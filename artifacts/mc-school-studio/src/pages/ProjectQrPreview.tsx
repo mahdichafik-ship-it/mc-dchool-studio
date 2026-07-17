@@ -3,6 +3,7 @@ import {
   useListStudents,
   useListClasses,
   useGenerateQrCodes,
+  useCreateStudent,
   getListStudentsQueryKey,
 } from '@workspace/api-client-react';
 import { useRoute, Link } from 'wouter';
@@ -15,6 +16,7 @@ import {
   QrCode,
   X,
   Download,
+  UserPlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -41,6 +43,12 @@ export default function ProjectQrPreview() {
   const [isZipping, setIsZipping] = useState(false);
   const [popupStudent, setPopupStudent] = useState<typeof students[number] | null>(null);
 
+  // Add-student form state
+  const [addOpen, setAddOpen] = useState(false);
+  const [addFirstName, setAddFirstName] = useState('');
+  const [addLastName, setAddLastName] = useState('');
+  const [addClassId, setAddClassId] = useState<string>('');
+
   const { data: students = [], isLoading: studentsLoading } = useListStudents(
     projectId!,
     {
@@ -56,6 +64,7 @@ export default function ProjectQrPreview() {
   });
 
   const generateQr = useGenerateQrCodes();
+  const createStudent = useCreateStudent();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -75,6 +84,37 @@ export default function ProjectQrPreview() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  const handleAddStudent = () => {
+    const trimFirst = addFirstName.trim();
+    const trimLast = addLastName.trim();
+    const classIdNum = parseInt(addClassId, 10);
+    if (!trimFirst || !trimLast || !classIdNum) return;
+
+    createStudent.mutate(
+      { projectId: projectId!, data: { firstName: trimFirst, lastName: trimLast, classId: classIdNum } },
+      {
+        onSuccess: (newStudent) => {
+          queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId!) });
+          // Auto-generate QR for the new student immediately
+          generateQr.mutate(
+            { projectId: projectId! },
+            {
+              onSuccess: () => queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId!) }),
+            },
+          );
+          toast({ title: `${newStudent.firstName} ${newStudent.lastName} added` });
+          setAddOpen(false);
+          setAddFirstName('');
+          setAddLastName('');
+          setAddClassId('');
+        },
+        onError: (err) => {
+          toast({ title: 'Failed to add student', description: String(err), variant: 'destructive' });
+        },
+      },
+    );
   };
 
   const handleGenerateAll = () => {
@@ -241,6 +281,17 @@ export default function ProjectQrPreview() {
             <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
             Regenerate All
           </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setAddClassId(selectedClassId !== 'all' ? String(selectedClassId) : (classes[0]?.id ? String(classes[0].id) : ''));
+              setAddOpen(true);
+            }}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8"
+          >
+            <UserPlus className="w-3.5 h-3.5 mr-1.5" />
+            Add Student
+          </Button>
         </div>
       </div>
 
@@ -381,6 +432,79 @@ export default function ProjectQrPreview() {
               <Download className="w-5 h-5 text-gray-300" />
               <span className="text-[10px] text-gray-400">PNG</span>
             </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Student Dialog ───────────────────────── */}
+      <Dialog open={addOpen} onOpenChange={(open) => { if (!open) { setAddOpen(false); setAddFirstName(''); setAddLastName(''); } }}>
+        <DialogContent className="bg-[#13131f] border border-white/15 text-white max-w-md rounded-2xl p-0 overflow-hidden">
+          <DialogTitle className="px-6 pt-6 pb-0 text-lg font-bold">Add Student</DialogTitle>
+
+          <div className="px-6 py-5 flex flex-col gap-4">
+            {/* First name */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">First Name</label>
+              <input
+                type="text"
+                value={addFirstName}
+                onChange={(e) => setAddFirstName(e.target.value)}
+                placeholder="e.g. Mohamed"
+                className="bg-[#1e1e33] border border-white/15 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+                autoFocus
+              />
+            </div>
+
+            {/* Last name */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">Last Name</label>
+              <input
+                type="text"
+                value={addLastName}
+                onChange={(e) => setAddLastName(e.target.value)}
+                placeholder="e.g. Berrich"
+                className="bg-[#1e1e33] border border-white/15 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+                onKeyDown={(e) => e.key === 'Enter' && handleAddStudent()}
+              />
+            </div>
+
+            {/* Class */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">Class</label>
+              <Select value={addClassId} onValueChange={setAddClassId}>
+                <SelectTrigger className="bg-[#1e1e33] border-white/15 text-white focus:ring-0 focus:border-blue-500">
+                  <SelectValue placeholder="Select a class…" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1e1e33] border-white/15 text-white">
+                  {classes.map((cls) => (
+                    <SelectItem key={cls.id} value={String(cls.id)}>
+                      {cls.className}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="px-6 pb-6 flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAddOpen(false)}
+              className="bg-transparent border-white/20 text-gray-300 hover:text-white hover:bg-white/10 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleAddStudent}
+              disabled={!addFirstName.trim() || !addLastName.trim() || !addClassId || createStudent.isPending}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs"
+            >
+              <UserPlus className="w-3.5 h-3.5 mr-1.5" />
+              {createStudent.isPending ? 'Adding…' : 'Add & Generate QR'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

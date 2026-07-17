@@ -44,19 +44,6 @@ export function ProjectView({ projectId, onBack }: Props) {
     }
   }, [students])
 
-  // Auto-update student list when a photo is matched
-  const handleMatched = useCallback(
-    (data: PhotoMatchedEvent) => {
-      if (data.student.projectId === projectId) {
-        reloadStudents()
-        // If the matched student is currently selected, that's automatically handled by
-        // the effect above after reloadStudents updates the students array
-      }
-    },
-    [projectId, reloadStudents],
-  )
-  usePhotoEvents(handleMatched)
-
   async function handleSetWatchFolder() {
     const folder = await window.api.invoke('dialog:openFolder') as string | null
     if (!folder) return

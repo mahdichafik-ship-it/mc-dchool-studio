@@ -83,6 +83,26 @@ export function useStudents(projectId: number | null, classId?: number) {
   }, [projectId, classId])
 
   useEffect(() => { load() }, [load])
+
+  // Re-fetch the full student list whenever a photo is matched in this project,
+  // so photo-count badges in the sidebar stay live without any manual action.
+  // Debounced at 300 ms to coalesce rapid-fire events during a burst shoot.
+  useEffect(() => {
+    if (!projectId) return
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const unsub = api.on('photo:matched', (event: PhotoMatchedEvent) => {
+      if (event.student.projectId !== projectId) return
+      if (timeoutId) clearTimeout(timeoutId)
+      timeoutId = setTimeout(() => { load() }, 300)
+    })
+
+    return () => {
+      unsub()
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [projectId, load])
+
   return { data, loading, reload: load }
 }
 

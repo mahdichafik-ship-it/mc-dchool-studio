@@ -60,11 +60,7 @@ export default function ProjectImport() {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
-    if (csvClassName) formData.append("csvClassName", csvClassName);
-
-    parseFile.mutate({ projectId, data: formData as any }, {
+    parseFile.mutate({ projectId, data: { file, csvClassName: csvClassName || undefined } }, {
       onSuccess: (data) => {
         setParsedData(data);
         

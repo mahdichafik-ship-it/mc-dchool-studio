@@ -106,7 +106,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
   let studentsCreated = 0;
 
   for (const sheet of sheets) {
-    const { className, firstNameColumn, lastNameColumn, studentIdColumn, rows, headers } = sheet;
+    const { className, firstNameColumn, lastNameColumn, studentIdColumn, emailColumn, phoneColumn, rows, headers } = sheet;
 
     if (!className || !firstNameColumn || !lastNameColumn) {
       continue;
@@ -130,6 +130,8 @@ router.post("/confirm", requireAuth, async (req, res) => {
     const firstNameIdx = headers.indexOf(firstNameColumn);
     const lastNameIdx = headers.indexOf(lastNameColumn);
     const studentIdIdx = studentIdColumn ? headers.indexOf(studentIdColumn) : -1;
+    const emailIdx = emailColumn ? headers.indexOf(emailColumn) : -1;
+    const phoneIdx = phoneColumn ? headers.indexOf(phoneColumn) : -1;
 
     if (firstNameIdx === -1 || lastNameIdx === -1) {
       continue;
@@ -149,12 +151,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
 
       existingIds.add(generatedStudentId);
 
+      const email = emailIdx >= 0 ? (String(row[emailIdx] ?? "").trim() || null) : null;
+      const phone = phoneIdx >= 0 ? (String(row[phoneIdx] ?? "").trim() || null) : null;
+
       await db.insert(studentsTable).values({
         projectId,
         classId: cls.id,
         firstName,
         lastName,
         generatedStudentId,
+        email,
+        phone,
       });
 
       studentsCreated++;

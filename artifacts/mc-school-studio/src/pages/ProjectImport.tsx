@@ -39,6 +39,8 @@ export default function ProjectImport() {
     firstNameColumn: string;
     lastNameColumn: string;
     studentIdColumn: string;
+    emailColumn: string;
+    phoneColumn: string;
   }>>({});
 
   // State from Confirm
@@ -74,9 +76,11 @@ export default function ProjectImport() {
           
           initialMappings[sheet.name] = {
             className: file.name.endsWith('.csv') ? csvClassName : sheet.name,
-            firstNameColumn: guessFn('first'),
-            lastNameColumn: guessLast('last'),
-            studentIdColumn: guessFn('id', 'student'),
+            firstNameColumn: guessFn('first', 'prenom', 'prénom'),
+            lastNameColumn: guessLast('last', 'nom', 'surname'),
+            studentIdColumn: guessFn('id', 'student', 'matricule', 'numero'),
+            emailColumn: guessFn('email', 'mail', 'courriel'),
+            phoneColumn: guessFn('phone', 'tel', 'mobile', 'gsm', 'portable'),
           };
         });
         setMappings(initialMappings);
@@ -132,6 +136,8 @@ export default function ProjectImport() {
           firstNameColumn: map.firstNameColumn,
           lastNameColumn: map.lastNameColumn,
           studentIdColumn: map.studentIdColumn || null,
+          emailColumn: map.emailColumn || null,
+          phoneColumn: map.phoneColumn || null,
           rows: rows,
           headers: sheetPreview.headers
         });
@@ -286,12 +292,32 @@ export default function ProjectImport() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-500 flex items-center gap-1">Student ID Column (Optional)</Label>
+                        <Label className="text-slate-500">Student ID Column <span className="text-slate-400 font-normal">(Optional)</span></Label>
                         <Select value={mappings[sheet.name]?.studentIdColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'studentIdColumn', v === 'none' ? '' : v)}>
-                          <SelectTrigger><SelectValue placeholder="No mapping" /></SelectTrigger>
+                          <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">-- Skip --</SelectItem>
                             {sheet.headers.map((h, i) => <SelectItem key={`sid-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-500">Email Column <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                        <Select value={mappings[sheet.name]?.emailColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'emailColumn', v === 'none' ? '' : v)}>
+                          <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">-- Skip --</SelectItem>
+                            {sheet.headers.map((h, i) => <SelectItem key={`em-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-500">Phone Column <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                        <Select value={mappings[sheet.name]?.phoneColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'phoneColumn', v === 'none' ? '' : v)}>
+                          <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">-- Skip --</SelectItem>
+                            {sheet.headers.map((h, i) => <SelectItem key={`ph-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>

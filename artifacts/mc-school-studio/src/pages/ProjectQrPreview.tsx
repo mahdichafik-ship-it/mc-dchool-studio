@@ -9,11 +9,12 @@ import { useRoute, Link } from 'wouter';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
-  UserPlus,
   RotateCcw,
   Archive,
   FileText,
   QrCode,
+  X,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -24,6 +25,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 export default function ProjectQrPreview() {
   const [match, params] = useRoute('/projects/:projectId/qr-preview');
@@ -33,6 +39,7 @@ export default function ProjectQrPreview() {
   const [selectedClassId, setSelectedClassId] = useState<number | 'all'>('all');
   const [qrFormat, setQrFormat] = useState<'simple' | 'json'>('simple');
   const [isZipping, setIsZipping] = useState(false);
+  const [popupStudent, setPopupStudent] = useState<typeof students[number] | null>(null);
 
   const { data: students = [], isLoading: studentsLoading } = useListStudents(
     projectId!,
@@ -58,6 +65,17 @@ export default function ProjectQrPreview() {
       : students.filter((s) => s.classId === selectedClassId);
 
   const missingCount = students.filter((s) => !s.simpleQr).length;
+
+  const handleDownloadSingle = (student: typeof students[number]) => {
+    const qr = qrFormat === 'simple' ? student.simpleQr : student.jsonQr;
+    if (!qr) return;
+    const a = document.createElement('a');
+    a.href = qr;
+    a.download = `QR_${student.firstName}_${student.lastName}_${student.generatedStudentId}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   const handleGenerateAll = () => {
     generateQr.mutate(
@@ -289,22 +307,83 @@ export default function ProjectQrPreview() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {filteredStudents.map((student) => (
-              <div
-                key={student.id}
-                className="bg-[#1c1c30] border border-white/8 rounded-lg px-4 py-3 hover:bg-[#222240] transition-colors"
-              >
-                <p className="font-bold text-white text-sm uppercase tracking-wide leading-snug truncate">
-                  {student.firstName} {student.lastName}
-                </p>
-                <p className="text-gray-400 text-xs mt-1 font-mono">
-                  ID: {student.generatedStudentId}
-                </p>
-              </div>
-            ))}
+            {filteredStudents.map((student) => {
+              const hasQr = qrFormat === 'simple' ? !!student.simpleQr : !!student.jsonQr;
+              return (
+                <button
+                  key={student.id}
+                  onClick={() => setPopupStudent(student)}
+                  className={`text-left bg-[#1c1c30] border border-white/8 rounded-lg px-4 py-3 transition-colors w-full ${
+                    hasQr
+                      ? 'hover:bg-[#222240] hover:border-blue-500/40 cursor-pointer'
+                      : 'opacity-50 cursor-not-allowed'
+                  }`}
+                  disabled={!hasQr}
+                  title={hasQr ? 'Click to show QR code' : 'No QR code generated yet'}
+                >
+                  <p className="font-bold text-white text-sm uppercase tracking-wide leading-snug truncate">
+                    {student.firstName} {student.lastName}
+                  </p>
+                  <p className="text-gray-400 text-xs mt-1 font-mono">
+                    ID: {student.generatedStudentId}
+                  </p>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* ── QR Popup ─────────────────────────────────── */}
+      <Dialog open={!!popupStudent} onOpenChange={(open) => !open && setPopupStudent(null)}>
+        <DialogContent className="bg-[#13131f] border border-white/15 text-white p-0 max-w-sm w-full rounded-2xl overflow-hidden">
+          <DialogTitle className="sr-only">
+            QR Code — {popupStudent?.firstName} {popupStudent?.lastName}
+          </DialogTitle>
+
+          {/* Close button */}
+          <button
+            onClick={() => setPopupStudent(null)}
+            className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+          >
+            <X className="w-4 h-4 text-white" />
+          </button>
+
+          {/* QR image */}
+          <div className="bg-white p-8 flex items-center justify-center">
+            {popupStudent && (
+              <img
+                src={(qrFormat === 'simple' ? popupStudent.simpleQr : popupStudent.jsonQr) ?? ''}
+                alt={`QR for ${popupStudent.firstName} ${popupStudent.lastName}`}
+                className="w-64 h-64 object-contain"
+              />
+            )}
+          </div>
+
+          {/* Student info + download */}
+          <div className="px-6 py-5 flex items-center justify-between">
+            <div>
+              <p className="font-bold text-white text-lg uppercase tracking-wide">
+                {popupStudent?.firstName} {popupStudent?.lastName}
+              </p>
+              <p className="text-gray-400 text-sm font-mono mt-0.5">
+                ID: {popupStudent?.generatedStudentId}
+              </p>
+              <p className="text-gray-500 text-xs mt-0.5">
+                {popupStudent?.className}
+              </p>
+            </div>
+            <button
+              onClick={() => popupStudent && handleDownloadSingle(popupStudent)}
+              className="flex flex-col items-center gap-1 p-3 rounded-xl bg-white/8 hover:bg-white/15 transition-colors"
+              title="Download PNG"
+            >
+              <Download className="w-5 h-5 text-gray-300" />
+              <span className="text-[10px] text-gray-400">PNG</span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

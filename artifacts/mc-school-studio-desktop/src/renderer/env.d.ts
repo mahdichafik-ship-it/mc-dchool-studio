@@ -1,0 +1,33 @@
+/// <reference types="vite/client" />
+
+import type { Project, Class, Student, Photo, PhotoMatchedEvent, PhotoUnmatchedEvent, ImportResult } from '../shared/types'
+
+interface ElectronAPI {
+  invoke(channel: 'projects:list'): Promise<Project[]>
+  invoke(channel: 'projects:get', args: { projectId: number }): Promise<Project | null>
+  invoke(channel: 'projects:import', args: { filePath: string }): Promise<ImportResult>
+  invoke(channel: 'projects:setWatchFolder', args: { projectId: number; folderPath: string }): Promise<void>
+  invoke(channel: 'classes:list', args: { projectId: number }): Promise<Class[]>
+  invoke(channel: 'students:list', args: { projectId: number; classId?: number }): Promise<Student[]>
+  invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
+  invoke(channel: 'photos:getThumbnail', args: { filePath: string }): Promise<string | null>
+  invoke(channel: 'photos:reassign', args: { photoId: number; studentId: number }): Promise<void>
+  invoke(channel: 'photos:delete', args: { photoId: number }): Promise<void>
+  invoke(channel: 'photos:unmatched', args: { projectId: number }): Promise<Photo[]>
+  invoke(channel: 'photos:openInSystem', args: { filePath: string }): Promise<void>
+  invoke(channel: 'watcher:start', args: { projectId: number }): Promise<void>
+  invoke(channel: 'watcher:stop', args: { projectId: number }): Promise<void>
+  invoke(channel: 'watcher:isRunning', args: { projectId: number }): Promise<boolean>
+  invoke(channel: 'dialog:openFile', args?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>
+  invoke(channel: 'dialog:openFolder'): Promise<string | null>
+  invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>
+  invoke(channel: 'app:getPhotosDir'): Promise<string>
+  on(channel: 'photo:matched', listener: (data: PhotoMatchedEvent) => void): () => void
+  on(channel: 'photo:unmatched', listener: (data: PhotoUnmatchedEvent) => void): () => void
+}
+
+declare global {
+  interface Window {
+    api: ElectronAPI
+  }
+}

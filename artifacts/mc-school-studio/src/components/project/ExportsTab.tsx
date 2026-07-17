@@ -1,6 +1,6 @@
 import React from 'react';
 import { Project } from '@workspace/api-client-react';
-import { Download, FileArchive, QrCode } from 'lucide-react';
+import { Download, FileArchive, QrCode, MonitorDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'wouter';
 
@@ -12,6 +12,10 @@ export function ExportsTab({ project }: { project: Project }) {
 
   const downloadPdf = () => {
     window.location.href = `/api/projects/${project.id}/export/pdf`;
+  };
+
+  const downloadDesktopJson = () => {
+    window.location.href = `/api/projects/${project.id}/export/json`;
   };
 
   return (
@@ -54,7 +58,26 @@ export function ExportsTab({ project }: { project: Project }) {
         </div>
       </div>
 
-      <div className="pt-8 border-t border-slate-200">
+      {/* Desktop Export */}
+      <div className="pt-4 border-t border-slate-200">
+        <div className="border border-teal-200 bg-teal-50 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div>
+            <h4 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
+              <MonitorDown className="w-5 h-5 text-teal-600" />
+              Export for Desktop App
+            </h4>
+            <p className="text-sm text-slate-600">
+              Download a JSON file to import into the MC School Studio desktop app. Use this on photo day to automatically match tethered photos to students via QR code.
+            </p>
+          </div>
+          <Button onClick={downloadDesktopJson} className="shrink-0">
+            <MonitorDown className="w-4 h-4" />
+            Export for Desktop
+          </Button>
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-slate-200">
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div>
             <h4 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">

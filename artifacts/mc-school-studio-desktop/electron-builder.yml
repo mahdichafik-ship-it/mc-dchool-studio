@@ -1,0 +1,53 @@
+appId: com.mcschoolstudio.desktop
+productName: MC School Studio
+copyright: Copyright © 2025 MC School Studio
+
+directories:
+  buildResources: build
+
+files:
+  - dist/**/*
+  - node_modules/**/*
+  - package.json
+
+asarUnpack:
+  - resources/**
+  - node_modules/better-sqlite3/**/*
+
+win:
+  executableName: mc-school-studio
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    - NSDocumentsFolderUsageDescription: Required to store photo data.
+    - NSDownloadsFolderUsageDescription: Required to import project files.
+  notarize: false
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+dmg:
+  artifactName: ${name}-${version}.${ext}
+
+linux:
+  target:
+    - AppImage
+    - snap
+  maintainer: electronjs.org
+  category: Photography
+
+appImage:
+  artifactName: ${name}-${version}.${ext}

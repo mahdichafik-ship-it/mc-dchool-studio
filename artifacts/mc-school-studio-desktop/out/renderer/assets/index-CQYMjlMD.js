@@ -12090,18 +12090,18 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$l = [
+const __iconNode$m = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$l);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$m);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$k = [
+const __iconNode$l = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12111,14 +12111,14 @@ const __iconNode$k = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$k);
+const BookOpen = createLucideIcon("book-open", __iconNode$l);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$j = [
+const __iconNode$k = [
   [
     "path",
     {
@@ -12128,15 +12128,27 @@ const __iconNode$j = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$j);
+const Camera = createLucideIcon("camera", __iconNode$k);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$i = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$i);
+const __iconNode$j = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$j);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$i = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$i);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12144,11 +12156,10 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$i);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$h = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$h);
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$h);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12156,10 +12167,11 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$h);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$g = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$g);
+const CircleX = createLucideIcon("circle-x", __iconNode$g);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12167,11 +12179,9 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$g);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$f = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$f);
+const Cloud = createLucideIcon("cloud", __iconNode$f);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12179,14 +12189,11 @@ const CircleX = createLucideIcon("circle-x", __iconNode$f);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$e = [
-  ["path", { d: "m2 2 20 20", key: "1ooewy" }],
-  ["path", { d: "M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193", key: "yfwify" }],
-  [
-    "path",
-    { d: "M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07", key: "jlfiyv" }
-  ]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const CloudOff = createLucideIcon("cloud-off", __iconNode$e);
+const ExternalLink = createLucideIcon("external-link", __iconNode$e);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12194,11 +12201,15 @@ const CloudOff = createLucideIcon("cloud-off", __iconNode$e);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$d = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+  [
+    "path",
+    {
+      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
+      key: "usdka0"
+    }
+  ]
 ];
-const ExternalLink = createLucideIcon("external-link", __iconNode$d);
+const FolderOpen = createLucideIcon("folder-open", __iconNode$d);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12209,12 +12220,12 @@ const __iconNode$c = [
   [
     "path",
     {
-      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
-      key: "usdka0"
+      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+      key: "1kt360"
     }
   ]
 ];
-const FolderOpen = createLucideIcon("folder-open", __iconNode$c);
+const Folder = createLucideIcon("folder", __iconNode$c);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12222,15 +12233,11 @@ const FolderOpen = createLucideIcon("folder-open", __iconNode$c);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$b = [
-  [
-    "path",
-    {
-      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
-      key: "1kt360"
-    }
-  ]
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
 ];
-const Folder = createLucideIcon("folder", __iconNode$b);
+const Image = createLucideIcon("image", __iconNode$b);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12238,11 +12245,11 @@ const Folder = createLucideIcon("folder", __iconNode$b);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$a = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
 ];
-const Image = createLucideIcon("image", __iconNode$a);
+const Info = createLucideIcon("info", __iconNode$a);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12250,11 +12257,12 @@ const Image = createLucideIcon("image", __iconNode$a);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$9 = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
+  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
+  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
+  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
 ];
-const Info = createLucideIcon("info", __iconNode$9);
+const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$9);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12262,12 +12270,16 @@ const Info = createLucideIcon("info", __iconNode$9);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$8 = [
-  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
-  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
-  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
-  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
+  ["path", { d: "M12 2v4", key: "3427ic" }],
+  ["path", { d: "m16.2 7.8 2.9-2.9", key: "r700ao" }],
+  ["path", { d: "M18 12h4", key: "wj9ykh" }],
+  ["path", { d: "m16.2 16.2 2.9 2.9", key: "1bxg5t" }],
+  ["path", { d: "M12 18v4", key: "jadmvz" }],
+  ["path", { d: "m4.9 19.1 2.9-2.9", key: "bwix9q" }],
+  ["path", { d: "M2 12h4", key: "j09sii" }],
+  ["path", { d: "m4.9 4.9 2.9 2.9", key: "giyufr" }]
 ];
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$8);
+const Loader = createLucideIcon("loader", __iconNode$8);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -15853,6 +15865,21 @@ function useStudents(projectId, classId) {
   reactExports.useEffect(() => {
     load();
   }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId) return;
+    let timeoutId = null;
+    const unsub = api.on("photo:matched", (event) => {
+      if (event.student.projectId !== projectId) return;
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        load();
+      }, 300);
+    });
+    return () => {
+      unsub();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [projectId, load]);
   return { data, loading, reload: load };
 }
 function usePhotos(studentId) {
@@ -15904,6 +15931,36 @@ function usePhotoEvents(onMatched, onUnmatched) {
       unsubUnmatched?.();
     };
   }, [onMatched, onUnmatched]);
+}
+function useUploadStatus(projectId) {
+  const [statusMap, setStatusMap] = reactExports.useState(/* @__PURE__ */ new Map());
+  const load = reactExports.useCallback(async () => {
+    if (!projectId) return;
+    const rows = await api.invoke("upload:getProjectStatus", { projectId });
+    const map = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      if (!row.studentId) continue;
+      const existing = map.get(row.studentId) ?? { pending: 0, uploading: 0, done: 0, error: 0, total: 0 };
+      existing.total++;
+      if (row.uploadStatus === "pending") existing.pending++;
+      else if (row.uploadStatus === "uploading") existing.uploading++;
+      else if (row.uploadStatus === "done") existing.done++;
+      else if (row.uploadStatus === "error") existing.error++;
+      map.set(row.studentId, existing);
+    }
+    setStatusMap(map);
+  }, [projectId]);
+  reactExports.useEffect(() => {
+    load();
+  }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId) return;
+    const unsub = api.on("upload:statusChanged", (event) => {
+      load();
+    });
+    return unsub;
+  }, [projectId, load]);
+  return { statusMap, reload: load };
 }
 let toastListeners = [];
 function addToast(toast) {
@@ -16087,6 +16144,7 @@ function ProjectView({ projectId, onBack }) {
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? void 0);
   const [selectedStudent, setSelectedStudent] = reactExports.useState(null);
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId);
+  const { statusMap: uploadStatusMap } = useUploadStatus(projectId);
   const [search, setSearch] = reactExports.useState("");
   const [settingFolder, setSettingFolder] = reactExports.useState(false);
   const [reassignDialogPhoto, setReassignDialogPhoto] = reactExports.useState(null);
@@ -16096,15 +16154,6 @@ function ProjectView({ projectId, onBack }) {
       if (refreshed) setSelectedStudent(refreshed);
     }
   }, [students]);
-  const handleMatched = reactExports.useCallback(
-    (data) => {
-      if (data.student.projectId === projectId) {
-        reloadStudents();
-      }
-    },
-    [projectId, reloadStudents]
-  );
-  usePhotoEvents(handleMatched);
   async function handleSetWatchFolder() {
     const folder = await window.api.invoke("dialog:openFolder");
     if (!folder) return;
@@ -16229,7 +16278,8 @@ function ProjectView({ projectId, onBack }) {
             {
               student: s,
               isSelected: selectedStudent?.id === s.id,
-              onClick: () => setSelectedStudent(s)
+              onClick: () => setSelectedStudent(s),
+              uploadSummary: uploadStatusMap.get(s.id)
             },
             s.id
           )),
@@ -16251,10 +16301,26 @@ function ProjectView({ projectId, onBack }) {
     ] })
   ] });
 }
+function UploadBadge({ summary }) {
+  if (summary.uploading > 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: "Uploading…", className: "flex items-center gap-0.5 text-[10px] text-blue-600", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) });
+  }
+  if (summary.error > 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: `${summary.error} upload(s) failed`, className: "flex items-center gap-0.5 text-[10px] text-red-500", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3" }) });
+  }
+  if (summary.pending > 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: `${summary.pending} upload(s) queued`, className: "flex items-center gap-0.5 text-[10px] text-amber-500", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3" }) });
+  }
+  if (summary.done > 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: `${summary.done} photo(s) uploaded`, className: "flex items-center gap-0.5 text-[10px] text-green-600", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3" }) });
+  }
+  return null;
+}
 function StudentRow({
   student: s,
   isSelected,
-  onClick
+  onClick,
+  uploadSummary
 }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "button",
@@ -16273,10 +16339,13 @@ function StudentRow({
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 font-mono", children: s.generatedStudentId })
         ] }),
-        s.photoCount > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", className: "text-[10px] px-1.5 py-0 shrink-0", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-2.5 mr-0.5" }),
-          s.photoCount
-        ] }) : null
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1 shrink-0", children: [
+          uploadSummary && /* @__PURE__ */ jsxRuntimeExports.jsx(UploadBadge, { summary: uploadSummary }),
+          s.photoCount > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", className: "text-[10px] px-1.5 py-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-2.5 mr-0.5" }),
+            s.photoCount
+          ] }) : null
+        ] })
       ]
     }
   );
@@ -16502,9 +16571,20 @@ function ReassignDialog({
 }
 function Settings() {
   const [photosDir, setPhotosDir] = reactExports.useState("");
+  const [apiUrl, setApiUrl] = reactExports.useState("");
+  const [uploadKey, setUploadKey] = reactExports.useState("");
+  const [saving, setSaving] = reactExports.useState(false);
+  const [savedOk, setSavedOk] = reactExports.useState(false);
+  const [connStatus, setConnStatus] = reactExports.useState("idle");
+  const [connError, setConnError] = reactExports.useState(null);
   reactExports.useEffect(() => {
     window.api.invoke("app:getPhotosDir").then((dir) => {
       setPhotosDir(dir);
+    });
+    window.api.invoke("upload:getConfig").then((cfg) => {
+      const { apiUrl: url, uploadKey: key } = cfg;
+      setApiUrl(url ?? "");
+      setUploadKey(key ?? "");
     });
   }, []);
   async function handleOpenPhotosDir() {
@@ -16512,6 +16592,36 @@ function Settings() {
       await window.api.invoke("app:openFile", { filePath: photosDir });
     }
   }
+  async function handleSaveConfig() {
+    setSaving(true);
+    setSavedOk(false);
+    try {
+      await window.api.invoke("upload:setConfig", { apiUrl, uploadKey });
+      setSavedOk(true);
+      setTimeout(() => setSavedOk(false), 3e3);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function handleTestConnection() {
+    await window.api.invoke("upload:setConfig", { apiUrl, uploadKey });
+    setConnStatus("testing");
+    setConnError(null);
+    try {
+      const result = await window.api.invoke("upload:testConnection");
+      if (result.ok) {
+        setConnStatus("ok");
+        setTimeout(() => setConnStatus("idle"), 4e3);
+      } else {
+        setConnStatus("error");
+        setConnError(result.error ?? "Connection failed");
+      }
+    } catch (e) {
+      setConnStatus("error");
+      setConnError(String(e));
+    }
+  }
+  const hasConfig = apiUrl.trim() !== "" && uploadKey.trim() !== "";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-5", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-xl font-bold text-slate-900", children: "Settings" }),
@@ -16536,13 +16646,80 @@ function Settings() {
           )
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-slate-50 border border-slate-200 rounded-xl p-5 opacity-60", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CloudOff, { className: "size-5 text-slate-400" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-600", children: "Cloud upload" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs bg-slate-200 text-slate-500 rounded-full px-2 py-0.5 font-medium", children: "Coming soon" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-5 text-teal-600" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Cloud upload" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "Upload captured photos to the cloud and sync them with the web app. This feature will be added in a future update." })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-4", children: "After each photo is matched, it is automatically uploaded to your MC School Studio web app so clients can view their photos online." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-medium text-slate-700 mb-1", children: "Web app URL" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "url",
+                value: apiUrl,
+                onChange: (e) => setApiUrl(e.target.value),
+                placeholder: "https://your-app.replit.app",
+                className: "w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-1", children: "The base URL of your web app (no trailing slash)." })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-medium text-slate-700 mb-1", children: "Upload key" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "password",
+                value: uploadKey,
+                onChange: (e) => setUploadKey(e.target.value),
+                placeholder: "Paste the PHOTO_UPLOAD_KEY from your server",
+                className: "w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white font-mono"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-400 mt-1", children: [
+              "Set ",
+              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-slate-100 px-1 rounded", children: "PHOTO_UPLOAD_KEY" }),
+              " in your server's environment variables, then paste the same value here."
+            ] })
+          ] }),
+          connStatus === "ok" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-4 shrink-0" }),
+            "Connected successfully"
+          ] }),
+          connStatus === "error" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-4 shrink-0" }),
+            connError ?? "Connection failed"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                onClick: handleTestConnection,
+                disabled: !hasConfig || connStatus === "testing",
+                className: "flex items-center gap-1.5 text-sm px-3 py-1.5 border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-40",
+                children: [
+                  connStatus === "testing" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-3.5" }),
+                  "Test connection"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                onClick: handleSaveConfig,
+                disabled: saving,
+                className: "flex items-center gap-1.5 text-sm px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg disabled:opacity-40",
+                children: [
+                  savedOk ? /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3.5" }) : null,
+                  saving ? "Saving…" : savedOk ? "Saved!" : "Save settings"
+                ]
+              }
+            )
+          ] })
+        ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-teal-50 border border-teal-200 rounded-xl p-5", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
@@ -16556,7 +16733,8 @@ function Settings() {
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: 'Start the watcher — the green "Live" indicator appears' }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Select a student to display their QR code on screen" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the student — SmartShooter saves the photo to the watch folder" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "The app detects the new photo, reads the QR code, and assigns it automatically" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "The app detects the new photo, reads the QR code, and assigns it automatically" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "If cloud upload is configured, the photo is uploaded to the web app instantly" })
         ] })
       ] })
     ] }) })

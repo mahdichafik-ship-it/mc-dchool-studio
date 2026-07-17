@@ -64,6 +64,14 @@ export interface PhotoUnmatchedEvent {
   reason: string
 }
 
+export type UploadStatus = 'pending' | 'uploading' | 'done' | 'error' | null
+
+export interface UploadStatusChangedEvent {
+  photoId: number
+  studentId: number
+  status: UploadStatus
+}
+
 export interface ImportResult {
   project: Project
   classesImported: number

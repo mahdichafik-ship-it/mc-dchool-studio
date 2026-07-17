@@ -53,13 +53,20 @@ const photosTable = sqliteCore.sqliteTable("photos", {
   fileName: sqliteCore.text("file_name").notNull(),
   capturedAt: sqliteCore.text("captured_at").notNull(),
   isMatched: sqliteCore.integer("is_matched", { mode: "boolean" }).notNull().default(false),
+  // null = not queued, 'pending' = queued, 'uploading' = in progress, 'done' = success, 'error' = failed
+  uploadStatus: sqliteCore.text("upload_status").$type(),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
+const settingsTable = sqliteCore.sqliteTable("settings", {
+  key: sqliteCore.text("key").primaryKey(),
+  value: sqliteCore.text("value").notNull()
 });
 const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   classesTable,
   photosTable,
   projectsTable,
+  settingsTable,
   studentsTable
 }, Symbol.toStringTag, { value: "Module" }));
 let _db = null;
@@ -123,11 +130,20 @@ function initializeSchema(sqlite) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_students_project ON students(project_id);
     CREATE INDEX IF NOT EXISTS idx_students_generated_id ON students(generated_student_id);
     CREATE INDEX IF NOT EXISTS idx_photos_student ON photos(student_id);
     CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
   `);
+  try {
+    sqlite.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT`);
+  } catch {
+  }
 }
 function getPhotosDir() {
   const homeDir = electron.app.getPath("home");
@@ -40633,6 +40649,119 @@ function registerPhotoHandlers() {
     await electron.shell.openPath(filePath);
   });
 }
+function getSetting(key) {
+  const db = getDb();
+  const row = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
+  return row?.value ?? null;
+}
+function setSetting(key, value) {
+  const db = getDb();
+  const existing = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
+  if (existing) {
+    db.update(settingsTable).set({ value }).where(drizzleOrm.eq(settingsTable.key, key)).run();
+  } else {
+    db.insert(settingsTable).values({ key, value }).run();
+  }
+}
+function getUploadConfig() {
+  return {
+    apiUrl: getSetting("upload_api_url"),
+    uploadKey: getSetting("upload_key")
+  };
+}
+async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
+  const db = getDb();
+  const { apiUrl, uploadKey } = getUploadConfig();
+  if (!apiUrl || !uploadKey) {
+    console.log("[Upload] Cloud upload not configured, skipping.");
+    return;
+  }
+  db.update(photosTable).set({ uploadStatus: "uploading" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+  try {
+    const fileBuffer = require$$0.readFileSync(filePath);
+    const blob = new Blob([fileBuffer], { type: "image/jpeg" });
+    const formData = new FormData();
+    formData.append("photo", blob, fileName);
+    formData.append("capturedAt", capturedAt);
+    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${projectId}/students/${studentId}/photos`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${uploadKey}`
+      },
+      body: formData
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    db.update(photosTable).set({ uploadStatus: "done" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    console.log(`[Upload] Photo ${photoId} uploaded successfully`);
+  } catch (err) {
+    console.error("[Upload] Upload failed:", err);
+    db.update(photosTable).set({ uploadStatus: "error" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    throw err;
+  }
+}
+function registerUploadHandlers() {
+  electron.ipcMain.handle("upload:getConfig", () => {
+    return getUploadConfig();
+  });
+  electron.ipcMain.handle(
+    "upload:setConfig",
+    (_e, { apiUrl, uploadKey }) => {
+      setSetting("upload_api_url", apiUrl.trim());
+      setSetting("upload_key", uploadKey.trim());
+      return { ok: true };
+    }
+  );
+  electron.ipcMain.handle("upload:testConnection", async () => {
+    const { apiUrl, uploadKey } = getUploadConfig();
+    if (!apiUrl || !uploadKey) {
+      return { ok: false, error: "API URL and upload key are required" };
+    }
+    try {
+      const url = `${apiUrl.replace(/\/+$/, "")}/api/healthz`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(5e3) });
+      if (response.ok) {
+        return { ok: true };
+      }
+      return { ok: false, error: `Server returned ${response.status}` };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle("upload:retry", async (_e, { photoId }) => {
+    const db = getDb();
+    const photo = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).get();
+    if (!photo || !photo.studentId) return { ok: false, error: "Photo not found or not matched" };
+    try {
+      await uploadPhoto(
+        photo.projectId,
+        photo.studentId,
+        photo.id,
+        photo.filePath,
+        photo.fileName,
+        photo.capturedAt
+      );
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle(
+    "upload:getProjectStatus",
+    (_e, { projectId }) => {
+      const db = getDb();
+      const photos = db.select({
+        id: photosTable.id,
+        studentId: photosTable.studentId,
+        uploadStatus: photosTable.uploadStatus
+      }).from(photosTable).where(drizzleOrm.and(drizzleOrm.eq(photosTable.projectId, projectId), drizzleOrm.eq(photosTable.isMatched, true))).all();
+      return photos;
+    }
+  );
+}
 const watchers = /* @__PURE__ */ new Map();
 function now() {
   return (/* @__PURE__ */ new Date()).toISOString();
@@ -40762,6 +40891,23 @@ async function handleNewPhoto(projectId, filePath) {
     photo: photoForEvent,
     student: studentForEvent
   });
+  const { apiUrl, uploadKey } = getUploadConfig();
+  if (apiUrl && uploadKey) {
+    db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
+    uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).then(() => {
+      win?.webContents.send("upload:statusChanged", {
+        photoId: photo.id,
+        studentId: student.id,
+        status: "done"
+      });
+    }).catch(() => {
+      win?.webContents.send("upload:statusChanged", {
+        photoId: photo.id,
+        studentId: student.id,
+        status: "error"
+      });
+    });
+  }
 }
 function registerDialogHandlers() {
   electron.ipcMain.handle(
@@ -40822,6 +40968,7 @@ electron.app.whenReady().then(() => {
   registerPhotoHandlers();
   registerWatcherHandlers();
   registerDialogHandlers();
+  registerUploadHandlers();
   createWindow();
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();

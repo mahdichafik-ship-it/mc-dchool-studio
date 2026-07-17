@@ -1,6 +1,32 @@
 /// <reference types="vite/client" />
 
-import type { Project, Class, Student, Photo, PhotoMatchedEvent, PhotoUnmatchedEvent, ImportResult } from '../shared/types'
+import type {
+  Project,
+  Class,
+  Student,
+  Photo,
+  PhotoMatchedEvent,
+  PhotoUnmatchedEvent,
+  ImportResult,
+  UploadStatus,
+  UploadStatusChangedEvent,
+} from '../shared/types'
+
+interface UploadConfig {
+  apiUrl: string | null
+  uploadKey: string | null
+}
+
+interface UploadResult {
+  ok: boolean
+  error?: string
+}
+
+interface ProjectUploadStatusRow {
+  id: number
+  studentId: number | null
+  uploadStatus: UploadStatus
+}
 
 interface ElectronAPI {
   invoke(channel: 'projects:list'): Promise<Project[]>
@@ -22,8 +48,15 @@ interface ElectronAPI {
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>
   invoke(channel: 'app:getPhotosDir'): Promise<string>
+  // Cloud upload
+  invoke(channel: 'upload:getConfig'): Promise<UploadConfig>
+  invoke(channel: 'upload:setConfig', args: { apiUrl: string; uploadKey: string }): Promise<UploadResult>
+  invoke(channel: 'upload:testConnection'): Promise<UploadResult>
+  invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
+  invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   on(channel: 'photo:matched', listener: (data: PhotoMatchedEvent) => void): () => void
   on(channel: 'photo:unmatched', listener: (data: PhotoUnmatchedEvent) => void): () => void
+  on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
 }
 
 declare global {

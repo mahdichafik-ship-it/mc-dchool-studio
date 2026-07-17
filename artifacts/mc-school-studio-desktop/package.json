@@ -2,7 +2,9 @@
   "name": "@workspace/mc-school-studio-desktop",
   "version": "1.0.0",
   "private": true,
-  "main": "dist/main/index.js",
+  "description": "Desktop photo capture and matching app for school photo days",
+  "author": "MC School Studio",
+  "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

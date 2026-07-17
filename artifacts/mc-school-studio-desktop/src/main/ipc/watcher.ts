@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron'
+import { uploadPhoto, getUploadConfig } from './upload'
 import chokidar, { FSWatcher } from 'chokidar'
 import { copyFileSync, mkdirSync } from 'fs'
 import { join, basename } from 'path'
@@ -186,4 +187,31 @@ async function handleNewPhoto(projectId: number, filePath: string) {
     photo: photoForEvent,
     student: studentForEvent,
   })
+
+  // Auto-upload if cloud upload is configured
+  const { apiUrl, uploadKey } = getUploadConfig()
+  if (apiUrl && uploadKey) {
+    // Mark as pending first so the UI shows it immediately
+    db.update(photosTable)
+      .set({ uploadStatus: 'pending' })
+      .where(eq(photosTable.id, photo.id))
+      .run()
+
+    // Fire-and-forget upload; progress is reflected via uploadStatus in DB
+    uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt)
+      .then(() => {
+        win?.webContents.send('upload:statusChanged', {
+          photoId: photo.id,
+          studentId: student.id,
+          status: 'done',
+        })
+      })
+      .catch(() => {
+        win?.webContents.send('upload:statusChanged', {
+          photoId: photo.id,
+          studentId: student.id,
+          status: 'error',
+        })
+      })
+  }
 }

@@ -68,7 +68,7 @@ export function InfoTab({ project }: { project: Project }) {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Photo Date</label>
+              <label className="text-sm font-medium text-slate-700">Photo Date <span className="text-slate-400 font-normal">(Optional)</span></label>
               <Input 
                 type="date"
                 value={formData.photoDate ? formData.photoDate.split('T')[0] : ''} 
@@ -76,7 +76,7 @@ export function InfoTab({ project }: { project: Project }) {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Address</label>
+              <label className="text-sm font-medium text-slate-700">Address <span className="text-slate-400 font-normal">(Optional)</span></label>
               <Input 
                 value={formData.address} 
                 onChange={e => setFormData({ ...formData, address: e.target.value })} 

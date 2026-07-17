@@ -12,6 +12,7 @@ import { InfoTab } from '@/components/project/InfoTab';
 import { ClassesTab } from '@/components/project/ClassesTab';
 import { StudentsTab } from '@/components/project/StudentsTab';
 import { ExportsTab } from '@/components/project/ExportsTab';
+import { PhotosTab } from '@/components/project/PhotosTab';
 
 export default function ProjectOverview() {
   const [match, params] = useRoute('/projects/:projectId');
@@ -83,6 +84,7 @@ export default function ProjectOverview() {
             <TabsList className="bg-slate-100/50 p-1 border border-slate-200 w-full justify-start rounded-lg self-start">
               <TabsTrigger value="students" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Students</TabsTrigger>
               <TabsTrigger value="classes" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Classes</TabsTrigger>
+              <TabsTrigger value="photos" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Photos</TabsTrigger>
               <TabsTrigger value="exports" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Exports</TabsTrigger>
               <TabsTrigger value="info" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Project Info</TabsTrigger>
             </TabsList>
@@ -96,6 +98,9 @@ export default function ProjectOverview() {
               </TabsContent>
               <TabsContent value="students" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
                 <StudentsTab projectId={project.id} />
+              </TabsContent>
+              <TabsContent value="photos" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
+                <PhotosTab projectId={project.id} />
               </TabsContent>
               <TabsContent value="exports" className="m-0 p-6 flex-1 overflow-auto">
                 <ExportsTab project={project} />

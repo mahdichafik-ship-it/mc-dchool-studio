@@ -18,3 +18,8 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.development]
+PHOTO_UPLOAD_KEY = "Where do I get the value for PHOTO_UPLOAD_KEY? Which service is this key for?\""

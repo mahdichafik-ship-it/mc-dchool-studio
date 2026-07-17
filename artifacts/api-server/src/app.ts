@@ -1,5 +1,7 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
+import fs from "fs";
 import { clerkMiddleware } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
@@ -34,5 +36,12 @@ app.use(
 );
 
 app.use("/api", router);
+
+// Ensure uploads directory exists (files written here by the multer storage engine;
+// served exclusively via the authenticated /api/.../photos/:id/file proxy endpoint)
+const uploadsDir = path.resolve(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 export default app;

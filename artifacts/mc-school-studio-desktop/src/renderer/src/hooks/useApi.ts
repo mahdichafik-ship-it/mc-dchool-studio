@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent } from '../../../shared/types'
+import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, UploadStatus, UploadStatusChangedEvent } from '../../../shared/types'
 
 // Re-export types for convenience
-export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent }
+export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, UploadStatus, UploadStatusChangedEvent }
 
 const api = window.api
 
@@ -169,4 +169,55 @@ export function usePhotoEvents(
       unsubUnmatched?.()
     }
   }, [onMatched, onUnmatched])
+}
+
+// Upload status per student: Map<studentId, { pending, uploading, done, error } counts>
+export interface StudentUploadSummary {
+  pending: number
+  uploading: number
+  done: number
+  error: number
+  total: number
+}
+
+export function useUploadStatus(projectId: number | null) {
+  // Map from studentId → counts
+  const [statusMap, setStatusMap] = useState<Map<number, StudentUploadSummary>>(new Map())
+
+  const load = useCallback(async () => {
+    if (!projectId) return
+    const rows = await api.invoke('upload:getProjectStatus', { projectId }) as Array<{
+      id: number
+      studentId: number | null
+      uploadStatus: UploadStatus
+    }>
+
+    const map = new Map<number, StudentUploadSummary>()
+    for (const row of rows) {
+      if (!row.studentId) continue
+      const existing = map.get(row.studentId) ?? { pending: 0, uploading: 0, done: 0, error: 0, total: 0 }
+      existing.total++
+      if (row.uploadStatus === 'pending') existing.pending++
+      else if (row.uploadStatus === 'uploading') existing.uploading++
+      else if (row.uploadStatus === 'done') existing.done++
+      else if (row.uploadStatus === 'error') existing.error++
+      map.set(row.studentId, existing)
+    }
+    setStatusMap(map)
+  }, [projectId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // Refresh whenever any upload status changes
+  useEffect(() => {
+    if (!projectId) return
+    const unsub = api.on('upload:statusChanged', (event: UploadStatusChangedEvent) => {
+      load()
+    })
+    return unsub
+  }, [projectId, load])
+
+  return { statusMap, reload: load }
 }

@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "x8Rb3o26-TsIR1p045gWk"
+uri = "file://artifacts/mc-school-studio-desktop/dist/release/mc-school-studio-1.0.0.AppImage"
+type = "unspecified"
+title = "MC School Studio 1.0.0 — Linux (AppImage)"

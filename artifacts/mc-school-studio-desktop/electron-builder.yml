@@ -4,9 +4,15 @@ copyright: Copyright © 2025 MC School Studio
 
 directories:
   buildResources: build
+  output: dist/release
+
+artifactName: mc-school-studio-${version}-${arch}.${ext}
+
+extraMetadata:
+  name: mc-school-studio
 
 files:
-  - dist/**/*
+  - out/**/*
   - node_modules/**/*
   - package.json
 

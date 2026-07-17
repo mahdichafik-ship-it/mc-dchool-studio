@@ -11,14 +11,18 @@ import {
   Camera,
   AlertCircle,
   ExternalLink,
+  Upload,
+  CheckCircle,
+  XCircle,
+  Loader,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { useProject, useClasses, useStudents, usePhotos, useWatcherStatus, usePhotoEvents } from '@/hooks/useApi'
+import { useProject, useClasses, useStudents, usePhotos, useWatcherStatus, usePhotoEvents, useUploadStatus } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
-import type { Student, Class, Photo, PhotoMatchedEvent } from '@/hooks/useApi'
+import type { Student, Class, Photo, PhotoMatchedEvent, StudentUploadSummary } from '@/hooks/useApi'
 
 interface Props {
   projectId: number
@@ -32,6 +36,7 @@ export function ProjectView({ projectId, onBack }: Props) {
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId)
+  const { statusMap: uploadStatusMap } = useUploadStatus(projectId)
   const [search, setSearch] = useState('')
   const [settingFolder, setSettingFolder] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
@@ -188,6 +193,7 @@ export function ProjectView({ projectId, onBack }: Props) {
                 student={s}
                 isSelected={selectedStudent?.id === s.id}
                 onClick={() => setSelectedStudent(s)}
+                uploadSummary={uploadStatusMap.get(s.id)}
               />
             ))}
             {filteredStudents.length === 0 && (
@@ -221,14 +227,48 @@ export function ProjectView({ projectId, onBack }: Props) {
   )
 }
 
+function UploadBadge({ summary }: { summary: StudentUploadSummary }) {
+  if (summary.uploading > 0) {
+    return (
+      <span title="Uploading…" className="flex items-center gap-0.5 text-[10px] text-blue-600">
+        <Loader className="size-3 animate-spin" />
+      </span>
+    )
+  }
+  if (summary.error > 0) {
+    return (
+      <span title={`${summary.error} upload(s) failed`} className="flex items-center gap-0.5 text-[10px] text-red-500">
+        <XCircle className="size-3" />
+      </span>
+    )
+  }
+  if (summary.pending > 0) {
+    return (
+      <span title={`${summary.pending} upload(s) queued`} className="flex items-center gap-0.5 text-[10px] text-amber-500">
+        <Upload className="size-3" />
+      </span>
+    )
+  }
+  if (summary.done > 0) {
+    return (
+      <span title={`${summary.done} photo(s) uploaded`} className="flex items-center gap-0.5 text-[10px] text-green-600">
+        <CheckCircle className="size-3" />
+      </span>
+    )
+  }
+  return null
+}
+
 function StudentRow({
   student: s,
   isSelected,
   onClick,
+  uploadSummary,
 }: {
   student: Student
   isSelected: boolean
   onClick: () => void
+  uploadSummary?: StudentUploadSummary
 }) {
   return (
     <button
@@ -246,12 +286,15 @@ function StudentRow({
         </p>
         <p className="text-xs text-slate-400 font-mono">{s.generatedStudentId}</p>
       </div>
-      {s.photoCount > 0 ? (
-        <Badge variant="success" className="text-[10px] px-1.5 py-0 shrink-0">
-          <Camera className="size-2.5 mr-0.5" />
-          {s.photoCount}
-        </Badge>
-      ) : null}
+      <div className="flex items-center gap-1 shrink-0">
+        {uploadSummary && <UploadBadge summary={uploadSummary} />}
+        {s.photoCount > 0 ? (
+          <Badge variant="success" className="text-[10px] px-1.5 py-0">
+            <Camera className="size-2.5 mr-0.5" />
+            {s.photoCount}
+          </Badge>
+        ) : null}
+      </div>
     </button>
   )
 }

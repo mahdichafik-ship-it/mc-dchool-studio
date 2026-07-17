@@ -4,6 +4,7 @@ import { registerProjectHandlers } from './ipc/projects'
 import { registerPhotoHandlers } from './ipc/photos'
 import { registerWatcherHandlers } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
+import { registerUploadHandlers } from './ipc/upload'
 import { getDb } from './db'
 
 const isDev = !app.isPackaged
@@ -49,6 +50,7 @@ app.whenReady().then(() => {
   registerPhotoHandlers()
   registerWatcherHandlers()
   registerDialogHandlers()
+  registerUploadHandlers()
 
   createWindow()
 

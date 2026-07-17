@@ -78,11 +78,23 @@ function initializeSchema(sqlite: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_students_project ON students(project_id);
     CREATE INDEX IF NOT EXISTS idx_students_generated_id ON students(generated_student_id);
     CREATE INDEX IF NOT EXISTS idx_photos_student ON photos(student_id);
     CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
   `)
+
+  // Add upload_status column to photos if it doesn't exist (idempotent migration)
+  try {
+    sqlite.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT`)
+  } catch {
+    // Column already exists — ignore
+  }
 }
 
 export function getPhotosDir(): string {

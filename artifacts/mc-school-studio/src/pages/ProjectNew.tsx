@@ -112,7 +112,7 @@ export default function ProjectNew() {
                     name="photoDate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Photo Date</FormLabel>
+                        <FormLabel>Photo Date <span className="text-slate-400 font-normal">(Optional)</span></FormLabel>
                         <FormControl>
                           <Input type="date" {...field} />
                         </FormControl>
@@ -125,7 +125,7 @@ export default function ProjectNew() {
                     name="address"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>School Address</FormLabel>
+                        <FormLabel>School Address <span className="text-slate-400 font-normal">(Optional)</span></FormLabel>
                         <FormControl>
                           <Input placeholder="123 Main St..." {...field} />
                         </FormControl>

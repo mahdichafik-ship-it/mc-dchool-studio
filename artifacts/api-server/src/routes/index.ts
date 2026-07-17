@@ -6,6 +6,7 @@ import classesRouter from "./classes";
 import studentsRouter from "./students";
 import importRouter from "./import";
 import exportRouter from "./export";
+import photosRouter from "./photos";
 
 const router = Router();
 
@@ -16,5 +17,7 @@ router.use("/projects/:projectId/classes", classesRouter);
 router.use("/projects/:projectId/students", studentsRouter);
 router.use("/projects/:projectId/import", importRouter);
 router.use("/projects/:projectId/export", exportRouter);
+// Photos: /api/projects/:projectId/students/:studentId/photos
+router.use("/projects/:projectId/students", photosRouter);
 
 export default router;

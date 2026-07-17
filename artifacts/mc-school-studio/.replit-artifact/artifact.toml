@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "MC School Studio"
+version = "1.0.0"
+id = "artifacts/mc-school-studio"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26125
+
+[services.development]
+run = "pnpm --filter @workspace/mc-school-studio run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mc-school-studio", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/mc-school-studio/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26125"
+BASE_PATH = "/"

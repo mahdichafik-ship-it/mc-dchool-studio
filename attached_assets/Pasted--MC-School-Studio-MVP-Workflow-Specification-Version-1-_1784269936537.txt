@@ -1,0 +1,642 @@
+# MC School Studio – MVP Workflow Specification (Version 1)
+
+## Overview
+
+The purpose of this application is to prepare an entire school for photography day by organizing student information and generating unique QR codes for every student.
+
+This version **does not manage photographs**. It is strictly a **School Project Management** application that prepares all the data required before photography begins.
+
+The workflow should be simple, intuitive, and require as few steps as possible.
+
+---
+
+# Overall Workflow
+
+```text
+Login
+      │
+      ▼
+Dashboard
+      │
+      ▼
+Create School Project
+      │
+      ▼
+Upload Excel / CSV
+      │
+      ▼
+Read Worksheets
+      │
+      ▼
+Map Spreadsheet Columns
+      │
+      ▼
+Create Classes
+      │
+      ▼
+Import Students
+      │
+      ▼
+Generate Missing Student IDs
+      │
+      ▼
+Generate QR Codes
+      │
+      ▼
+Review Data
+      │
+      ▼
+Export QR Codes (ZIP)
+      │
+      ▼
+Export Printable PDF
+      │
+      ▼
+Ready for Photography Day
+```
+
+---
+
+# Step 1 – User Login
+
+The application opens with a secure login screen.
+
+Supported authentication:
+
+* Email
+* Password
+
+After authentication, the user is redirected to the Dashboard.
+
+---
+
+# Step 2 – Dashboard
+
+The Dashboard is the application's homepage.
+
+Its purpose is to quickly access school projects.
+
+It displays:
+
+### Statistics
+
+* Total Projects
+* Total Schools
+* Total Classes
+* Total Students
+
+### Recent Projects
+
+Each card displays:
+
+* School Name
+* Photography Date
+* Number of Classes
+* Number of Students
+* Last Modified
+
+### Quick Actions
+
+* New Project
+* Open Project
+
+---
+
+# Step 3 – Create School Project
+
+The user creates a project for one school.
+
+Required information:
+
+* School Name
+
+Optional information:
+
+* Photography Date
+* Address
+* Contact Person
+* Email
+* Telephone
+* Notes
+
+Example
+
+```text
+American School Casablanca
+
+Photography Date:
+15 October 2026
+
+Contact:
+Mrs Sarah Jones
+```
+
+Once saved, Firestore creates a Project document.
+
+The project now becomes the workspace for everything related to that school.
+
+---
+
+# Step 4 – Project Overview
+
+Opening a project displays four sections.
+
+## Project Information
+
+Displays:
+
+School Name
+
+Photography Date
+
+Contact
+
+Notes
+
+Edit button
+
+---
+
+## Classes
+
+Initially empty.
+
+After importing Excel:
+
+```
+Grade 1A
+
+Grade 1B
+
+Grade 2A
+
+Teachers
+```
+
+Each class shows:
+
+* Student count
+* Edit
+* Delete
+
+---
+
+## Students
+
+Initially empty.
+
+Later becomes a searchable table.
+
+Columns:
+
+First Name
+
+Last Name
+
+Generated Student ID
+
+Class
+
+Actions
+
+---
+
+## Exports
+
+Initially empty.
+
+Contains buttons:
+
+Generate ZIP
+
+Generate PDF
+
+---
+
+# Step 5 – Import Student List
+
+The user clicks:
+
+Import Students
+
+Supported files:
+
+* Excel (.xlsx)
+* CSV (.csv)
+
+---
+
+## Excel Behaviour
+
+Every worksheet (tab) becomes a class.
+
+Workbook
+
+```
+Grade 1A
+
+Grade 1B
+
+Grade 2A
+
+Teachers
+```
+
+Automatically creates four classes.
+
+No manual class creation is required.
+
+---
+
+## CSV Behaviour
+
+CSV files contain only one class.
+
+The application asks:
+
+"What is the class name?"
+
+The user types:
+
+```
+Grade 3B
+```
+
+---
+
+# Step 6 – Preview Spreadsheet
+
+Before importing, the application shows a preview.
+
+Example
+
+| First | Last   | Student No |
+| ----- | ------ | ---------- |
+| Amir  | Naciri | 1525       |
+| Lina  | Ahmed  | 1526       |
+
+The user confirms the data.
+
+---
+
+# Step 7 – Header Mapping
+
+Schools use different column names.
+
+The application asks the user to match spreadsheet columns to standard fields.
+
+Example
+
+Spreadsheet
+
+```
+Given Name
+```
+
+↓
+
+Application
+
+```
+First Name
+```
+
+Spreadsheet
+
+```
+Family Name
+```
+
+↓
+
+Application
+
+```
+Last Name
+```
+
+Spreadsheet
+
+```
+Student Number
+```
+
+↓
+
+Application
+
+```
+Student ID
+```
+
+Required fields:
+
+* First Name
+* Last Name
+
+Optional:
+
+* Student ID
+
+---
+
+# Step 8 – Import Students
+
+After mapping,
+
+students are imported.
+
+Each worksheet imports into its matching class.
+
+Example
+
+Grade 2A
+
+```
+Amir
+
+Lina
+
+Sara
+
+Youssef
+```
+
+Four student records are created.
+
+---
+
+# Step 9 – Student ID Generation
+
+Some schools already have IDs.
+
+Others don't.
+
+If Student ID exists:
+
+Keep it.
+
+Example
+
+```
+45862
+```
+
+If missing:
+
+Generate one automatically.
+
+Rules:
+
+* Seven characters
+* Uppercase
+* Letters and numbers
+* Unique within the project
+
+Example
+
+```
+MB972CX
+```
+
+The generated ID never changes unless the user manually edits it.
+
+---
+
+# Step 10 – QR Generation
+
+Every student receives two QR formats.
+
+---
+
+## Simple QR
+
+Designed for photography software.
+
+Contents:
+
+```
+FirstName.LastName.StudentID
+```
+
+Example
+
+```
+Amir.Naciri.MB972CX
+```
+
+Only plain text.
+
+---
+
+## JSON QR
+
+Contains structured data.
+
+Example
+
+```json
+{
+  "project":"American School Casablanca",
+  "class":"Grade 2A",
+  "firstName":"Amir",
+  "lastName":"Naciri",
+  "studentId":"MB972CX"
+}
+```
+
+Used for future mobile scanning and automation.
+
+---
+
+# Step 11 – Student Management
+
+The Students page displays all imported students.
+
+Functions:
+
+Search
+
+Sort
+
+Filter by class
+
+Edit student
+
+Delete student
+
+Bulk delete
+
+Bulk regenerate QR
+
+The table updates instantly after edits.
+
+---
+
+# Step 12 – Class Management
+
+The Classes page allows:
+
+Rename class
+
+Delete class
+
+View students
+
+Student count
+
+Deleting a class asks for confirmation.
+
+---
+
+# Step 13 – Project Management
+
+The Project page allows:
+
+Edit school information
+
+Change photography date
+
+Update contact information
+
+Archive project
+
+Delete project
+
+Deleting a project removes:
+
+* Classes
+* Students
+* QR data
+
+Only after confirmation.
+
+---
+
+# Step 14 – QR Preview
+
+The QR Preview page displays cards.
+
+Each card contains:
+
+Large QR
+
+Student Name
+
+Generated Student ID
+
+Class Name
+
+Buttons:
+
+Preview
+
+Download PNG
+
+Print
+
+---
+
+# Step 15 – ZIP Export
+
+The application generates individual PNG files for every student.
+
+Naming convention:
+
+```
+Firstname_Lastname_StudentID.png
+```
+
+Example
+
+```
+Amir_Naciri_MB972CX.png
+```
+
+All PNG files are compressed into one ZIP file for download.
+
+---
+
+# Step 16 – PDF Export
+
+The application generates a printable PDF.
+
+Each page contains:
+
+* School Name
+* Class Name
+* Student Name
+* Student ID
+* Large QR code
+
+One student per page to make distribution simple before photo day.
+
+---
+
+# Firestore Data Model
+
+## Projects
+
+```text
+projectId
+schoolName
+photoDate
+address
+contactName
+contactEmail
+contactPhone
+notes
+createdAt
+updatedAt
+```
+
+---
+
+## Classes
+
+```text
+classId
+projectId
+className
+studentCount
+createdAt
+updatedAt
+```
+
+---
+
+## Students
+
+```text
+studentId
+projectId
+classId
+firstName
+lastName
+generatedStudentId
+simpleQR
+jsonQR
+createdAt
+updatedAt
+```
+
+---
+
+# MVP Principles
+
+This version of the application is **only responsible for preparing schools before photography day**.
+
+It should **not** include:
+
+* Image uploads
+* Photography sessions
+* QR scanning during capture
+* Image renaming
+* AI face matching
+* Parent galleries
+* Online ordering
+* Payment processing
+* Print fulfilment
+* Delivery management
+
+The focus is to create a reliable, fast, and intuitive project management tool that becomes the foundation for future modules. By keeping Version 1 narrowly scoped, you'll have a stable core that can later expand into a complete school photography platform.

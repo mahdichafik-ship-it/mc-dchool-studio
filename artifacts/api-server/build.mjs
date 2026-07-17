@@ -59,7 +59,7 @@ async function buildAll() {
       "@prisma/client",
       "@mikro-orm/*",
       "@grpc/*",
-      "@swc/*",
+      // "@swc/*" intentionally NOT externalized — PDFKit's fontkit dependency needs it bundled
       "@aws-sdk/*",
       "@azure/*",
       "@opentelemetry/*",

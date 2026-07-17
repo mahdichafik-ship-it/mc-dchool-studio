@@ -3,13 +3,26 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: MC School Studio API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: dashboard
+    description: Dashboard statistics
+  - name: projects
+    description: School project management
+  - name: classes
+    description: Class management within a project
+  - name: students
+    description: Student management within a project
+  - name: import
+    description: Student list import operations
+  - name: export
+    description: QR code export operations
+
 paths:
   /healthz:
     get:
@@ -24,6 +37,496 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get dashboard statistics
+      description: Returns aggregate counts for projects, schools, classes, and students
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+        "401":
+          description: Unauthorized
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List all projects
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+        "401":
+          description: Unauthorized
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create a new school project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+
+  /projects/{projectId}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: Get a project by ID
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      summary: Update a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectPatch"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project and all its data
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+
+  /projects/{projectId}/classes:
+    get:
+      operationId: listClasses
+      tags: [classes]
+      summary: List all classes in a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of classes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Class"
+        "401":
+          description: Unauthorized
+    post:
+      operationId: createClass
+      tags: [classes]
+      summary: Create a class in a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClassInput"
+      responses:
+        "201":
+          description: Created class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Class"
+        "401":
+          description: Unauthorized
+
+  /projects/{projectId}/classes/{classId}:
+    patch:
+      operationId: updateClass
+      tags: [classes]
+      summary: Rename a class
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: classId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClassPatch"
+      responses:
+        "200":
+          description: Updated class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Class"
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteClass
+      tags: [classes]
+      summary: Delete a class and its students
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: classId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+
+  /projects/{projectId}/students:
+    get:
+      operationId: listStudents
+      tags: [students]
+      summary: List students in a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of students
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Student"
+        "401":
+          description: Unauthorized
+    post:
+      operationId: createStudent
+      tags: [students]
+      summary: Add a single student to a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudentInput"
+      responses:
+        "201":
+          description: Created student
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+        "401":
+          description: Unauthorized
+
+  /projects/{projectId}/students/{studentId}:
+    patch:
+      operationId: updateStudent
+      tags: [students]
+      summary: Update a student record
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudentPatch"
+      responses:
+        "200":
+          description: Updated student
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteStudent
+      tags: [students]
+      summary: Delete a student
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+
+  /projects/{projectId}/students/bulk-delete:
+    post:
+      operationId: bulkDeleteStudents
+      tags: [students]
+      summary: Delete multiple students
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkStudentIds"
+      responses:
+        "200":
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkDeleteResult"
+        "401":
+          description: Unauthorized
+
+  /projects/{projectId}/students/generate-qr:
+    post:
+      operationId: generateQrCodes
+      tags: [students]
+      summary: Generate QR codes for all students missing them
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateQrRequest"
+      responses:
+        "200":
+          description: QR generation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateQrResult"
+        "401":
+          description: Unauthorized
+
+  /projects/{projectId}/import/parse:
+    post:
+      operationId: parseImportFile
+      tags: [import]
+      summary: Upload and parse an Excel or CSV file, returns sheet/column preview
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ImportFileForm"
+      responses:
+        "200":
+          description: Parse result with sheets and sample rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResult"
+        "400":
+          description: Invalid file
+        "401":
+          description: Unauthorized
+
+  /projects/{projectId}/import/confirm:
+    post:
+      operationId: confirmImport
+      tags: [import]
+      summary: Confirm an import with column mapping and create students
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportConfirmation"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+
+  /projects/{projectId}/export/zip:
+    get:
+      operationId: exportZip
+      tags: [export]
+      summary: Download a ZIP of QR code PNGs for all students
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ZIP file
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+
+  /projects/{projectId}/export/pdf:
+    get:
+      operationId: exportPdf
+      tags: [export]
+      summary: Download a printable PDF with one student per page
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +537,285 @@ components:
       required:
         - status
 
+    DashboardStats:
+      type: object
+      required: [totalProjects, totalSchools, totalClasses, totalStudents]
+      properties:
+        totalProjects:
+          type: integer
+        totalSchools:
+          type: integer
+        totalClasses:
+          type: integer
+        totalStudents:
+          type: integer
+
+    Project:
+      type: object
+      required: [id, schoolName, createdAt, updatedAt, classCount, studentCount]
+      properties:
+        id:
+          type: integer
+        schoolName:
+          type: string
+        photoDate:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        contactName:
+          type: ["string", "null"]
+        contactEmail:
+          type: ["string", "null"]
+        contactPhone:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        classCount:
+          type: integer
+        studentCount:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    ProjectInput:
+      type: object
+      required: [schoolName]
+      properties:
+        schoolName:
+          type: string
+          minLength: 1
+        photoDate:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        contactName:
+          type: ["string", "null"]
+        contactEmail:
+          type: ["string", "null"]
+        contactPhone:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    ProjectPatch:
+      type: object
+      properties:
+        schoolName:
+          type: string
+          minLength: 1
+        photoDate:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        contactName:
+          type: ["string", "null"]
+        contactEmail:
+          type: ["string", "null"]
+        contactPhone:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    Class:
+      type: object
+      required: [id, projectId, className, studentCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: integer
+        className:
+          type: string
+        studentCount:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    ClassInput:
+      type: object
+      required: [className]
+      properties:
+        className:
+          type: string
+          minLength: 1
+
+    ClassPatch:
+      type: object
+      required: [className]
+      properties:
+        className:
+          type: string
+          minLength: 1
+
+    Student:
+      type: object
+      required: [id, projectId, classId, className, firstName, lastName, generatedStudentId, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: integer
+        classId:
+          type: integer
+        className:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        generatedStudentId:
+          type: string
+        simpleQr:
+          type: ["string", "null"]
+        jsonQr:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    StudentInput:
+      type: object
+      required: [classId, firstName, lastName]
+      properties:
+        classId:
+          type: integer
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        generatedStudentId:
+          type: ["string", "null"]
+
+    StudentPatch:
+      type: object
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        generatedStudentId:
+          type: ["string", "null"]
+        classId:
+          type: integer
+
+    BulkStudentIds:
+      type: object
+      required: [studentIds]
+      properties:
+        studentIds:
+          type: array
+          items:
+            type: integer
+
+    BulkDeleteResult:
+      type: object
+      required: [deleted]
+      properties:
+        deleted:
+          type: integer
+
+    GenerateQrRequest:
+      type: object
+      properties:
+        studentIds:
+          type: array
+          items:
+            type: integer
+          description: If omitted, generates QR codes for all students in the project
+
+    GenerateQrResult:
+      type: object
+      required: [generated]
+      properties:
+        generated:
+          type: integer
+
+    ParseResult:
+      type: object
+      required: [sheets]
+      properties:
+        sheets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SheetPreview"
+
+    SheetPreview:
+      type: object
+      required: [name, headers, rows]
+      properties:
+        name:
+          type: string
+        headers:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+
+    ImportConfirmation:
+      type: object
+      required: [sheets]
+      properties:
+        sheets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SheetMapping"
+
+    SheetMapping:
+      type: object
+      required: [sheetName, className, firstNameColumn, lastNameColumn, rows]
+      properties:
+        sheetName:
+          type: string
+        className:
+          type: string
+        firstNameColumn:
+          type: string
+        lastNameColumn:
+          type: string
+        studentIdColumn:
+          type: ["string", "null"]
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        headers:
+          type: array
+          items:
+            type: string
+
+    ImportResult:
+      type: object
+      required: [classesCreated, studentsCreated]
+      properties:
+        classesCreated:
+          type: integer
+        studentsCreated:
+          type: integer
+
+    ImportFileForm:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: Excel (.xlsx) or CSV (.csv) file
+        csvClassName:
+          type: string
+          description: Required only for CSV files — the class name to assign

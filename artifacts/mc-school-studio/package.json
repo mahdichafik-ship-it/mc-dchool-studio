@@ -77,6 +77,8 @@
   "dependencies": {
     "@clerk/react": "^6.12.4",
     "@clerk/themes": "^2.4.57",
+    "@types/jszip": "^3.4.1",
+    "jszip": "^3.10.1",
     "xlsx": "^0.18.5"
   }
 }

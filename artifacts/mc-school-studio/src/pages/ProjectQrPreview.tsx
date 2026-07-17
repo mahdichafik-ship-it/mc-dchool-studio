@@ -48,6 +48,7 @@ export default function ProjectQrPreview() {
   const [addFirstName, setAddFirstName] = useState('');
   const [addLastName, setAddLastName] = useState('');
   const [addClassId, setAddClassId] = useState<string>('');
+  const [addStudentId, setAddStudentId] = useState('');
   const [addEmail, setAddEmail] = useState('');
   const [addPhone, setAddPhone] = useState('');
 
@@ -95,7 +96,7 @@ export default function ProjectQrPreview() {
     if (!trimFirst || !trimLast || !classIdNum) return;
 
     createStudent.mutate(
-      { projectId: projectId!, data: { firstName: trimFirst, lastName: trimLast, classId: classIdNum, email: addEmail.trim() || null, phone: addPhone.trim() || null } },
+      { projectId: projectId!, data: { firstName: trimFirst, lastName: trimLast, classId: classIdNum, generatedStudentId: addStudentId.trim() || null, email: addEmail.trim() || null, phone: addPhone.trim() || null } },
       {
         onSuccess: (newStudent) => {
           queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId!) });
@@ -111,6 +112,7 @@ export default function ProjectQrPreview() {
           setAddFirstName('');
           setAddLastName('');
           setAddClassId('');
+          setAddStudentId('');
           setAddEmail('');
           setAddPhone('');
         },
@@ -487,6 +489,20 @@ export default function ProjectQrPreview() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* ID number (optional) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                ID Number <span className="text-gray-600 normal-case font-normal">(optional — auto-generated if blank)</span>
+              </label>
+              <input
+                type="text"
+                value={addStudentId}
+                onChange={(e) => setAddStudentId(e.target.value)}
+                placeholder="e.g. 000123"
+                className="bg-[#1e1e33] border border-white/15 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors font-mono"
+              />
             </div>
 
             {/* Email (optional) */}

@@ -1,0 +1,27 @@
+kind = "slides"
+previewPath = "/mc-school-studio-deck/"
+title = "MC School Studio — Photographer Deck"
+version = "1.0.0"
+id = "artifacts/mc-school-studio-deck"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/mc-school-studio-deck/" ]
+localPort = 26103
+
+[services.development]
+run = "pnpm --filter @workspace/mc-school-studio-deck run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mc-school-studio-deck", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/mc-school-studio-deck/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26103"
+BASE_PATH = "/mc-school-studio-deck/"

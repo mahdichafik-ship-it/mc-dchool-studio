@@ -1,0 +1,130 @@
+[
+  {
+    "id": "a1b2c3d4-0001-0000-0000-000000000001",
+    "position": 1,
+    "filepath": "src/pages/slides/Slide01_Title.tsx",
+    "title": "MC School Studio",
+    "description": "Title slide — hero image with tagline",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0002-0000-0000-000000000002",
+    "position": 2,
+    "filepath": "src/pages/slides/Slide02_OldWay.tsx",
+    "title": "The old way is broken",
+    "description": "Four pain points of traditional school photography workflows",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0003-0000-0000-000000000003",
+    "position": 3,
+    "filepath": "src/pages/slides/Slide03_BetterWorkflow.tsx",
+    "title": "There's a better workflow",
+    "description": "Four-step high-level overview of the MC School Studio workflow",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0004-0000-0000-000000000004",
+    "position": 4,
+    "filepath": "src/pages/slides/Slide04_CreateProject.tsx",
+    "title": "Step 1 — Create your project online",
+    "description": "Log in anywhere, enter school details, project saved to cloud",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0005-0000-0000-000000000005",
+    "position": 5,
+    "filepath": "src/pages/slides/Slide05_ImportRoster.tsx",
+    "title": "Step 2 — Import the student roster",
+    "description": "Upload CSV/Excel, map columns, students created in seconds",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0006-0000-0000-000000000006",
+    "position": 6,
+    "filepath": "src/pages/slides/Slide06_QRCodes.tsx",
+    "title": "Step 3 — QR codes, auto-generated",
+    "description": "Unique QR per student, stored in cloud, no extra software",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0007-0000-0000-000000000007",
+    "position": 7,
+    "filepath": "src/pages/slides/Slide07_PrintDistribute.tsx",
+    "title": "Print & distribute before shoot day",
+    "description": "Download as ZIP or PDF, hand cards to students",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0008-0000-0000-000000000008",
+    "position": 8,
+    "filepath": "src/pages/slides/Slide08_PullProject.tsx",
+    "title": "Step 4 — Pull your project to the desktop app",
+    "description": "Install once, configure, sync from cloud in one click",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0009-0000-0000-000000000009",
+    "position": 9,
+    "filepath": "src/pages/slides/Slide09_ShootDaySetup.tsx",
+    "title": "Shoot-day setup takes 30 seconds",
+    "description": "Open project, set watch folder, ready to shoot",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0010-0000-0000-000000000010",
+    "position": 10,
+    "filepath": "src/pages/slides/Slide10_Shoot.tsx",
+    "title": "Step 5 — Shoot. The app does the rest.",
+    "description": "Student holds QR card, photo taken, QR read, student matched and uploaded",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0011-0000-0000-000000000011",
+    "position": 11,
+    "filepath": "src/pages/slides/Slide11_RealtimeMatching.tsx",
+    "title": "Real-time matching — how it works",
+    "description": "Chokidar, jsQR, matched upload queue, unmatched flagging",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0012-0000-0000-000000000012",
+    "position": 12,
+    "filepath": "src/pages/slides/Slide12_PhotosGoUp.tsx",
+    "title": "Photos go up as you shoot",
+    "description": "Background uploads, no waiting, auto-retry, instant web updates",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0013-0000-0000-000000000013",
+    "position": 13,
+    "filepath": "src/pages/slides/Slide13_ReviewAnywhere.tsx",
+    "title": "Review from anywhere — even mid-shoot",
+    "description": "Web app on any device, real-time photos, catch misfires, school access",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0014-0000-0000-000000000014",
+    "position": 14,
+    "filepath": "src/pages/slides/Slide14_LiveCounters.tsx",
+    "title": "Live counters keep you on track",
+    "description": "Classes, students, photos — all live counters with no refresh needed",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0015-0000-0000-000000000015",
+    "position": 15,
+    "filepath": "src/pages/slides/Slide15_NothingLost.tsx",
+    "title": "Nothing is lost between sessions",
+    "description": "Cloud storage, re-sync for makeup days, late enrollments, no silos",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0016-0000-0000-000000000016",
+    "position": 16,
+    "filepath": "src/pages/slides/Slide16_Transformed.tsx",
+    "title": "Your shoot day, transformed",
+    "description": "Before vs. after — hours of manual work eliminated",
+    "speakerNotes": ""
+  }
+]

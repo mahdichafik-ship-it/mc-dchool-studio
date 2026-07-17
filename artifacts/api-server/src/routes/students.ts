@@ -238,27 +238,29 @@ router.post("/generate-qr", requireAuth, async (req, res) => {
       .where(eq(studentsTable.projectId, projectId));
   }
 
+  // Only regenerate students that are actually missing QR codes (unless specific IDs requested)
+  const needsQr = Array.isArray(studentIds) && studentIds.length > 0
+    ? studentsToProcess
+    : studentsToProcess.filter(r => !r.student.simpleQr);
+
+  // Generate all QR codes in parallel (concurrency-limited to avoid OOM on huge classes)
+  const BATCH = 50;
   let generated = 0;
-  for (const { student, className } of studentsToProcess) {
-    const simpleQr = await generateSimpleQr(
-      student.firstName,
-      student.lastName,
-      student.generatedStudentId,
+  for (let i = 0; i < needsQr.length; i += BATCH) {
+    const batch = needsQr.slice(i, i + BATCH);
+    await Promise.all(
+      batch.map(async ({ student, className }) => {
+        const [simpleQr, jsonQr] = await Promise.all([
+          generateSimpleQr(student.firstName, student.lastName, student.generatedStudentId),
+          generateJsonQr(project.schoolName, className, student.firstName, student.lastName, student.generatedStudentId),
+        ]);
+        await db
+          .update(studentsTable)
+          .set({ simpleQr, jsonQr, updatedAt: new Date() })
+          .where(eq(studentsTable.id, student.id));
+        generated++;
+      }),
     );
-    const jsonQr = await generateJsonQr(
-      project.schoolName,
-      className,
-      student.firstName,
-      student.lastName,
-      student.generatedStudentId,
-    );
-
-    await db
-      .update(studentsTable)
-      .set({ simpleQr, jsonQr, updatedAt: new Date() })
-      .where(eq(studentsTable.id, student.id));
-
-    generated++;
   }
 
   res.json({ generated });

@@ -23,7 +23,14 @@ export default function ProjectQrPreview() {
       onSuccess: (res) => {
         queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId!) });
         toast({ title: `Generated ${res.generated} QR codes` });
-      }
+      },
+      onError: (err) => {
+        toast({
+          title: 'QR generation failed',
+          description: String(err),
+          variant: 'destructive',
+        });
+      },
     });
   };
 

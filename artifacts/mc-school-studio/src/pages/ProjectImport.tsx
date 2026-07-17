@@ -272,7 +272,7 @@ export default function ProjectImport() {
                         <Select value={mappings[sheet.name]?.firstNameColumn} onValueChange={v => updateMapping(sheet.name, 'firstNameColumn', v)}>
                           <SelectTrigger><SelectValue placeholder="Select column" /></SelectTrigger>
                           <SelectContent>
-                            {sheet.headers.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
+                            {sheet.headers.map((h, i) => <SelectItem key={`fn-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -281,7 +281,7 @@ export default function ProjectImport() {
                         <Select value={mappings[sheet.name]?.lastNameColumn} onValueChange={v => updateMapping(sheet.name, 'lastNameColumn', v)}>
                           <SelectTrigger><SelectValue placeholder="Select column" /></SelectTrigger>
                           <SelectContent>
-                            {sheet.headers.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
+                            {sheet.headers.map((h, i) => <SelectItem key={`ln-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -291,7 +291,7 @@ export default function ProjectImport() {
                           <SelectTrigger><SelectValue placeholder="No mapping" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">-- Skip --</SelectItem>
-                            {sheet.headers.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
+                            {sheet.headers.map((h, i) => <SelectItem key={`sid-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>

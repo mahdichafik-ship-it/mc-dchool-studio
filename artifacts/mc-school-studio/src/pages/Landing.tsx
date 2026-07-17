@@ -1,6 +1,8 @@
 import React from 'react';
 import { Link } from 'wouter';
-import { Camera, ArrowRight, ShieldCheck, Zap, Users } from 'lucide-react';
+import { Camera, ArrowRight, ShieldCheck, Zap, Users, Monitor, Apple, AppWindow } from 'lucide-react';
+
+const GITHUB_RELEASES_URL = 'https://github.com/your-org/mc-school-studio/releases/latest';
 
 export default function Landing() {
   return (
@@ -34,6 +36,43 @@ export default function Landing() {
             <Link href="/sign-up" className="inline-flex items-center gap-2 bg-teal-600 text-white px-8 py-3.5 rounded-lg font-semibold text-lg hover:bg-teal-700 transition-colors shadow-md">
               Start Free Trial <ArrowRight className="w-5 h-5" />
             </Link>
+          </div>
+        </section>
+
+        {/* Desktop app download */}
+        <section className="pb-16 px-8 max-w-6xl mx-auto">
+          <div className="rounded-2xl border border-teal-200 bg-teal-50 px-8 py-7 flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-5">
+              <div className="w-12 h-12 rounded-xl bg-teal-600 flex items-center justify-center shrink-0">
+                <Monitor className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Download the Desktop App</h2>
+                <p className="text-sm text-slate-600 mt-0.5">
+                  Shoot-day tool — auto-matches QR codes as photos land in your camera folder.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <a
+                href={GITHUB_RELEASES_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
+              >
+                <Apple className="w-4 h-4" />
+                Mac (.dmg)
+              </a>
+              <a
+                href={GITHUB_RELEASES_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
+              >
+                <AppWindow className="w-4 h-4" />
+                Windows (.exe)
+              </a>
+            </div>
           </div>
         </section>
 

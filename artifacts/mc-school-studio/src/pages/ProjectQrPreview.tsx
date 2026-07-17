@@ -48,6 +48,8 @@ export default function ProjectQrPreview() {
   const [addFirstName, setAddFirstName] = useState('');
   const [addLastName, setAddLastName] = useState('');
   const [addClassId, setAddClassId] = useState<string>('');
+  const [addEmail, setAddEmail] = useState('');
+  const [addPhone, setAddPhone] = useState('');
 
   const { data: students = [], isLoading: studentsLoading } = useListStudents(
     projectId!,
@@ -93,7 +95,7 @@ export default function ProjectQrPreview() {
     if (!trimFirst || !trimLast || !classIdNum) return;
 
     createStudent.mutate(
-      { projectId: projectId!, data: { firstName: trimFirst, lastName: trimLast, classId: classIdNum } },
+      { projectId: projectId!, data: { firstName: trimFirst, lastName: trimLast, classId: classIdNum, email: addEmail.trim() || null, phone: addPhone.trim() || null } },
       {
         onSuccess: (newStudent) => {
           queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId!) });
@@ -109,6 +111,8 @@ export default function ProjectQrPreview() {
           setAddFirstName('');
           setAddLastName('');
           setAddClassId('');
+          setAddEmail('');
+          setAddPhone('');
         },
         onError: (err) => {
           toast({ title: 'Failed to add student', description: String(err), variant: 'destructive' });
@@ -483,6 +487,35 @@ export default function ProjectQrPreview() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Email (optional) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                Email <span className="text-gray-600 normal-case font-normal">(optional)</span>
+              </label>
+              <input
+                type="email"
+                value={addEmail}
+                onChange={(e) => setAddEmail(e.target.value)}
+                placeholder="e.g. student@example.com"
+                className="bg-[#1e1e33] border border-white/15 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            </div>
+
+            {/* Phone (optional) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                Phone <span className="text-gray-600 normal-case font-normal">(optional)</span>
+              </label>
+              <input
+                type="tel"
+                value={addPhone}
+                onChange={(e) => setAddPhone(e.target.value)}
+                placeholder="e.g. +212 6xx xx xx xx"
+                className="bg-[#1e1e33] border border-white/15 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+                onKeyDown={(e) => e.key === 'Enter' && handleAddStudent()}
+              />
             </div>
           </div>
 

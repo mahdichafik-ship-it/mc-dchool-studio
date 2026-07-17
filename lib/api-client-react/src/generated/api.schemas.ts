@@ -99,6 +99,10 @@ export interface Student {
   lastName: string;
   generatedStudentId: string;
   /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
   simpleQr?: string | null;
   /** @nullable */
   jsonQr?: string | null;
@@ -114,6 +118,10 @@ export interface StudentInput {
   lastName: string;
   /** @nullable */
   generatedStudentId?: string | null;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  phone?: string | null;
 }
 
 export interface StudentPatch {
@@ -124,6 +132,10 @@ export interface StudentPatch {
   /** @nullable */
   generatedStudentId?: string | null;
   classId?: number;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  phone?: string | null;
 }
 
 export interface BulkStudentIds {

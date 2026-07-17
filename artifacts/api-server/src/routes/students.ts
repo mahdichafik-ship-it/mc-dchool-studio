@@ -36,6 +36,8 @@ function formatStudent(
     firstName: s.firstName,
     lastName: s.lastName,
     generatedStudentId: s.generatedStudentId,
+    email: s.email ?? null,
+    phone: s.phone ?? null,
     simpleQr: s.simpleQr,
     jsonQr: s.jsonQr,
     createdAt: s.createdAt.toISOString(),
@@ -76,7 +78,7 @@ router.post("/", requireAuth, async (req, res) => {
     return;
   }
 
-  const { classId, firstName, lastName, generatedStudentId } = req.body;
+  const { classId, firstName, lastName, generatedStudentId, email, phone } = req.body;
 
   if (!classId || !firstName || !lastName) {
     res.status(400).json({ error: "classId, firstName, and lastName are required" });
@@ -101,7 +103,15 @@ router.post("/", requireAuth, async (req, res) => {
 
   const [student] = await db
     .insert(studentsTable)
-    .values({ projectId, classId, firstName, lastName, generatedStudentId: studentId })
+    .values({
+      projectId,
+      classId,
+      firstName,
+      lastName,
+      generatedStudentId: studentId,
+      email: email ?? null,
+      phone: phone ?? null,
+    })
     .returning();
 
   res.status(201).json(formatStudent(student, cls.className));
@@ -128,7 +138,7 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     return;
   }
 
-  const { firstName, lastName, generatedStudentId, classId } = req.body;
+  const { firstName, lastName, generatedStudentId, classId, email, phone } = req.body;
 
   const [updated] = await db
     .update(studentsTable)
@@ -137,6 +147,8 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
       ...(lastName !== undefined && { lastName }),
       ...(generatedStudentId !== undefined && { generatedStudentId }),
       ...(classId !== undefined && { classId }),
+      ...(email !== undefined && { email: email ?? null }),
+      ...(phone !== undefined && { phone: phone ?? null }),
       // Regenerate QR if name or ID changed
       ...(firstName !== undefined || lastName !== undefined || generatedStudentId !== undefined
         ? { simpleQr: null, jsonQr: null }

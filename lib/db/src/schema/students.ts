@@ -15,6 +15,8 @@ export const studentsTable = pgTable("students", {
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   generatedStudentId: text("generated_student_id").notNull(),
+  email: text("email"),
+  phone: text("phone"),
   simpleQr: text("simple_qr"),
   jsonQr: text("json_qr"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

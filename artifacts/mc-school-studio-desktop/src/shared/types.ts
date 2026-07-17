@@ -77,3 +77,16 @@ export interface ImportResult {
   classesImported: number
   studentsImported: number
 }
+
+export interface PhotoDeletedEvent {
+  photoId: number
+  projectId: number
+  studentId: number | null
+}
+
+export interface PhotoReassignedEvent {
+  photoId: number
+  projectId: number
+  fromStudentId: number | null
+  toStudentId: number
+}

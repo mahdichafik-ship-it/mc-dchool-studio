@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, UploadStatus, UploadStatusChangedEvent } from '../../../shared/types'
+import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent } from '../../../shared/types'
 
 // Re-export types for convenience
-export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, UploadStatus, UploadStatusChangedEvent }
+export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent }
 
 const api = window.api
 
@@ -84,21 +84,37 @@ export function useStudents(projectId: number | null, classId?: number) {
 
   useEffect(() => { load() }, [load])
 
-  // Re-fetch the full student list whenever a photo is matched in this project,
-  // so photo-count badges in the sidebar stay live without any manual action.
-  // Debounced at 300 ms to coalesce rapid-fire events during a burst shoot.
+  // Re-fetch the full student list whenever a photo is matched, deleted, or
+  // reassigned in this project, so photo-count badges in the sidebar stay live
+  // without any manual action. Debounced at 300 ms to coalesce burst events.
   useEffect(() => {
     if (!projectId) return
     let timeoutId: ReturnType<typeof setTimeout> | null = null
 
-    const unsub = api.on('photo:matched', (event: PhotoMatchedEvent) => {
-      if (event.student.projectId !== projectId) return
+    const scheduleReload = () => {
       if (timeoutId) clearTimeout(timeoutId)
       timeoutId = setTimeout(() => { load() }, 300)
+    }
+
+    const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
+      if (event.student.projectId !== projectId) return
+      scheduleReload()
+    })
+
+    const unsubDeleted = api.on('photo:deleted', (event: PhotoDeletedEvent) => {
+      if (event.projectId !== projectId) return
+      scheduleReload()
+    })
+
+    const unsubReassigned = api.on('photo:reassigned', (event: PhotoReassignedEvent) => {
+      if (event.projectId !== projectId) return
+      scheduleReload()
     })
 
     return () => {
-      unsub()
+      unsubMatched()
+      unsubDeleted()
+      unsubReassigned()
       if (timeoutId) clearTimeout(timeoutId)
     }
   }, [projectId, load])

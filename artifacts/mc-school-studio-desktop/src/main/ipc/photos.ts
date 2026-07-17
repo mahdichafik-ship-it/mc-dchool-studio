@@ -1,4 +1,4 @@
-import { ipcMain, shell } from 'electron'
+import { ipcMain, shell, BrowserWindow } from 'electron'
 import { copyFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { eq, count } from 'drizzle-orm'
@@ -6,6 +6,11 @@ import { getDb, getPhotosDir } from '../db'
 import { photosTable, studentsTable } from '../db/schema'
 import { generateThumbnail } from '../lib/qrReader'
 import type { Photo } from '../../shared/types'
+
+function getMainWindow(): BrowserWindow | null {
+  const wins = BrowserWindow.getAllWindows()
+  return wins.length > 0 ? wins[0] : null
+}
 
 function now() {
   return new Date().toISOString()
@@ -72,11 +77,32 @@ export function registerPhotoHandlers() {
         .set({ studentId, filePath: destPath, isMatched: true })
         .where(eq(photosTable.id, photoId))
         .run()
+
+      // Notify renderer so sidebar counts update immediately
+      const win = getMainWindow()
+      win?.webContents.send('photo:reassigned', {
+        photoId,
+        projectId: photo.projectId,
+        fromStudentId: photo.studentId,
+        toStudentId: studentId,
+      })
     },
   )
 
   ipcMain.handle('photos:delete', async (_e, { photoId }: { photoId: number }) => {
+    // Fetch before deleting so we can include projectId in the event
+    const [photo] = db.select().from(photosTable).where(eq(photosTable.id, photoId)).all()
     db.delete(photosTable).where(eq(photosTable.id, photoId)).run()
+
+    // Notify renderer so sidebar counts update immediately
+    if (photo) {
+      const win = getMainWindow()
+      win?.webContents.send('photo:deleted', {
+        photoId,
+        projectId: photo.projectId,
+        studentId: photo.studentId,
+      })
+    }
   })
 
   ipcMain.handle('photos:unmatched', async (_e, { projectId }: { projectId: number }): Promise<Photo[]> => {

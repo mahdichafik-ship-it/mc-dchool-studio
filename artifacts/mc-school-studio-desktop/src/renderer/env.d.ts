@@ -7,6 +7,8 @@ import type {
   Photo,
   PhotoMatchedEvent,
   PhotoUnmatchedEvent,
+  PhotoDeletedEvent,
+  PhotoReassignedEvent,
   ImportResult,
   UploadStatus,
   UploadStatusChangedEvent,
@@ -56,6 +58,8 @@ interface ElectronAPI {
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   on(channel: 'photo:matched', listener: (data: PhotoMatchedEvent) => void): () => void
   on(channel: 'photo:unmatched', listener: (data: PhotoUnmatchedEvent) => void): () => void
+  on(channel: 'photo:deleted', listener: (data: PhotoDeletedEvent) => void): () => void
+  on(channel: 'photo:reassigned', listener: (data: PhotoReassignedEvent) => void): () => void
   on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
 }
 

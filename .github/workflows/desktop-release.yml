@@ -1,0 +1,103 @@
+# Builds Windows (.exe NSIS installer) and macOS (.dmg universal) desktop
+# packages on every `v*` tag push and attaches them to the GitHub Release.
+#
+# Trigger: git tag v1.2.3 && git push origin v1.2.3
+#
+# Note: pnpm-workspace.yaml contains overrides that exclude non-Linux platform
+# binaries so they are not installed inside the Replit environment. This
+# workflow strips those Replit-only overrides before running `pnpm install` so
+# that the correct native binaries are fetched for each runner OS.
+
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required to create/update GitHub Releases and upload assets
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # macOS — produces a universal .dmg (x64 + arm64)
+  # ---------------------------------------------------------------------------
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Strip Replit-only platform overrides
+        run: node scripts/strip-replit-overrides.mjs
+
+      - name: Install dependencies
+        # --no-frozen-lockfile because we modified pnpm-workspace.yaml above;
+        # the lockfile was generated on Linux and does not include darwin entries.
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build & package macOS DMG
+        # dist:mac runs `electron-vite build && electron-builder --mac` inside
+        # the desktop package directory, so electron-builder.yml is found
+        # automatically (no --config path needed).
+        run: pnpm --filter @workspace/mc-school-studio-desktop run dist:mac
+        env:
+          # Disable notarization — set CSC_LINK / CSC_KEY_PASSWORD in repo
+          # secrets if you have an Apple Developer certificate.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload DMG to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/mc-school-studio-desktop/dist/release/*.dmg
+
+  # ---------------------------------------------------------------------------
+  # Windows — produces an NSIS .exe installer (x64)
+  # ---------------------------------------------------------------------------
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Strip Replit-only platform overrides
+        run: node scripts/strip-replit-overrides.mjs
+
+      - name: Install dependencies
+        # --no-frozen-lockfile — same reason as macOS job above.
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build & package Windows installer
+        # dist:win runs `electron-vite build && electron-builder --win` inside
+        # the desktop package directory, so electron-builder.yml is found
+        # automatically (no --config path needed).
+        run: pnpm --filter @workspace/mc-school-studio-desktop run dist:win
+
+      - name: Upload installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/mc-school-studio-desktop/dist/release/*.exe

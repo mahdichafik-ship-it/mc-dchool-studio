@@ -54,7 +54,24 @@ pnpm --filter @workspace/mc-school-studio-desktop run dist:win
 pnpm --filter @workspace/mc-school-studio-desktop run dist
 ```
 
-Installers are written to `artifacts/mc-school-studio-desktop/dist/`.
+Installers are written to `artifacts/mc-school-studio-desktop/dist/release/`.
+
+## CI/CD — automated installers via GitHub Actions
+
+Pushing a `v*` tag triggers `.github/workflows/desktop-release.yml`, which
+builds the macOS DMG (universal: x64 + arm64) and Windows NSIS installer in
+parallel and attaches both files to the GitHub Release automatically.
+
+```bash
+# Tag a release and push — CI does the rest
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow handles the Replit-only `pnpm-workspace.yaml` overrides
+automatically: it runs `node scripts/strip-replit-overrides.mjs` before
+`pnpm install` to remove the Linux-only platform-binary exclusions, so the
+macOS and Windows runners fetch the correct native binaries.
 
 ## Workflow on photo day
 

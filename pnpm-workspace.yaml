@@ -75,6 +75,21 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # ============================================================================
+  # REPLIT-ONLY: Platform binary exclusions
+  # ============================================================================
+  # The lines below set non-Linux-x64 platform packages to "-" (skip) so that
+  # pnpm does not download macOS/Windows/ARM binaries inside the Replit
+  # environment (Linux x64 only).
+  #
+  # These overrides MUST be stripped before building on macOS or Windows — the
+  # CI pipeline does this automatically via `scripts/strip-replit-overrides.mjs`
+  # (called in .github/workflows/desktop-release.yml before `pnpm install`).
+  #
+  # If you are building the desktop app locally on a Mac or Windows machine,
+  # remove or comment out this entire overrides block before running
+  # `pnpm install`.
+  # ============================================================================
   # replit uses linux-x64 only, we can exclude all other platforms
   "esbuild>@esbuild/darwin-arm64": "-"
   "esbuild>@esbuild/darwin-x64": "-"

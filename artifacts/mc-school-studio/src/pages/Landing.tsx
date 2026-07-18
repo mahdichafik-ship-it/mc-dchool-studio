@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'wouter';
 import { Camera, ArrowRight, ShieldCheck, Zap, Users, Monitor, Apple, AppWindow } from 'lucide-react';
 
-const GITHUB_RELEASES_URL = 'https://github.com/your-org/mc-school-studio/releases/latest';
+const GITHUB_RELEASES_URL = 'https://github.com/mahdichafik-ship-it/untitled-project/releases/latest';
 
 export default function Landing() {
   return (

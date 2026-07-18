@@ -45,6 +45,51 @@ export function useProject(projectId: number | null) {
   }, [projectId])
 
   useEffect(() => { load() }, [load])
+
+  // Re-fetch project aggregates (classCount, studentCount, photoCount) whenever
+  // a photo is matched, unmatched, deleted, or reassigned so the header stays
+  // live during an active shoot. Debounced at 300 ms to coalesce burst events.
+  // Note: PhotoUnmatchedEvent has no projectId, but the watcher is per-project
+  // so any unmatched event is from the active project's watcher.
+  useEffect(() => {
+    if (!projectId) return
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const scheduleReload = () => {
+      if (timeoutId) clearTimeout(timeoutId)
+      timeoutId = setTimeout(() => { load() }, 300)
+    }
+
+    const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
+      if (event.student.projectId !== projectId) return
+      scheduleReload()
+    })
+
+    // Unmatched photos still increment the project-level photoCount, and
+    // PhotoUnmatchedEvent carries no projectId, so reload on every event.
+    const unsubUnmatched = api.on('photo:unmatched', (_event: PhotoUnmatchedEvent) => {
+      scheduleReload()
+    })
+
+    const unsubDeleted = api.on('photo:deleted', (event: PhotoDeletedEvent) => {
+      if (event.projectId !== projectId) return
+      scheduleReload()
+    })
+
+    const unsubReassigned = api.on('photo:reassigned', (event: PhotoReassignedEvent) => {
+      if (event.projectId !== projectId) return
+      scheduleReload()
+    })
+
+    return () => {
+      unsubMatched()
+      unsubUnmatched()
+      unsubDeleted()
+      unsubReassigned()
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [projectId, load])
+
   return { data, loading, reload: load }
 }
 

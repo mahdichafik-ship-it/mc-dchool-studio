@@ -208,7 +208,7 @@ export function ProjectList({ onOpenProject }: Props) {
                         </div>
                         <div className="flex items-center gap-2 shrink-0 ml-3">
                           {alreadyLocal && (
-                            <Badge variant="outline" className="text-xs text-slate-400">Local copy exists</Badge>
+                            <Badge variant="secondary" className="text-xs text-slate-400">Local copy exists</Badge>
                           )}
                           <button
                             onClick={() => handlePullProject(cp)}

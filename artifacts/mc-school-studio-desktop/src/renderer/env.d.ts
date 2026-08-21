@@ -30,6 +30,30 @@ interface ProjectUploadStatusRow {
   uploadStatus: UploadStatus
 }
 
+interface CloudProject {
+  id: number
+  schoolName: string
+  photoDate: string | null
+  address: string | null
+  contactName: string | null
+  classCount: number
+  studentCount: number
+  updatedAt: string
+}
+
+interface CloudProjectListResult {
+  ok: boolean
+  projects?: CloudProject[]
+  error?: string
+}
+
+interface CloudProjectPullResult {
+  ok: boolean
+  classesImported?: number
+  studentsImported?: number
+  error?: string
+}
+
 interface ElectronAPI {
   invoke(channel: 'projects:list'): Promise<Project[]>
   invoke(channel: 'projects:get', args: { projectId: number }): Promise<Project | null>
@@ -56,6 +80,9 @@ interface ElectronAPI {
   invoke(channel: 'upload:testConnection'): Promise<UploadResult>
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
+  // Cloud project sync
+  invoke(channel: 'cloud:listProjects'): Promise<CloudProjectListResult>
+  invoke(channel: 'cloud:pullProject', args: { cloudProjectId: number }): Promise<CloudProjectPullResult>
   on(channel: 'photo:matched', listener: (data: PhotoMatchedEvent) => void): () => void
   on(channel: 'photo:unmatched', listener: (data: PhotoUnmatchedEvent) => void): () => void
   on(channel: 'photo:deleted', listener: (data: PhotoDeletedEvent) => void): () => void

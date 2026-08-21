@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, LayoutDashboard, FolderKanban, LogOut } from 'lucide-react';
+import { Camera, LayoutDashboard, FolderKanban, LogOut, Users } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/react';
 import { Link, useLocation } from 'wouter';
 
@@ -15,6 +15,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const navItems = [
     { label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
     { label: 'Projects', icon: FolderKanban, href: '/dashboard' }, // We just link to dashboard for projects list, or we could have a separate route. Let's just use dashboard for both.
+    { label: 'Team', icon: Users, href: '/team' },
   ];
 
   return (

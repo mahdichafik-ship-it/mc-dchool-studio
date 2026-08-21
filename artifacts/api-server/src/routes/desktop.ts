@@ -69,7 +69,8 @@ router.get("/projects", requireUploadKey, async (_req, res) => {
 
 // GET /api/desktop/projects/:projectId/bundle — full export bundle for import
 router.get("/projects/:projectId/bundle", requireUploadKey, async (req, res) => {
-  const projectId = parseInt(req.params.projectId);
+  const rawProjectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId;
+  const projectId = parseInt(rawProjectId, 10);
   if (isNaN(projectId)) {
     res.status(400).json({ error: "Invalid project ID" });
     return;

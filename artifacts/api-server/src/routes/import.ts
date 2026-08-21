@@ -6,15 +6,14 @@ import { projectsTable, classesTable, studentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { generateUniqueStudentId } from "../lib/studentId";
+import { canAccessProject } from "../lib/studioAccess";
 
 const router = Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 async function verifyProject(projectId: number, userId: string) {
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
+  if (!(await canAccessProject(userId, projectId, "edit"))) return null;
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   return project ?? null;
 }
 

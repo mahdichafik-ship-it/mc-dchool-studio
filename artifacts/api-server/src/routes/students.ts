@@ -5,15 +5,12 @@ import { eq, and, inArray } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { generateUniqueStudentId } from "../lib/studentId";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
+import { canAccessProject } from "../lib/studioAccess";
 
 const router = Router({ mergeParams: true });
 
 async function verifyProject(projectId: number, userId: string): Promise<boolean> {
-  const [project] = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
-  return !!project;
+  return canAccessProject(userId, projectId, "view");
 }
 
 async function getExistingStudentIds(projectId: number): Promise<Set<string>> {

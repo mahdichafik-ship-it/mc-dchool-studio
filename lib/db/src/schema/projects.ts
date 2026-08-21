@@ -1,10 +1,12 @@
 import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { studiosTable } from "./studios";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const projectsTable = pgTable("projects", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull(),
+  studioId: integer("studio_id").references(() => studiosTable.id, { onDelete: "cascade" }),
   schoolName: text("school_name").notNull(),
   photoDate: text("photo_date"),
   address: text("address"),

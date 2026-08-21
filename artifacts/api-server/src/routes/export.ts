@@ -7,16 +7,15 @@ import { projectsTable, classesTable, studentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
+import { canAccessProject } from "../lib/studioAccess";
 
 // GET /api/projects/:projectId/export/json — Desktop app import bundle
 
 const router = Router({ mergeParams: true });
 
 async function verifyProject(projectId: number, userId: string) {
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
+  if (!(await canAccessProject(userId, projectId, "view"))) return null;
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   return project ?? null;
 }
 

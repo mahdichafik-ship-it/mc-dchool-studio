@@ -3,15 +3,12 @@ import { db } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
 import { eq, and, count } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
+import { canAccessProject } from "../lib/studioAccess";
 
 const router = Router({ mergeParams: true });
 
 async function verifyProject(projectId: number, userId: string): Promise<boolean> {
-  const [project] = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
-  return !!project;
+  return canAccessProject(userId, projectId, "view");
 }
 
 // GET /api/projects/:projectId/classes

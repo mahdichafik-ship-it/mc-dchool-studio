@@ -1,14 +1,17 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
-import { eq, count, and } from "drizzle-orm";
+import { eq, count, inArray } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
+import { accessibleProjectIds, canAccessProject, getStudioMember, isStudioManager } from "../lib/studioAccess";
 
 const router = Router();
 
 // GET /api/projects
 router.get("/", requireAuth, async (req, res) => {
   const userId = getUserId(req);
+  const ids = await accessibleProjectIds(userId);
+  if (!ids.length) { res.json([]); return; }
 
   const projects = await db
     .select({
@@ -24,7 +27,7 @@ router.get("/", requireAuth, async (req, res) => {
       updatedAt: projectsTable.updatedAt,
     })
     .from(projectsTable)
-    .where(eq(projectsTable.userId, userId))
+    .where(inArray(projectsTable.id, ids))
     .orderBy(projectsTable.updatedAt);
 
   // Enrich with counts
@@ -60,6 +63,8 @@ router.get("/", requireAuth, async (req, res) => {
 // POST /api/projects
 router.post("/", requireAuth, async (req, res) => {
   const userId = getUserId(req);
+  const member = await getStudioMember(userId);
+  if (!["owner", "admin", "assistant"].includes(member.role)) { res.status(403).json({ error: "You do not have permission to create projects" }); return; }
   const { schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes } =
     req.body;
 
@@ -72,6 +77,7 @@ router.post("/", requireAuth, async (req, res) => {
     .insert(projectsTable)
     .values({
       userId,
+      studioId: member.studioId,
       schoolName,
       photoDate: photoDate ?? null,
       address: address ?? null,
@@ -96,10 +102,11 @@ router.get("/:projectId", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
 
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
+  if (!(await canAccessProject(userId, projectId, "view"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
 
   if (!project) {
     res.status(404).json({ error: "Project not found" });
@@ -129,12 +136,7 @@ router.patch("/:projectId", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
 
-  const [existing] = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
-
-  if (!existing) {
+  if (!(await canAccessProject(userId, projectId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -154,7 +156,7 @@ router.patch("/:projectId", requireAuth, async (req, res) => {
       ...(notes !== undefined && { notes }),
       updatedAt: new Date(),
     })
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)))
+    .where(eq(projectsTable.id, projectId))
     .returning();
 
   const [{ classCount }] = await db
@@ -180,19 +182,14 @@ router.delete("/:projectId", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
 
-  const [existing] = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
-
-  if (!existing) {
+  if (!(await canAccessProject(userId, projectId, "manage"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
 
   await db
     .delete(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
+    .where(eq(projectsTable.id, projectId));
 
   res.status(204).send();
 });

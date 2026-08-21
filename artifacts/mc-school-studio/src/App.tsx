@@ -12,6 +12,7 @@ import ProjectNew from "./pages/ProjectNew";
 import ProjectOverview from "./pages/ProjectOverview";
 import ProjectImport from "./pages/ProjectImport";
 import ProjectQrPreview from "./pages/ProjectQrPreview";
+import Team from "./pages/Team";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -160,6 +161,7 @@ function Router() {
       <Route path="/projects/:projectId" component={() => <AuthenticatedRoute component={ProjectOverview} />} />
       <Route path="/projects/:projectId/import" component={() => <AuthenticatedRoute component={ProjectImport} />} />
       <Route path="/projects/:projectId/qr-preview" component={() => <AuthenticatedRoute component={ProjectQrPreview} />} />
+      <Route path="/team" component={() => <AuthenticatedRoute component={Team} />} />
       
       <Route>
         <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">

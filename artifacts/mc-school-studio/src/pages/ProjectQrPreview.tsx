@@ -5,6 +5,7 @@ import {
   useGenerateQrCodes,
   useCreateStudent,
   getListStudentsQueryKey,
+  getListClassesQueryKey,
 } from '@workspace/api-client-react';
 import { useRoute, Link } from 'wouter';
 import { useQueryClient } from '@tanstack/react-query';
@@ -63,7 +64,7 @@ export default function ProjectQrPreview() {
   );
 
   const { data: classes = [] } = useListClasses(projectId!, {
-    query: { enabled: !!projectId },
+    query: { enabled: !!projectId, queryKey: getListClassesQueryKey(projectId!) },
   });
 
   const generateQr = useGenerateQrCodes();
@@ -207,7 +208,7 @@ export default function ProjectQrPreview() {
       body{font-family:sans-serif;margin:16px}
       @media print{body{margin:0}}
     </style></head><body>
-      <h2 style="margin-bottom:12px">QR Codes — ${toprint.length} students</h2>
+      <h2 style="margin-bottom:12px">QR Codes — ${toPrint.length} students</h2>
       <div>${cards}</div>
       <script>window.onload=()=>window.print();<\/script>
     </body></html>`;

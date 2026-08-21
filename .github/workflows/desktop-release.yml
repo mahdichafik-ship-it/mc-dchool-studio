@@ -20,10 +20,12 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # macOS — produces a universal .dmg (x64 + arm64)
+  # macOS — produces separate installers for Intel and Apple silicon Macs.
   # ---------------------------------------------------------------------------
   build-mac:
-    runs-on: macos-latest
+    # Pin a stable runner: the latest image can change independently of
+    # electron-builder and has caused DMG conversion failures.
+    runs-on: macos-14
 
     steps:
       - name: Checkout

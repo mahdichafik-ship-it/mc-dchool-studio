@@ -46,7 +46,8 @@ mac:
         - arm64
 
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  # The x64 and arm64 builds run in parallel, so their filenames must differ.
+  artifactName: ${name}-${version}-${arch}.${ext}
 
 linux:
   target:

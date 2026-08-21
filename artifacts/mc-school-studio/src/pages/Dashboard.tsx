@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 
-const GITHUB_RELEASES_URL = 'https://github.com/mahdichafik-ship-it/untitled-project/releases/latest';
+const GITHUB_RELEASES_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/latest';
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();

@@ -57,6 +57,8 @@ const photosTable = sqliteCore.sqliteTable("photos", {
   isMatched: sqliteCore.integer("is_matched", { mode: "boolean" }).notNull().default(false),
   // null = not queued, 'pending' = queued, 'uploading' = in progress, 'done' = success, 'error' = failed
   uploadStatus: sqliteCore.text("upload_status").$type(),
+  // URL returned by the cloud API after a successful upload
+  fileUrl: sqliteCore.text("file_url"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
 const settingsTable = sqliteCore.sqliteTable("settings", {
@@ -144,6 +146,10 @@ function initializeSchema(sqlite) {
   `);
   try {
     sqlite.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT`);
+  } catch {
+  }
+  try {
+    sqlite.exec(`ALTER TABLE photos ADD COLUMN file_url TEXT`);
   } catch {
   }
 }
@@ -40723,6 +40729,17 @@ function getUploadConfig() {
     uploadKey: getSetting("upload_key")
   };
 }
+function notifyUploadStatus(photoId, studentId, status) {
+  const win = electron.BrowserWindow.getAllWindows()[0];
+  win?.webContents.send("upload:statusChanged", { photoId, studentId, status });
+}
+function toServerFileUrl(fileUrl) {
+  if (!fileUrl) return null;
+  if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
+  const { apiUrl } = getUploadConfig();
+  if (!apiUrl) return null;
+  return `${apiUrl.replace(/\/+$/, "")}/${fileUrl.replace(/^\/+/, "")}`;
+}
 async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
   const db = getDb();
   const { apiUrl, uploadKey } = getUploadConfig();
@@ -40730,7 +40747,8 @@ async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, ca
     console.log("[Upload] Cloud upload not configured, skipping.");
     return;
   }
-  db.update(photosTable).set({ uploadStatus: "uploading" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+  db.update(photosTable).set({ uploadStatus: "uploading", fileUrl: null }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+  notifyUploadStatus(photoId, studentId, "uploading");
   try {
     const fileBuffer = require$$0.readFileSync(filePath);
     const blob = new Blob([fileBuffer], { type: "image/jpeg" });
@@ -40749,11 +40767,20 @@ async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, ca
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    db.update(photosTable).set({ uploadStatus: "done" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    let fileUrl = null;
+    try {
+      const payload = await response.json();
+      if (typeof payload.fileUrl === "string") fileUrl = payload.fileUrl;
+    } catch {
+      console.warn("[Upload] Upload succeeded but did not return a readable fileUrl");
+    }
+    db.update(photosTable).set({ uploadStatus: "done", fileUrl }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    notifyUploadStatus(photoId, studentId, "done");
     console.log(`[Upload] Photo ${photoId} uploaded successfully`);
   } catch (err) {
     console.error("[Upload] Upload failed:", err);
     db.update(photosTable).set({ uploadStatus: "error" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    notifyUploadStatus(photoId, studentId, "error");
     throw err;
   }
 }
@@ -40810,11 +40837,20 @@ function registerUploadHandlers() {
       const photos = db.select({
         id: photosTable.id,
         studentId: photosTable.studentId,
-        uploadStatus: photosTable.uploadStatus
+        uploadStatus: photosTable.uploadStatus,
+        fileUrl: photosTable.fileUrl
       }).from(photosTable).where(drizzleOrm.and(drizzleOrm.eq(photosTable.projectId, projectId), drizzleOrm.eq(photosTable.isMatched, true))).all();
-      return photos;
+      return photos.map((photo) => ({
+        ...photo,
+        fileUrl: toServerFileUrl(photo.fileUrl)
+      }));
     }
   );
+  electron.ipcMain.handle("upload:getGlobalErrorCount", () => {
+    const db = getDb();
+    const photos = db.select({ id: photosTable.id }).from(photosTable).where(drizzleOrm.eq(photosTable.uploadStatus, "error")).all();
+    return photos.length;
+  });
 }
 const watchers = /* @__PURE__ */ new Map();
 function now$1() {
@@ -40964,18 +41000,12 @@ async function handleNewPhoto(projectId, filePath) {
   const { apiUrl, uploadKey } = getUploadConfig();
   if (apiUrl && uploadKey) {
     db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
-    uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).then(() => {
-      win?.webContents.send("upload:statusChanged", {
-        photoId: photo.id,
-        studentId: student.id,
-        status: "done"
-      });
-    }).catch(() => {
-      win?.webContents.send("upload:statusChanged", {
-        photoId: photo.id,
-        studentId: student.id,
-        status: "error"
-      });
+    win?.webContents.send("upload:statusChanged", {
+      photoId: photo.id,
+      studentId: student.id,
+      status: "pending"
+    });
+    uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).catch(() => {
     });
   }
 }

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent } from '../../../shared/types'
+import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow } from '../../../shared/types'
 
 // Re-export types for convenience
-export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent }
+export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow }
 
 const api = window.api
 
@@ -244,20 +244,20 @@ export interface StudentUploadSummary {
 export function useUploadStatus(projectId: number | null) {
   // Map from studentId → counts
   const [statusMap, setStatusMap] = useState<Map<number, StudentUploadSummary>>(new Map())
+  // Map from photoId → status and server URL for the detail panel
+  const [photoStatusMap, setPhotoStatusMap] = useState<Map<number, ProjectUploadStatusRow>>(new Map())
   // Photo IDs with error status in this project
   const [errorPhotoIds, setErrorPhotoIds] = useState<number[]>([])
 
   const load = useCallback(async () => {
     if (!projectId) return
-    const rows = await api.invoke('upload:getProjectStatus', { projectId }) as Array<{
-      id: number
-      studentId: number | null
-      uploadStatus: UploadStatus
-    }>
+    const rows = await api.invoke('upload:getProjectStatus', { projectId }) as ProjectUploadStatusRow[]
 
     const map = new Map<number, StudentUploadSummary>()
+    const photoMap = new Map<number, ProjectUploadStatusRow>()
     const errIds: number[] = []
     for (const row of rows) {
+      photoMap.set(row.id, row)
       if (!row.studentId) continue
       const existing = map.get(row.studentId) ?? { pending: 0, uploading: 0, done: 0, error: 0, total: 0 }
       existing.total++
@@ -268,6 +268,7 @@ export function useUploadStatus(projectId: number | null) {
       map.set(row.studentId, existing)
     }
     setStatusMap(map)
+    setPhotoStatusMap(photoMap)
     setErrorPhotoIds(errIds)
   }, [projectId])
 
@@ -284,7 +285,7 @@ export function useUploadStatus(projectId: number | null) {
     return unsub
   }, [projectId, load])
 
-  return { statusMap, errorPhotoIds, reload: load }
+  return { statusMap, photoStatusMap, errorPhotoIds, reload: load }
 }
 
 // Total failed upload count across all projects (for Settings screen)

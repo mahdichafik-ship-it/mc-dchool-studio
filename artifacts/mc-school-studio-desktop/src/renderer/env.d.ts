@@ -12,6 +12,7 @@ import type {
   ImportResult,
   UploadStatus,
   UploadStatusChangedEvent,
+  ProjectUploadStatusRow,
 } from '../shared/types'
 
 interface UploadConfig {
@@ -22,12 +23,6 @@ interface UploadConfig {
 interface UploadResult {
   ok: boolean
   error?: string
-}
-
-interface ProjectUploadStatusRow {
-  id: number
-  studentId: number | null
-  uploadStatus: UploadStatus
 }
 
 interface CloudProject {
@@ -81,6 +76,7 @@ interface ElectronAPI {
   invoke(channel: 'upload:testConnection'): Promise<UploadResult>
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
+  invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
   // Cloud project sync
   invoke(channel: 'cloud:listProjects'): Promise<CloudProjectListResult>
   invoke(channel: 'cloud:pullProject', args: { cloudProjectId: number }): Promise<CloudProjectPullResult>

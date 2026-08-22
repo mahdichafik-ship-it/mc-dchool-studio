@@ -11,7 +11,9 @@ import {
   Camera,
   AlertCircle,
   ExternalLink,
+  Download,
   Upload,
+  CloudUpload,
   CheckCircle,
   XCircle,
   Loader,
@@ -23,7 +25,7 @@ import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { useProject, useClasses, useStudents, usePhotos, useWatcherStatus, usePhotoEvents, useUploadStatus } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
-import type { Student, Class, Photo, PhotoMatchedEvent, StudentUploadSummary } from '@/hooks/useApi'
+import type { Student, Class, Photo, PhotoMatchedEvent, StudentUploadSummary, ProjectUploadStatusRow, UploadStatus } from '@/hooks/useApi'
 
 interface Props {
   projectId: number
@@ -37,7 +39,7 @@ export function ProjectView({ projectId, onBack }: Props) {
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId)
-  const { statusMap: uploadStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
+  const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
   const [search, setSearch] = useState('')
   const [settingFolder, setSettingFolder] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
@@ -253,6 +255,7 @@ export function ProjectView({ projectId, onBack }: Props) {
             <StudentDetail
               student={selectedStudent}
               projectId={projectId}
+              photoStatusMap={photoStatusMap}
               onReassign={() => reloadStudents()}
             />
           ) : (
@@ -347,10 +350,12 @@ function StudentRow({
 function StudentDetail({
   student,
   projectId,
+  photoStatusMap,
   onReassign,
 }: {
   student: Student
   projectId: number
+  photoStatusMap: Map<number, ProjectUploadStatusRow>
   onReassign: () => void
 }) {
   const { data: photos, reload: reloadPhotos } = usePhotos(student.id)
@@ -448,6 +453,7 @@ function StudentDetail({
                 <PhotoTile
                   key={photo.id}
                   photo={photo}
+                  uploadStatus={photoStatusMap.get(photo.id)}
                   onOpen={() => handleOpenPhoto(photo.filePath)}
                   onDelete={() => handleDeletePhoto(photo.id)}
                   onReassign={() => {
@@ -480,15 +486,20 @@ function StudentDetail({
 
 function PhotoTile({
   photo,
+  uploadStatus,
   onOpen,
   onDelete,
   onReassign,
 }: {
   photo: Photo
+  uploadStatus?: ProjectUploadStatusRow
   onOpen: () => void
   onDelete: () => void
   onReassign: () => void
 }) {
+  const status = getUploadStatusMeta(uploadStatus?.uploadStatus)
+  const StatusIcon = status.icon
+
   return (
     <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
       {photo.thumbnailData ? (
@@ -504,8 +515,24 @@ function PhotoTile({
         </div>
       )}
 
+      {/* Cloud upload state */}
+      <div
+        className={cn(
+          'absolute top-1.5 right-1.5 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm',
+          status.badgeClass,
+        )}
+        title={`Upload status: ${status.label}`}
+      >
+        <StatusIcon className={cn('size-3', status.iconClass)} />
+        <span className="sr-only">{status.label}</span>
+      </div>
+
       {/* Hover overlay */}
       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-2">
+        <div className={cn('text-[11px] font-medium flex items-center gap-1 mb-1', status.textClass)}>
+          <StatusIcon className="size-3" />
+          {status.label}
+        </div>
         <button
           onClick={onOpen}
           className="w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1 flex items-center justify-center gap-1"
@@ -524,6 +551,18 @@ function PhotoTile({
         >
           Delete
         </button>
+        {uploadStatus?.uploadStatus === 'done' && uploadStatus.fileUrl && (
+          <a
+            href={uploadStatus.fileUrl}
+            download={photo.fileName}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full text-white text-xs bg-teal-500/80 hover:bg-teal-500 rounded px-2 py-1 flex items-center justify-center gap-1"
+            title="Download uploaded photo"
+          >
+            <Download className="size-3" /> Download
+          </a>
+        )}
       </div>
 
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5">
@@ -531,6 +570,51 @@ function PhotoTile({
       </div>
     </div>
   )
+}
+
+function getUploadStatusMeta(status: UploadStatus | undefined) {
+  switch (status) {
+    case 'pending':
+      return {
+        label: 'Pending',
+        icon: Upload,
+        badgeClass: 'bg-amber-50/95 border-amber-200',
+        iconClass: 'text-amber-600',
+        textClass: 'text-amber-200',
+      }
+    case 'uploading':
+      return {
+        label: 'Uploading…',
+        icon: Loader,
+        badgeClass: 'bg-blue-50/95 border-blue-200',
+        iconClass: 'text-blue-600 animate-spin',
+        textClass: 'text-blue-200',
+      }
+    case 'done':
+      return {
+        label: 'Uploaded',
+        icon: CheckCircle,
+        badgeClass: 'bg-green-50/95 border-green-200',
+        iconClass: 'text-green-600',
+        textClass: 'text-green-200',
+      }
+    case 'error':
+      return {
+        label: 'Upload failed',
+        icon: XCircle,
+        badgeClass: 'bg-red-50/95 border-red-200',
+        iconClass: 'text-red-600',
+        textClass: 'text-red-200',
+      }
+    default:
+      return {
+        label: 'Not uploaded',
+        icon: CloudUpload,
+        badgeClass: 'bg-slate-50/95 border-slate-200',
+        iconClass: 'text-slate-500',
+        textClass: 'text-slate-200',
+      }
+  }
 }
 
 function ReassignDialog({

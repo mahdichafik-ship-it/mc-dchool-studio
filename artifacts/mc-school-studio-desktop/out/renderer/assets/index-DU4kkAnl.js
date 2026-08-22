@@ -12090,18 +12090,18 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$o = [
+const __iconNode$q = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$o);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$q);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$n = [
+const __iconNode$p = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12111,14 +12111,14 @@ const __iconNode$n = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$n);
+const BookOpen = createLucideIcon("book-open", __iconNode$p);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$m = [
+const __iconNode$o = [
   [
     "path",
     {
@@ -12128,15 +12128,38 @@ const __iconNode$m = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$m);
+const Camera = createLucideIcon("camera", __iconNode$o);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$l = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$l);
+const __iconNode$n = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$n);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$m = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$m);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$l = [
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+];
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$l);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12145,10 +12168,10 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$l);
  */
 const __iconNode$k = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$k);
+const CircleX = createLucideIcon("circle-x", __iconNode$k);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12156,10 +12179,11 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$k);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$j = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["path", { d: "M12 13v8", key: "1l5pq0" }],
+  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
+  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$j);
+const CloudUpload = createLucideIcon("cloud-upload", __iconNode$j);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12167,11 +12191,9 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$j);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$i = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$i);
+const Cloud = createLucideIcon("cloud", __iconNode$i);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12179,9 +12201,11 @@ const CircleX = createLucideIcon("circle-x", __iconNode$i);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$h = [
-  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const Cloud = createLucideIcon("cloud", __iconNode$h);
+const Download = createLucideIcon("download", __iconNode$h);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12189,11 +12213,11 @@ const Cloud = createLucideIcon("cloud", __iconNode$h);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$g = [
-  ["path", { d: "M12 15V3", key: "m9g1x1" }],
-  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
-  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const Download = createLucideIcon("download", __iconNode$g);
+const ExternalLink = createLucideIcon("external-link", __iconNode$g);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12201,11 +12225,15 @@ const Download = createLucideIcon("download", __iconNode$g);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$f = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+  [
+    "path",
+    {
+      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
+      key: "usdka0"
+    }
+  ]
 ];
-const ExternalLink = createLucideIcon("external-link", __iconNode$f);
+const FolderOpen = createLucideIcon("folder-open", __iconNode$f);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12216,12 +12244,12 @@ const __iconNode$e = [
   [
     "path",
     {
-      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
-      key: "usdka0"
+      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+      key: "1kt360"
     }
   ]
 ];
-const FolderOpen = createLucideIcon("folder-open", __iconNode$e);
+const Folder = createLucideIcon("folder", __iconNode$e);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12229,15 +12257,11 @@ const FolderOpen = createLucideIcon("folder-open", __iconNode$e);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$d = [
-  [
-    "path",
-    {
-      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
-      key: "1kt360"
-    }
-  ]
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
 ];
-const Folder = createLucideIcon("folder", __iconNode$d);
+const Image = createLucideIcon("image", __iconNode$d);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12245,11 +12269,11 @@ const Folder = createLucideIcon("folder", __iconNode$d);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$c = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
 ];
-const Image = createLucideIcon("image", __iconNode$c);
+const Info = createLucideIcon("info", __iconNode$c);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12257,11 +12281,12 @@ const Image = createLucideIcon("image", __iconNode$c);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$b = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
+  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
+  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
+  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
 ];
-const Info = createLucideIcon("info", __iconNode$b);
+const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$b);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12269,19 +12294,6 @@ const Info = createLucideIcon("info", __iconNode$b);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$a = [
-  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
-  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
-  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
-  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
-];
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$a);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$9 = [
   ["path", { d: "M12 2v4", key: "3427ic" }],
   ["path", { d: "m16.2 7.8 2.9-2.9", key: "r700ao" }],
   ["path", { d: "M18 12h4", key: "wj9ykh" }],
@@ -12291,14 +12303,14 @@ const __iconNode$9 = [
   ["path", { d: "M2 12h4", key: "j09sii" }],
   ["path", { d: "m4.9 4.9 2.9 2.9", key: "giyufr" }]
 ];
-const Loader = createLucideIcon("loader", __iconNode$9);
+const Loader = createLucideIcon("loader", __iconNode$a);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$8 = [
+const __iconNode$9 = [
   [
     "path",
     {
@@ -12307,7 +12319,20 @@ const __iconNode$8 = [
     }
   ]
 ];
-const Play = createLucideIcon("play", __iconNode$8);
+const Play = createLucideIcon("play", __iconNode$9);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$8 = [
+  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
+  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
+  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
+  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+];
+const RefreshCw = createLucideIcon("refresh-cw", __iconNode$8);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12315,12 +12340,10 @@ const Play = createLucideIcon("play", __iconNode$8);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$7 = [
-  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
-  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
-  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
-  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+  ["path", { d: "m21 21-4.34-4.34", key: "14j7rj" }],
+  ["circle", { cx: "11", cy: "11", r: "8", key: "4ej97u" }]
 ];
-const RefreshCw = createLucideIcon("refresh-cw", __iconNode$7);
+const Search = createLucideIcon("search", __iconNode$7);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12328,17 +12351,6 @@ const RefreshCw = createLucideIcon("refresh-cw", __iconNode$7);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$6 = [
-  ["path", { d: "m21 21-4.34-4.34", key: "14j7rj" }],
-  ["circle", { cx: "11", cy: "11", r: "8", key: "4ej97u" }]
-];
-const Search = createLucideIcon("search", __iconNode$6);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$5 = [
   [
     "path",
     {
@@ -12348,7 +12360,17 @@ const __iconNode$5 = [
   ],
   ["circle", { cx: "12", cy: "12", r: "3", key: "1v7zrd" }]
 ];
-const Settings$1 = createLucideIcon("settings", __iconNode$5);
+const Settings$1 = createLucideIcon("settings", __iconNode$6);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$5 = [
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }]
+];
+const Square = createLucideIcon("square", __iconNode$5);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12356,9 +12378,17 @@ const Settings$1 = createLucideIcon("settings", __iconNode$5);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$4 = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }]
+  [
+    "path",
+    {
+      d: "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
+      key: "wmoenq"
+    }
+  ],
+  ["path", { d: "M12 9v4", key: "juzpu7" }],
+  ["path", { d: "M12 17h.01", key: "p32p05" }]
 ];
-const Square = createLucideIcon("square", __iconNode$4);
+const TriangleAlert = createLucideIcon("triangle-alert", __iconNode$4);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -16004,33 +16034,60 @@ function usePhotoEvents(onMatched, onUnmatched) {
 }
 function useUploadStatus(projectId) {
   const [statusMap, setStatusMap] = reactExports.useState(/* @__PURE__ */ new Map());
+  const [photoStatusMap, setPhotoStatusMap] = reactExports.useState(/* @__PURE__ */ new Map());
+  const [errorPhotoIds, setErrorPhotoIds] = reactExports.useState([]);
   const load = reactExports.useCallback(async () => {
     if (!projectId) return;
     const rows = await api.invoke("upload:getProjectStatus", { projectId });
     const map = /* @__PURE__ */ new Map();
+    const photoMap = /* @__PURE__ */ new Map();
+    const errIds = [];
     for (const row of rows) {
+      photoMap.set(row.id, row);
       if (!row.studentId) continue;
       const existing = map.get(row.studentId) ?? { pending: 0, uploading: 0, done: 0, error: 0, total: 0 };
       existing.total++;
       if (row.uploadStatus === "pending") existing.pending++;
       else if (row.uploadStatus === "uploading") existing.uploading++;
       else if (row.uploadStatus === "done") existing.done++;
-      else if (row.uploadStatus === "error") existing.error++;
+      else if (row.uploadStatus === "error") {
+        existing.error++;
+        errIds.push(row.id);
+      }
       map.set(row.studentId, existing);
     }
     setStatusMap(map);
+    setPhotoStatusMap(photoMap);
+    setErrorPhotoIds(errIds);
   }, [projectId]);
   reactExports.useEffect(() => {
     load();
   }, [load]);
   reactExports.useEffect(() => {
     if (!projectId) return;
-    const unsub = api.on("upload:statusChanged", (event) => {
+    const unsub = api.on("upload:statusChanged", (_event) => {
       load();
     });
     return unsub;
   }, [projectId, load]);
-  return { statusMap, reload: load };
+  return { statusMap, photoStatusMap, errorPhotoIds, reload: load };
+}
+function useGlobalErrorCount() {
+  const [count, setCount] = reactExports.useState(0);
+  const load = reactExports.useCallback(async () => {
+    const result = await api.invoke("upload:getGlobalErrorCount");
+    setCount(result);
+  }, []);
+  reactExports.useEffect(() => {
+    load();
+  }, [load]);
+  reactExports.useEffect(() => {
+    const unsub = api.on("upload:statusChanged", (_event) => {
+      load();
+    });
+    return unsub;
+  }, [load]);
+  return { count, reload: load };
 }
 let toastListeners = [];
 function addToast(toast) {
@@ -16331,10 +16388,11 @@ function ProjectView({ projectId, onBack }) {
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? void 0);
   const [selectedStudent, setSelectedStudent] = reactExports.useState(null);
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId);
-  const { statusMap: uploadStatusMap } = useUploadStatus(projectId);
+  const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId);
   const [search, setSearch] = reactExports.useState("");
   const [settingFolder, setSettingFolder] = reactExports.useState(false);
   const [reassignDialogPhoto, setReassignDialogPhoto] = reactExports.useState(null);
+  const [retrying, setRetrying] = reactExports.useState(false);
   reactExports.useEffect(() => {
     if (selectedStudent) {
       const refreshed = students.find((s) => s.id === selectedStudent.id);
@@ -16363,6 +16421,28 @@ function ProjectView({ projectId, onBack }) {
       }
     } catch (e) {
       addToast({ type: "error", title: "Watcher error", description: String(e) });
+    }
+  }
+  async function handleRetryFailed() {
+    if (errorPhotoIds.length === 0 || retrying) return;
+    setRetrying(true);
+    let successCount = 0;
+    let failCount = 0;
+    for (const photoId of errorPhotoIds) {
+      try {
+        const result = await window.api.invoke("upload:retry", { photoId });
+        if (result.ok) successCount++;
+        else failCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setRetrying(false);
+    await reloadUploadStatus();
+    if (failCount === 0) {
+      addToast({ type: "success", title: "Retry complete", description: `${successCount} photo${successCount !== 1 ? "s" : ""} uploaded successfully` });
+    } else {
+      addToast({ type: "error", title: "Retry finished with errors", description: `${successCount} succeeded, ${failCount} still failed` });
     }
   }
   const filteredStudents = students.filter((s) => {
@@ -16459,6 +16539,18 @@ function ProjectView({ projectId, onBack }) {
             }
           )
         ] }) }),
+        errorPhotoIds.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-2 border-b border-red-100 bg-red-50", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            onClick: handleRetryFailed,
+            disabled: retrying,
+            className: "w-full flex items-center justify-center gap-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-60 rounded-md px-2 py-1.5 transition-colors",
+            children: [
+              retrying ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-3" }),
+              retrying ? "Retrying…" : `Retry ${errorPhotoIds.length} failed upload${errorPhotoIds.length !== 1 ? "s" : ""}`
+            ]
+          }
+        ) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 overflow-y-auto", children: [
           filteredStudents.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsx(
             StudentRow,
@@ -16478,6 +16570,7 @@ function ProjectView({ projectId, onBack }) {
         {
           student: selectedStudent,
           projectId,
+          photoStatusMap,
           onReassign: () => reloadStudents()
         }
       ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full text-center p-8", children: [
@@ -16540,6 +16633,7 @@ function StudentRow({
 function StudentDetail({
   student,
   projectId,
+  photoStatusMap,
   onReassign
 }) {
   const { data: photos, reload: reloadPhotos } = usePhotos(student.id);
@@ -16620,6 +16714,7 @@ function StudentDetail({
           PhotoTile,
           {
             photo,
+            uploadStatus: photoStatusMap.get(photo.id),
             onOpen: () => handleOpenPhoto(photo.filePath),
             onDelete: () => handleDeletePhoto(photo.id),
             onReassign: () => {
@@ -16648,10 +16743,13 @@ function StudentDetail({
 }
 function PhotoTile({
   photo,
+  uploadStatus,
   onOpen,
   onDelete,
   onReassign
 }) {
+  const status = getUploadStatusMeta(uploadStatus?.uploadStatus);
+  const StatusIcon = status.icon;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
     photo.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       "img",
@@ -16662,7 +16760,25 @@ function PhotoTile({
         draggable: false
       }
     ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "div",
+      {
+        className: cn(
+          "absolute top-1.5 right-1.5 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm",
+          status.badgeClass
+        ),
+        title: `Upload status: ${status.label}`,
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(StatusIcon, { className: cn("size-3", status.iconClass) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: status.label })
+        ]
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn("text-[11px] font-medium flex items-center gap-1 mb-1", status.textClass), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(StatusIcon, { className: "size-3" }),
+        status.label
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
         {
@@ -16689,10 +16805,69 @@ function PhotoTile({
           className: "w-full text-white text-xs bg-red-500/70 hover:bg-red-500 rounded px-2 py-1",
           children: "Delete"
         }
+      ),
+      uploadStatus?.uploadStatus === "done" && uploadStatus.fileUrl && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "a",
+        {
+          href: uploadStatus.fileUrl,
+          download: photo.fileName,
+          target: "_blank",
+          rel: "noopener noreferrer",
+          className: "w-full text-white text-xs bg-teal-500/80 hover:bg-teal-500 rounded px-2 py-1 flex items-center justify-center gap-1",
+          title: "Download uploaded photo",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3" }),
+            " Download"
+          ]
+        }
       )
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: photo.fileName }) })
   ] });
+}
+function getUploadStatusMeta(status) {
+  switch (status) {
+    case "pending":
+      return {
+        label: "Pending",
+        icon: Upload,
+        badgeClass: "bg-amber-50/95 border-amber-200",
+        iconClass: "text-amber-600",
+        textClass: "text-amber-200"
+      };
+    case "uploading":
+      return {
+        label: "Uploading…",
+        icon: Loader,
+        badgeClass: "bg-blue-50/95 border-blue-200",
+        iconClass: "text-blue-600 animate-spin",
+        textClass: "text-blue-200"
+      };
+    case "done":
+      return {
+        label: "Uploaded",
+        icon: CircleCheckBig,
+        badgeClass: "bg-green-50/95 border-green-200",
+        iconClass: "text-green-600",
+        textClass: "text-green-200"
+      };
+    case "error":
+      return {
+        label: "Upload failed",
+        icon: CircleX,
+        badgeClass: "bg-red-50/95 border-red-200",
+        iconClass: "text-red-600",
+        textClass: "text-red-200"
+      };
+    default:
+      return {
+        label: "Not uploaded",
+        icon: CloudUpload,
+        badgeClass: "bg-slate-50/95 border-slate-200",
+        iconClass: "text-slate-500",
+        textClass: "text-slate-200"
+      };
+  }
 }
 function ReassignDialog({
   photo,
@@ -16764,6 +16939,7 @@ function Settings() {
   const [savedOk, setSavedOk] = reactExports.useState(false);
   const [connStatus, setConnStatus] = reactExports.useState("idle");
   const [connError, setConnError] = reactExports.useState(null);
+  const { count: globalErrorCount } = useGlobalErrorCount();
   reactExports.useEffect(() => {
     window.api.invoke("app:getPhotosDir").then((dir) => {
       setPhotosDir(dir);
@@ -16838,6 +17014,17 @@ function Settings() {
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: handleChoosePhotosDir, className: "shrink-0 text-sm text-slate-600 hover:text-slate-900 font-medium", children: "Change" })
+        ] })
+      ] }),
+      globalErrorCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "size-5 text-red-500 shrink-0" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-medium text-red-800", children: [
+            globalErrorCount,
+            " failed upload",
+            globalErrorCount !== 1 ? "s" : ""
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mt-0.5", children: 'Open the affected project and click "Retry failed uploads" to retry.' })
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [

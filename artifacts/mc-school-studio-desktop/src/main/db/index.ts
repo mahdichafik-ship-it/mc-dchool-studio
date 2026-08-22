@@ -95,6 +95,13 @@ function initializeSchema(sqlite: Database.Database) {
   } catch {
     // Column already exists — ignore
   }
+
+  // Store the server URL returned after a successful cloud upload.
+  try {
+    sqlite.exec(`ALTER TABLE photos ADD COLUMN file_url TEXT`)
+  } catch {
+    // Column already exists — ignore
+  }
 }
 
 export function getPhotosDir(): string {

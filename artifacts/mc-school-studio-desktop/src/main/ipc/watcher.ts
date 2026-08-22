@@ -215,22 +215,14 @@ async function handleNewPhoto(projectId: number, filePath: string) {
       .set({ uploadStatus: 'pending' })
       .where(eq(photosTable.id, photo.id))
       .run()
+    win?.webContents.send('upload:statusChanged', {
+      photoId: photo.id,
+      studentId: student.id,
+      status: 'pending',
+    })
 
     // Fire-and-forget upload; progress is reflected via uploadStatus in DB
     uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt)
-      .then(() => {
-        win?.webContents.send('upload:statusChanged', {
-          photoId: photo.id,
-          studentId: student.id,
-          status: 'done',
-        })
-      })
-      .catch(() => {
-        win?.webContents.send('upload:statusChanged', {
-          photoId: photo.id,
-          studentId: student.id,
-          status: 'error',
-        })
-      })
+      .catch(() => {})
   }
 }

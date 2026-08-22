@@ -6,11 +6,12 @@
  * automatically queued and uploaded to the configured API endpoint.
  */
 
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { readFileSync } from 'fs'
 import { getDb } from '../db'
 import { settingsTable, photosTable } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
+import type { UploadStatus } from '../../shared/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
@@ -40,6 +41,20 @@ export function getUploadConfig(): { apiUrl: string | null; uploadKey: string | 
   }
 }
 
+function notifyUploadStatus(photoId: number, studentId: number, status: UploadStatus) {
+  const win = BrowserWindow.getAllWindows()[0]
+  win?.webContents.send('upload:statusChanged', { photoId, studentId, status })
+}
+
+function toServerFileUrl(fileUrl: string | null): string | null {
+  if (!fileUrl) return null
+  if (/^https?:\/\//i.test(fileUrl)) return fileUrl
+
+  const { apiUrl } = getUploadConfig()
+  if (!apiUrl) return null
+  return `${apiUrl.replace(/\/+$/, '')}/${fileUrl.replace(/^\/+/, '')}`
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Upload a single photo to the cloud API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,9 +77,10 @@ export async function uploadPhoto(
 
   // Mark as uploading
   db.update(photosTable)
-    .set({ uploadStatus: 'uploading' })
+    .set({ uploadStatus: 'uploading', fileUrl: null })
     .where(eq(photosTable.id, photoId))
     .run()
+  notifyUploadStatus(photoId, studentId, 'uploading')
 
   try {
     const fileBuffer = readFileSync(filePath)
@@ -88,11 +104,22 @@ export async function uploadPhoto(
       throw new Error(`HTTP ${response.status}: ${text}`)
     }
 
+    // Keep the server URL so the desktop app can link directly to the uploaded file.
+    let fileUrl: string | null = null
+    try {
+      const payload = await response.json() as { fileUrl?: unknown }
+      if (typeof payload.fileUrl === 'string') fileUrl = payload.fileUrl
+    } catch {
+      // A successful upload is still complete if the server response is not JSON.
+      console.warn('[Upload] Upload succeeded but did not return a readable fileUrl')
+    }
+
     // Mark as done
     db.update(photosTable)
-      .set({ uploadStatus: 'done' })
+      .set({ uploadStatus: 'done', fileUrl })
       .where(eq(photosTable.id, photoId))
       .run()
+    notifyUploadStatus(photoId, studentId, 'done')
 
     console.log(`[Upload] Photo ${photoId} uploaded successfully`)
   } catch (err) {
@@ -101,6 +128,7 @@ export async function uploadPhoto(
       .set({ uploadStatus: 'error' })
       .where(eq(photosTable.id, photoId))
       .run()
+    notifyUploadStatus(photoId, studentId, 'error')
     throw err
   }
 }
@@ -163,7 +191,7 @@ export function registerUploadHandlers() {
     }
   })
 
-  // Get upload status for all photos in a project (for sidebar progress)
+  // Get upload status and server URLs for all matched photos in a project.
   ipcMain.handle(
     'upload:getProjectStatus',
     (_e, { projectId }: { projectId: number }) => {
@@ -173,11 +201,15 @@ export function registerUploadHandlers() {
           id: photosTable.id,
           studentId: photosTable.studentId,
           uploadStatus: photosTable.uploadStatus,
+          fileUrl: photosTable.fileUrl,
         })
         .from(photosTable)
         .where(and(eq(photosTable.projectId, projectId), eq(photosTable.isMatched, true)))
         .all()
-      return photos
+      return photos.map((photo) => ({
+        ...photo,
+        fileUrl: toServerFileUrl(photo.fileUrl),
+      }))
     },
   )
 

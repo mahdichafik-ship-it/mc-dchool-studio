@@ -14,8 +14,11 @@
     --color-red-600: oklch(57.7% 0.245 27.325);
     --color-red-700: oklch(50.5% 0.213 27.518);
     --color-red-800: oklch(44.4% 0.177 26.899);
+    --color-amber-50: oklch(98.7% 0.022 95.277);
     --color-amber-100: oklch(96.2% 0.059 95.617);
+    --color-amber-200: oklch(92.4% 0.12 95.746);
     --color-amber-500: oklch(76.9% 0.188 70.08);
+    --color-amber-600: oklch(66.6% 0.179 58.318);
     --color-amber-800: oklch(47.3% 0.137 46.201);
     --color-green-50: oklch(98.2% 0.018 155.826);
     --color-green-100: oklch(96.2% 0.044 156.743);
@@ -32,6 +35,8 @@
     --color-teal-600: oklch(60% 0.118 184.704);
     --color-teal-700: oklch(51.1% 0.096 186.391);
     --color-teal-800: oklch(43.7% 0.078 188.216);
+    --color-blue-50: oklch(97% 0.014 254.604);
+    --color-blue-200: oklch(88.2% 0.059 254.128);
     --color-blue-600: oklch(54.6% 0.245 262.881);
     --color-slate-50: oklch(98.4% 0.003 247.858);
     --color-slate-100: oklch(96.8% 0.007 247.896);
@@ -223,6 +228,17 @@
   }
 }
 @layer utilities {
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border-width: 0;
+  }
   .absolute {
     position: absolute;
   }
@@ -235,11 +251,17 @@
   .inset-0 {
     inset: 0;
   }
+  .top-1\.5 {
+    top: calc(var(--spacing) * 1.5);
+  }
   .top-2 {
     top: calc(var(--spacing) * 2);
   }
   .right-0 {
     right: 0;
+  }
+  .right-1\.5 {
+    right: calc(var(--spacing) * 1.5);
   }
   .right-4 {
     right: calc(var(--spacing) * 4);
@@ -618,8 +640,17 @@
     --tw-border-style: dashed;
     border-style: dashed;
   }
+  .border-amber-200 {
+    border-color: var(--color-amber-200);
+  }
+  .border-blue-200 {
+    border-color: var(--color-blue-200);
+  }
   .border-green-200 {
     border-color: var(--color-green-200);
+  }
+  .border-red-100 {
+    border-color: var(--color-red-100);
   }
   .border-red-200 {
     border-color: var(--color-red-200);
@@ -660,6 +691,12 @@
   .bg-\[\#0f172a\] {
     background-color: #0f172a;
   }
+  .bg-amber-50\/95 {
+    background-color: color-mix(in srgb, oklch(98.7% 0.022 95.277) 95%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-amber-50) 95%, transparent);
+    }
+  }
   .bg-amber-100 {
     background-color: var(--color-amber-100);
   }
@@ -675,8 +712,20 @@
       background-color: color-mix(in oklab, var(--color-black) 60%, transparent);
     }
   }
+  .bg-blue-50\/95 {
+    background-color: color-mix(in srgb, oklch(97% 0.014 254.604) 95%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-blue-50) 95%, transparent);
+    }
+  }
   .bg-green-50 {
     background-color: var(--color-green-50);
+  }
+  .bg-green-50\/95 {
+    background-color: color-mix(in srgb, oklch(98.2% 0.018 155.826) 95%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-green-50) 95%, transparent);
+    }
   }
   .bg-green-100 {
     background-color: var(--color-green-100);
@@ -689,6 +738,12 @@
   }
   .bg-red-50 {
     background-color: var(--color-red-50);
+  }
+  .bg-red-50\/95 {
+    background-color: color-mix(in srgb, oklch(97.1% 0.013 17.38) 95%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-red-50) 95%, transparent);
+    }
   }
   .bg-red-100 {
     background-color: var(--color-red-100);
@@ -705,6 +760,12 @@
   .bg-slate-50 {
     background-color: var(--color-slate-50);
   }
+  .bg-slate-50\/95 {
+    background-color: color-mix(in srgb, oklch(98.4% 0.003 247.858) 95%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-slate-50) 95%, transparent);
+    }
+  }
   .bg-slate-100 {
     background-color: var(--color-slate-100);
   }
@@ -716,6 +777,12 @@
   }
   .bg-teal-100 {
     background-color: var(--color-teal-100);
+  }
+  .bg-teal-500\/80 {
+    background-color: color-mix(in srgb, oklch(70.4% 0.14 182.503) 80%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-teal-500) 80%, transparent);
+    }
   }
   .bg-teal-600 {
     background-color: var(--color-teal-600);
@@ -877,6 +944,9 @@
   .text-\[10px\] {
     font-size: 10px;
   }
+  .text-\[11px\] {
+    font-size: 11px;
+  }
   .leading-none {
     --tw-leading: 1;
     line-height: 1;
@@ -904,14 +974,26 @@
   .whitespace-nowrap {
     white-space: nowrap;
   }
+  .text-amber-200 {
+    color: var(--color-amber-200);
+  }
   .text-amber-500 {
     color: var(--color-amber-500);
+  }
+  .text-amber-600 {
+    color: var(--color-amber-600);
   }
   .text-amber-800 {
     color: var(--color-amber-800);
   }
+  .text-blue-200 {
+    color: var(--color-blue-200);
+  }
   .text-blue-600 {
     color: var(--color-blue-600);
+  }
+  .text-green-200 {
+    color: var(--color-green-200);
   }
   .text-green-500 {
     color: var(--color-green-500);
@@ -928,6 +1010,9 @@
   .text-primary {
     color: hsl(var(--primary));
   }
+  .text-red-200 {
+    color: var(--color-red-200);
+  }
   .text-red-500 {
     color: var(--color-red-500);
   }
@@ -939,6 +1024,9 @@
   }
   .text-red-800 {
     color: var(--color-red-800);
+  }
+  .text-slate-200 {
+    color: var(--color-slate-200);
   }
   .text-slate-300 {
     color: var(--color-slate-300);
@@ -1072,6 +1160,13 @@
       }
     }
   }
+  .hover\:bg-red-200 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--color-red-200);
+      }
+    }
+  }
   .hover\:bg-red-500 {
     &:hover {
       @media (hover: hover) {
@@ -1114,6 +1209,13 @@
         @supports (color: color-mix(in lab, red, red)) {
           background-color: color-mix(in oklab, var(--color-teal-50) 40%, transparent);
         }
+      }
+    }
+  }
+  .hover\:bg-teal-500 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--color-teal-500);
       }
     }
   }
@@ -1251,6 +1353,11 @@
   .disabled\:opacity-50 {
     &:disabled {
       opacity: 50%;
+    }
+  }
+  .disabled\:opacity-60 {
+    &:disabled {
+      opacity: 60%;
     }
   }
   .lg\:block {

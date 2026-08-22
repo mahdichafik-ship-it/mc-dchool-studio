@@ -56,6 +56,8 @@ export const photosTable = sqliteTable('photos', {
   isMatched: integer('is_matched', { mode: 'boolean' }).notNull().default(false),
   // null = not queued, 'pending' = queued, 'uploading' = in progress, 'done' = success, 'error' = failed
   uploadStatus: text('upload_status').$type<'pending' | 'uploading' | 'done' | 'error' | null>(),
+  // URL returned by the cloud API after a successful upload
+  fileUrl: text('file_url'),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
 })
 

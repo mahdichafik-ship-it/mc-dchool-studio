@@ -1,33 +1,49 @@
 /**
- * Desktop-facing API routes — authenticated with PHOTO_UPLOAD_KEY (no Clerk).
+ * Desktop-facing API routes — authenticated with a member-scoped connection
+ * token (no Clerk).
  * Used by the Electron app to list and pull cloud projects without a JSON file.
  */
 
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import type { Request, Response, NextFunction } from "express";
+import { eq, inArray } from "drizzle-orm";
+import { getDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
+import { assignedDesktopProjectIds, canAccessAssignedDesktopProject } from "../lib/studioAccess";
 
 const router = Router();
 
-function requireUploadKey(req: Request, res: Response, next: NextFunction): void {
-  const uploadKey = process.env.PHOTO_UPLOAD_KEY;
-  if (!uploadKey) {
-    res.status(503).json({ error: "Cloud upload not configured on server (PHOTO_UPLOAD_KEY missing)" });
-    return;
-  }
-  const authHeader = req.headers.authorization;
-  const provided = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  if (!provided || provided !== uploadKey) {
-    res.status(401).json({ error: "Invalid upload key" });
-    return;
-  }
-  next();
+function memberForAccess(connection: ReturnType<typeof getDesktopConnection>) {
+  return {
+    id: connection.memberId,
+    studioId: connection.studioId,
+    role: connection.memberRole,
+  };
 }
 
-// GET /api/desktop/projects — list all projects (summary)
-router.get("/projects", requireUploadKey, async (_req, res) => {
+router.get("/me", requireDesktopConnection, async (req, res) => {
+  const connection = getDesktopConnection(req);
+  const projectIds = await assignedDesktopProjectIds(memberForAccess(connection));
+  res.json({
+    connectionId: connection.connectionId,
+    deviceName: connection.deviceName,
+    member: {
+      id: connection.memberId,
+      email: connection.memberEmail,
+      role: connection.memberRole,
+    },
+    projectCount: projectIds.length,
+  });
+});
+
+// GET /api/desktop/projects — list only projects assigned to this connection
+router.get("/projects", requireDesktopConnection, async (req, res) => {
+  const connection = getDesktopConnection(req);
+  const projectIds = await assignedDesktopProjectIds(memberForAccess(connection));
+  if (!projectIds.length) {
+    res.json([]);
+    return;
+  }
   const projects = await db
     .select({
       id: projectsTable.id,
@@ -39,6 +55,7 @@ router.get("/projects", requireUploadKey, async (_req, res) => {
       updatedAt: projectsTable.updatedAt,
     })
     .from(projectsTable)
+    .where(inArray(projectsTable.id, projectIds))
     .orderBy(projectsTable.updatedAt);
 
   // Add class + student counts
@@ -68,11 +85,17 @@ router.get("/projects", requireUploadKey, async (_req, res) => {
 });
 
 // GET /api/desktop/projects/:projectId/bundle — full export bundle for import
-router.get("/projects/:projectId/bundle", requireUploadKey, async (req, res) => {
+router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, res) => {
+  const connection = getDesktopConnection(req);
   const rawProjectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId;
   const projectId = parseInt(rawProjectId, 10);
   if (isNaN(projectId)) {
     res.status(400).json({ error: "Invalid project ID" });
+    return;
+  }
+
+  if (!(await canAccessAssignedDesktopProject(memberForAccess(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
     return;
   }
 

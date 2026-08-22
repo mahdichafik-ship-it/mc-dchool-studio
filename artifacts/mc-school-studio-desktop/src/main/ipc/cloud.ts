@@ -1,7 +1,7 @@
 /**
  * Cloud sync IPC handlers.
  * Lets the desktop app list and pull projects directly from the cloud API
- * using the configured apiUrl + uploadKey — no JSON file needed.
+ * using the configured apiUrl + connection token — no JSON file needed.
  */
 
 import { ipcMain } from 'electron'
@@ -28,15 +28,15 @@ export interface CloudProject {
 export function registerCloudHandlers() {
   // List all projects available on the cloud API
   ipcMain.handle('cloud:listProjects', async (): Promise<{ ok: boolean; projects?: CloudProject[]; error?: string }> => {
-    const { apiUrl, uploadKey } = getUploadConfig()
-    if (!apiUrl || !uploadKey) {
-      return { ok: false, error: 'Cloud connection not configured. Set API URL and upload key in Settings.' }
+    const { apiUrl, connectionToken } = getUploadConfig()
+    if (!apiUrl || !connectionToken) {
+      return { ok: false, error: 'Cloud connection not configured. Set API URL and desktop connection token in Settings.' }
     }
 
     try {
       const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects`
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${uploadKey}` },
+        headers: { Authorization: `Bearer ${connectionToken}` },
         signal: AbortSignal.timeout(10000),
       })
 
@@ -61,15 +61,15 @@ export function registerCloudHandlers() {
       studentsImported?: number
       error?: string
     }> => {
-      const { apiUrl, uploadKey } = getUploadConfig()
-      if (!apiUrl || !uploadKey) {
+      const { apiUrl, connectionToken } = getUploadConfig()
+      if (!apiUrl || !connectionToken) {
         return { ok: false, error: 'Cloud connection not configured' }
       }
 
       try {
         const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProjectId}/bundle`
         const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${uploadKey}` },
+          headers: { Authorization: `Bearer ${connectionToken}` },
           signal: AbortSignal.timeout(30000),
         })
 

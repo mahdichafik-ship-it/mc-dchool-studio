@@ -39,6 +39,14 @@ export async function getStudioMember(userId: string) {
 
 export async function canAccessProject(userId: string, projectId: number, action: ProjectAction = "view") {
   const member = await ensureStudioForUser(userId);
+  return canAccessProjectForMember(member, projectId, action);
+}
+
+export async function canAccessProjectForMember(
+  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+  projectId: number,
+  action: ProjectAction = "view",
+) {
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project || project.studioId !== member.studioId) return false;
   if (member.role === "owner" || member.role === "admin") return true;
@@ -50,12 +58,52 @@ export async function canAccessProject(userId: string, projectId: number, action
 
 export async function accessibleProjectIds(userId: string) {
   const member = await ensureStudioForUser(userId);
+  return accessibleProjectIdsForMember(member);
+}
+
+export async function accessibleProjectIdsForMember(
+  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+) {
   if (member.role === "owner" || member.role === "admin") {
     const rows = await db.select({ id: projectsTable.id }).from(projectsTable).where(eq(projectsTable.studioId, member.studioId));
     return rows.map((row) => row.id);
   }
   const rows = await db.select({ projectId: projectAssignmentsTable.projectId })
-    .from(projectAssignmentsTable).where(eq(projectAssignmentsTable.memberId, member.id));
+    .from(projectAssignmentsTable)
+    .innerJoin(projectsTable, eq(projectAssignmentsTable.projectId, projectsTable.id))
+    .where(and(eq(projectAssignmentsTable.memberId, member.id), eq(projectsTable.studioId, member.studioId)));
+  return rows.map((row) => row.projectId);
+}
+
+export async function canAccessAssignedDesktopProject(
+  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+  projectId: number,
+) {
+  if (member.role !== "assistant" && member.role !== "photographer") return false;
+  const [project] = await db
+    .select({ id: projectsTable.id })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.studioId, member.studioId)));
+  if (!project) return false;
+  const [assignment] = await db
+    .select({ id: projectAssignmentsTable.id })
+    .from(projectAssignmentsTable)
+    .where(and(
+      eq(projectAssignmentsTable.projectId, projectId),
+      eq(projectAssignmentsTable.memberId, member.id),
+    ))
+    .limit(1);
+  return !!assignment;
+}
+
+export async function assignedDesktopProjectIds(
+  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+) {
+  if (member.role !== "assistant" && member.role !== "photographer") return [];
+  const rows = await db.select({ projectId: projectAssignmentsTable.projectId })
+    .from(projectAssignmentsTable)
+    .innerJoin(projectsTable, eq(projectAssignmentsTable.projectId, projectsTable.id))
+    .where(and(eq(projectAssignmentsTable.memberId, member.id), eq(projectsTable.studioId, member.studioId)));
   return rows.map((row) => row.projectId);
 }
 

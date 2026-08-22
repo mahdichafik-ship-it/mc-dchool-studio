@@ -34,3 +34,16 @@ export const projectAssignmentsTable = pgTable("project_assignments", {
   memberId: integer("member_id").notNull().references(() => studioMembersTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("project_assignments_project_member_unique").on(table.projectId, table.memberId)]);
+
+export const desktopConnectionsTable = pgTable("desktop_connections", {
+  id: serial("id").primaryKey(),
+  studioId: integer("studio_id").notNull().references(() => studiosTable.id, { onDelete: "cascade" }),
+  memberId: integer("member_id").notNull().references(() => studioMembersTable.id, { onDelete: "cascade" }),
+  deviceName: text("device_name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  tokenPrefix: text("token_prefix").notNull(),
+  status: text("status", { enum: ["active", "revoked"] }).notNull().default("active"),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});

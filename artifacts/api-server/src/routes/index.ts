@@ -21,7 +21,7 @@ router.use("/projects/:projectId/import", importRouter);
 router.use("/projects/:projectId/export", exportRouter);
 // Photos: /api/projects/:projectId/students/:studentId/photos
 router.use("/projects/:projectId/students", photosRouter);
-// Desktop app sync (upload-key auth, no Clerk)
+// Desktop app sync (member-scoped connection auth, no Clerk)
 router.use("/desktop", desktopRouter);
 router.use("/team", teamRouter);
 

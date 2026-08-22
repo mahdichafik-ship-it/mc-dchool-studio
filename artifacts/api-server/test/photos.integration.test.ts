@@ -10,14 +10,19 @@ import { and, eq } from "drizzle-orm";
 import {
   classesTable,
   db,
+  desktopConnectionsTable,
   pool,
+  projectAssignmentsTable,
   projectsTable,
   studentPhotosTable,
   studentsTable,
+  studioMembersTable,
+  studiosTable,
 } from "@workspace/db";
 import photosRouter from "../src/routes/photos";
+import desktopRouter from "../src/routes/desktop";
+import { createDesktopToken } from "../src/lib/desktopAuth";
 
-const uploadKey = "integration-photo-upload-key";
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
 const jpegBytes = Buffer.from(
   "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/AX//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/AX//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
@@ -40,8 +45,16 @@ let baseUrl: string;
 let projectId: number;
 let studentId: number;
 let classId: number;
+let studioId: number;
+let memberId: number;
+let otherMemberId: number;
+let adminMemberId: number;
+let hiddenProjectId: number;
 let uploadedPhotoId: number | undefined;
 let uploadedFilePath: string | undefined;
+const desktopCredentials = createDesktopToken();
+const otherDesktopCredentials = createDesktopToken();
+const adminDesktopCredentials = createDesktopToken();
 
 const app = express();
 const authHandler = Object.assign(
@@ -60,18 +73,95 @@ app.use((req, _res, next) => {
   next();
 });
 app.use("/api/projects/:projectId/students", photosRouter);
+app.use("/api/desktop", desktopRouter);
 
 before(async () => {
-  process.env.PHOTO_UPLOAD_KEY = uploadKey;
+  const [studio] = await db
+    .insert(studiosTable)
+    .values({ name: "Photo flow integration studio", createdByUserId: userId })
+    .returning({ id: studiosTable.id });
+  studioId = studio.id;
+
+  const [member] = await db
+    .insert(studioMembersTable)
+    .values({
+      studioId,
+      userId,
+      email: `${userId}@member.local`,
+      role: "photographer",
+    })
+    .returning({ id: studioMembersTable.id });
+  memberId = member.id;
+
+  const [otherMember] = await db
+    .insert(studioMembersTable)
+    .values({
+      studioId,
+      userId: `${userId}-other`,
+      email: `${userId}-other@member.local`,
+      role: "photographer",
+    })
+    .returning({ id: studioMembersTable.id });
+  otherMemberId = otherMember.id;
+
+  const [adminMember] = await db
+    .insert(studioMembersTable)
+    .values({
+      studioId,
+      userId: `${userId}-admin`,
+      email: `${userId}-admin@member.local`,
+      role: "admin",
+    })
+    .returning({ id: studioMembersTable.id });
+  adminMemberId = adminMember.id;
 
   const [project] = await db
     .insert(projectsTable)
     .values({
       userId,
+      studioId,
       schoolName: "Photo flow integration school",
     })
     .returning({ id: projectsTable.id });
   projectId = project.id;
+  await db.insert(projectAssignmentsTable).values([
+    { projectId, memberId },
+    { projectId, memberId: otherMemberId },
+  ]);
+
+  const [hiddenProject] = await db
+    .insert(projectsTable)
+    .values({
+      userId,
+      studioId,
+      schoolName: "Hidden integration project",
+    })
+    .returning({ id: projectsTable.id });
+  hiddenProjectId = hiddenProject.id;
+
+  await db.insert(desktopConnectionsTable).values([
+    {
+      studioId,
+      memberId,
+      deviceName: "Integration desktop",
+      tokenHash: desktopCredentials.tokenHash,
+      tokenPrefix: desktopCredentials.tokenPrefix,
+    },
+    {
+      studioId,
+      memberId: otherMemberId,
+      deviceName: "Other integration desktop",
+      tokenHash: otherDesktopCredentials.tokenHash,
+      tokenPrefix: otherDesktopCredentials.tokenPrefix,
+    },
+    {
+      studioId,
+      memberId: adminMemberId,
+      deviceName: "Admin integration desktop",
+      tokenHash: adminDesktopCredentials.tokenHash,
+      tokenPrefix: adminDesktopCredentials.tokenPrefix,
+    },
+  ]);
 
   const [studentClass] = await db
     .insert(classesTable)
@@ -108,8 +198,8 @@ after(async () => {
   if (uploadedFilePath) {
     await rm(uploadedFilePath, { force: true });
   }
-  if (projectId) {
-    await db.delete(projectsTable).where(eq(projectsTable.id, projectId));
+  if (studioId) {
+    await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
   }
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
@@ -130,7 +220,7 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
     `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${uploadKey}` },
+      headers: { Authorization: `Bearer ${desktopCredentials.token}` },
       body: form,
     },
   );
@@ -198,4 +288,84 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   assert.equal(deletedPhoto, undefined, "DELETE should remove the database row");
   uploadedPhotoId = undefined;
   uploadedFilePath = undefined;
+});
+
+test("limits desktop projects to assignments and revokes only one connection", async () => {
+  const listResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+  });
+  assert.equal(listResponse.status, 200);
+  const projects = await listResponse.json() as { id: number }[];
+  assert(projects.some((project) => project.id === projectId), "assigned project should be listed");
+  assert(!projects.some((project) => project.id === hiddenProjectId), "unassigned project must not be listed");
+
+  const bundleResponse = await fetch(`${baseUrl}/api/desktop/projects/${hiddenProjectId}/bundle`, {
+    headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+  });
+  assert.equal(bundleResponse.status, 404, "unassigned project bundle must be hidden");
+
+  const adminListResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${adminDesktopCredentials.token}` },
+  });
+  assert.equal(adminListResponse.status, 200);
+  assert.deepEqual(await adminListResponse.json(), [], "an admin desktop must still require explicit assignments");
+
+  const adminBundleResponse = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/bundle`, {
+    headers: { Authorization: `Bearer ${adminDesktopCredentials.token}` },
+  });
+  assert.equal(adminBundleResponse.status, 404, "an admin desktop must not download an unassigned bundle");
+
+  const adminUpload = new (globalThis as any).FormData();
+  adminUpload.append(
+    "photo",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    "admin-unassigned-attempt.jpg",
+  );
+  const adminUploadResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminDesktopCredentials.token}` },
+      body: adminUpload,
+    },
+  );
+  assert.equal(adminUploadResponse.status, 404, "an admin desktop must not upload to an unassigned project");
+
+  await db
+    .update(desktopConnectionsTable)
+    .set({ status: "revoked", revokedAt: new Date() })
+    .where(and(
+      eq(desktopConnectionsTable.memberId, memberId),
+      eq(desktopConnectionsTable.tokenHash, desktopCredentials.tokenHash),
+    ));
+
+  const revokedResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+  });
+  assert.equal(revokedResponse.status, 401);
+
+  const otherConnectionResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${otherDesktopCredentials.token}` },
+  });
+  assert.equal(otherConnectionResponse.status, 200, "revoking one device must not interrupt another");
+});
+
+test("rejects encoded traversal identifiers before writing an upload", async () => {
+  const form = new (globalThis as any).FormData();
+  form.append(
+    "photo",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    "traversal-attempt.jpg",
+  );
+
+  const response = await fetch(
+    `${baseUrl}/api/projects/%2E%2E%2Foutside/students/${studentId}/photos`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${otherDesktopCredentials.token}` },
+      body: form,
+    },
+  );
+  assert.equal(response.status, 400);
+  assert(!fs.existsSync(path.resolve(process.cwd(), "uploads", "outside")), "invalid identifiers must not create an upload directory");
 });

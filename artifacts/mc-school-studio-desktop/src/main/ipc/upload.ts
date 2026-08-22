@@ -34,10 +34,10 @@ function setSetting(key: string, value: string) {
   }
 }
 
-export function getUploadConfig(): { apiUrl: string | null; uploadKey: string | null } {
+export function getUploadConfig(): { apiUrl: string | null; connectionToken: string | null } {
   return {
     apiUrl: getSetting('upload_api_url'),
-    uploadKey: getSetting('upload_key'),
+    connectionToken: getSetting('desktop_connection_token'),
   }
 }
 
@@ -68,9 +68,9 @@ export async function uploadPhoto(
   capturedAt: string,
 ): Promise<void> {
   const db = getDb()
-  const { apiUrl, uploadKey } = getUploadConfig()
+  const { apiUrl, connectionToken } = getUploadConfig()
 
-  if (!apiUrl || !uploadKey) {
+  if (!apiUrl || !connectionToken) {
     console.log('[Upload] Cloud upload not configured, skipping.')
     return
   }
@@ -94,7 +94,7 @@ export async function uploadPhoto(
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${uploadKey}`,
+        Authorization: `Bearer ${connectionToken}`,
       },
       body: formData,
     })
@@ -146,26 +146,30 @@ export function registerUploadHandlers() {
   // Save cloud upload configuration
   ipcMain.handle(
     'upload:setConfig',
-    (_e, { apiUrl, uploadKey }: { apiUrl: string; uploadKey: string }) => {
+    (_e, { apiUrl, connectionToken }: { apiUrl: string; connectionToken: string }) => {
       setSetting('upload_api_url', apiUrl.trim())
-      setSetting('upload_key', uploadKey.trim())
+      setSetting('desktop_connection_token', connectionToken.trim())
       return { ok: true }
     },
   )
 
   // Test connection to API
   ipcMain.handle('upload:testConnection', async () => {
-    const { apiUrl, uploadKey } = getUploadConfig()
-    if (!apiUrl || !uploadKey) {
-      return { ok: false, error: 'API URL and upload key are required' }
+    const { apiUrl, connectionToken } = getUploadConfig()
+    if (!apiUrl || !connectionToken) {
+      return { ok: false, error: 'API URL and desktop connection token are required' }
     }
     try {
-      const url = `${apiUrl.replace(/\/+$/, '')}/api/healthz`
-      const response = await fetch(url, { signal: AbortSignal.timeout(5000) })
+      const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/me`
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(5000),
+      })
       if (response.ok) {
         return { ok: true }
       }
-      return { ok: false, error: `Server returned ${response.status}` }
+      const body = await response.json().catch(() => ({})) as { error?: string }
+      return { ok: false, error: body.error ?? `Server returned ${response.status}` }
     } catch (err) {
       return { ok: false, error: String(err) }
     }

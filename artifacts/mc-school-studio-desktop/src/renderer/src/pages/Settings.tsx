@@ -23,7 +23,7 @@ interface UpdateState {
 export function Settings() {
   const [photosDir, setPhotosDir] = useState<string>('')
   const [apiUrl, setApiUrl] = useState<string>('')
-  const [uploadKey, setUploadKey] = useState<string>('')
+  const [connectionToken, setConnectionToken] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [savedOk, setSavedOk] = useState(false)
   const [connStatus, setConnStatus] = useState<ConnectionStatus>('idle')
@@ -37,9 +37,9 @@ export function Settings() {
     })
 
     window.api.invoke('upload:getConfig').then((cfg) => {
-      const { apiUrl: url, uploadKey: key } = cfg as { apiUrl: string | null; uploadKey: string | null }
+      const { apiUrl: url, connectionToken: token } = cfg as { apiUrl: string | null; connectionToken: string | null }
       setApiUrl(url ?? '')
-      setUploadKey(key ?? '')
+      setConnectionToken(token ?? '')
     })
 
     window.api.invoke('update:getState').then(setUpdateState)
@@ -63,7 +63,7 @@ export function Settings() {
     setSaving(true)
     setSavedOk(false)
     try {
-      await window.api.invoke('upload:setConfig', { apiUrl, uploadKey })
+      await window.api.invoke('upload:setConfig', { apiUrl, connectionToken })
       setSavedOk(true)
       setTimeout(() => setSavedOk(false), 3000)
     } finally {
@@ -73,7 +73,7 @@ export function Settings() {
 
   async function handleTestConnection() {
     // Save first
-    await window.api.invoke('upload:setConfig', { apiUrl, uploadKey })
+    await window.api.invoke('upload:setConfig', { apiUrl, connectionToken })
     setConnStatus('testing')
     setConnError(null)
     try {
@@ -123,7 +123,7 @@ export function Settings() {
     }
   }
 
-  const hasConfig = apiUrl.trim() !== '' && uploadKey.trim() !== ''
+  const hasConfig = apiUrl.trim() !== '' && connectionToken.trim() !== ''
 
   return (
     <div className="flex flex-col h-full">
@@ -209,8 +209,9 @@ export function Settings() {
               <h3 className="font-semibold text-slate-900">Cloud upload</h3>
             </div>
             <p className="text-sm text-slate-500 mb-4">
-              After each photo is matched, it is automatically uploaded to your MC School
-              Studio web app so clients can view their photos online.
+               After each photo is matched, it is automatically uploaded to your MC School
+               Studio web app so clients can view their photos online. Your connection is
+               limited to the projects assigned to this desktop.
             </p>
 
             <div className="space-y-3">
@@ -232,18 +233,18 @@ export function Settings() {
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Upload key
+                   Desktop connection token
                 </label>
                 <input
                   type="password"
-                  value={uploadKey}
-                  onChange={(e) => setUploadKey(e.target.value)}
-                  placeholder="Paste the PHOTO_UPLOAD_KEY from your server"
+                   value={connectionToken}
+                   onChange={(e) => setConnectionToken(e.target.value)}
+                   placeholder="Paste the token created in the web app"
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white font-mono"
                 />
                 <p className="text-xs text-slate-400 mt-1">
-                  Set <code className="bg-slate-100 px-1 rounded">PHOTO_UPLOAD_KEY</code> in
-                  your server's environment variables, then paste the same value here.
+                   An owner or admin creates a token from the web app’s Team page. Each token
+                   is linked to a team member and device, and the owner can revoke it at any time.
                 </p>
               </div>
 

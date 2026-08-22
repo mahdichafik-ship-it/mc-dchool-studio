@@ -3,7 +3,8 @@ import { Users, UserPlus } from "lucide-react";
 
 type Member = { id: number; email: string; role: string; status: string; userId: string };
 type Invite = { id: number; email: string; role: string; status: string };
-type TeamData = { currentMember: Member; members: Member[]; invites: Invite[]; projects: { id: number; schoolName: string }[]; assignments: { projectId: number; memberId: number }[] };
+type DesktopConnection = { id: number; memberId: number; memberEmail: string; deviceName: string; tokenPrefix: string; status: "active" | "revoked"; createdAt: string; lastUsedAt: string | null; revokedAt: string | null };
+type TeamData = { currentMember: Member; members: Member[]; invites: Invite[]; projects: { id: number; schoolName: string }[]; assignments: { projectId: number; memberId: number }[]; desktopConnections: DesktopConnection[] };
 
 export default function Team() {
   const [data, setData] = useState<TeamData | null>(null);
@@ -12,6 +13,11 @@ export default function Team() {
   const [saving, setSaving] = useState(false);
   const [assignmentProjectId, setAssignmentProjectId] = useState("");
   const [assignmentMemberIds, setAssignmentMemberIds] = useState<number[]>([]);
+  const [desktopMemberId, setDesktopMemberId] = useState("");
+  const [deviceName, setDeviceName] = useState("");
+  const [desktopSaving, setDesktopSaving] = useState(false);
+  const [desktopError, setDesktopError] = useState<string | null>(null);
+  const [newDesktopToken, setNewDesktopToken] = useState<string | null>(null);
   const load = () => fetch("/api/team").then((res) => res.ok ? res.json() : Promise.reject()).then(setData);
   useEffect(() => { void load(); }, []);
   const canManage = data?.currentMember.role === "owner" || data?.currentMember.role === "admin";
@@ -26,6 +32,26 @@ export default function Team() {
   async function saveAssignments() {
     if (!assignmentProjectId) return;
     await fetch(`/api/team/projects/${assignmentProjectId}/assignments`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memberIds: assignmentMemberIds }) });
+    await load();
+  }
+  async function createDesktopConnection(event: React.FormEvent) {
+    event.preventDefault();
+    setDesktopSaving(true); setDesktopError(null); setNewDesktopToken(null);
+    try {
+      const res = await fetch("/api/team/desktop-connections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memberId: Number(desktopMemberId), deviceName }) });
+      const body = await res.json().catch(() => ({})) as { token?: string; error?: string };
+      if (!res.ok || !body.token) { setDesktopError(body.error ?? "Could not create the desktop connection."); return; }
+      setNewDesktopToken(body.token);
+      setDeviceName("");
+      await load();
+    } finally {
+      setDesktopSaving(false);
+    }
+  }
+  async function revokeDesktopConnection(connection: DesktopConnection) {
+    if (!window.confirm(`Revoke ${connection.deviceName}? That computer will stop seeing cloud projects and uploading photos immediately.`)) return;
+    const res = await fetch(`/api/team/desktop-connections/${connection.id}`, { method: "DELETE" });
+    if (!res.ok) { setDesktopError("Could not revoke the desktop connection."); return; }
     await load();
   }
   if (!data) return <div className="p-8 text-slate-500">Loading your studio team…</div>;
@@ -47,6 +73,17 @@ export default function Team() {
           <select multiple value={assignmentMemberIds.map(String)} onChange={(e) => setAssignmentMemberIds(Array.from(e.currentTarget.selectedOptions).map((option) => Number(option.value)))} className="h-24 rounded-md border border-slate-300 px-3 py-2 text-sm" aria-label="Assigned team members">{data.members.filter((member) => member.status === "active" && member.role !== "owner" && member.role !== "admin").map((member) => <option key={member.id} value={member.id}>{member.email} · {member.role}</option>)}</select>
           <button type="button" onClick={() => void saveAssignments()} disabled={!assignmentProjectId} className="h-10 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">Save access</button></div>
       </div>}
+       {canManage && <div className="rounded-xl border bg-white p-5 shadow-sm">
+         <h2 className="font-semibold text-slate-900">Desktop connections</h2><p className="mt-1 text-sm text-slate-500">Create one token per computer. It inherits the selected member’s project assignments.</p>
+         <form onSubmit={(event) => void createDesktopConnection(event)} className="mt-4 grid gap-3 md:grid-cols-[1fr_1.4fr_auto]">
+           <select required value={desktopMemberId} onChange={(e) => setDesktopMemberId(e.target.value)} className="h-10 rounded-md border border-slate-300 px-3 text-sm" aria-label="Desktop connection member"><option value="">Choose a member</option>{data.members.filter((member) => member.status === "active" && (member.role === "assistant" || member.role === "photographer")).map((member) => <option key={member.id} value={member.id}>{member.email} · {member.role}</option>)}</select>
+           <input required value={deviceName} onChange={(e) => setDeviceName(e.target.value)} maxLength={100} placeholder="e.g. Studio MacBook 1" className="h-10 rounded-md border border-slate-300 px-3 text-sm" />
+           <button disabled={!desktopMemberId || !deviceName.trim() || desktopSaving} className="h-10 rounded-md bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">{desktopSaving ? "Creating…" : "Create token"}</button>
+         </form>
+         {desktopError && <p role="alert" className="mt-3 text-sm text-red-600">{desktopError}</p>}
+         {newDesktopToken && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-medium text-amber-900">Copy this token now — it will not be shown again.</p><textarea readOnly value={newDesktopToken} onFocus={(event) => event.currentTarget.select()} aria-label="New desktop connection token" className="mt-2 h-16 w-full resize-none rounded border border-amber-300 bg-white p-2 font-mono text-xs text-slate-800" /></div>}
+         {data.desktopConnections.length > 0 && <div className="mt-5 divide-y rounded-lg border">{data.desktopConnections.map((connection) => <div key={connection.id} className="flex items-center justify-between gap-4 px-4 py-3"><div className="min-w-0"><p className="font-medium text-slate-900">{connection.deviceName}</p><p className="mt-0.5 text-xs text-slate-500">{connection.memberEmail} · {connection.tokenPrefix}… · {connection.status === "active" ? (connection.lastUsedAt ? `Last used ${new Date(connection.lastUsedAt).toLocaleString()}` : "Not used yet") : "Revoked"}</p></div>{data.currentMember.role === "owner" && connection.status === "active" && <button type="button" onClick={() => void revokeDesktopConnection(connection)} className="shrink-0 rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">Revoke</button>}</div>)}</div>}
+       </div>}
       {data.invites.filter((invite) => invite.status === "pending").length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold text-amber-900">Pending invitations</h2>{data.invites.filter((invite) => invite.status === "pending").map((invite) => <p key={invite.id} className="mt-2 text-sm text-amber-800">{invite.email} · {invite.role}</p>)}</div>}
     </div>
   </div>;

@@ -17,7 +17,7 @@ import type {
 
 interface UploadConfig {
   apiUrl: string | null
-  uploadKey: string | null
+  connectionToken: string | null
 }
 
 interface UploadResult {
@@ -79,7 +79,7 @@ interface ElectronAPI {
   invoke(channel: 'app:setPhotosDir', args: { dir: string }): Promise<string>
   // Cloud upload
   invoke(channel: 'upload:getConfig'): Promise<UploadConfig>
-  invoke(channel: 'upload:setConfig', args: { apiUrl: string; uploadKey: string }): Promise<UploadResult>
+  invoke(channel: 'upload:setConfig', args: { apiUrl: string; connectionToken: string }): Promise<UploadResult>
   invoke(channel: 'upload:testConnection'): Promise<UploadResult>
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>

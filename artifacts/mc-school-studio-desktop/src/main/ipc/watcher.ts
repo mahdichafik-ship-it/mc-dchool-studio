@@ -208,8 +208,8 @@ async function handleNewPhoto(projectId: number, filePath: string) {
   })
 
   // Auto-upload if cloud upload is configured
-  const { apiUrl, uploadKey } = getUploadConfig()
-  if (apiUrl && uploadKey) {
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (apiUrl && connectionToken) {
     // Mark as pending first so the UI shows it immediately
     db.update(photosTable)
       .set({ uploadStatus: 'pending' })

@@ -5,29 +5,16 @@ import fs from "fs";
 import { db } from "@workspace/db";
 import { projectsTable, studentsTable, studentPhotosTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import type { Request, Response, NextFunction } from "express";
+import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
+import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
+import { canAccessAssignedDesktopProject } from "../lib/studioAccess";
 
 const router = Router({ mergeParams: true });
 
 // ---------------------------------------------------------------------------
-// Upload key authentication — desktop app → server only (POST)
+// Member-scoped desktop authentication — desktop app → server only (POST)
 // ---------------------------------------------------------------------------
-
-function requireUploadKey(req: Request, res: Response, next: NextFunction): void {
-  const uploadKey = process.env.PHOTO_UPLOAD_KEY;
-  if (!uploadKey) {
-    res.status(503).json({ error: "Cloud upload not configured on server (PHOTO_UPLOAD_KEY missing)" });
-    return;
-  }
-  const authHeader = req.headers.authorization;
-  const provided = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  if (!provided || provided !== uploadKey) {
-    res.status(401).json({ error: "Invalid upload key" });
-    return;
-  }
-  next();
-}
 
 // ---------------------------------------------------------------------------
 // File storage — uploads/student-photos/<projectId>/<studentId>/
@@ -90,13 +77,47 @@ async function verifyStudent(studentId: number, projectId: number): Promise<bool
   return !!student;
 }
 
-/** Verify the project exists (no ownership check — for upload-key-only routes) */
-async function verifyProject(projectId: number): Promise<boolean> {
-  const [project] = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
-  return !!project;
+function validRouteId(value: string | string[] | undefined): value is string {
+  return typeof value === "string" && /^[1-9]\d*$/.test(value);
+}
+
+function validateDesktopUploadPath(req: Request, res: Response, next: NextFunction): void {
+  if (!validRouteId(req.params.projectId) || !validRouteId(req.params.studentId)) {
+    res.status(400).json({ error: "Invalid projectId or studentId" });
+    return;
+  }
+  next();
+}
+
+function connectionAccessMember(connection: ReturnType<typeof getDesktopConnection>) {
+  return {
+    id: connection.memberId,
+    studioId: connection.studioId,
+    role: connection.memberRole,
+  };
+}
+
+async function authorizeDesktopUploadTarget(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const projectId = Number(req.params.projectId);
+  const studentId = Number(req.params.studentId);
+  if (!(await canAccessAssignedDesktopProject(connectionAccessMember(getDesktopConnection(req)), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (!(await verifyStudent(studentId, projectId))) {
+    res.status(404).json({ error: "Student not found in this project" });
+    return;
+  }
+  next();
+}
+
+function discardUploadedFile(req: Request): void {
+  if (!req.file) return;
+  try {
+    fs.unlinkSync(req.file.path);
+  } catch {
+    // The upload did not finish writing or the file was already removed.
+  }
 }
 
 function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
@@ -117,51 +138,59 @@ function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
 // ---------------------------------------------------------------------------
 
 // POST /api/projects/:projectId/students/:studentId/photos
-// Desktop app → server: authenticated with PHOTO_UPLOAD_KEY bearer token
-router.post("/:studentId/photos", requireUploadKey, upload.single("photo"), async (req, res) => {
+// Desktop app → server: validate and authorize identifiers before Multer
+// constructs a filesystem path, then authenticate the photo write to that project.
+router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploadPath, authorizeDesktopUploadTarget, upload.single("photo"), async (req, res, next) => {
   const projectId = parseInt(req.params.projectId as string);
   const studentId = parseInt(req.params.studentId as string);
 
-  if (isNaN(projectId) || isNaN(studentId)) {
-    res.status(400).json({ error: "Invalid projectId or studentId" });
-    return;
+  try {
+    // Reload the connection after streaming so a revoked device, removed member,
+    // or changed role cannot commit a file that began uploading earlier.
+    const refreshedConnection = await refreshDesktopConnection(getDesktopConnection(req).connectionId);
+    if (!refreshedConnection) {
+      discardUploadedFile(req);
+      res.status(401).json({ error: "Desktop connection was revoked while uploading" });
+      return;
+    }
+    if (!(await canAccessAssignedDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
+      discardUploadedFile(req);
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (!(await verifyStudent(studentId, projectId))) {
+      discardUploadedFile(req);
+      res.status(404).json({ error: "Student not found in this project" });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: "No photo uploaded (use field name 'photo')" });
+      return;
+    }
+
+    const relPath = path
+      .relative(path.resolve(process.cwd(), "uploads"), req.file.path)
+      .replace(/\\/g, "/");
+    const fileUrl = `/uploads/${relPath}`;
+    const capturedAt = (req.body as Record<string, string>).capturedAt ?? null;
+
+    const [photo] = await db
+      .insert(studentPhotosTable)
+      .values({
+        projectId,
+        studentId,
+        fileName: req.file.originalname,
+        fileUrl,
+        mimeType: req.file.mimetype,
+        capturedAt: capturedAt || null,
+      })
+      .returning();
+
+    res.status(201).json(photoToResponse(photo));
+  } catch (error) {
+    discardUploadedFile(req);
+    next(error);
   }
-
-  if (!(await verifyProject(projectId))) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-
-  if (!(await verifyStudent(studentId, projectId))) {
-    res.status(404).json({ error: "Student not found in this project" });
-    return;
-  }
-
-  if (!req.file) {
-    res.status(400).json({ error: "No photo uploaded (use field name 'photo')" });
-    return;
-  }
-
-  const relPath = path
-    .relative(path.resolve(process.cwd(), "uploads"), req.file.path)
-    .replace(/\\/g, "/");
-  const fileUrl = `/uploads/${relPath}`;
-
-  const capturedAt = (req.body as Record<string, string>).capturedAt ?? null;
-
-  const [photo] = await db
-    .insert(studentPhotosTable)
-    .values({
-      projectId,
-      studentId,
-      fileName: req.file.originalname,
-      fileUrl,
-      mimeType: req.file.mimetype,
-      capturedAt: capturedAt || null,
-    })
-    .returning();
-
-  res.status(201).json(photoToResponse(photo));
 });
 
 // GET /api/projects/:projectId/students/:studentId/photos

@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { and, eq } from "drizzle-orm";
-import { db, projectAssignmentsTable, projectsTable, studioInvitesTable, studioMembersTable } from "@workspace/db";
+import { db, desktopConnectionsTable, projectAssignmentsTable, projectsTable, studioInvitesTable, studioMembersTable } from "@workspace/db";
 import { getUserId, requireAuth } from "../lib/auth";
 import { getStudioMember, isStudioManager } from "../lib/studioAccess";
+import { createDesktopToken } from "../lib/desktopAuth";
 
 const router = Router();
 const roles = ["admin", "assistant", "photographer", "viewer"] as const;
@@ -13,7 +14,32 @@ router.get("/", requireAuth, async (req, res): Promise<void> => {
   const invites = await db.select().from(studioInvitesTable).where(eq(studioInvitesTable.studioId, member.studioId));
   const projects = await db.select({ id: projectsTable.id, schoolName: projectsTable.schoolName }).from(projectsTable).where(eq(projectsTable.studioId, member.studioId));
   const assignments = await db.select().from(projectAssignmentsTable);
-  res.json({ currentMember: member, members, invites, projects, assignments: assignments.filter((item) => projects.some((project) => project.id === item.projectId)) });
+  const canManage = member.role === "owner" || member.role === "admin";
+  const desktopConnections = canManage
+    ? await db
+      .select({
+        id: desktopConnectionsTable.id,
+        deviceName: desktopConnectionsTable.deviceName,
+        tokenPrefix: desktopConnectionsTable.tokenPrefix,
+        status: desktopConnectionsTable.status,
+        lastUsedAt: desktopConnectionsTable.lastUsedAt,
+        createdAt: desktopConnectionsTable.createdAt,
+        revokedAt: desktopConnectionsTable.revokedAt,
+        memberId: desktopConnectionsTable.memberId,
+        memberEmail: studioMembersTable.email,
+      })
+      .from(desktopConnectionsTable)
+      .innerJoin(studioMembersTable, eq(desktopConnectionsTable.memberId, studioMembersTable.id))
+      .where(eq(desktopConnectionsTable.studioId, member.studioId))
+    : [];
+  res.json({
+    currentMember: member,
+    members,
+    invites,
+    projects,
+    assignments: assignments.filter((item) => projects.some((project) => project.id === item.projectId)),
+    desktopConnections,
+  });
 });
 
 router.post("/invites", requireAuth, async (req, res): Promise<void> => {
@@ -64,6 +90,86 @@ router.put("/projects/:projectId/assignments", requireAuth, async (req, res): Pr
   await db.delete(projectAssignmentsTable).where(eq(projectAssignmentsTable.projectId, projectId));
   if (valid.length) await db.insert(projectAssignmentsTable).values(valid.map((memberId: number) => ({ projectId, memberId })));
   res.json({ projectId, memberIds: valid });
+});
+
+router.post("/desktop-connections", requireAuth, async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  if (!(await isStudioManager(userId))) {
+    res.status(403).json({ error: "Only owners and admins can connect desktop computers" });
+    return;
+  }
+
+  const current = await getStudioMember(userId);
+  const memberId = Number(req.body?.memberId);
+  const deviceName = String(req.body?.deviceName ?? "").trim();
+  if (!Number.isInteger(memberId) || !deviceName || deviceName.length > 100) {
+    res.status(400).json({ error: "A member and device name are required" });
+    return;
+  }
+
+  const [member] = await db
+    .select()
+    .from(studioMembersTable)
+    .where(and(
+      eq(studioMembersTable.id, memberId),
+      eq(studioMembersTable.studioId, current.studioId),
+      eq(studioMembersTable.status, "active"),
+    ));
+  if (!member) {
+    res.status(400).json({ error: "Active studio member not found" });
+    return;
+  }
+  if (member.role !== "assistant" && member.role !== "photographer") {
+    res.status(400).json({ error: "Desktop connections require an assistant or photographer member with assigned projects" });
+    return;
+  }
+
+  const credentials = createDesktopToken();
+  const [connection] = await db.insert(desktopConnectionsTable).values({
+    studioId: current.studioId,
+    memberId,
+    deviceName,
+    tokenHash: credentials.tokenHash,
+    tokenPrefix: credentials.tokenPrefix,
+  }).returning({
+    id: desktopConnectionsTable.id,
+    deviceName: desktopConnectionsTable.deviceName,
+    tokenPrefix: desktopConnectionsTable.tokenPrefix,
+    memberId: desktopConnectionsTable.memberId,
+    status: desktopConnectionsTable.status,
+    createdAt: desktopConnectionsTable.createdAt,
+  });
+
+  res.status(201).json({ connection, token: credentials.token });
+});
+
+router.delete("/desktop-connections/:connectionId", requireAuth, async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  const current = await getStudioMember(userId);
+  if (current.role !== "owner") {
+    res.status(403).json({ error: "Only the studio owner can revoke desktop connections" });
+    return;
+  }
+
+  const connectionId = Number(req.params.connectionId);
+  if (!Number.isInteger(connectionId)) {
+    res.status(400).json({ error: "Invalid desktop connection" });
+    return;
+  }
+  const [updated] = await db
+    .update(desktopConnectionsTable)
+    .set({ status: "revoked", revokedAt: new Date() })
+    .where(and(
+      eq(desktopConnectionsTable.id, connectionId),
+      eq(desktopConnectionsTable.studioId, current.studioId),
+      eq(desktopConnectionsTable.status, "active"),
+    ))
+    .returning({ id: desktopConnectionsTable.id });
+  if (!updated) {
+    res.status(404).json({ error: "Active desktop connection not found" });
+    return;
+  }
+  res.status(204).send();
 });
 
 export default router;

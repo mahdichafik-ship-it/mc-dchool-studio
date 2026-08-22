@@ -180,4 +180,15 @@ export function registerUploadHandlers() {
       return photos
     },
   )
+
+  // Count failed uploads across all projects (for Settings screen)
+  ipcMain.handle('upload:getGlobalErrorCount', () => {
+    const db = getDb()
+    const photos = db
+      .select({ id: photosTable.id })
+      .from(photosTable)
+      .where(eq(photosTable.uploadStatus, 'error'))
+      .all()
+    return photos.length
+  })
 }

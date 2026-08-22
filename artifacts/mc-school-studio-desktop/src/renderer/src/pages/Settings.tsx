@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { FolderOpen, Cloud, Info, CheckCircle, XCircle, Loader } from 'lucide-react'
+import { FolderOpen, Cloud, Info, CheckCircle, XCircle, Loader, AlertTriangle } from 'lucide-react'
+import { useGlobalErrorCount } from '@/hooks/useApi'
 
 type ConnectionStatus = 'idle' | 'testing' | 'ok' | 'error'
 
@@ -11,6 +12,7 @@ export function Settings() {
   const [savedOk, setSavedOk] = useState(false)
   const [connStatus, setConnStatus] = useState<ConnectionStatus>('idle')
   const [connError, setConnError] = useState<string | null>(null)
+  const { count: globalErrorCount } = useGlobalErrorCount()
 
   useEffect(() => {
     window.api.invoke('app:getPhotosDir').then((dir) => {
@@ -105,6 +107,21 @@ export function Settings() {
               </button>
             </div>
           </div>
+
+          {/* Failed uploads summary */}
+          {globalErrorCount > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+              <AlertTriangle className="size-5 text-red-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-red-800">
+                  {globalErrorCount} failed upload{globalErrorCount !== 1 ? 's' : ''}
+                </p>
+                <p className="text-xs text-red-600 mt-0.5">
+                  Open the affected project and click "Retry failed uploads" to retry.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Cloud upload */}
           <div className="bg-white border border-slate-200 rounded-xl p-5">

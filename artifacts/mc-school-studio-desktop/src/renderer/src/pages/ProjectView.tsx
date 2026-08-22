@@ -15,6 +15,7 @@ import {
   CheckCircle,
   XCircle,
   Loader,
+  RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -36,10 +37,11 @@ export function ProjectView({ projectId, onBack }: Props) {
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId)
-  const { statusMap: uploadStatusMap } = useUploadStatus(projectId)
+  const { statusMap: uploadStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
   const [search, setSearch] = useState('')
   const [settingFolder, setSettingFolder] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
+  const [retrying, setRetrying] = useState(false)
 
   // Re-select the student when students refresh (to get updated photoCount)
   useEffect(() => {
@@ -72,6 +74,29 @@ export function ProjectView({ projectId, onBack }: Props) {
       }
     } catch (e) {
       addToast({ type: 'error', title: 'Watcher error', description: String(e) })
+    }
+  }
+
+  async function handleRetryFailed() {
+    if (errorPhotoIds.length === 0 || retrying) return
+    setRetrying(true)
+    let successCount = 0
+    let failCount = 0
+    for (const photoId of errorPhotoIds) {
+      try {
+        const result = await window.api.invoke('upload:retry', { photoId }) as { ok: boolean; error?: string }
+        if (result.ok) successCount++
+        else failCount++
+      } catch {
+        failCount++
+      }
+    }
+    setRetrying(false)
+    await reloadUploadStatus()
+    if (failCount === 0) {
+      addToast({ type: 'success', title: 'Retry complete', description: `${successCount} photo${successCount !== 1 ? 's' : ''} uploaded successfully` })
+    } else {
+      addToast({ type: 'error', title: 'Retry finished with errors', description: `${successCount} succeeded, ${failCount} still failed` })
     }
   }
 
@@ -184,6 +209,26 @@ export function ProjectView({ projectId, onBack }: Props) {
               />
             </div>
           </div>
+
+          {/* Retry failed uploads button */}
+          {errorPhotoIds.length > 0 && (
+            <div className="px-3 py-2 border-b border-red-100 bg-red-50">
+              <button
+                onClick={handleRetryFailed}
+                disabled={retrying}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-60 rounded-md px-2 py-1.5 transition-colors"
+              >
+                {retrying ? (
+                  <Loader className="size-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3" />
+                )}
+                {retrying
+                  ? 'Retrying…'
+                  : `Retry ${errorPhotoIds.length} failed upload${errorPhotoIds.length !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          )}
 
           {/* Student list */}
           <div className="flex-1 overflow-y-auto">

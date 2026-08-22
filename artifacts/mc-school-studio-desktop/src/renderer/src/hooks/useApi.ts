@@ -244,6 +244,8 @@ export interface StudentUploadSummary {
 export function useUploadStatus(projectId: number | null) {
   // Map from studentId → counts
   const [statusMap, setStatusMap] = useState<Map<number, StudentUploadSummary>>(new Map())
+  // Photo IDs with error status in this project
+  const [errorPhotoIds, setErrorPhotoIds] = useState<number[]>([])
 
   const load = useCallback(async () => {
     if (!projectId) return
@@ -254,6 +256,7 @@ export function useUploadStatus(projectId: number | null) {
     }>
 
     const map = new Map<number, StudentUploadSummary>()
+    const errIds: number[] = []
     for (const row of rows) {
       if (!row.studentId) continue
       const existing = map.get(row.studentId) ?? { pending: 0, uploading: 0, done: 0, error: 0, total: 0 }
@@ -261,10 +264,11 @@ export function useUploadStatus(projectId: number | null) {
       if (row.uploadStatus === 'pending') existing.pending++
       else if (row.uploadStatus === 'uploading') existing.uploading++
       else if (row.uploadStatus === 'done') existing.done++
-      else if (row.uploadStatus === 'error') existing.error++
+      else if (row.uploadStatus === 'error') { existing.error++; errIds.push(row.id) }
       map.set(row.studentId, existing)
     }
     setStatusMap(map)
+    setErrorPhotoIds(errIds)
   }, [projectId])
 
   useEffect(() => {
@@ -274,11 +278,33 @@ export function useUploadStatus(projectId: number | null) {
   // Refresh whenever any upload status changes
   useEffect(() => {
     if (!projectId) return
-    const unsub = api.on('upload:statusChanged', (event: UploadStatusChangedEvent) => {
+    const unsub = api.on('upload:statusChanged', (_event: UploadStatusChangedEvent) => {
       load()
     })
     return unsub
   }, [projectId, load])
 
-  return { statusMap, reload: load }
+  return { statusMap, errorPhotoIds, reload: load }
+}
+
+// Total failed upload count across all projects (for Settings screen)
+export function useGlobalErrorCount() {
+  const [count, setCount] = useState(0)
+
+  const load = useCallback(async () => {
+    const result = await api.invoke('upload:getGlobalErrorCount') as number
+    setCount(result)
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  // Refresh whenever any upload status changes
+  useEffect(() => {
+    const unsub = api.on('upload:statusChanged', (_event: UploadStatusChangedEvent) => {
+      load()
+    })
+    return unsub
+  }, [load])
+
+  return { count, reload: load }
 }

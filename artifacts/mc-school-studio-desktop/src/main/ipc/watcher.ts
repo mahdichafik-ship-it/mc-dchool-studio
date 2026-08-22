@@ -5,7 +5,7 @@ import { copyFileSync, mkdirSync } from 'fs'
 import { join, basename } from 'path'
 import { eq, and } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { projectsTable, studentsTable, photosTable } from '../db/schema'
+import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
 import { readQrFromImage } from '../lib/qrReader'
 import type { Photo, Student } from '../../shared/types'
 
@@ -19,6 +19,16 @@ function now() {
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
   return wins.length > 0 ? wins[0] : null
+}
+
+function safeFolderName(value: string): string {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
+}
+
+function referenceFromFilename(fileName: string, studentIds: string[]): string | null {
+  const stem = fileName.replace(/\.[^.]+$/, '')
+  const matching = studentIds.filter((id) => stem.endsWith(id) || stem.includes(`-${id}`) || stem.includes(`_${id}`))
+  return matching.sort((a, b) => b.length - a.length)[0] ?? null
 }
 
 export function registerWatcherHandlers() {
@@ -75,10 +85,15 @@ async function handleNewPhoto(projectId: number, filePath: string) {
 
   console.log(`[Watcher] New photo: ${fileName}`)
 
-  // Read QR code from photo
-  const qrResult = await readQrFromImage(filePath)
+  // Smart Shooter normally places the student reference at the end of the filename,
+  // e.g. Smith_John_class_school-001234.jpg. QR-in-image remains a fallback.
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
+  const filenameReference = referenceFromFilename(fileName, knownStudents.map((student) => student.generatedStudentId))
+  const qrResult = filenameReference ? null : await readQrFromImage(filePath)
+  const reference = filenameReference ?? qrResult?.studentId
 
-  if (!qrResult) {
+  if (!reference) {
     console.log(`[Watcher] No QR found in ${fileName}`)
     // Store as unmatched photo
     db.insert(photosTable)
@@ -107,7 +122,7 @@ async function handleNewPhoto(projectId: number, filePath: string) {
     .where(
       and(
         eq(studentsTable.projectId, projectId),
-        eq(studentsTable.generatedStudentId, qrResult.studentId),
+        eq(studentsTable.generatedStudentId, reference),
       ),
     )
     .get()
@@ -133,8 +148,12 @@ async function handleNewPhoto(projectId: number, filePath: string) {
     return
   }
 
-  // Copy photo to app photos directory
-  const destDir = join(getPhotosDir(), String(projectId), student.generatedStudentId)
+  const [classRow] = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).all()
+  const projectFolder = safeFolderName(project?.schoolName ?? `Project ${projectId}`)
+  const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
+  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
+  // Keep the source untouched; organize a durable local copy by project/class/student.
+  const destDir = join(getPhotosDir(), projectFolder, classFolder, studentFolder)
   mkdirSync(destDir, { recursive: true })
   const destPath = join(destDir, fileName)
   copyFileSync(filePath, destPath)

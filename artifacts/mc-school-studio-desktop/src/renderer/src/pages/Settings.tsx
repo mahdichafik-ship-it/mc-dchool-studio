@@ -30,6 +30,13 @@ export function Settings() {
     }
   }
 
+  async function handleChoosePhotosDir() {
+    const selected = await window.api.invoke('dialog:openFolder') as string | null
+    if (!selected) return
+    const saved = await window.api.invoke('app:setPhotosDir', { dir: selected }) as string
+    setPhotosDir(saved)
+  }
+
   async function handleSaveConfig() {
     setSaving(true)
     setSavedOk(false)
@@ -81,7 +88,7 @@ export function Settings() {
               <h3 className="font-semibold text-slate-900">Photos storage location</h3>
             </div>
             <p className="text-sm text-slate-500 mb-3">
-              Matched photos are copied here and organised by project and student ID.
+               Matched photos are copied here and organised by project, class, and student. Smart Shooter’s original files are never moved.
             </p>
             <div className="flex items-center gap-2">
               <code className="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate">
@@ -92,6 +99,9 @@ export function Settings() {
                 className="shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium"
               >
                 Open
+              </button>
+              <button onClick={handleChoosePhotosDir} className="shrink-0 text-sm text-slate-600 hover:text-slate-900 font-medium">
+                Change
               </button>
             </div>
           </div>

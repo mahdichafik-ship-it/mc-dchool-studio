@@ -40,6 +40,8 @@ const studentsTable = sqliteCore.sqliteTable("students", {
   firstName: sqliteCore.text("first_name").notNull(),
   lastName: sqliteCore.text("last_name").notNull(),
   generatedStudentId: sqliteCore.text("generated_student_id").notNull(),
+  email: sqliteCore.text("email"),
+  phone: sqliteCore.text("phone"),
   simpleQr: sqliteCore.text("simple_qr"),
   jsonQr: sqliteCore.text("json_qr"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
@@ -147,11 +149,21 @@ function initializeSchema(sqlite) {
 }
 function getPhotosDir() {
   const homeDir = electron.app.getPath("home");
-  const dir = path.join(homeDir, "MC School Studio", "photos");
+  const configured = _db?.select().from(settingsTable).where(settingsTable.key.equals("storage_root")).get()?.value;
+  const dir = configured || path.join(homeDir, "MC School Studio", "photos");
   require$$0.mkdirSync(dir, { recursive: true });
   return dir;
 }
-function now$1() {
+function setPhotosDir(dir) {
+  const clean = dir.trim();
+  if (!clean) return;
+  const db = getDb();
+  const existing = db.select().from(settingsTable).where(settingsTable.key.equals("storage_root")).get();
+  if (existing) db.update(settingsTable).set({ value: clean }).where(settingsTable.key.equals("storage_root")).run();
+  else db.insert(settingsTable).values({ key: "storage_root", value: clean }).run();
+  require$$0.mkdirSync(clean, { recursive: true });
+}
+function now$2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function enrichProject(p, classCount, studentCount, photoCount) {
@@ -194,7 +206,7 @@ function registerProjectHandlers() {
   electron.ipcMain.handle(
     "projects:setWatchFolder",
     async (_e, { projectId, folderPath }) => {
-      db.update(projectsTable).set({ watchFolder: folderPath, updatedAt: now$1() }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
+      db.update(projectsTable).set({ watchFolder: folderPath, updatedAt: now$2() }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
     }
   );
   electron.ipcMain.handle("projects:import", async (_e, { filePath }) => {
@@ -212,7 +224,7 @@ function registerProjectHandlers() {
         contactEmail: p.contactEmail ?? null,
         contactPhone: p.contactPhone ?? null,
         notes: p.notes ?? null,
-        updatedAt: now$1()
+        updatedAt: now$2()
       }).where(drizzleOrm.eq(projectsTable.id, existing.id)).run();
       projectId = existing.id;
       db.delete(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).run();
@@ -225,8 +237,8 @@ function registerProjectHandlers() {
         contactEmail: p.contactEmail ?? null,
         contactPhone: p.contactPhone ?? null,
         notes: p.notes ?? null,
-        createdAt: p.createdAt ?? now$1(),
-        updatedAt: now$1()
+        createdAt: p.createdAt ?? now$2(),
+        updatedAt: now$2()
       }).returning().get();
       projectId = result.id;
     }
@@ -235,8 +247,8 @@ function registerProjectHandlers() {
       const result = db.insert(classesTable).values({
         projectId,
         className: cls.className,
-        createdAt: cls.createdAt ?? now$1(),
-        updatedAt: cls.updatedAt ?? now$1()
+        createdAt: cls.createdAt ?? now$2(),
+        updatedAt: cls.updatedAt ?? now$2()
       }).returning().get();
       classIdMap.set(cls.id, result.id);
     }
@@ -252,8 +264,8 @@ function registerProjectHandlers() {
         generatedStudentId: stu.generatedStudentId,
         simpleQr: stu.simpleQr ?? null,
         jsonQr: stu.jsonQr ?? null,
-        createdAt: stu.createdAt ?? now$1(),
-        updatedAt: stu.updatedAt ?? now$1()
+        createdAt: stu.createdAt ?? now$2(),
+        updatedAt: stu.updatedAt ?? now$2()
       }).run();
       studentsImported++;
     }
@@ -40588,6 +40600,10 @@ async function generateThumbnail(filePath, size = 300) {
     return null;
   }
 }
+function getMainWindow$1() {
+  const wins = electron.BrowserWindow.getAllWindows();
+  return wins.length > 0 ? wins[0] : null;
+}
 function rowToPhoto(row, thumbnailData = null) {
   return {
     id: row.id,
@@ -40631,10 +40647,26 @@ function registerPhotoHandlers() {
       const destPath = path.join(destDir, photo.fileName);
       require$$0.copyFileSync(photo.filePath, destPath);
       db2.update(photosTable).set({ studentId, filePath: destPath, isMatched: true }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+      const win = getMainWindow$1();
+      win?.webContents.send("photo:reassigned", {
+        photoId,
+        projectId: photo.projectId,
+        fromStudentId: photo.studentId,
+        toStudentId: studentId
+      });
     }
   );
   electron.ipcMain.handle("photos:delete", async (_e, { photoId }) => {
+    const [photo] = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).all();
     db.delete(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    if (photo) {
+      const win = getMainWindow$1();
+      win?.webContents.send("photo:deleted", {
+        photoId,
+        projectId: photo.projectId,
+        studentId: photo.studentId
+      });
+    }
   });
   electron.ipcMain.handle("photos:unmatched", async (_e, { projectId }) => {
     const rows = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.projectId, projectId)).all().filter((r) => !r.isMatched);
@@ -40763,12 +40795,20 @@ function registerUploadHandlers() {
   );
 }
 const watchers = /* @__PURE__ */ new Map();
-function now() {
+function now$1() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function getMainWindow() {
   const wins = electron.BrowserWindow.getAllWindows();
   return wins.length > 0 ? wins[0] : null;
+}
+function safeFolderName(value) {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
+}
+function referenceFromFilename(fileName, studentIds) {
+  const stem = fileName.replace(/\.[^.]+$/, "");
+  const matching = studentIds.filter((id) => stem.endsWith(id) || stem.includes(`-${id}`) || stem.includes(`_${id}`));
+  return matching.sort((a, b) => b.length - a.length)[0] ?? null;
 }
 function registerWatcherHandlers() {
   const db = getDb();
@@ -40808,15 +40848,19 @@ async function handleNewPhoto(projectId, filePath) {
   const win = getMainWindow();
   const fileName = path.basename(filePath);
   console.log(`[Watcher] New photo: ${fileName}`);
-  const qrResult = await readQrFromImage(filePath);
-  if (!qrResult) {
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
+  const filenameReference = referenceFromFilename(fileName, knownStudents.map((student2) => student2.generatedStudentId));
+  const qrResult = filenameReference ? null : await readQrFromImage(filePath);
+  const reference = filenameReference ?? qrResult?.studentId;
+  if (!reference) {
     console.log(`[Watcher] No QR found in ${fileName}`);
     db.insert(photosTable).values({
       projectId,
       studentId: null,
       filePath,
       fileName,
-      capturedAt: now(),
+      capturedAt: now$1(),
       isMatched: false
     }).run();
     win?.webContents.send("photo:unmatched", {
@@ -40829,7 +40873,7 @@ async function handleNewPhoto(projectId, filePath) {
   const student = db.select().from(studentsTable).where(
     drizzleOrm.and(
       drizzleOrm.eq(studentsTable.projectId, projectId),
-      drizzleOrm.eq(studentsTable.generatedStudentId, qrResult.studentId)
+      drizzleOrm.eq(studentsTable.generatedStudentId, reference)
     )
   ).get();
   if (!student) {
@@ -40839,7 +40883,7 @@ async function handleNewPhoto(projectId, filePath) {
       studentId: null,
       filePath,
       fileName,
-      capturedAt: now(),
+      capturedAt: now$1(),
       isMatched: false
     }).run();
     win?.webContents.send("photo:unmatched", {
@@ -40849,7 +40893,11 @@ async function handleNewPhoto(projectId, filePath) {
     });
     return;
   }
-  const destDir = path.join(getPhotosDir(), String(projectId), student.generatedStudentId);
+  const [classRow] = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).all();
+  const projectFolder = safeFolderName(project?.schoolName ?? `Project ${projectId}`);
+  const classFolder = safeFolderName(classRow?.className ?? "Unassigned Class");
+  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`);
+  const destDir = path.join(getPhotosDir(), projectFolder, classFolder, studentFolder);
   require$$0.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
   require$$0.copyFileSync(filePath, destPath);
@@ -40858,7 +40906,7 @@ async function handleNewPhoto(projectId, filePath) {
     studentId: student.id,
     filePath: destPath,
     fileName,
-    capturedAt: now(),
+    capturedAt: now$1(),
     isMatched: true
   }).returning().get();
   console.log(`[Watcher] Matched ${fileName} → ${student.firstName} ${student.lastName}`);
@@ -40932,6 +40980,113 @@ function registerDialogHandlers() {
   electron.ipcMain.handle("app:getPhotosDir", () => {
     return getPhotosDir();
   });
+  electron.ipcMain.handle("app:setPhotosDir", (_e, { dir }) => {
+    setPhotosDir(dir);
+    return getPhotosDir();
+  });
+}
+function now() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function registerCloudHandlers() {
+  electron.ipcMain.handle("cloud:listProjects", async () => {
+    const { apiUrl, uploadKey } = getUploadConfig();
+    if (!apiUrl || !uploadKey) {
+      return { ok: false, error: "Cloud connection not configured. Set API URL and upload key in Settings." };
+    }
+    try {
+      const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${uploadKey}` },
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return { ok: false, error: body.error ?? `Server returned ${res.status}` };
+      }
+      const projects = await res.json();
+      return { ok: true, projects };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle(
+    "cloud:pullProject",
+    async (_e, { cloudProjectId }) => {
+      const { apiUrl, uploadKey } = getUploadConfig();
+      if (!apiUrl || !uploadKey) {
+        return { ok: false, error: "Cloud connection not configured" };
+      }
+      try {
+        const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProjectId}/bundle`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${uploadKey}` },
+          signal: AbortSignal.timeout(3e4)
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          return { ok: false, error: body.error ?? `Server returned ${res.status}` };
+        }
+        const bundle = await res.json();
+        const db = getDb();
+        const { project: p, classes, students } = bundle;
+        const existing = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.schoolName, p.schoolName)).get();
+        let localProjectId;
+        if (existing) {
+          db.update(projectsTable).set({
+            schoolName: p.schoolName,
+            photoDate: p.photoDate ?? null,
+            address: p.address ?? null,
+            contactName: p.contactName ?? null,
+            contactEmail: p.contactEmail ?? null,
+            contactPhone: p.contactPhone ?? null,
+            notes: p.notes ?? null,
+            updatedAt: now()
+          }).where(drizzleOrm.eq(projectsTable.id, existing.id)).run();
+          localProjectId = existing.id;
+          db.delete(classesTable).where(drizzleOrm.eq(classesTable.projectId, localProjectId)).run();
+        } else {
+          const result = db.insert(projectsTable).values({
+            schoolName: p.schoolName,
+            photoDate: p.photoDate ?? null,
+            address: p.address ?? null,
+            contactName: p.contactName ?? null,
+            contactEmail: p.contactEmail ?? null,
+            contactPhone: p.contactPhone ?? null,
+            notes: p.notes ?? null
+          }).returning().get();
+          localProjectId = result.id;
+        }
+        const classIdMap = /* @__PURE__ */ new Map();
+        let classesImported = 0;
+        for (const cls of classes) {
+          const [inserted] = db.insert(classesTable).values({ projectId: localProjectId, className: cls.className }).returning().all();
+          classIdMap.set(cls.id, inserted.id);
+          classesImported++;
+        }
+        let studentsImported = 0;
+        for (const s of students) {
+          const localClassId = classIdMap.get(s.classId);
+          if (!localClassId) continue;
+          db.insert(studentsTable).values({
+            projectId: localProjectId,
+            classId: localClassId,
+            firstName: s.firstName,
+            lastName: s.lastName,
+            generatedStudentId: s.generatedStudentId,
+            email: s.email ?? null,
+            phone: s.phone ?? null,
+            simpleQr: s.simpleQr ?? null,
+            jsonQr: s.jsonQr ?? null
+          }).run();
+          studentsImported++;
+        }
+        return { ok: true, classesImported, studentsImported };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    }
+  );
 }
 const isDev = !electron.app.isPackaged;
 function createWindow() {
@@ -40952,6 +41107,23 @@ function createWindow() {
       nodeIntegration: false
     }
   });
+  const showWindow = () => {
+    if (!mainWindow.isDestroyed()) mainWindow.show();
+  };
+  mainWindow.once("ready-to-show", showWindow);
+  setTimeout(showWindow, 3e3);
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+    const message = `The app interface could not load (${errorCode}: ${errorDescription}).`;
+    console.error(message);
+    electron.dialog.showErrorBox("MC School Studio could not open", message);
+    showWindow();
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    const message = `The app interface stopped unexpectedly: ${details.reason}.`;
+    console.error(message);
+    electron.dialog.showErrorBox("MC School Studio could not open", message);
+    showWindow();
+  });
   mainWindow.on("ready-to-show", () => {
     mainWindow.show();
   });
@@ -40969,10 +41141,16 @@ electron.app.whenReady().then(() => {
   registerWatcherHandlers();
   registerDialogHandlers();
   registerUploadHandlers();
+  registerCloudHandlers();
   createWindow();
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((error) => {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error("Failed to start MC School Studio:", message);
+  electron.dialog.showErrorBox("MC School Studio could not open", message);
+  electron.app.quit();
 });
 electron.app.on("window-all-closed", () => {
   if (process.platform !== "darwin") electron.app.quit();

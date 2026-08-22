@@ -99,7 +99,18 @@ function initializeSchema(sqlite: Database.Database) {
 
 export function getPhotosDir(): string {
   const homeDir = app.getPath('home')
-  const dir = join(homeDir, 'MC School Studio', 'photos')
+  const configured = _db?.select().from(schema.settingsTable).where(schema.settingsTable.key.equals('storage_root')).get()?.value
+  const dir = configured || join(homeDir, 'MC School Studio', 'photos')
   mkdirSync(dir, { recursive: true })
   return dir
+}
+
+export function setPhotosDir(dir: string): void {
+  const clean = dir.trim()
+  if (!clean) return
+  const db = getDb()
+  const existing = db.select().from(schema.settingsTable).where(schema.settingsTable.key.equals('storage_root')).get()
+  if (existing) db.update(schema.settingsTable).set({ value: clean }).where(schema.settingsTable.key.equals('storage_root')).run()
+  else db.insert(schema.settingsTable).values({ key: 'storage_root', value: clean }).run()
+  mkdirSync(clean, { recursive: true })
 }

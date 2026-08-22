@@ -12090,18 +12090,18 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$m = [
+const __iconNode$o = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$m);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$o);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$l = [
+const __iconNode$n = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12111,14 +12111,14 @@ const __iconNode$l = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$l);
+const BookOpen = createLucideIcon("book-open", __iconNode$n);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$k = [
+const __iconNode$m = [
   [
     "path",
     {
@@ -12128,15 +12128,38 @@ const __iconNode$k = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$k);
+const Camera = createLucideIcon("camera", __iconNode$m);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$j = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$j);
+const __iconNode$l = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$l);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$k = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$k);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$j = [
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+];
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$j);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12145,10 +12168,10 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$j);
  */
 const __iconNode$i = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$i);
+const CircleX = createLucideIcon("circle-x", __iconNode$i);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12156,10 +12179,9 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$i);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$h = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$h);
+const Cloud = createLucideIcon("cloud", __iconNode$h);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12167,11 +12189,11 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$h);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$g = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$g);
+const Download = createLucideIcon("download", __iconNode$g);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12179,9 +12201,11 @@ const CircleX = createLucideIcon("circle-x", __iconNode$g);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$f = [
-  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const Cloud = createLucideIcon("cloud", __iconNode$f);
+const ExternalLink = createLucideIcon("external-link", __iconNode$f);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12189,11 +12213,15 @@ const Cloud = createLucideIcon("cloud", __iconNode$f);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$e = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+  [
+    "path",
+    {
+      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
+      key: "usdka0"
+    }
+  ]
 ];
-const ExternalLink = createLucideIcon("external-link", __iconNode$e);
+const FolderOpen = createLucideIcon("folder-open", __iconNode$e);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12204,12 +12232,12 @@ const __iconNode$d = [
   [
     "path",
     {
-      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
-      key: "usdka0"
+      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+      key: "1kt360"
     }
   ]
 ];
-const FolderOpen = createLucideIcon("folder-open", __iconNode$d);
+const Folder = createLucideIcon("folder", __iconNode$d);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12217,15 +12245,11 @@ const FolderOpen = createLucideIcon("folder-open", __iconNode$d);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$c = [
-  [
-    "path",
-    {
-      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
-      key: "1kt360"
-    }
-  ]
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
 ];
-const Folder = createLucideIcon("folder", __iconNode$c);
+const Image = createLucideIcon("image", __iconNode$c);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12233,11 +12257,11 @@ const Folder = createLucideIcon("folder", __iconNode$c);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$b = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
 ];
-const Image = createLucideIcon("image", __iconNode$b);
+const Info = createLucideIcon("info", __iconNode$b);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12245,11 +12269,12 @@ const Image = createLucideIcon("image", __iconNode$b);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$a = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
+  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
+  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
+  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
 ];
-const Info = createLucideIcon("info", __iconNode$a);
+const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$a);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12257,19 +12282,6 @@ const Info = createLucideIcon("info", __iconNode$a);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$9 = [
-  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
-  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
-  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
-  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
-];
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$9);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$8 = [
   ["path", { d: "M12 2v4", key: "3427ic" }],
   ["path", { d: "m16.2 7.8 2.9-2.9", key: "r700ao" }],
   ["path", { d: "M18 12h4", key: "wj9ykh" }],
@@ -12279,14 +12291,14 @@ const __iconNode$8 = [
   ["path", { d: "M2 12h4", key: "j09sii" }],
   ["path", { d: "m4.9 4.9 2.9 2.9", key: "giyufr" }]
 ];
-const Loader = createLucideIcon("loader", __iconNode$8);
+const Loader = createLucideIcon("loader", __iconNode$9);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$7 = [
+const __iconNode$8 = [
   [
     "path",
     {
@@ -12295,7 +12307,20 @@ const __iconNode$7 = [
     }
   ]
 ];
-const Play = createLucideIcon("play", __iconNode$7);
+const Play = createLucideIcon("play", __iconNode$8);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$7 = [
+  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
+  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
+  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
+  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+];
+const RefreshCw = createLucideIcon("refresh-cw", __iconNode$7);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -15829,6 +15854,38 @@ function useProject(projectId) {
   reactExports.useEffect(() => {
     load();
   }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId) return;
+    let timeoutId = null;
+    const scheduleReload = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        load();
+      }, 300);
+    };
+    const unsubMatched = api.on("photo:matched", (event) => {
+      if (event.student.projectId !== projectId) return;
+      scheduleReload();
+    });
+    const unsubUnmatched = api.on("photo:unmatched", (_event) => {
+      scheduleReload();
+    });
+    const unsubDeleted = api.on("photo:deleted", (event) => {
+      if (event.projectId !== projectId) return;
+      scheduleReload();
+    });
+    const unsubReassigned = api.on("photo:reassigned", (event) => {
+      if (event.projectId !== projectId) return;
+      scheduleReload();
+    });
+    return () => {
+      unsubMatched();
+      unsubUnmatched();
+      unsubDeleted();
+      unsubReassigned();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [projectId, load]);
   return { data, loading, reload: load };
 }
 function useClasses(projectId) {
@@ -15868,15 +15925,28 @@ function useStudents(projectId, classId) {
   reactExports.useEffect(() => {
     if (!projectId) return;
     let timeoutId = null;
-    const unsub = api.on("photo:matched", (event) => {
-      if (event.student.projectId !== projectId) return;
+    const scheduleReload = () => {
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         load();
       }, 300);
+    };
+    const unsubMatched = api.on("photo:matched", (event) => {
+      if (event.student.projectId !== projectId) return;
+      scheduleReload();
+    });
+    const unsubDeleted = api.on("photo:deleted", (event) => {
+      if (event.projectId !== projectId) return;
+      scheduleReload();
+    });
+    const unsubReassigned = api.on("photo:reassigned", (event) => {
+      if (event.projectId !== projectId) return;
+      scheduleReload();
     });
     return () => {
-      unsub();
+      unsubMatched();
+      unsubDeleted();
+      unsubReassigned();
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [projectId, load]);
@@ -16015,36 +16085,59 @@ function Toaster() {
 }
 function ProjectList({ onOpenProject }) {
   const { data: projects, loading, error, reload } = useProjects();
-  const [importing, setImporting] = reactExports.useState(false);
-  async function handleImport() {
-    const filePath = await window.api.invoke("dialog:openFile", {
-      filters: [{ name: "MC School Studio Export", extensions: ["json"] }]
-    });
-    if (!filePath) return;
-    setImporting(true);
+  const [syncOpen, setSyncOpen] = reactExports.useState(false);
+  const [cloudProjects, setCloudProjects] = reactExports.useState([]);
+  const [syncLoading, setSyncLoading] = reactExports.useState(false);
+  const [syncError, setSyncError] = reactExports.useState(null);
+  const [pullingId, setPullingId] = reactExports.useState(null);
+  async function handleOpenSync() {
+    setSyncOpen(true);
+    setSyncError(null);
+    setCloudProjects([]);
+    setSyncLoading(true);
     try {
-      const result = await window.api.invoke("projects:import", { filePath });
-      addToast({
-        type: "success",
-        title: `Imported: ${result.project.schoolName}`,
-        description: `${result.classesImported} classes, ${result.studentsImported} students`
-      });
-      reload();
+      const result = await window.api.invoke("cloud:listProjects");
+      if (result.ok && result.projects) {
+        setCloudProjects(result.projects);
+      } else {
+        setSyncError(result.error ?? "Failed to load cloud projects");
+      }
     } catch (e) {
-      addToast({ type: "error", title: "Import failed", description: String(e) });
+      setSyncError(String(e));
     } finally {
-      setImporting(false);
+      setSyncLoading(false);
+    }
+  }
+  async function handlePullProject(cp) {
+    setPullingId(cp.id);
+    try {
+      const result = await window.api.invoke("cloud:pullProject", { cloudProjectId: cp.id });
+      if (result.ok) {
+        addToast({
+          type: "success",
+          title: `Synced: ${cp.schoolName}`,
+          description: `${result.classesImported} classes · ${result.studentsImported} students`
+        });
+        reload();
+        setSyncOpen(false);
+      } else {
+        addToast({ type: "error", title: "Sync failed", description: result.error });
+      }
+    } catch (e) {
+      addToast({ type: "error", title: "Sync failed", description: String(e) });
+    } finally {
+      setPullingId(null);
     }
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-xl font-bold text-slate-900", children: "Projects" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mt-0.5", children: "Import a school project from the web app to get started" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mt-0.5", children: "Pull a project from the cloud to get started" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: handleImport, disabled: importing, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-4" }),
-        importing ? "Importing…" : "Import Project"
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: handleOpenSync, className: "bg-teal-600 hover:bg-teal-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-4" }),
+        "Sync from Cloud"
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 overflow-auto px-8 py-6", children: [
@@ -16052,22 +16145,116 @@ function ProjectList({ onOpenProject }) {
       error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-red-500 text-sm bg-red-50 p-4 rounded-lg", children: error }),
       !loading && projects.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-64 text-center", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(FolderOpen, { className: "size-8 text-slate-400" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-700 mb-1", children: "No projects yet" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 max-w-xs", children: "Prepare your school project on the web app, export it as JSON, then import it here." }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { className: "mt-4", onClick: handleImport, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-4" }),
-          "Import First Project"
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-700 mb-1", children: "No local projects yet" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 max-w-xs", children: "Create and prepare your project on the web app, then pull it here to start the shoot." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { className: "mt-4 bg-teal-600 hover:bg-teal-700", onClick: handleOpenSync, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-4" }),
+          "Sync from Cloud"
         ] })
       ] }),
-      !loading && projects.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 gap-3 max-w-3xl", children: projects.map((p) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-        ProjectCard,
-        {
-          project: p,
-          onClick: () => onOpenProject(p.id, p.schoolName)
-        },
-        p.id
-      )) })
-    ] })
+      !loading && projects.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 gap-3 max-w-3xl", children: projects.map((p) => /* @__PURE__ */ jsxRuntimeExports.jsx(ProjectCard, { project: p, onClick: () => onOpenProject(p.id, p.schoolName) }, p.id)) })
+    ] }),
+    syncOpen && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-6 py-5 border-b border-slate-200 flex items-center justify-between", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-5 text-teal-600" }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "font-semibold text-slate-900", children: "Sync from Cloud" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500", children: "Select a project to pull locally" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: () => {
+              if (!pullingId) setSyncOpen(false);
+            },
+            className: "text-slate-400 hover:text-slate-600 text-xl leading-none",
+            children: "×"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 overflow-auto p-4", children: [
+        syncLoading && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-2 py-12 text-slate-500 text-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-4 animate-spin" }),
+          "Connecting to cloud…"
+        ] }),
+        syncError && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-5 text-red-500 shrink-0 mt-0.5" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-700", children: "Could not reach cloud" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mt-1", children: syncError }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-2", children: "Make sure the API URL and upload key are configured in Settings." })
+          ] })
+        ] }),
+        !syncLoading && !syncError && cloudProjects.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center py-12 text-slate-500 text-sm", children: "No projects found on the cloud." }),
+        !syncLoading && !syncError && cloudProjects.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: cloudProjects.map((cp) => {
+          const isPulling = pullingId === cp.id;
+          const alreadyLocal = projects.some(
+            (lp) => lp.schoolName === cp.schoolName
+          );
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              className: "flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3 hover:border-teal-300 hover:bg-teal-50/40 transition-colors",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 min-w-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-9 h-9 rounded-lg bg-teal-50 flex items-center justify-center shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-4 text-teal-600" }) }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-slate-900 truncate", children: cp.schoolName }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-500 mt-0.5", children: [
+                      cp.classCount,
+                      " classes · ",
+                      cp.studentCount,
+                      " students",
+                      cp.photoDate ? ` · ${cp.photoDate}` : ""
+                    ] })
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 shrink-0 ml-3", children: [
+                  alreadyLocal && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", className: "text-xs text-slate-400", children: "Local copy exists" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "button",
+                    {
+                      onClick: () => handlePullProject(cp),
+                      disabled: !!pullingId,
+                      className: "flex items-center gap-1.5 text-sm px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white rounded-lg transition-colors",
+                      children: [
+                        isPulling ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3.5" }),
+                        isPulling ? "Pulling…" : alreadyLocal ? "Re-sync" : "Pull"
+                      ]
+                    }
+                  )
+                ] })
+              ]
+            },
+            cp.id
+          );
+        }) })
+      ] }),
+      !syncLoading && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-6 py-3 border-t border-slate-100 flex justify-between items-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            onClick: handleOpenSync,
+            className: "flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-3" }),
+              "Refresh list"
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: () => setSyncOpen(false),
+            disabled: !!pullingId,
+            className: "text-sm text-slate-500 hover:text-slate-700 disabled:opacity-40",
+            children: "Close"
+          }
+        )
+      ] })
+    ] }) })
   ] });
 }
 function ProjectCard({ project: p, onClick }) {
@@ -16592,6 +16779,12 @@ function Settings() {
       await window.api.invoke("app:openFile", { filePath: photosDir });
     }
   }
+  async function handleChoosePhotosDir() {
+    const selected = await window.api.invoke("dialog:openFolder");
+    if (!selected) return;
+    const saved = await window.api.invoke("app:setPhotosDir", { dir: selected });
+    setPhotosDir(saved);
+  }
   async function handleSaveConfig() {
     setSaving(true);
     setSavedOk(false);
@@ -16633,7 +16826,7 @@ function Settings() {
           /* @__PURE__ */ jsxRuntimeExports.jsx(FolderOpen, { className: "size-5 text-teal-600" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Photos storage location" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-3", children: "Matched photos are copied here and organised by project and student ID." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-3", children: "Matched photos are copied here and organised by project, class, and student. Smart Shooter’s original files are never moved." }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "flex-1 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate", children: photosDir || "Loading…" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -16643,7 +16836,8 @@ function Settings() {
               className: "shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium",
               children: "Open"
             }
-          )
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: handleChoosePhotosDir, className: "shrink-0 text-sm text-slate-600 hover:text-slate-900 font-medium", children: "Change" })
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [

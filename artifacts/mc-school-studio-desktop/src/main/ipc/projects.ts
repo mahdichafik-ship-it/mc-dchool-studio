@@ -1,12 +1,17 @@
 import { ipcMain } from 'electron'
-import { readFileSync } from 'fs'
+import { readFileSync, mkdirSync } from 'fs'
+import { join } from 'path'
 import { eq, count } from 'drizzle-orm'
-import { getDb } from '../db'
+import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
 import type { Project, Class, Student, ImportResult } from '../../shared/types'
 
 function now() {
   return new Date().toISOString()
+}
+
+function safeFolderName(value: string): string {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
 }
 
 function enrichProject(
@@ -36,6 +41,28 @@ function enrichProject(
 export function registerProjectHandlers() {
   const db = getDb()
 
+  function prepareProjectFolders(projectId: number): void {
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (!project) return
+
+    const projectDir = join(getPhotosDir(), safeFolderName(project.schoolName))
+    mkdirSync(projectDir, { recursive: true })
+
+    const classes = db.select().from(classesTable).where(eq(classesTable.projectId, projectId)).all()
+    for (const cls of classes) {
+      const classDir = join(projectDir, safeFolderName(cls.className))
+      mkdirSync(classDir, { recursive: true })
+
+      const students = db.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
+      for (const student of students) {
+        mkdirSync(
+          join(classDir, safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+          { recursive: true },
+        )
+      }
+    }
+  }
+
   ipcMain.handle('projects:list', async (): Promise<Project[]> => {
     const projects = db.select().from(projectsTable).orderBy(projectsTable.updatedAt).all()
     return projects.map((p) => {
@@ -64,6 +91,7 @@ export function registerProjectHandlers() {
     const [{ classCount }] = db.select({ classCount: count() }).from(classesTable).where(eq(classesTable.projectId, p.id)).all()
     const [{ studentCount }] = db.select({ studentCount: count() }).from(studentsTable).where(eq(studentsTable.projectId, p.id)).all()
     const [{ photoCount }] = db.select({ photoCount: count() }).from(photosTable).where(eq(photosTable.projectId, p.id)).all()
+    prepareProjectFolders(projectId)
     return enrichProject(p, classCount, studentCount, photoCount)
   })
 

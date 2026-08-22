@@ -149,7 +149,7 @@ function initializeSchema(sqlite) {
 }
 function getPhotosDir() {
   const homeDir = electron.app.getPath("home");
-  const configured = _db?.select().from(settingsTable).where(settingsTable.key.equals("storage_root")).get()?.value;
+  const configured = _db?.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, "storage_root")).get()?.value;
   const dir = configured || path.join(homeDir, "MC School Studio", "photos");
   require$$0.mkdirSync(dir, { recursive: true });
   return dir;
@@ -158,13 +158,16 @@ function setPhotosDir(dir) {
   const clean = dir.trim();
   if (!clean) return;
   const db = getDb();
-  const existing = db.select().from(settingsTable).where(settingsTable.key.equals("storage_root")).get();
-  if (existing) db.update(settingsTable).set({ value: clean }).where(settingsTable.key.equals("storage_root")).run();
+  const existing = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, "storage_root")).get();
+  if (existing) db.update(settingsTable).set({ value: clean }).where(drizzleOrm.eq(settingsTable.key, "storage_root")).run();
   else db.insert(settingsTable).values({ key: "storage_root", value: clean }).run();
   require$$0.mkdirSync(clean, { recursive: true });
 }
 function now$2() {
   return (/* @__PURE__ */ new Date()).toISOString();
+}
+function safeFolderName$1(value) {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
 function enrichProject(p, classCount, studentCount, photoCount) {
   return {
@@ -186,6 +189,24 @@ function enrichProject(p, classCount, studentCount, photoCount) {
 }
 function registerProjectHandlers() {
   const db = getDb();
+  function prepareProjectFolders(projectId) {
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    if (!project) return;
+    const projectDir = path.join(getPhotosDir(), safeFolderName$1(project.schoolName));
+    require$$0.mkdirSync(projectDir, { recursive: true });
+    const classes = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
+    for (const cls of classes) {
+      const classDir = path.join(projectDir, safeFolderName$1(cls.className));
+      require$$0.mkdirSync(classDir, { recursive: true });
+      const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.classId, cls.id)).all();
+      for (const student of students) {
+        require$$0.mkdirSync(
+          path.join(classDir, safeFolderName$1(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+          { recursive: true }
+        );
+      }
+    }
+  }
   electron.ipcMain.handle("projects:list", async () => {
     const projects = db.select().from(projectsTable).orderBy(projectsTable.updatedAt).all();
     return projects.map((p) => {
@@ -201,6 +222,7 @@ function registerProjectHandlers() {
     const [{ classCount }] = db.select({ classCount: drizzleOrm.count() }).from(classesTable).where(drizzleOrm.eq(classesTable.projectId, p.id)).all();
     const [{ studentCount }] = db.select({ studentCount: drizzleOrm.count() }).from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, p.id)).all();
     const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(photosTable).where(drizzleOrm.eq(photosTable.projectId, p.id)).all();
+    prepareProjectFolders(projectId);
     return enrichProject(p, classCount, studentCount, photoCount);
   });
   electron.ipcMain.handle(

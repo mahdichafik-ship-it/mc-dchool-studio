@@ -13,10 +13,10 @@ name: Desktop Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
-  contents: write   # required to create/update GitHub Releases and upload assets
+  contents: write # required to create/update GitHub Releases and upload assets
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -30,6 +30,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify macOS signing credentials
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          for secret_name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!secret_name:-}" ]; then
+              missing+=("$secret_name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Tagged macOS releases require signing and notarization secrets: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -56,9 +76,15 @@ jobs:
         # automatically (no --config path needed).
         run: pnpm --filter @workspace/mc-school-studio-desktop run dist:mac
         env:
-          # Disable notarization — set CSC_LINK / CSC_KEY_PASSWORD in repo
-          # secrets if you have an Apple Developer certificate.
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # The preflight step requires all macOS signing and notarization
+          # secrets before this tagged release can be packaged.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "true"
+          # These are used by electron-builder's macOS notarization step.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload DMG to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -74,6 +100,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify Windows signing credentials
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          $requiredSecrets = @("WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD")
+          $missing = $requiredSecrets | Where-Object {
+            [string]::IsNullOrWhiteSpace(
+              [Environment]::GetEnvironmentVariable($_)
+            )
+          }
+
+          if ($missing) {
+            Write-Error (
+              "Tagged Windows releases require signing secrets: " +
+              ($missing -join ", ")
+            )
+            exit 1
+          }
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -98,6 +145,11 @@ jobs:
         # the desktop package directory, so electron-builder.yml is found
         # automatically (no --config path needed).
         run: pnpm --filter @workspace/mc-school-studio-desktop run dist:win
+        env:
+          # electron-builder uses the Windows-specific variables for the
+          # Authenticode certificate and its private-key password.
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Upload installer to GitHub Release
         uses: softprops/action-gh-release@v2

@@ -56,6 +56,70 @@ pnpm --filter @workspace/mc-school-studio-desktop run dist
 
 Installers are written to `artifacts/mc-school-studio-desktop/dist/release/`.
 
+### One-time code-signing setup
+
+Tagged releases require the signing secrets below and stop before packaging if
+any required secret is missing. Keep certificate files and passwords private;
+add them only as GitHub Actions repository or environment secrets, never to
+the repository.
+
+#### macOS signing and notarization
+
+1. Join the [Apple Developer Program](https://developer.apple.com/programs/)
+   and create a **Developer ID Application** certificate in
+   **Certificates, Identifiers & Profiles**.
+2. Install the certificate in Keychain Access, export it as a `.p12` file, and
+   protect the export with a strong password.
+3. Convert the `.p12` file to one-line base64 and add the result as the
+   `CSC_LINK` GitHub Actions secret. For example:
+
+   ```bash
+   # macOS
+   base64 -i developer-id-application.p12 | pbcopy
+
+   # Linux
+   base64 -w 0 developer-id-application.p12
+   ```
+
+4. Add the `.p12` export password as `CSC_KEY_PASSWORD`.
+5. Create an app-specific password at
+   [appleid.apple.com](https://appleid.apple.com/), then add these secrets for
+   notarization:
+
+   - `APPLE_ID` — the Apple ID used for the developer account
+   - `APPLE_APP_SPECIFIC_PASSWORD` — the app-specific password
+   - `APPLE_TEAM_ID` — the Team ID shown in Apple Developer account
+     membership details
+
+The macOS job verifies all five values before packaging and then sets
+`CSC_IDENTITY_AUTO_DISCOVERY` to `true`. `electron-builder.yml` enables
+notarization for the macOS target, so a tagged release cannot publish an
+unsigned or unnotarized DMG.
+
+#### Windows signing
+
+1. Obtain a code-signing certificate that includes its private key from your
+   certificate authority and export it as a password-protected `.p12` or
+   `.pfx` file.
+2. Convert the certificate file to one-line base64 and add it as the
+   `WIN_CSC_LINK` GitHub Actions secret. In PowerShell:
+
+   ```powershell
+   [Convert]::ToBase64String(
+     [IO.File]::ReadAllBytes("code-signing.pfx")
+   ) | Set-Clipboard
+   ```
+
+3. Add the certificate export password as `WIN_CSC_KEY_PASSWORD`.
+
+The Windows job verifies both values before packaging and passes them to
+electron-builder, which Authenticode-signs the `.exe` installer. A tagged
+release cannot publish an unsigned installer; local development builds can
+still be unsigned.
+
+After configuring the secrets, push a version tag and confirm the resulting
+GitHub Release assets install without Gatekeeper or SmartScreen warnings.
+
 ## CI/CD — automated installers via GitHub Actions
 
 Pushing a `v*` tag triggers `.github/workflows/desktop-release.yml`, which

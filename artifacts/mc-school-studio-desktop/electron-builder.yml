@@ -34,11 +34,12 @@ nsis:
   createDesktopShortcut: always
 
 mac:
-  entitlementsInherit: build/entitlements.mac.plist
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   extendInfo:
     - NSDocumentsFolderUsageDescription: Required to store photo data.
     - NSDownloadsFolderUsageDescription: Required to import project files.
-  notarize: false
+  notarize: true
   target:
     - target: dmg
       arch:

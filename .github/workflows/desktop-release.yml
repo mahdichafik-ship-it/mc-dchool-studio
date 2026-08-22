@@ -31,6 +31,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify release tag matches app version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "const fs=require('fs'); const tag=process.env.RELEASE_TAG; const version=JSON.parse(fs.readFileSync('artifacts/mc-school-studio-desktop/package.json','utf8')).version; if(tag !== 'v'+version){console.error('Release tag '+tag+' must match desktop package version v'+version);process.exit(1)}"
+
       - name: Verify macOS signing credentials
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -89,7 +94,11 @@ jobs:
       - name: Upload DMG to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/mc-school-studio-desktop/dist/release/*.dmg
+          files: |
+            artifacts/mc-school-studio-desktop/dist/release/*.dmg
+            artifacts/mc-school-studio-desktop/dist/release/*.zip
+            artifacts/mc-school-studio-desktop/dist/release/latest-mac.yml
+            artifacts/mc-school-studio-desktop/dist/release/*.blockmap
 
   # ---------------------------------------------------------------------------
   # Windows — produces an NSIS .exe installer (x64)
@@ -100,6 +109,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify release tag matches app version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "const fs=require('fs'); const tag=process.env.RELEASE_TAG; const version=JSON.parse(fs.readFileSync('artifacts/mc-school-studio-desktop/package.json','utf8')).version; if(tag !== 'v'+version){console.error('Release tag '+tag+' must match desktop package version v'+version);process.exit(1)}"
 
       - name: Verify Windows signing credentials
         shell: pwsh
@@ -154,4 +168,7 @@ jobs:
       - name: Upload installer to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/mc-school-studio-desktop/dist/release/*.exe
+          files: |
+            artifacts/mc-school-studio-desktop/dist/release/*.exe
+            artifacts/mc-school-studio-desktop/dist/release/latest.yml
+            artifacts/mc-school-studio-desktop/dist/release/*.blockmap

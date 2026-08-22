@@ -1,8 +1,24 @@
 import React, { useState, useEffect } from 'react'
-import { FolderOpen, Cloud, Info, CheckCircle, XCircle, Loader, AlertTriangle } from 'lucide-react'
+import { FolderOpen, Cloud, Info, CheckCircle, XCircle, Loader, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { useGlobalErrorCount } from '@/hooks/useApi'
 
 type ConnectionStatus = 'idle' | 'testing' | 'ok' | 'error'
+type UpdateStatus =
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+  | 'unsupported'
+
+interface UpdateState {
+  status: UpdateStatus
+  version?: string
+  percent?: number
+  message?: string
+}
 
 export function Settings() {
   const [photosDir, setPhotosDir] = useState<string>('')
@@ -12,6 +28,7 @@ export function Settings() {
   const [savedOk, setSavedOk] = useState(false)
   const [connStatus, setConnStatus] = useState<ConnectionStatus>('idle')
   const [connError, setConnError] = useState<string | null>(null)
+  const [updateState, setUpdateState] = useState<UpdateState>({ status: 'unsupported' })
   const { count: globalErrorCount } = useGlobalErrorCount()
 
   useEffect(() => {
@@ -24,6 +41,9 @@ export function Settings() {
       setApiUrl(url ?? '')
       setUploadKey(key ?? '')
     })
+
+    window.api.invoke('update:getState').then(setUpdateState)
+    return window.api.on('update:status', setUpdateState)
   }, [])
 
   async function handleOpenPhotosDir() {
@@ -68,6 +88,38 @@ export function Settings() {
     } catch (e) {
       setConnStatus('error')
       setConnError(String(e))
+    }
+  }
+
+  async function handleCheckForUpdates() {
+    setUpdateState({ status: 'checking' })
+    const result = await window.api.invoke('update:check')
+    setUpdateState(result)
+  }
+
+  async function handleInstallUpdate() {
+    const result = await window.api.invoke('update:install')
+    setUpdateState(result)
+  }
+
+  function updateStatusMessage() {
+    switch (updateState.status) {
+      case 'checking':
+        return 'Checking for updates…'
+      case 'available':
+        return updateState.version
+          ? `Version ${updateState.version} is available.`
+          : 'An update is available.'
+      case 'downloading':
+        return `Downloading update${updateState.percent !== undefined ? ` (${Math.round(updateState.percent)}%)` : '…'}`
+      case 'downloaded':
+        return 'Update downloaded. Restart when ready to install it.'
+      case 'not-available':
+        return 'You’re up to date.'
+      case 'error':
+        return 'Could not check for updates. Try again later.'
+      default:
+        return 'Updates are checked from an installed release.'
     }
   }
 
@@ -122,6 +174,33 @@ export function Settings() {
               </div>
             </div>
           )}
+
+          {/* Desktop updates */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <RefreshCw className="size-5 text-teal-600" />
+              <h3 className="font-semibold text-slate-900">App updates</h3>
+            </div>
+            <p className="text-sm text-slate-500 mb-4">
+              Check whether a newer signed version of MC School Studio is available.
+            </p>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={updateState.status === 'downloaded' ? handleInstallUpdate : handleCheckForUpdates}
+                disabled={updateState.status === 'checking' || updateState.status === 'downloading'}
+              >
+                {updateState.status === 'checking' || updateState.status === 'downloading' ? (
+                  <Loader className="animate-spin" />
+                ) : (
+                  <RefreshCw />
+                )}
+                {updateState.status === 'downloaded' ? 'Restart and install' : 'Check for updates'}
+              </Button>
+              <span className="text-xs text-slate-500">{updateStatusMessage()}</span>
+            </div>
+          </div>
 
           {/* Cloud upload */}
           <div className="bg-white border border-slate-200 rounded-xl p-5">

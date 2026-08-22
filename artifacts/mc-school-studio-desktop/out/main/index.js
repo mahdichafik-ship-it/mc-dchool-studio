@@ -13,6 +13,7 @@ const require$$1$1 = require("zlib");
 const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
 const chokidar = require("chokidar");
+const electronUpdater = require("electron-updater");
 const projectsTable = sqliteCore.sqliteTable("projects", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
   schoolName: sqliteCore.text("school_name").notNull(),
@@ -28677,15 +28678,15 @@ const makeIssue = (params) => {
       message: issueData.message
     };
   }
-  let errorMessage = "";
+  let errorMessage2 = "";
   const maps = errorMaps.filter((m) => !!m).slice().reverse();
   for (const map of maps) {
-    errorMessage = map(fullIssue, { data, defaultError: errorMessage }).message;
+    errorMessage2 = map(fullIssue, { data, defaultError: errorMessage2 }).message;
   }
   return {
     ...issueData,
     path: fullPath,
-    message: errorMessage
+    message: errorMessage2
   };
 };
 const EMPTY_PATH = [];
@@ -41140,9 +41141,158 @@ function registerCloudHandlers() {
     }
   );
 }
+let mainWindow = null;
+let currentState = { status: "unsupported" };
+let checkPromise = null;
+let updateDialogShowing = false;
+let installDialogShowing = false;
+let updaterEventsRegistered = false;
+let ipcHandlersRegistered = false;
+let availableUpdate = null;
+function setState(state) {
+  currentState = state;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update:status", state);
+  }
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+async function promptToDownload(info) {
+  if (updateDialogShowing || !mainWindow || mainWindow.isDestroyed()) return;
+  updateDialogShowing = true;
+  try {
+    const result = await electron.dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Update available",
+      message: `MC School Studio ${info.version} is available.`,
+      detail: "Download the update now. The app will ask before restarting to install it.",
+      buttons: ["Download update", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (result.response === 0) {
+      try {
+        await electronUpdater.autoUpdater.downloadUpdate();
+      } catch (error) {
+        setState({ status: "error", message: errorMessage(error) });
+      }
+    }
+  } finally {
+    updateDialogShowing = false;
+  }
+}
+async function promptToInstall() {
+  if (installDialogShowing || !mainWindow || mainWindow.isDestroyed()) return;
+  installDialogShowing = true;
+  try {
+    const result = await electron.dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Update ready to install",
+      message: "The latest version of MC School Studio has finished downloading.",
+      detail: "Restart the app now to install the update, or choose Later to install it when the app closes.",
+      buttons: ["Restart and install", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (result.response === 0) {
+      electronUpdater.autoUpdater.quitAndInstall();
+    }
+  } finally {
+    installDialogShowing = false;
+  }
+}
+function registerUpdaterEvents() {
+  electronUpdater.autoUpdater.on("checking-for-update", () => {
+    setState({ status: "checking" });
+  });
+  electronUpdater.autoUpdater.on("update-available", (info) => {
+    availableUpdate = info;
+    setState({ status: "available", version: info.version });
+    void promptToDownload(info);
+  });
+  electronUpdater.autoUpdater.on("update-not-available", (info) => {
+    setState({ status: "not-available", version: info.version });
+  });
+  electronUpdater.autoUpdater.on("download-progress", (progress) => {
+    setState({
+      status: "downloading",
+      percent: progress.percent,
+      message: `${Math.round(progress.percent)}%`
+    });
+  });
+  electronUpdater.autoUpdater.on("update-downloaded", (info) => {
+    availableUpdate = null;
+    setState({ status: "downloaded", version: info.version, percent: 100 });
+    void promptToInstall();
+  });
+  electronUpdater.autoUpdater.on("error", (error) => {
+    console.error("Failed to check for desktop updates:", error);
+    setState({ status: "error", message: errorMessage(error) });
+  });
+}
+function checkForUpdates() {
+  if (!electron.app.isPackaged) {
+    const state = {
+      status: "unsupported",
+      message: "Updates are checked from an installed release."
+    };
+    setState(state);
+    return Promise.resolve(state);
+  }
+  if (checkPromise) return checkPromise;
+  setState({ status: "checking" });
+  checkPromise = Promise.resolve().then(() => electronUpdater.autoUpdater.checkForUpdates()).then((result) => {
+    if (!result) {
+      return currentState;
+    }
+    return currentState.status === "checking" ? { status: "not-available", version: result.updateInfo.version } : currentState;
+  }).catch((error) => {
+    const state = { status: "error", message: errorMessage(error) };
+    setState(state);
+    return state;
+  }).finally(() => {
+    checkPromise = null;
+  });
+  return checkPromise;
+}
+function registerUpdateHandlers(window2) {
+  mainWindow = window2;
+  if (!updaterEventsRegistered) {
+    registerUpdaterEvents();
+    updaterEventsRegistered = true;
+  }
+  if (!ipcHandlersRegistered) {
+    electron.ipcMain.handle("update:getState", () => currentState);
+    electron.ipcMain.handle("update:check", () => checkForUpdates());
+    electron.ipcMain.handle("update:install", () => {
+      if (currentState.status !== "downloaded") {
+        return {
+          status: "error",
+          message: "No downloaded update is ready to install."
+        };
+      }
+      electronUpdater.autoUpdater.quitAndInstall();
+      return currentState;
+    });
+    ipcHandlersRegistered = true;
+  }
+  electronUpdater.autoUpdater.autoDownload = false;
+  electronUpdater.autoUpdater.autoInstallOnAppQuit = true;
+  if (availableUpdate) void promptToDownload(availableUpdate);
+  if (currentState.status === "downloaded") void promptToInstall();
+}
+function scheduleUpdateCheck() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  setTimeout(() => {
+    void checkForUpdates();
+  }, 1500);
+}
 const isDev = !electron.app.isPackaged;
 function createWindow() {
-  const mainWindow = new electron.BrowserWindow({
+  const mainWindow2 = new electron.BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1024,
@@ -41160,31 +41310,31 @@ function createWindow() {
     }
   });
   const showWindow = () => {
-    if (!mainWindow.isDestroyed()) mainWindow.show();
+    if (!mainWindow2.isDestroyed()) mainWindow2.show();
   };
-  mainWindow.once("ready-to-show", showWindow);
+  mainWindow2.once("ready-to-show", showWindow);
   setTimeout(showWindow, 3e3);
-  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+  mainWindow2.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
     const message = `The app interface could not load (${errorCode}: ${errorDescription}).`;
     console.error(message);
     electron.dialog.showErrorBox("MC School Studio could not open", message);
     showWindow();
   });
-  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+  mainWindow2.webContents.on("render-process-gone", (_event, details) => {
     const message = `The app interface stopped unexpectedly: ${details.reason}.`;
     console.error(message);
     electron.dialog.showErrorBox("MC School Studio could not open", message);
     showWindow();
   });
-  mainWindow.on("ready-to-show", () => {
-    mainWindow.show();
+  mainWindow2.on("ready-to-show", () => {
+    mainWindow2.show();
   });
   if (isDev && process.env["ELECTRON_RENDERER_URL"]) {
-    mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+    mainWindow2.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+    mainWindow2.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
-  return mainWindow;
+  return mainWindow2;
 }
 electron.app.whenReady().then(() => {
   getDb();
@@ -41194,9 +41344,15 @@ electron.app.whenReady().then(() => {
   registerDialogHandlers();
   registerUploadHandlers();
   registerCloudHandlers();
-  createWindow();
+  const mainWindow2 = createWindow();
+  registerUpdateHandlers(mainWindow2);
+  scheduleUpdateCheck();
   electron.app.on("activate", () => {
-    if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (electron.BrowserWindow.getAllWindows().length === 0) {
+      const window2 = createWindow();
+      registerUpdateHandlers(window2);
+      scheduleUpdateCheck();
+    }
   });
 }).catch((error) => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);

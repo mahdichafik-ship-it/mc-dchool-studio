@@ -11,6 +11,12 @@ artifactName: mc-school-studio-${version}-${arch}.${ext}
 extraMetadata:
   name: mc-school-studio
 
+publish:
+  provider: github
+  owner: mahdichafik-ship-it
+  repo: mc-dchool-studio
+  releaseType: release
+
 files:
   - out/**/*
   - node_modules/**/*
@@ -42,6 +48,10 @@ mac:
   notarize: true
   target:
     - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
       arch:
         - x64
         - arm64

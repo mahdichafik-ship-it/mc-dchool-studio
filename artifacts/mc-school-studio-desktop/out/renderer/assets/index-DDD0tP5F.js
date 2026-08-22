@@ -16939,6 +16939,7 @@ function Settings() {
   const [savedOk, setSavedOk] = reactExports.useState(false);
   const [connStatus, setConnStatus] = reactExports.useState("idle");
   const [connError, setConnError] = reactExports.useState(null);
+  const [updateState, setUpdateState] = reactExports.useState({ status: "unsupported" });
   const { count: globalErrorCount } = useGlobalErrorCount();
   reactExports.useEffect(() => {
     window.api.invoke("app:getPhotosDir").then((dir) => {
@@ -16949,6 +16950,8 @@ function Settings() {
       setApiUrl(url ?? "");
       setUploadKey(key ?? "");
     });
+    window.api.invoke("update:getState").then(setUpdateState);
+    return window.api.on("update:status", setUpdateState);
   }, []);
   async function handleOpenPhotosDir() {
     if (photosDir) {
@@ -16990,6 +16993,33 @@ function Settings() {
       setConnError(String(e));
     }
   }
+  async function handleCheckForUpdates() {
+    setUpdateState({ status: "checking" });
+    const result = await window.api.invoke("update:check");
+    setUpdateState(result);
+  }
+  async function handleInstallUpdate() {
+    const result = await window.api.invoke("update:install");
+    setUpdateState(result);
+  }
+  function updateStatusMessage() {
+    switch (updateState.status) {
+      case "checking":
+        return "Checking for updates…";
+      case "available":
+        return updateState.version ? `Version ${updateState.version} is available.` : "An update is available.";
+      case "downloading":
+        return `Downloading update${updateState.percent !== void 0 ? ` (${Math.round(updateState.percent)}%)` : "…"}`;
+      case "downloaded":
+        return "Update downloaded. Restart when ready to install it.";
+      case "not-available":
+        return "You’re up to date.";
+      case "error":
+        return "Could not check for updates. Try again later.";
+      default:
+        return "Updates are checked from an installed release.";
+    }
+  }
   const hasConfig = apiUrl.trim() !== "" && uploadKey.trim() !== "";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-5", children: [
@@ -17025,6 +17055,29 @@ function Settings() {
             globalErrorCount !== 1 ? "s" : ""
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mt-0.5", children: 'Open the affected project and click "Retry failed uploads" to retry.' })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-5 text-teal-600" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "App updates" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-4", children: "Check whether a newer signed version of MC School Studio is available." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            Button,
+            {
+              variant: "outline",
+              size: "sm",
+              onClick: updateState.status === "downloaded" ? handleInstallUpdate : handleCheckForUpdates,
+              disabled: updateState.status === "checking" || updateState.status === "downloading",
+              children: [
+                updateState.status === "checking" || updateState.status === "downloading" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, {}),
+                updateState.status === "downloaded" ? "Restart and install" : "Check for updates"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-500", children: updateStatusMessage() })
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [

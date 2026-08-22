@@ -25,6 +25,13 @@ interface UploadResult {
   error?: string
 }
 
+interface UpdateState {
+  status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | 'unsupported'
+  version?: string
+  percent?: number
+  message?: string
+}
+
 interface CloudProject {
   id: number
   schoolName: string
@@ -77,6 +84,10 @@ interface ElectronAPI {
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
+  // Desktop updates
+  invoke(channel: 'update:getState'): Promise<UpdateState>
+  invoke(channel: 'update:check'): Promise<UpdateState>
+  invoke(channel: 'update:install'): Promise<UpdateState>
   // Cloud project sync
   invoke(channel: 'cloud:listProjects'): Promise<CloudProjectListResult>
   invoke(channel: 'cloud:pullProject', args: { cloudProjectId: number }): Promise<CloudProjectPullResult>
@@ -85,6 +96,7 @@ interface ElectronAPI {
   on(channel: 'photo:deleted', listener: (data: PhotoDeletedEvent) => void): () => void
   on(channel: 'photo:reassigned', listener: (data: PhotoReassignedEvent) => void): () => void
   on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
+  on(channel: 'update:status', listener: (data: UpdateState) => void): () => void
 }
 
 declare global {

@@ -6,6 +6,7 @@ import { registerWatcherHandlers } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
 import { registerUploadHandlers } from './ipc/upload'
 import { registerCloudHandlers } from './ipc/cloud'
+import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
 import { getDb } from './db'
 
 const isDev = !app.isPackaged
@@ -76,10 +77,16 @@ app.whenReady().then(() => {
   registerUploadHandlers()
   registerCloudHandlers()
 
-  createWindow()
+  const mainWindow = createWindow()
+  registerUpdateHandlers(mainWindow)
+  scheduleUpdateCheck()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      const window = createWindow()
+      registerUpdateHandlers(window)
+      scheduleUpdateCheck()
+    }
   })
 }).catch((error: unknown) => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error)

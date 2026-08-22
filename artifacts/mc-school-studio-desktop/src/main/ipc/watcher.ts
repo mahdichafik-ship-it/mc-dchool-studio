@@ -7,6 +7,7 @@ import { eq, and } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
 import { readQrFromImage } from '../lib/qrReader'
+import { extractStudentReference } from '../lib/photoFileNaming'
 import type { Photo, Student } from '../../shared/types'
 
 // Active watchers: projectId → FSWatcher
@@ -23,12 +24,6 @@ function getMainWindow(): BrowserWindow | null {
 
 function safeFolderName(value: string): string {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
-}
-
-function referenceFromFilename(fileName: string, studentIds: string[]): string | null {
-  const stem = fileName.replace(/\.[^.]+$/, '')
-  const matching = studentIds.filter((id) => stem.endsWith(id) || stem.includes(`-${id}`) || stem.includes(`_${id}`))
-  return matching.sort((a, b) => b.length - a.length)[0] ?? null
 }
 
 export function registerWatcherHandlers() {
@@ -89,7 +84,7 @@ async function handleNewPhoto(projectId: number, filePath: string) {
   // e.g. Smith_John_class_school-001234.jpg. QR-in-image remains a fallback.
   const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
   const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
-  const filenameReference = referenceFromFilename(fileName, knownStudents.map((student) => student.generatedStudentId))
+  const filenameReference = extractStudentReference(fileName, knownStudents.map((student) => student.generatedStudentId))
   const qrResult = filenameReference ? null : await readQrFromImage(filePath)
   const reference = filenameReference ?? qrResult?.studentId
 

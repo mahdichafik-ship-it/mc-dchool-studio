@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "MC School Studio",
@@ -9,6 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test:naming": "node --experimental-strip-types --test test/photo-file-naming.test.ts",
     "dist:mac": "pnpm run build && electron-builder --mac",
     "dist:win": "pnpm run build && electron-builder --win",
     "dist": "pnpm run build && electron-builder --mac --win"

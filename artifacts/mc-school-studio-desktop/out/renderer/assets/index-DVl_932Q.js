@@ -16241,7 +16241,7 @@ function ProjectList({ onOpenProject }) {
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-700", children: "Could not reach cloud" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mt-1", children: syncError }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-2", children: "Make sure the API URL and upload key are configured in Settings." })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-2", children: "Make sure the API URL and desktop connection token are configured in Settings." })
           ] })
         ] }),
         !syncLoading && !syncError && cloudProjects.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center py-12 text-slate-500 text-sm", children: "No projects found on the cloud." }),
@@ -16934,7 +16934,7 @@ function ReassignDialog({
 function Settings() {
   const [photosDir, setPhotosDir] = reactExports.useState("");
   const [apiUrl, setApiUrl] = reactExports.useState("");
-  const [uploadKey, setUploadKey] = reactExports.useState("");
+  const [connectionToken, setConnectionToken] = reactExports.useState("");
   const [saving, setSaving] = reactExports.useState(false);
   const [savedOk, setSavedOk] = reactExports.useState(false);
   const [connStatus, setConnStatus] = reactExports.useState("idle");
@@ -16946,9 +16946,9 @@ function Settings() {
       setPhotosDir(dir);
     });
     window.api.invoke("upload:getConfig").then((cfg) => {
-      const { apiUrl: url, uploadKey: key } = cfg;
+      const { apiUrl: url, connectionToken: token } = cfg;
       setApiUrl(url ?? "");
-      setUploadKey(key ?? "");
+      setConnectionToken(token ?? "");
     });
     window.api.invoke("update:getState").then(setUpdateState);
     return window.api.on("update:status", setUpdateState);
@@ -16968,7 +16968,7 @@ function Settings() {
     setSaving(true);
     setSavedOk(false);
     try {
-      await window.api.invoke("upload:setConfig", { apiUrl, uploadKey });
+      await window.api.invoke("upload:setConfig", { apiUrl, connectionToken });
       setSavedOk(true);
       setTimeout(() => setSavedOk(false), 3e3);
     } finally {
@@ -16976,7 +16976,7 @@ function Settings() {
     }
   }
   async function handleTestConnection() {
-    await window.api.invoke("upload:setConfig", { apiUrl, uploadKey });
+    await window.api.invoke("upload:setConfig", { apiUrl, connectionToken });
     setConnStatus("testing");
     setConnError(null);
     try {
@@ -17020,7 +17020,7 @@ function Settings() {
         return "Updates are checked from an installed release.";
     }
   }
-  const hasConfig = apiUrl.trim() !== "" && uploadKey.trim() !== "";
+  const hasConfig = apiUrl.trim() !== "" && connectionToken.trim() !== "";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-5", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-xl font-bold text-slate-900", children: "Settings" }),
@@ -17085,7 +17085,7 @@ function Settings() {
           /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-5 text-teal-600" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Cloud upload" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-4", children: "After each photo is matched, it is automatically uploaded to your MC School Studio web app so clients can view their photos online." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-4", children: "After each photo is matched, it is automatically uploaded to your MC School Studio web app so clients can view their photos online. Your connection is limited to the projects assigned to this desktop." }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-medium text-slate-700 mb-1", children: "Web app URL" }),
@@ -17102,22 +17102,18 @@ function Settings() {
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-1", children: "The base URL of your web app (no trailing slash)." })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-medium text-slate-700 mb-1", children: "Upload key" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-medium text-slate-700 mb-1", children: "Desktop connection token" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "input",
               {
                 type: "password",
-                value: uploadKey,
-                onChange: (e) => setUploadKey(e.target.value),
-                placeholder: "Paste the PHOTO_UPLOAD_KEY from your server",
+                value: connectionToken,
+                onChange: (e) => setConnectionToken(e.target.value),
+                placeholder: "Paste the token created in the web app",
                 className: "w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white font-mono"
               }
             ),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-400 mt-1", children: [
-              "Set ",
-              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-slate-100 px-1 rounded", children: "PHOTO_UPLOAD_KEY" }),
-              " in your server's environment variables, then paste the same value here."
-            ] })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-1", children: "An owner or admin creates a token from the web app’s Team page. Each token is linked to a team member and device, and the owner can revoke it at any time." })
           ] }),
           connStatus === "ok" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-4 shrink-0" }),

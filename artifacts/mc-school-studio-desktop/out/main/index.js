@@ -13,6 +13,7 @@ const require$$1$1 = require("zlib");
 const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
 const chokidar = require("chokidar");
+const node_path = require("node:path");
 const electronUpdater = require("electron-updater");
 const projectsTable = sqliteCore.sqliteTable("projects", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
@@ -40727,7 +40728,7 @@ function setSetting(key, value) {
 function getUploadConfig() {
   return {
     apiUrl: getSetting("upload_api_url"),
-    uploadKey: getSetting("upload_key")
+    connectionToken: getSetting("desktop_connection_token")
   };
 }
 function notifyUploadStatus(photoId, studentId, status) {
@@ -40743,8 +40744,8 @@ function toServerFileUrl(fileUrl) {
 }
 async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
   const db = getDb();
-  const { apiUrl, uploadKey } = getUploadConfig();
-  if (!apiUrl || !uploadKey) {
+  const { apiUrl, connectionToken } = getUploadConfig();
+  if (!apiUrl || !connectionToken) {
     console.log("[Upload] Cloud upload not configured, skipping.");
     return;
   }
@@ -40760,7 +40761,7 @@ async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, ca
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${uploadKey}`
+        Authorization: `Bearer ${connectionToken}`
       },
       body: formData
     });
@@ -40791,24 +40792,28 @@ function registerUploadHandlers() {
   });
   electron.ipcMain.handle(
     "upload:setConfig",
-    (_e, { apiUrl, uploadKey }) => {
+    (_e, { apiUrl, connectionToken }) => {
       setSetting("upload_api_url", apiUrl.trim());
-      setSetting("upload_key", uploadKey.trim());
+      setSetting("desktop_connection_token", connectionToken.trim());
       return { ok: true };
     }
   );
   electron.ipcMain.handle("upload:testConnection", async () => {
-    const { apiUrl, uploadKey } = getUploadConfig();
-    if (!apiUrl || !uploadKey) {
-      return { ok: false, error: "API URL and upload key are required" };
+    const { apiUrl, connectionToken } = getUploadConfig();
+    if (!apiUrl || !connectionToken) {
+      return { ok: false, error: "API URL and desktop connection token are required" };
     }
     try {
-      const url = `${apiUrl.replace(/\/+$/, "")}/api/healthz`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(5e3) });
+      const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/me`;
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(5e3)
+      });
       if (response.ok) {
         return { ok: true };
       }
-      return { ok: false, error: `Server returned ${response.status}` };
+      const body = await response.json().catch(() => ({}));
+      return { ok: false, error: body.error ?? `Server returned ${response.status}` };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
@@ -40853,6 +40858,17 @@ function registerUploadHandlers() {
     return photos.length;
   });
 }
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function extractStudentReference(fileName, studentIds) {
+  const stem = node_path.basename(fileName, node_path.extname(fileName));
+  const matches = studentIds.filter((id) => {
+    if (!id) return false;
+    return new RegExp(`(?:^|[-_])${escapeRegExp(id)}$`).test(stem);
+  });
+  return matches.sort((a, b) => b.length - a.length)[0] ?? null;
+}
 const watchers = /* @__PURE__ */ new Map();
 function now$1() {
   return (/* @__PURE__ */ new Date()).toISOString();
@@ -40863,11 +40879,6 @@ function getMainWindow() {
 }
 function safeFolderName(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
-}
-function referenceFromFilename(fileName, studentIds) {
-  const stem = fileName.replace(/\.[^.]+$/, "");
-  const matching = studentIds.filter((id) => stem.endsWith(id) || stem.includes(`-${id}`) || stem.includes(`_${id}`));
-  return matching.sort((a, b) => b.length - a.length)[0] ?? null;
 }
 function registerWatcherHandlers() {
   const db = getDb();
@@ -40909,7 +40920,7 @@ async function handleNewPhoto(projectId, filePath) {
   console.log(`[Watcher] New photo: ${fileName}`);
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
-  const filenameReference = referenceFromFilename(fileName, knownStudents.map((student2) => student2.generatedStudentId));
+  const filenameReference = extractStudentReference(fileName, knownStudents.map((student2) => student2.generatedStudentId));
   const qrResult = filenameReference ? null : await readQrFromImage(filePath);
   const reference = filenameReference ?? qrResult?.studentId;
   if (!reference) {
@@ -40998,8 +41009,8 @@ async function handleNewPhoto(projectId, filePath) {
     photo: photoForEvent,
     student: studentForEvent
   });
-  const { apiUrl, uploadKey } = getUploadConfig();
-  if (apiUrl && uploadKey) {
+  const { apiUrl, connectionToken } = getUploadConfig();
+  if (apiUrl && connectionToken) {
     db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
     win?.webContents.send("upload:statusChanged", {
       photoId: photo.id,
@@ -41043,14 +41054,14 @@ function now() {
 }
 function registerCloudHandlers() {
   electron.ipcMain.handle("cloud:listProjects", async () => {
-    const { apiUrl, uploadKey } = getUploadConfig();
-    if (!apiUrl || !uploadKey) {
-      return { ok: false, error: "Cloud connection not configured. Set API URL and upload key in Settings." };
+    const { apiUrl, connectionToken } = getUploadConfig();
+    if (!apiUrl || !connectionToken) {
+      return { ok: false, error: "Cloud connection not configured. Set API URL and desktop connection token in Settings." };
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`;
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${uploadKey}` },
+        headers: { Authorization: `Bearer ${connectionToken}` },
         signal: AbortSignal.timeout(1e4)
       });
       if (!res.ok) {
@@ -41066,14 +41077,14 @@ function registerCloudHandlers() {
   electron.ipcMain.handle(
     "cloud:pullProject",
     async (_e, { cloudProjectId }) => {
-      const { apiUrl, uploadKey } = getUploadConfig();
-      if (!apiUrl || !uploadKey) {
+      const { apiUrl, connectionToken } = getUploadConfig();
+      if (!apiUrl || !connectionToken) {
         return { ok: false, error: "Cloud connection not configured" };
       }
       try {
         const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProjectId}/bundle`;
         const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${uploadKey}` },
+          headers: { Authorization: `Bearer ${connectionToken}` },
           signal: AbortSignal.timeout(3e4)
         });
         if (!res.ok) {

@@ -1,0 +1,1 @@
+- [Clerk route integration tests](clerk-route-integration-tests.md) — fake authenticated requests must preserve Clerk's branded auth contract and session token type.

@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, desktopConnectionsTable, projectAssignmentsTable, projectsTable, studioInvitesTable, studioMembersTable } from "@workspace/db";
 import { getUserId, requireAuth } from "../lib/auth";
-import { getStudioMember, isStudioManager } from "../lib/studioAccess";
+import { accessibleProjectIdsForMember, getStudioMember, isStudioManager } from "../lib/studioAccess";
 import { createDesktopToken } from "../lib/desktopAuth";
 
 const router = Router();
@@ -10,11 +10,19 @@ const roles = ["admin", "assistant", "photographer", "viewer"] as const;
 
 router.get("/", requireAuth, async (req, res): Promise<void> => {
   const member = await getStudioMember(getUserId(req));
-  const members = await db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, member.studioId));
-  const invites = await db.select().from(studioInvitesTable).where(eq(studioInvitesTable.studioId, member.studioId));
-  const projects = await db.select({ id: projectsTable.id, schoolName: projectsTable.schoolName }).from(projectsTable).where(eq(projectsTable.studioId, member.studioId));
-  const assignments = await db.select().from(projectAssignmentsTable);
+  if (member.status !== "active") { res.status(403).json({ error: "Your studio membership has been removed" }); return; }
   const canManage = member.role === "owner" || member.role === "admin";
+  const members = await db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, member.studioId));
+  const invites = canManage
+    ? await db.select().from(studioInvitesTable).where(eq(studioInvitesTable.studioId, member.studioId))
+    : [];
+  const projectIds = canManage ? null : await accessibleProjectIdsForMember(member);
+  const projects = canManage
+    ? await db.select({ id: projectsTable.id, schoolName: projectsTable.schoolName }).from(projectsTable).where(eq(projectsTable.studioId, member.studioId))
+    : projectIds!.length
+      ? await db.select({ id: projectsTable.id, schoolName: projectsTable.schoolName }).from(projectsTable).where(and(eq(projectsTable.studioId, member.studioId), inArray(projectsTable.id, projectIds!)))
+      : [];
+  const assignments = canManage ? await db.select().from(projectAssignmentsTable) : [];
   const desktopConnections = canManage
     ? await db
       .select({
@@ -68,7 +76,7 @@ router.patch("/members/:memberId", requireAuth, async (req, res): Promise<void> 
 router.delete("/members/:memberId", requireAuth, async (req, res): Promise<void> => {
   const userId = getUserId(req);
   const current = await getStudioMember(userId);
-  if (current.role !== "owner") { res.status(403).json({ error: "Only the owner can remove members" }); return; }
+  if (current.status !== "active" || current.role !== "owner") { res.status(403).json({ error: "Only the owner can remove members" }); return; }
   const memberId = Number(req.params.memberId);
   const [target] = await db.select().from(studioMembersTable).where(and(eq(studioMembersTable.id, memberId), eq(studioMembersTable.studioId, current.studioId)));
   if (!target || target.role === "owner") { res.status(400).json({ error: "The workspace owner cannot be removed" }); return; }
@@ -146,7 +154,7 @@ router.post("/desktop-connections", requireAuth, async (req, res): Promise<void>
 router.delete("/desktop-connections/:connectionId", requireAuth, async (req, res): Promise<void> => {
   const userId = getUserId(req);
   const current = await getStudioMember(userId);
-  if (current.role !== "owner") {
+  if (current.status !== "active" || current.role !== "owner") {
     res.status(403).json({ error: "Only the studio owner can revoke desktop connections" });
     return;
   }

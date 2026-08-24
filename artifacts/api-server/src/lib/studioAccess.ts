@@ -3,6 +3,9 @@ import { db, projectsTable, projectAssignmentsTable, studioInvitesTable, studioM
 
 export type StudioRole = "owner" | "admin" | "assistant" | "photographer" | "viewer";
 export type ProjectAction = "view" | "edit" | "shoot" | "manage";
+type AccessMember = Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role"> & {
+  status?: "active" | "removed";
+};
 
 async function clerkEmail(userId: string): Promise<string> {
   const key = process.env.CLERK_SECRET_KEY;
@@ -18,7 +21,7 @@ async function clerkEmail(userId: string): Promise<string> {
 }
 
 export async function ensureStudioForUser(userId: string) {
-  const existing = await db.select().from(studioMembersTable).where(and(eq(studioMembersTable.userId, userId), eq(studioMembersTable.status, "active"))).limit(1);
+  const existing = await db.select().from(studioMembersTable).where(eq(studioMembersTable.userId, userId)).limit(1);
   if (existing[0]) return existing[0];
   const email = (await clerkEmail(userId)).toLowerCase();
   const invite = await db.select().from(studioInvitesTable).where(and(eq(studioInvitesTable.email, email), eq(studioInvitesTable.status, "pending"))).limit(1);
@@ -43,16 +46,18 @@ export async function canAccessProject(userId: string, projectId: number, action
 }
 
 export async function canAccessProjectForMember(
-  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+  member: AccessMember,
   projectId: number,
   action: ProjectAction = "view",
 ) {
+  if (member.status === "removed") return false;
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project || project.studioId !== member.studioId) return false;
   if (member.role === "owner" || member.role === "admin") return true;
   const assignments = await db.select().from(projectAssignmentsTable).where(and(eq(projectAssignmentsTable.projectId, projectId), eq(projectAssignmentsTable.memberId, member.id))).limit(1);
   if (!assignments[0]) return false;
-  if (action === "view" || action === "shoot") return member.role === "assistant" || member.role === "photographer";
+  if (action === "view") return member.role === "assistant" || member.role === "photographer" || member.role === "viewer";
+  if (action === "shoot") return member.role === "assistant" || member.role === "photographer";
   return member.role === "assistant";
 }
 
@@ -62,8 +67,9 @@ export async function accessibleProjectIds(userId: string) {
 }
 
 export async function accessibleProjectIdsForMember(
-  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+  member: AccessMember,
 ) {
+  if (member.status === "removed") return [];
   if (member.role === "owner" || member.role === "admin") {
     const rows = await db.select({ id: projectsTable.id }).from(projectsTable).where(eq(projectsTable.studioId, member.studioId));
     return rows.map((row) => row.id);
@@ -76,9 +82,10 @@ export async function accessibleProjectIdsForMember(
 }
 
 export async function canAccessAssignedDesktopProject(
-  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+  member: AccessMember,
   projectId: number,
 ) {
+  if (member.status === "removed") return false;
   if (member.role !== "assistant" && member.role !== "photographer") return false;
   const [project] = await db
     .select({ id: projectsTable.id })
@@ -97,8 +104,9 @@ export async function canAccessAssignedDesktopProject(
 }
 
 export async function assignedDesktopProjectIds(
-  member: Pick<typeof studioMembersTable.$inferSelect, "id" | "studioId" | "role">,
+  member: AccessMember,
 ) {
+  if (member.status === "removed") return [];
   if (member.role !== "assistant" && member.role !== "photographer") return [];
   const rows = await db.select({ projectId: projectAssignmentsTable.projectId })
     .from(projectAssignmentsTable)
@@ -109,5 +117,5 @@ export async function assignedDesktopProjectIds(
 
 export async function isStudioManager(userId: string) {
   const member = await ensureStudioForUser(userId);
-  return member.role === "owner" || member.role === "admin";
+  return member.status === "active" && (member.role === "owner" || member.role === "admin");
 }

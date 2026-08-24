@@ -9,8 +9,8 @@ import { canAccessProject } from "../lib/studioAccess";
 
 const router = Router({ mergeParams: true });
 
-async function verifyProject(projectId: number, userId: string): Promise<boolean> {
-  return canAccessProject(userId, projectId, "view");
+async function verifyProject(projectId: number, userId: string, action: "view" | "edit" = "view"): Promise<boolean> {
+  return canAccessProject(userId, projectId, action);
 }
 
 async function getExistingStudentIds(projectId: number): Promise<Set<string>> {
@@ -70,7 +70,7 @@ router.post("/", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -120,7 +120,7 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
   const projectId = parseInt(req.params.projectId as string);
   const studentId = parseInt(req.params.studentId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -169,7 +169,7 @@ router.delete("/:studentId", requireAuth, async (req, res) => {
   const projectId = parseInt(req.params.projectId as string);
   const studentId = parseInt(req.params.studentId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -186,7 +186,7 @@ router.post("/bulk-delete", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -214,7 +214,7 @@ router.post("/generate-qr", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }

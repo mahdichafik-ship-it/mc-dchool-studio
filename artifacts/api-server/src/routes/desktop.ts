@@ -18,6 +18,7 @@ function memberForAccess(connection: ReturnType<typeof getDesktopConnection>) {
     id: connection.memberId,
     studioId: connection.studioId,
     role: connection.memberRole,
+    status: "active" as const,
   };
 }
 

@@ -64,7 +64,7 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const member = await getStudioMember(userId);
-  if (!["owner", "admin", "assistant"].includes(member.role)) { res.status(403).json({ error: "You do not have permission to create projects" }); return; }
+  if (member.status !== "active" || !["owner", "admin", "assistant"].includes(member.role)) { res.status(403).json({ error: "You do not have permission to create projects" }); return; }
   const { schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes } =
     req.body;
 

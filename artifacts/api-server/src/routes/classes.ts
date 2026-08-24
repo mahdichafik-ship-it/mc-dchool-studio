@@ -7,8 +7,8 @@ import { canAccessProject } from "../lib/studioAccess";
 
 const router = Router({ mergeParams: true });
 
-async function verifyProject(projectId: number, userId: string): Promise<boolean> {
-  return canAccessProject(userId, projectId, "view");
+async function verifyProject(projectId: number, userId: string, action: "view" | "edit" = "view"): Promise<boolean> {
+  return canAccessProject(userId, projectId, action);
 }
 
 // GET /api/projects/:projectId/classes
@@ -50,7 +50,7 @@ router.post("/", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -86,7 +86,7 @@ router.patch("/:classId", requireAuth, async (req, res) => {
   const projectId = parseInt(req.params.projectId as string);
   const classId = parseInt(req.params.classId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -127,7 +127,7 @@ router.delete("/:classId", requireAuth, async (req, res) => {
   const projectId = parseInt(req.params.projectId as string);
   const classId = parseInt(req.params.classId as string);
 
-  if (!(await verifyProject(projectId, userId))) {
+  if (!(await verifyProject(projectId, userId, "edit"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }

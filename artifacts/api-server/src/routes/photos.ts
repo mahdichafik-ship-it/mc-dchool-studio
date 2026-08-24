@@ -3,12 +3,12 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { db } from "@workspace/db";
-import { projectsTable, studentsTable, studentPhotosTable } from "@workspace/db";
+import { studentsTable, studentPhotosTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
-import { canAccessAssignedDesktopProject } from "../lib/studioAccess";
+import { canAccessAssignedDesktopProject, canAccessProject } from "../lib/studioAccess";
 
 const router = Router({ mergeParams: true });
 
@@ -57,15 +57,6 @@ const upload = multer({
 function resolveFilePath(fileUrl: string): string {
   // fileUrl is stored as /uploads/student-photos/... — strip leading slash
   return path.join(process.cwd(), fileUrl.replace(/^\//, ""));
-}
-
-/** Verify the project exists and belongs to the authenticated user */
-async function verifyProjectOwnership(projectId: number, userId: string): Promise<boolean> {
-  const [project] = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, userId)));
-  return !!project;
 }
 
 /** Verify the student belongs to the project */
@@ -194,7 +185,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
 });
 
 // GET /api/projects/:projectId/students/:studentId/photos
-// Web app: Clerk authenticated + project ownership check
+// Web app: Clerk authenticated + assignment-aware project access.
 router.get("/:studentId/photos", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
@@ -205,7 +196,7 @@ router.get("/:studentId/photos", requireAuth, async (req, res) => {
     return;
   }
 
-  if (!(await verifyProjectOwnership(projectId, userId))) {
+  if (!(await canAccessProject(userId, projectId, "view"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -225,7 +216,7 @@ router.get("/:studentId/photos", requireAuth, async (req, res) => {
 });
 
 // GET /api/projects/:projectId/students/:studentId/photos/:photoId/file
-// Streams the photo file — Clerk auth + ownership. Safe for use in <img src>.
+// Streams the photo file — Clerk auth + assignment-aware access. Safe for use in <img src>.
 // Browsers send session cookies automatically on same-origin requests.
 router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => {
   const userId = getUserId(req);
@@ -238,7 +229,7 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
     return;
   }
 
-  if (!(await verifyProjectOwnership(projectId, userId))) {
+  if (!(await canAccessProject(userId, projectId, "view"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -272,14 +263,14 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
 });
 
 // DELETE /api/projects/:projectId/students/:studentId/photos/:photoId
-// Web app: Clerk authenticated + project ownership check
+// Web app: Clerk authenticated + shoot permission.
 router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);
   const studentId = parseInt(req.params.studentId as string);
   const photoId = parseInt(req.params.photoId as string);
 
-  if (!(await verifyProjectOwnership(projectId, userId))) {
+  if (!(await canAccessProject(userId, projectId, "shoot"))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }

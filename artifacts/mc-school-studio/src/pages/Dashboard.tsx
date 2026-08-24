@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 
-const GITHUB_RELEASES_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/latest';
+const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.3';
+const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.3-arm64.dmg`;
+const WINDOWS_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.3-setup.exe`;
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
@@ -46,7 +48,7 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <a
-              href={`${GITHUB_RELEASES_URL}`}
+              href={MAC_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
@@ -55,7 +57,7 @@ export default function Dashboard() {
               Mac (.dmg)
             </a>
             <a
-              href={`${GITHUB_RELEASES_URL}`}
+              href={WINDOWS_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"

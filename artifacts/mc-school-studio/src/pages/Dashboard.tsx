@@ -6,9 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 
-const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.3';
-const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.3-arm64.dmg`;
-const WINDOWS_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.3-setup.exe`;
+const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.4';
+const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.4-arm64.dmg`;
+const WINDOWS_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.4-setup.exe`;
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();

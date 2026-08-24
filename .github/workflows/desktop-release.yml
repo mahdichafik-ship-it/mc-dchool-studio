@@ -67,6 +67,26 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      - name: Decode macOS signing certificate
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const path = require('path')
+
+          const certificate = Buffer.from(process.env.CSC_LINK, 'base64')
+          if (certificate.length === 0) {
+            throw new Error('CSC_LINK did not decode to a certificate file')
+          }
+
+          fs.writeFileSync(
+            path.join(process.env.RUNNER_TEMP, 'mac-signing-certificate.p12'),
+            certificate,
+          )
+          NODE
+          echo "CSC_LINK=$RUNNER_TEMP/mac-signing-certificate.p12" >> "$GITHUB_ENV"
+
       - name: Strip Replit-only platform overrides
         run: node scripts/strip-replit-overrides.mjs
 
@@ -83,7 +103,6 @@ jobs:
         env:
           # The preflight step requires all macOS signing and notarization
           # secrets before this tagged release can be packaged.
-          CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           CSC_IDENTITY_AUTO_DISCOVERY: "true"
           # These are used by electron-builder's macOS notarization step.
@@ -147,6 +166,28 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      - name: Decode Windows signing certificate
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP "windows-signing-certificate.pfx"
+
+          try {
+            [IO.File]::WriteAllBytes(
+              $certificatePath,
+              [Convert]::FromBase64String($env:WIN_CSC_LINK)
+            )
+          } catch {
+            throw "WIN_CSC_LINK must contain a base64-encoded .p12 or .pfx certificate."
+          }
+
+          if ((Get-Item $certificatePath).Length -eq 0) {
+            throw "WIN_CSC_LINK did not decode to a certificate file."
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "WIN_CSC_LINK=$certificatePath"
+
       - name: Strip Replit-only platform overrides
         run: node scripts/strip-replit-overrides.mjs
 
@@ -162,7 +203,6 @@ jobs:
         env:
           # electron-builder uses the Windows-specific variables for the
           # Authenticode certificate and its private-key password.
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Upload installer to GitHub Release

@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "MC School Studio",

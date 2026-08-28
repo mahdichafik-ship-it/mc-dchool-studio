@@ -96,10 +96,12 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build & package macOS DMG
-        # dist:mac disables electron-builder's automatic GitHub publishing.
-        # The dedicated release step below uploads the finished artifacts.
+        # electron-builder publishes the signed artifacts to the GitHub Release.
         run: pnpm --filter @workspace/mc-school-studio-desktop run dist:mac
         env:
+          # electron-builder specifically reads GH_TOKEN for GitHub publishing.
+          # github.token is the short-lived, repository-scoped Actions token.
+          GH_TOKEN: ${{ github.token }}
           # The preflight step requires all macOS signing and notarization
           # secrets before this tagged release can be packaged.
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -108,12 +110,3 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Upload DMG to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/mc-school-studio-desktop/dist/release/*.dmg
-            artifacts/mc-school-studio-desktop/dist/release/*.zip
-            artifacts/mc-school-studio-desktop/dist/release/latest-mac.yml
-            artifacts/mc-school-studio-desktop/dist/release/*.blockmap

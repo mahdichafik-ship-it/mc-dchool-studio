@@ -1,12 +1,12 @@
-# Builds Windows (.exe NSIS installer) and macOS (.dmg universal) desktop
-# packages on every `v*` tag push and attaches them to the GitHub Release.
+# Builds signed and notarized macOS desktop packages on every `v*` tag push
+# and attaches them to the GitHub Release.
 #
 # Trigger: git tag v1.2.3 && git push origin v1.2.3
 #
 # Note: pnpm-workspace.yaml contains overrides that exclude non-Linux platform
 # binaries so they are not installed inside the Replit environment. This
 # workflow strips those Replit-only overrides before running `pnpm install` so
-# that the correct native binaries are fetched for each runner OS.
+# that the correct native binaries are fetched for the macOS runner.
 
 name: Desktop Release
 
@@ -117,98 +117,4 @@ jobs:
             artifacts/mc-school-studio-desktop/dist/release/*.dmg
             artifacts/mc-school-studio-desktop/dist/release/*.zip
             artifacts/mc-school-studio-desktop/dist/release/latest-mac.yml
-            artifacts/mc-school-studio-desktop/dist/release/*.blockmap
-
-  # ---------------------------------------------------------------------------
-  # Windows — produces an NSIS .exe installer (x64)
-  # ---------------------------------------------------------------------------
-  build-windows:
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify release tag matches app version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: node -e "const fs=require('fs'); const tag=process.env.RELEASE_TAG; const version=JSON.parse(fs.readFileSync('artifacts/mc-school-studio-desktop/package.json','utf8')).version; if(tag !== 'v'+version){console.error('Release tag '+tag+' must match desktop package version v'+version);process.exit(1)}"
-
-      - name: Verify Windows signing credentials
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          $requiredSecrets = @("WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD")
-          $missing = $requiredSecrets | Where-Object {
-            [string]::IsNullOrWhiteSpace(
-              [Environment]::GetEnvironmentVariable($_)
-            )
-          }
-
-          if ($missing) {
-            Write-Error (
-              "Tagged Windows releases require signing secrets: " +
-              ($missing -join ", ")
-            )
-            exit 1
-          }
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Decode Windows signing certificate
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-        run: |
-          $certificatePath = Join-Path $env:RUNNER_TEMP "windows-signing-certificate.pfx"
-
-          try {
-            [IO.File]::WriteAllBytes(
-              $certificatePath,
-              [Convert]::FromBase64String($env:WIN_CSC_LINK)
-            )
-          } catch {
-            throw "WIN_CSC_LINK must contain a base64-encoded .p12 or .pfx certificate."
-          }
-
-          if ((Get-Item $certificatePath).Length -eq 0) {
-            throw "WIN_CSC_LINK did not decode to a certificate file."
-          }
-
-          Add-Content -Path $env:GITHUB_ENV -Value "WIN_CSC_LINK=$certificatePath"
-
-      - name: Strip Replit-only platform overrides
-        run: node scripts/strip-replit-overrides.mjs
-
-      - name: Install dependencies
-        # --no-frozen-lockfile — same reason as macOS job above.
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Build & package Windows installer
-        # dist:win runs `electron-vite build && electron-builder --win` inside
-        # the desktop package directory, so electron-builder.yml is found
-        # automatically (no --config path needed).
-        run: pnpm --filter @workspace/mc-school-studio-desktop run dist:win
-        env:
-          # electron-builder uses the Windows-specific variables for the
-          # Authenticode certificate and its private-key password.
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-
-      - name: Upload installer to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/mc-school-studio-desktop/dist/release/*.exe
-            artifacts/mc-school-studio-desktop/dist/release/latest.yml
             artifacts/mc-school-studio-desktop/dist/release/*.blockmap

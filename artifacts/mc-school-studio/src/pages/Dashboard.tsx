@@ -1,14 +1,13 @@
 import React from 'react';
 import { useGetDashboardStats, useListProjects } from '@workspace/api-client-react';
 import { Link } from 'wouter';
-import { Plus, Building2, Layers, Users, FolderKanban, Calendar, ChevronRight, Monitor, Apple, AppWindow } from 'lucide-react';
+import { Plus, Building2, Layers, Users, FolderKanban, Calendar, ChevronRight, Monitor, Apple } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 
 const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.4';
 const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.4-arm64.dmg`;
-const WINDOWS_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.4-setup.exe`;
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
@@ -46,7 +45,7 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="shrink-0">
             <a
               href={MAC_DOWNLOAD_URL}
               target="_blank"
@@ -55,15 +54,6 @@ export default function Dashboard() {
             >
               <Apple className="w-4 h-4" />
               Mac (.dmg)
-            </a>
-            <a
-              href={WINDOWS_DOWNLOAD_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
-            >
-              <AppWindow className="w-4 h-4" />
-              Windows (.exe)
             </a>
           </div>
         </div>

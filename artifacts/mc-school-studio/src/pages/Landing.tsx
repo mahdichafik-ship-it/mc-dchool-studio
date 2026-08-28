@@ -1,10 +1,9 @@
 import React from 'react';
 import { Link } from 'wouter';
-import { Camera, ArrowRight, ShieldCheck, Zap, Users, Monitor, Apple, AppWindow } from 'lucide-react';
+import { Camera, ArrowRight, ShieldCheck, Zap, Users, Monitor, Apple } from 'lucide-react';
 
 const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.4';
 const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.4-arm64.dmg`;
-const WINDOWS_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.4-setup.exe`;
 
 export default function Landing() {
   return (
@@ -55,7 +54,7 @@ export default function Landing() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="shrink-0">
               <a
                 href={MAC_DOWNLOAD_URL}
                 target="_blank"
@@ -64,15 +63,6 @@ export default function Landing() {
               >
                 <Apple className="w-4 h-4" />
                 Mac (.dmg)
-              </a>
-              <a
-                href={WINDOWS_DOWNLOAD_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
-              >
-                <AppWindow className="w-4 h-4" />
-                Windows (.exe)
               </a>
             </div>
           </div>

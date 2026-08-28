@@ -96,9 +96,8 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build & package macOS DMG
-        # dist:mac runs `electron-vite build && electron-builder --mac` inside
-        # the desktop package directory, so electron-builder.yml is found
-        # automatically (no --config path needed).
+        # dist:mac disables electron-builder's automatic GitHub publishing.
+        # The dedicated release step below uploads the finished artifacts.
         run: pnpm --filter @workspace/mc-school-studio-desktop run dist:mac
         env:
           # The preflight step requires all macOS signing and notarization

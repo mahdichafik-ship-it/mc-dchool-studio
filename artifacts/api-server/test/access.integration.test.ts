@@ -44,6 +44,8 @@ const pendingEmail = `${pendingUserId}@member.local`;
 let server: Server;
 let baseUrl: string;
 let studioId: number;
+let ownerMemberId: number;
+let adminMemberId: number;
 let assignedProjectId: number;
 let unassignedProjectId: number;
 let assignedStudentId: number;
@@ -156,6 +158,8 @@ before(async () => {
   deletablePhotoId = insertedPhotos.find((photo) => photo.fileName === "deletable.jpg")!.id;
 
   const membersByUserId = new Map(memberRows.map((member) => [member.userId, member.id]));
+  ownerMemberId = membersByUserId.get(ownerUserId)!;
+  adminMemberId = membersByUserId.get(adminUserId)!;
   await db.insert(projectAssignmentsTable).values([
     { projectId: assignedProjectId, memberId: membersByUserId.get(assistantUserId)! },
     { projectId: assignedProjectId, memberId: membersByUserId.get(photographerUserId)! },
@@ -325,6 +329,20 @@ test("keeps Team data and invitation activation permission-aware", async () => {
     body: JSON.stringify({ email: `allowed-${suffix}@member.local`, role: "viewer" }),
   });
   assert.equal(ownerInviteResponse.status, 201, "owner controls should be able to invite teammates");
+
+  for (const [userId, memberId, role] of [
+    [ownerUserId, ownerMemberId, "owner"],
+    [adminUserId, adminMemberId, "admin"],
+  ] as const) {
+    const desktopResponse = await request(userId, "/api/team/desktop-connections", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memberId, deviceName: `${role} test Mac` }),
+    });
+    assert.equal(desktopResponse.status, 201, `${role} should create a manager desktop connection`);
+    const desktop = await readJson<{ token: string }>(desktopResponse);
+    assert.match(desktop.token, /^mcs_desktop_/, `${role} connection should return a one-time token`);
+  }
 });
 
 test("rejects access to an unassigned or unknown project", async () => {

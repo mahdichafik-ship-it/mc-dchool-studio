@@ -86,12 +86,13 @@ export async function canAccessAssignedDesktopProject(
   projectId: number,
 ) {
   if (member.status === "removed") return false;
-  if (member.role !== "assistant" && member.role !== "photographer") return false;
   const [project] = await db
     .select({ id: projectsTable.id })
     .from(projectsTable)
     .where(and(eq(projectsTable.id, projectId), eq(projectsTable.studioId, member.studioId)));
   if (!project) return false;
+  if (member.role === "owner" || member.role === "admin") return true;
+  if (member.role !== "assistant" && member.role !== "photographer") return false;
   const [assignment] = await db
     .select({ id: projectAssignmentsTable.id })
     .from(projectAssignmentsTable)
@@ -107,6 +108,13 @@ export async function assignedDesktopProjectIds(
   member: AccessMember,
 ) {
   if (member.status === "removed") return [];
+  if (member.role === "owner" || member.role === "admin") {
+    const rows = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(eq(projectsTable.studioId, member.studioId));
+    return rows.map((row) => row.id);
+  }
   if (member.role !== "assistant" && member.role !== "photographer") return [];
   const rows = await db.select({ projectId: projectAssignmentsTable.projectId })
     .from(projectAssignmentsTable)

@@ -290,7 +290,7 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   uploadedFilePath = undefined;
 });
 
-test("limits desktop projects to assignments and revokes only one connection", async () => {
+test("limits photographer desktops to assignments, gives admins studio access, and revokes only one connection", async () => {
   const listResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
     headers: { Authorization: `Bearer ${desktopCredentials.token}` },
   });
@@ -308,18 +308,23 @@ test("limits desktop projects to assignments and revokes only one connection", a
     headers: { Authorization: `Bearer ${adminDesktopCredentials.token}` },
   });
   assert.equal(adminListResponse.status, 200);
-  assert.deepEqual(await adminListResponse.json(), [], "an admin desktop must still require explicit assignments");
+  const adminProjects = await adminListResponse.json() as { id: number }[];
+  assert.deepEqual(
+    adminProjects.map((project) => project.id).sort((a, b) => a - b),
+    [projectId, hiddenProjectId].sort((a, b) => a - b),
+    "an admin desktop should see every project in its studio without assignments",
+  );
 
   const adminBundleResponse = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/bundle`, {
     headers: { Authorization: `Bearer ${adminDesktopCredentials.token}` },
   });
-  assert.equal(adminBundleResponse.status, 404, "an admin desktop must not download an unassigned bundle");
+  assert.equal(adminBundleResponse.status, 200, "an admin desktop should download an unassigned studio bundle");
 
   const adminUpload = new (globalThis as any).FormData();
   adminUpload.append(
     "photo",
     new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
-    "admin-unassigned-attempt.jpg",
+    "admin-studio-upload.jpg",
   );
   const adminUploadResponse = await fetch(
     `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
@@ -329,7 +334,10 @@ test("limits desktop projects to assignments and revokes only one connection", a
       body: adminUpload,
     },
   );
-  assert.equal(adminUploadResponse.status, 404, "an admin desktop must not upload to an unassigned project");
+  assert.equal(adminUploadResponse.status, 201, "an admin desktop should upload to any project in its studio");
+  const adminUploaded = await adminUploadResponse.json() as PhotoResponse;
+  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, adminUploaded.id));
+  await rm(path.resolve(process.cwd(), adminUploaded.fileUrl.replace(/^\//, "")), { force: true });
 
   await db
     .update(desktopConnectionsTable)

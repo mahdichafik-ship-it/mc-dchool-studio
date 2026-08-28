@@ -127,8 +127,8 @@ router.post("/desktop-connections", requireAuth, async (req, res): Promise<void>
     res.status(400).json({ error: "Active studio member not found" });
     return;
   }
-  if (member.role !== "assistant" && member.role !== "photographer") {
-    res.status(400).json({ error: "Desktop connections require an assistant or photographer member with assigned projects" });
+  if (!["owner", "admin", "assistant", "photographer"].includes(member.role)) {
+    res.status(400).json({ error: "Desktop connections require an owner, admin, assistant, or photographer" });
     return;
   }
 

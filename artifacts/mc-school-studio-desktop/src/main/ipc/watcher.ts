@@ -12,6 +12,7 @@ import { readQrFromImage } from '../lib/qrReader'
 import {
   advanceSequence,
   createSequenceState,
+  registerCapturePath,
   sortCaptureFiles,
   type CaptureFile,
   type SequenceState,
@@ -142,7 +143,7 @@ async function enqueuePhoto(projectId: number, filePath: string): Promise<void> 
   try {
     const fileStat = await statFile(filePath)
     if (!fileStat.isFile()) return
-    session.seenPaths.add(filePath)
+    if (!registerCapturePath(session.seenPaths, filePath)) return
     session.pendingFiles.push({
       filePath,
       fileName: basename(filePath),
@@ -183,29 +184,6 @@ async function handleNewPhoto(
 ): Promise<void> {
   const db = getDb()
   const win = getMainWindow()
-  const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
-  const filenameReference = extractStudentReference(
-    capture.fileName,
-    knownStudents.map((student) => student.generatedStudentId),
-  )
-
-  if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
-    const result = await processWatchedPhoto(projectId, capture.filePath, {
-      store: createWatchedPhotoStore(db),
-      photosDir: getPhotosDir(),
-      readQr: async () => null,
-    })
-
-    if (result.kind === 'unmatched') {
-      win?.webContents.send('photo:unmatched', result)
-      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
-      return
-    }
-
-    finishMatchedPhoto(db, win, result.photo, result.student)
-    return
-  }
-
   const qrResult = await readQrFromImage(capture.filePath)
 
   if (qrResult) {
@@ -238,6 +216,34 @@ async function handleNewPhoto(
     })
     console.log(`[Watcher] QR marker ${capture.fileName} → ${student!.firstName} ${student!.lastName}`)
     return
+  }
+
+  // Once a QR marker is active, its sequence owns every following portrait.
+  // Filename matching remains available only for older Smart Shooter setups
+  // that do not use marker images.
+  if (session.sequenceState.activeStudentId === null) {
+    const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
+    const filenameReference = extractStudentReference(
+      capture.fileName,
+      knownStudents.map((student) => student.generatedStudentId),
+    )
+
+    if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
+      const result = await processWatchedPhoto(projectId, capture.filePath, {
+        store: createWatchedPhotoStore(db),
+        photosDir: getPhotosDir(),
+        readQr: async () => null,
+      })
+
+      if (result.kind === 'unmatched') {
+        win?.webContents.send('photo:unmatched', result)
+        console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
+        return
+      }
+
+      finishMatchedPhoto(db, win, result.photo, result.student)
+      return
+    }
   }
 
   const decision = advanceSequence(session.sequenceState, { kind: 'portrait' })

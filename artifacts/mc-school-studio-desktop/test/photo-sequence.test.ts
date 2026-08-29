@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   advanceSequence,
   createSequenceState,
+  registerCapturePath,
   sortCaptureFiles,
 } from '../src/main/lib/photoSequence.ts'
 
@@ -55,6 +56,24 @@ test('does not assign a portrait before the first valid marker', () => {
     kind: 'review',
     reason: 'Portrait was captured before a valid student QR marker',
   })
+})
+
+test('starts a fresh sequence after the watcher restarts', () => {
+  const previousSession = createSequenceState()
+  advanceSequence(previousSession, { kind: 'marker', studentId: 10, reference: 'STU-10' })
+
+  const restartedSession = createSequenceState()
+  assert.deepEqual(advanceSequence(restartedSession, { kind: 'portrait' }), {
+    kind: 'review',
+    reason: 'Portrait was captured before a valid student QR marker',
+  })
+})
+
+test('ignores duplicate file events within the same watcher session', () => {
+  const seenPaths = new Set<string>()
+  assert.equal(registerCapturePath(seenPaths, '/spool/portrait-1.jpg'), true)
+  assert.equal(registerCapturePath(seenPaths, '/spool/portrait-1.jpg'), false)
+  assert.equal(registerCapturePath(seenPaths, '/spool/portrait-2.jpg'), true)
 })
 
 test('sorts a capture burst by capture time with deterministic filename ties', () => {

@@ -21,6 +21,12 @@ export function createSequenceState(): SequenceState {
   return { activeStudentId: null }
 }
 
+export function registerCapturePath(seenPaths: Set<string>, filePath: string): boolean {
+  if (seenPaths.has(filePath)) return false
+  seenPaths.add(filePath)
+  return true
+}
+
 export function sortCaptureFiles(files: CaptureFile[]): CaptureFile[] {
   return [...files].sort((a, b) => {
     const timestampDifference = a.capturedAtMs - b.capturedAtMs

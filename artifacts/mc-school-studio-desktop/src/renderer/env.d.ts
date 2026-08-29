@@ -6,6 +6,7 @@ import type {
   Student,
   Photo,
   PhotoMatchedEvent,
+  PhotoMarkerEvent,
   PhotoUnmatchedEvent,
   PhotoDeletedEvent,
   PhotoReassignedEvent,
@@ -23,6 +24,18 @@ interface UploadConfig {
 interface UploadResult {
   ok: boolean
   error?: string
+}
+
+interface AuthMember {
+  email: string
+  role: 'owner' | 'admin' | 'assistant' | 'photographer'
+}
+
+interface AuthSession {
+  signedIn: boolean
+  member?: AuthMember
+  error?: string
+  offline?: boolean
 }
 
 interface UpdateState {
@@ -78,9 +91,11 @@ interface ElectronAPI {
   invoke(channel: 'app:getPhotosDir'): Promise<string>
   invoke(channel: 'app:setPhotosDir', args: { dir: string }): Promise<string>
   // Cloud upload
-  invoke(channel: 'upload:getConfig'): Promise<UploadConfig>
-  invoke(channel: 'upload:setConfig', args: { apiUrl: string; connectionToken: string }): Promise<UploadResult>
   invoke(channel: 'upload:testConnection'): Promise<UploadResult>
+  invoke(channel: 'auth:getSession'): Promise<AuthSession>
+  invoke(channel: 'auth:refresh'): Promise<AuthSession>
+  invoke(channel: 'auth:signIn'): Promise<AuthSession>
+  invoke(channel: 'auth:signOut'): Promise<{ ok: boolean }>
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
@@ -92,11 +107,14 @@ interface ElectronAPI {
   invoke(channel: 'cloud:listProjects'): Promise<CloudProjectListResult>
   invoke(channel: 'cloud:pullProject', args: { cloudProjectId: number }): Promise<CloudProjectPullResult>
   on(channel: 'photo:matched', listener: (data: PhotoMatchedEvent) => void): () => void
+  on(channel: 'photo:marker', listener: (data: PhotoMarkerEvent) => void): () => void
   on(channel: 'photo:unmatched', listener: (data: PhotoUnmatchedEvent) => void): () => void
   on(channel: 'photo:deleted', listener: (data: PhotoDeletedEvent) => void): () => void
   on(channel: 'photo:reassigned', listener: (data: PhotoReassignedEvent) => void): () => void
   on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
   on(channel: 'update:status', listener: (data: UpdateState) => void): () => void
+  on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
+  on(channel: 'auth:sessionInvalidated', listener: (session: AuthSession) => void): () => void
 }
 
 declare global {

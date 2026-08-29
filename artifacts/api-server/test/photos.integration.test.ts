@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import fs from "node:fs";
 import path from "node:path";
 import test, { after, before } from "node:test";
@@ -288,6 +288,223 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   assert.equal(deletedPhoto, undefined, "DELETE should remove the database row");
   uploadedPhotoId = undefined;
   uploadedFilePath = undefined;
+});
+
+test("preserves the uploaded photo when the database delete fails", async () => {
+  const form = new (globalThis as any).FormData();
+  form.append(
+    "photo",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    "database-failure-portrait.jpg",
+  );
+
+  const uploadResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+      body: form,
+    },
+  );
+  assert.equal(uploadResponse.status, 201);
+  const uploaded = (await uploadResponse.json()) as PhotoResponse;
+  const filePath = path.resolve(process.cwd(), uploaded.fileUrl.replace(/^\//, ""));
+  assert(fs.existsSync(filePath), "the uploaded photo should exist before the failure");
+
+  const triggerName = `photo_delete_failure_${process.pid}_${Date.now()}`;
+  const functionName = `${triggerName}_function`;
+  await pool.query(`
+    CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'intentional photo delete failure';
+    END;
+    $$ LANGUAGE plpgsql
+  `);
+  await pool.query(`
+    CREATE TRIGGER ${triggerName}
+    BEFORE DELETE ON student_photos
+    FOR EACH ROW EXECUTE FUNCTION ${functionName}()
+  `);
+
+  try {
+    const deleteResponse = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
+    assert.equal(deleteResponse.status, 500);
+    assert(fs.existsSync(filePath), "a failed database delete must keep the photo file");
+    assert.deepEqual(await readFile(filePath), jpegBytes);
+
+    const [storedPhoto] = await db
+      .select()
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, uploaded.id));
+    assert(storedPhoto, "a failed database delete must keep the photo row");
+    assert.equal(storedPhoto.fileUrl, uploaded.fileUrl);
+  } finally {
+    await pool.query(`DROP TRIGGER IF EXISTS ${triggerName} ON student_photos`);
+    await pool.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+  }
+});
+
+async function uploadFailureTestPhoto(fileName: string): Promise<{
+  uploaded: PhotoResponse;
+  filePath: string;
+}> {
+  const form = new (globalThis as any).FormData();
+  form.append(
+    "photo",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    fileName,
+  );
+  const response = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+      body: form,
+    },
+  );
+  assert.equal(response.status, 201);
+  const uploaded = (await response.json()) as PhotoResponse;
+  return {
+    uploaded,
+    filePath: path.resolve(process.cwd(), uploaded.fileUrl.replace(/^\//, "")),
+  };
+}
+
+test("restores the photo row when removing its file fails", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("unlink-failure.jpg");
+  const originalUnlinkSync = fs.unlinkSync;
+  fs.unlinkSync = ((target: fs.PathLike) => {
+    if (path.resolve(String(target)) === filePath) {
+      throw new Error("intentional unlink failure");
+    }
+    return originalUnlinkSync(target);
+  }) as typeof fs.unlinkSync;
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
+    assert.equal(response.status, 500);
+    const [storedPhoto] = await db
+      .select()
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, uploaded.id));
+    assert(storedPhoto, "the photo row should be restored after unlink fails");
+    assert.deepEqual(await readFile(filePath), jpegBytes);
+  } finally {
+    fs.unlinkSync = originalUnlinkSync;
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+  }
+});
+
+test("keeps a durable backup when restoring the deleted row fails", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("restore-failure.jpg");
+  const originalUnlinkSync = fs.unlinkSync;
+  fs.unlinkSync = ((target: fs.PathLike) => {
+    if (path.resolve(String(target)) === filePath) {
+      throw new Error("intentional unlink failure");
+    }
+    return originalUnlinkSync(target);
+  }) as typeof fs.unlinkSync;
+  const triggerName = `photo_restore_failure_${process.pid}_${Date.now()}`;
+  const functionName = `${triggerName}_function`;
+  await pool.query(`
+    CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.id = ${uploaded.id} THEN
+        RAISE EXCEPTION 'intentional photo restore failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `);
+  await pool.query(`
+    CREATE TRIGGER ${triggerName}
+    BEFORE INSERT ON student_photos
+    FOR EACH ROW EXECUTE FUNCTION ${functionName}()
+  `);
+
+  const parentDirectory = path.dirname(filePath);
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
+    assert.equal(response.status, 500);
+    assert.deepEqual(await readFile(filePath), jpegBytes, "the original remains readable");
+    const backupDirectories = (await readdir(parentDirectory))
+      .filter((entry) => entry.startsWith(".photo-delete-"));
+    assert(backupDirectories.length > 0, "failed compensation must retain a recovery backup");
+    const backupPath = path.join(parentDirectory, backupDirectories[0], path.basename(filePath));
+    assert.deepEqual(await readFile(backupPath), jpegBytes);
+  } finally {
+    fs.unlinkSync = originalUnlinkSync;
+    await pool.query(`DROP TRIGGER IF EXISTS ${triggerName} ON student_photos`);
+    await pool.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
+    await db.insert(studentPhotosTable).values({
+      id: uploaded.id,
+      projectId: uploaded.projectId,
+      studentId: uploaded.studentId,
+      fileName: uploaded.fileName,
+      fileUrl: uploaded.fileUrl,
+      mimeType: uploaded.mimeType,
+      capturedAt: uploaded.capturedAt,
+      createdAt: new Date(uploaded.createdAt),
+    }).onConflictDoNothing();
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    for (const entry of await readdir(parentDirectory)) {
+      if (entry.startsWith(".photo-delete-")) {
+        await rm(path.join(parentDirectory, entry), { recursive: true, force: true });
+      }
+    }
+    await rm(filePath, { force: true });
+  }
+});
+
+test("finishes deletion when only backup cleanup fails", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("cleanup-failure.jpg");
+  const originalRmSync = fs.rmSync;
+  let blockedBackupDirectory: string | undefined;
+  fs.rmSync = ((target: fs.PathLike, options?: fs.RmDirOptions) => {
+    if (path.basename(String(target)).startsWith(".photo-delete-")) {
+      blockedBackupDirectory = String(target);
+      throw new Error("intentional backup cleanup failure");
+    }
+    return originalRmSync(target, options);
+  }) as typeof fs.rmSync;
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
+    assert.equal(response.status, 204);
+    assert.equal(fs.existsSync(filePath), false);
+    const [storedPhoto] = await db
+      .select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, uploaded.id));
+    assert.equal(storedPhoto, undefined);
+    assert(blockedBackupDirectory && fs.existsSync(blockedBackupDirectory));
+    assert.deepEqual(
+      await readFile(path.join(blockedBackupDirectory, path.basename(filePath))),
+      jpegBytes,
+    );
+  } finally {
+    fs.rmSync = originalRmSync;
+    if (blockedBackupDirectory) {
+      await rm(blockedBackupDirectory, { recursive: true, force: true });
+    }
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+  }
 });
 
 test("limits photographer desktops to assignments, gives admins studio access, and revokes only one connection", async () => {

@@ -111,6 +111,50 @@ function discardUploadedFile(req: Request): void {
   }
 }
 
+type PhotoDeleteBackup = {
+  directory: string;
+  filePath: string;
+};
+
+function createPhotoDeleteBackup(filePath: string): PhotoDeleteBackup {
+  if (!fs.existsSync(filePath)) {
+    throw new Error("Photo file not found on server; deletion aborted");
+  }
+
+  const directory = fs.mkdtempSync(path.join(path.dirname(filePath), ".photo-delete-"));
+  const backupPath = path.join(directory, path.basename(filePath));
+  try {
+    fs.copyFileSync(filePath, backupPath, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    try {
+      fs.rmSync(directory, { recursive: true, force: true });
+    } catch (cleanupError) {
+      console.error("Could not clean up a failed photo deletion backup", {
+        error: cleanupError,
+        backupPath,
+      });
+    }
+    throw error;
+  }
+
+  return { directory, filePath: backupPath };
+}
+
+function removePhotoDeleteBackup(backup: PhotoDeleteBackup): void {
+  fs.rmSync(backup.directory, { recursive: true, force: true });
+}
+
+async function restoreDeletedPhoto(
+  photo: typeof studentPhotosTable.$inferSelect,
+  filePath: string,
+  backup: PhotoDeleteBackup,
+): Promise<void> {
+  if (!fs.existsSync(filePath)) {
+    fs.copyFileSync(backup.filePath, filePath, fs.constants.COPYFILE_EXCL);
+  }
+  await db.insert(studentPhotosTable).values(photo);
+}
+
 function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
   return {
     id: photo.id,
@@ -291,16 +335,70 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
     return;
   }
 
-  try {
-    const filePath = resolveFilePath(photo.fileUrl);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-  } catch {
-    // Non-fatal
-  }
+  const filePath = resolveFilePath(photo.fileUrl);
+  const backup = createPhotoDeleteBackup(filePath);
+  let rowDeleted = false;
+  let preserveBackup = false;
 
-  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photoId));
+  try {
+    const [deletedPhoto] = await db
+      .delete(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, photoId))
+      .returning({ id: studentPhotosTable.id });
+
+    if (!deletedPhoto) {
+      throw new Error("Photo could not be deleted");
+    }
+    rowDeleted = true;
+
+    try {
+      fs.unlinkSync(filePath);
+    } catch (error) {
+      try {
+        await restoreDeletedPhoto(photo, filePath, backup);
+        rowDeleted = false;
+      } catch (restoreError) {
+        preserveBackup = true;
+        console.error("Could not restore a photo after file deletion failed", {
+          error: restoreError,
+          photoId,
+          backupPath: backup.filePath,
+        });
+      }
+      throw error;
+    }
+
+    try {
+      removePhotoDeleteBackup(backup);
+    } catch (cleanupError) {
+      // The requested deletion has succeeded. Keep any surviving backup as
+      // cleanup debt rather than trying to roll back from a possibly partial
+      // recursive removal.
+      console.error("Could not clean up a completed photo deletion backup", {
+        error: cleanupError,
+        photoId,
+        backupPath: backup.filePath,
+      });
+    }
+  } catch (error) {
+    // A failed compensation must retain the only durable recovery copy.
+    // Otherwise, the row still exists (DB failure) or has been restored, so
+    // the backup can be removed safely.
+    if (!preserveBackup && (!rowDeleted || fs.existsSync(filePath))) {
+      try {
+        if (fs.existsSync(backup.directory)) {
+          removePhotoDeleteBackup(backup);
+        }
+      } catch (cleanupError) {
+        console.error("Could not clean up a photo deletion backup", {
+          error: cleanupError,
+          photoId,
+          backupPath: backup.filePath,
+        });
+      }
+    }
+    throw error;
+  }
 
   res.status(204).send();
 });

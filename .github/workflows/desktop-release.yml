@@ -194,6 +194,27 @@ jobs:
             exit 1
           }
 
+      - name: Decode Windows signing certificate
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          $certificatePath = Join-Path `
+            $env:RUNNER_TEMP `
+            "windows-signing-certificate.pfx"
+          $certificate = [Convert]::FromBase64String($env:WIN_CSC_LINK)
+
+          if ($certificate.Length -eq 0) {
+            Write-Error "WIN_CSC_LINK did not decode to a certificate file"
+            exit 1
+          }
+
+          [IO.File]::WriteAllBytes($certificatePath, $certificate)
+          "WIN_CSC_LINK=$certificatePath" | Out-File `
+            -FilePath $env:GITHUB_ENV `
+            -Encoding utf8 `
+            -Append
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:

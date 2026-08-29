@@ -9,6 +9,8 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
 import { projectsTable, classesTable, studentsTable } from '../db/schema'
 import { getUploadConfig } from './upload'
+import { getSetting, invalidateDesktopCredentials } from './upload'
+import { WorkBarrier } from '../lib/workBarrier'
 
 function now() {
   return new Date().toISOString()
@@ -25,12 +27,22 @@ export interface CloudProject {
   updatedAt: string
 }
 
+const cloudImportBarrier = new WorkBarrier()
+
+export function disableCloudImportsForRetirement(): Promise<void> {
+  return cloudImportBarrier.disableAndDrain()
+}
+
+export function enableCloudImportsAfterSignIn(): void {
+  cloudImportBarrier.enable()
+}
+
 export function registerCloudHandlers() {
   // List all projects available on the cloud API
   ipcMain.handle('cloud:listProjects', async (): Promise<{ ok: boolean; projects?: CloudProject[]; error?: string }> => {
     const { apiUrl, connectionToken } = getUploadConfig()
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: 'Cloud connection not configured. Set API URL and desktop connection token in Settings.' }
+       return { ok: false, error: 'Sign in to MC School Studio before syncing projects.' }
     }
 
     try {
@@ -41,6 +53,7 @@ export function registerCloudHandlers() {
       })
 
       if (!res.ok) {
+        if (res.status === 401) invalidateDesktopCredentials(true)
         const body = await res.json().catch(() => ({})) as { error?: string }
         return { ok: false, error: body.error ?? `Server returned ${res.status}` }
       }
@@ -61,12 +74,16 @@ export function registerCloudHandlers() {
       studentsImported?: number
       error?: string
     }> => {
+      if (cloudImportBarrier.isDisabled() || getSetting('desktop_retired') === '1') {
+        return { ok: false, error: 'Cloud sync is disabled because this desktop was retired.' }
+      }
       const { apiUrl, connectionToken } = getUploadConfig()
       if (!apiUrl || !connectionToken) {
-        return { ok: false, error: 'Cloud connection not configured' }
+         return { ok: false, error: 'Sign in to MC School Studio before pulling projects.' }
       }
 
-      try {
+      const task = cloudImportBarrier.run(async () => {
+        try {
         const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProjectId}/bundle`
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${connectionToken}` },
@@ -74,6 +91,7 @@ export function registerCloudHandlers() {
         })
 
         if (!res.ok) {
+          if (res.status === 401) invalidateDesktopCredentials(true)
           const body = await res.json().catch(() => ({})) as { error?: string }
           return { ok: false, error: body.error ?? `Server returned ${res.status}` }
         }
@@ -90,6 +108,10 @@ export function registerCloudHandlers() {
             email?: string | null; phone?: string | null
             simpleQr?: string | null; jsonQr?: string | null
           }[]
+        }
+
+        if (cloudImportBarrier.isDisabled() || getSetting('desktop_retired') === '1') {
+          return { ok: false, error: 'Cloud sync stopped because this desktop was retired.' }
         }
 
         const db = getDb()
@@ -175,6 +197,8 @@ export function registerCloudHandlers() {
       } catch (err) {
         return { ok: false, error: String(err) }
       }
+      })
+      return task ?? { ok: false, error: 'Cloud sync is disabled because this desktop was retired.' }
     },
   )
 }

@@ -1,9 +1,59 @@
 import { ipcMain, shell } from 'electron'
 import { randomBytes } from 'node:crypto'
-import { DEFAULT_API_URL, deleteSetting, getSetting, getUploadConfig, saveConnectionToken, setSetting } from './upload'
+import { rmSync } from 'node:fs'
+import { getDb, getPhotosDir } from '../db'
+import { photosTable, projectsTable } from '../db/schema'
+import { retireLocalProjects } from '../lib/retirement'
+import { enableWatchersAfterSignIn, stopAllWatchersForRetirement } from './watcher'
+import { disableCloudImportsForRetirement, enableCloudImportsAfterSignIn } from './cloud'
+import {
+  DEFAULT_API_URL,
+  deleteSetting,
+  getSetting,
+  readConnectionToken,
+  saveConnectionToken,
+  setSetting,
+  disableCloudSyncForRetirement,
+  enableCloudSyncAfterSignIn,
+  waitForActiveUploads,
+} from './upload'
 
 type AuthMember = { email: string; role: 'owner' | 'admin' | 'assistant' | 'photographer' }
 type AuthSession = { signedIn: boolean; member?: AuthMember; error?: string }
+type CurrentSessionPayload = {
+  member?: AuthMember
+  error?: string
+  retirement?: { retiredAt: string | null; acknowledgedAt: string | null } | null
+}
+
+async function clearLocalProjectData() {
+  disableCloudSyncForRetirement()
+  const cloudImportsDrained = disableCloudImportsForRetirement()
+  await stopAllWatchersForRetirement()
+  await waitForActiveUploads()
+  await cloudImportsDrained
+  const db = getDb()
+  return retireLocalProjects(
+    {
+      listProjects: () => db
+        .select({ id: projectsTable.id, schoolName: projectsTable.schoolName })
+        .from(projectsTable)
+        .all(),
+      listPhotoPaths: () => db
+        .select({ filePath: photosTable.filePath })
+        .from(photosTable)
+        .all()
+        .map((photo) => photo.filePath),
+      clearProjects: () => {
+        db.delete(projectsTable).run()
+      },
+    },
+    {
+      remove: (path) => rmSync(path, { recursive: true, force: true }),
+    },
+    getPhotosDir(),
+  )
+}
 
 async function postJson(url: string, body: Record<string, unknown>, timeoutMs: number) {
   const response = await fetch(url, {
@@ -16,15 +66,42 @@ async function postJson(url: string, body: Record<string, unknown>, timeoutMs: n
   return { response, payload }
 }
 
-async function fetchCurrentSession(): Promise<AuthSession> {
-  const { apiUrl, connectionToken } = getUploadConfig()
+async function performCurrentSessionCheck(): Promise<AuthSession> {
+  const apiUrl = (getSetting('upload_api_url') ?? DEFAULT_API_URL).replace(/\/+$/, '')
+  const connectionToken = readConnectionToken()
   if (!connectionToken) return { signedIn: false }
   try {
     const response = await fetch(`${apiUrl}/api/desktop/me`, {
       headers: { Authorization: `Bearer ${connectionToken}` },
       signal: AbortSignal.timeout(5000),
     })
-    const payload = await response.json().catch(() => ({})) as { member?: AuthMember; error?: string }
+    const payload = await response.json().catch(() => ({})) as CurrentSessionPayload
+    if (response.ok && payload.retirement) {
+      setSetting('desktop_retired', '1')
+      try {
+        await clearLocalProjectData()
+      } catch (error) {
+        return {
+          signedIn: false,
+          error: `This desktop was retired, but its local project data could not be cleared. Close the app and try again. (${String(error)})`,
+        }
+      }
+
+      const acknowledgement = await fetch(`${apiUrl}/api/desktop/retirement/acknowledge`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => null)
+      if (acknowledgement?.ok) {
+        deleteSetting('desktop_connection_token')
+      }
+      return {
+        signedIn: false,
+        error: acknowledgement?.ok
+          ? 'This desktop was retired by the studio owner. Local project and photo data was cleared and cloud sync is disabled.'
+          : 'This desktop was retired by the studio owner. Local project and photo data was cleared and cloud sync is disabled. Retirement acknowledgement will retry when the app reconnects.',
+      }
+    }
     if (response.ok && payload.member) return { signedIn: true, member: payload.member }
     if (response.status === 401) {
       return { signedIn: false, error: 'Your desktop session was signed out or revoked. Sign in again.' }
@@ -33,6 +110,16 @@ async function fetchCurrentSession(): Promise<AuthSession> {
   } catch {
     return { signedIn: false, error: 'Could not reach MC School Studio. Check your internet connection.' }
   }
+}
+
+let currentSessionCheck: Promise<AuthSession> | null = null
+
+export function fetchCurrentSession(): Promise<AuthSession> {
+  if (currentSessionCheck) return currentSessionCheck
+  currentSessionCheck = performCurrentSessionCheck().finally(() => {
+    currentSessionCheck = null
+  })
+  return currentSessionCheck
 }
 
 export function registerAuthHandlers() {
@@ -106,6 +193,9 @@ export function registerAuthHandlers() {
         const member = exchanged.payload.member as AuthMember
         setSetting('upload_api_url', apiUrl)
         saveConnectionToken(exchanged.payload.token)
+        enableCloudSyncAfterSignIn()
+        enableCloudImportsAfterSignIn()
+        enableWatchersAfterSignIn()
         return { signedIn: true, member }
       }
       return { signedIn: false, error: 'Sign-in timed out. Click Sign in to try again.' }

@@ -35,6 +35,8 @@ router.get("/", requireAuth, async (req, res): Promise<void> => {
         revokedAt: desktopConnectionsTable.revokedAt,
         memberId: desktopConnectionsTable.memberId,
         memberEmail: studioMembersTable.email,
+        retiredAt: desktopConnectionsTable.retiredAt,
+        retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
       })
       .from(desktopConnectionsTable)
       .innerJoin(studioMembersTable, eq(desktopConnectionsTable.memberId, studioMembersTable.id))
@@ -170,7 +172,7 @@ router.delete("/desktop-connections/:connectionId", requireAuth, async (req, res
     .where(and(
       eq(desktopConnectionsTable.id, connectionId),
       eq(desktopConnectionsTable.studioId, current.studioId),
-      eq(desktopConnectionsTable.status, "active"),
+      inArray(desktopConnectionsTable.status, ["active", "retired"]),
     ))
     .returning({ id: desktopConnectionsTable.id });
   if (!updated) {
@@ -178,6 +180,67 @@ router.delete("/desktop-connections/:connectionId", requireAuth, async (req, res
     return;
   }
   res.status(204).send();
+});
+
+router.post("/desktop-connections/:connectionId/retire", requireAuth, async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  const current = await getStudioMember(userId);
+  if (current.status !== "active" || current.role !== "owner") {
+    res.status(403).json({ error: "Only the studio owner can retire desktop connections" });
+    return;
+  }
+
+  const connectionId = Number(req.params.connectionId);
+  if (!Number.isInteger(connectionId)) {
+    res.status(400).json({ error: "Invalid desktop connection" });
+    return;
+  }
+
+  const [existing] = await db
+    .select({
+      id: desktopConnectionsTable.id,
+      status: desktopConnectionsTable.status,
+      retiredAt: desktopConnectionsTable.retiredAt,
+      retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
+    })
+    .from(desktopConnectionsTable)
+    .where(and(
+      eq(desktopConnectionsTable.id, connectionId),
+      eq(desktopConnectionsTable.studioId, current.studioId),
+    ));
+  if (!existing || existing.status === "revoked") {
+    res.status(404).json({ error: "Active desktop connection not found" });
+    return;
+  }
+
+  if (existing.status === "retired") {
+    res.json(existing);
+    return;
+  }
+
+  const [updated] = await db
+    .update(desktopConnectionsTable)
+    .set({
+      status: "retired",
+      retiredAt: new Date(),
+      retirementAcknowledgedAt: null,
+    })
+    .where(and(
+      eq(desktopConnectionsTable.id, connectionId),
+      eq(desktopConnectionsTable.studioId, current.studioId),
+      eq(desktopConnectionsTable.status, "active"),
+    ))
+    .returning({
+      id: desktopConnectionsTable.id,
+      status: desktopConnectionsTable.status,
+      retiredAt: desktopConnectionsTable.retiredAt,
+      retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
+    });
+  if (!updated) {
+    res.status(404).json({ error: "Active desktop connection not found" });
+    return;
+  }
+  res.json(updated);
 });
 
 export default router;

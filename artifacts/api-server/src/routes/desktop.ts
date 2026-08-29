@@ -5,11 +5,19 @@
  */
 
 import { Router } from "express";
+import type { Response } from "express";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { db, desktopAuthSessionsTable, desktopConnectionsTable, studioMembersTable } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
 import { and, eq, gt, inArray } from "drizzle-orm";
-import { getDesktopConnection, hashDesktopToken, requireDesktopConnection, createDesktopToken } from "../lib/desktopAuth";
+import {
+  getDesktopConnection,
+  hashDesktopToken,
+  refreshDesktopConnection,
+  requireDesktopConnection,
+  requireDesktopConnectionWithRetirement,
+  createDesktopToken,
+} from "../lib/desktopAuth";
 import { assignedDesktopProjectIds, canAccessAssignedDesktopProject } from "../lib/studioAccess";
 import { getStudioMember } from "../lib/studioAccess";
 import { getUserId, requireAuth } from "../lib/auth";
@@ -197,9 +205,20 @@ function memberForAccess(connection: ReturnType<typeof getDesktopConnection>) {
   };
 }
 
-router.get("/me", requireDesktopConnection, async (req, res) => {
+async function requireStillActiveBeforeDataResponse(
+  connection: ReturnType<typeof getDesktopConnection>,
+  res: Response,
+): Promise<boolean> {
+  if (await refreshDesktopConnection(connection.connectionId)) return true;
+  res.status(401).json({ error: "Invalid or retired desktop connection" });
+  return false;
+}
+
+router.get("/me", requireDesktopConnectionWithRetirement, async (req, res) => {
   const connection = getDesktopConnection(req);
-  const projectIds = await assignedDesktopProjectIds(memberForAccess(connection));
+  const projectIds = connection.status === "active"
+    ? await assignedDesktopProjectIds(memberForAccess(connection))
+    : [];
   res.json({
     connectionId: connection.connectionId,
     deviceName: connection.deviceName,
@@ -209,6 +228,42 @@ router.get("/me", requireDesktopConnection, async (req, res) => {
       role: connection.memberRole,
     },
     projectCount: projectIds.length,
+    retirement: connection.status === "retired"
+      ? {
+        retiredAt: connection.retiredAt instanceof Date ? connection.retiredAt.toISOString() : connection.retiredAt,
+        acknowledgedAt: connection.retirementAcknowledgedAt instanceof Date
+          ? connection.retirementAcknowledgedAt.toISOString()
+          : connection.retirementAcknowledgedAt,
+      }
+      : null,
+  });
+});
+
+router.post("/retirement/acknowledge", requireDesktopConnectionWithRetirement, async (req, res): Promise<void> => {
+  const connection = getDesktopConnection(req);
+  if (connection.status !== "retired") {
+    res.status(409).json({ error: "This desktop connection is not retired" });
+    return;
+  }
+
+  const acknowledgedAt = connection.retirementAcknowledgedAt ?? new Date();
+  const [updated] = await db
+    .update(desktopConnectionsTable)
+    .set({ retirementAcknowledgedAt: acknowledgedAt })
+    .where(and(
+      eq(desktopConnectionsTable.id, connection.connectionId),
+      eq(desktopConnectionsTable.status, "retired"),
+    ))
+    .returning({ retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt });
+  if (!updated?.retirementAcknowledgedAt) {
+    res.status(409).json({ error: "This desktop retirement could not be acknowledged" });
+    return;
+  }
+  res.json({
+    ok: true,
+    acknowledgedAt: updated.retirementAcknowledgedAt instanceof Date
+      ? updated.retirementAcknowledgedAt.toISOString()
+      : updated.retirementAcknowledgedAt,
   });
 });
 
@@ -217,6 +272,7 @@ router.get("/projects", requireDesktopConnection, async (req, res) => {
   const connection = getDesktopConnection(req);
   const projectIds = await assignedDesktopProjectIds(memberForAccess(connection));
   if (!projectIds.length) {
+    if (!(await requireStillActiveBeforeDataResponse(connection, res))) return;
     res.json([]);
     return;
   }
@@ -257,6 +313,7 @@ router.get("/projects", requireDesktopConnection, async (req, res) => {
     }),
   );
 
+  if (!(await requireStillActiveBeforeDataResponse(connection, res))) return;
   res.json(enriched);
 });
 
@@ -301,6 +358,7 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
     .where(eq(studentsTable.projectId, projectId))
     .orderBy(classesTable.className, studentsTable.lastName, studentsTable.firstName);
 
+  if (!(await requireStillActiveBeforeDataResponse(connection, res))) return;
   res.json({
     exportedAt: new Date().toISOString(),
     exportVersion: 1,

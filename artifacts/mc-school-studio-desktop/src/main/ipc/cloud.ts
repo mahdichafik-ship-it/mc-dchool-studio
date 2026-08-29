@@ -9,6 +9,8 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
 import { projectsTable, classesTable, studentsTable } from '../db/schema'
 import { getUploadConfig } from './upload'
+import { getSetting } from './upload'
+import { WorkBarrier } from '../lib/workBarrier'
 
 function now() {
   return new Date().toISOString()
@@ -23,6 +25,16 @@ export interface CloudProject {
   classCount: number
   studentCount: number
   updatedAt: string
+}
+
+const cloudImportBarrier = new WorkBarrier()
+
+export function disableCloudImportsForRetirement(): Promise<void> {
+  return cloudImportBarrier.disableAndDrain()
+}
+
+export function enableCloudImportsAfterSignIn(): void {
+  cloudImportBarrier.enable()
 }
 
 export function registerCloudHandlers() {
@@ -61,12 +73,16 @@ export function registerCloudHandlers() {
       studentsImported?: number
       error?: string
     }> => {
+      if (cloudImportBarrier.isDisabled() || getSetting('desktop_retired') === '1') {
+        return { ok: false, error: 'Cloud sync is disabled because this desktop was retired.' }
+      }
       const { apiUrl, connectionToken } = getUploadConfig()
       if (!apiUrl || !connectionToken) {
          return { ok: false, error: 'Sign in to MC School Studio before pulling projects.' }
       }
 
-      try {
+      const task = cloudImportBarrier.run(async () => {
+        try {
         const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProjectId}/bundle`
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${connectionToken}` },
@@ -90,6 +106,10 @@ export function registerCloudHandlers() {
             email?: string | null; phone?: string | null
             simpleQr?: string | null; jsonQr?: string | null
           }[]
+        }
+
+        if (cloudImportBarrier.isDisabled() || getSetting('desktop_retired') === '1') {
+          return { ok: false, error: 'Cloud sync stopped because this desktop was retired.' }
         }
 
         const db = getDb()
@@ -175,6 +195,8 @@ export function registerCloudHandlers() {
       } catch (err) {
         return { ok: false, error: String(err) }
       }
+      })
+      return task ?? { ok: false, error: 'Cloud sync is disabled because this desktop was retired.' }
     },
   )
 }

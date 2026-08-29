@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, desktopConnectionsTable, studioMembersTable } from "@workspace/db";
 
 export type DesktopConnection = {
@@ -11,6 +11,9 @@ export type DesktopConnection = {
   memberEmail: string;
   memberRole: "owner" | "admin" | "assistant" | "photographer" | "viewer";
   deviceName: string;
+  status: "active" | "retired";
+  retiredAt: Date | null;
+  retirementAcknowledgedAt: Date | null;
 };
 
 type DesktopConnectionRow = DesktopConnection & {
@@ -30,8 +33,12 @@ export function createDesktopToken(): { token: string; tokenHash: string; tokenP
   };
 }
 
-export async function findDesktopConnection(token: string): Promise<DesktopConnection | null> {
+export async function findDesktopConnection(
+  token: string,
+  options: { includeRetired?: boolean } = {},
+): Promise<DesktopConnection | null> {
   const tokenHash = hashDesktopToken(token);
+  const statuses = options.includeRetired ? ["active", "retired"] as const : ["active"] as const;
   const [connection] = await db
     .select({
       connectionId: desktopConnectionsTable.id,
@@ -41,12 +48,15 @@ export async function findDesktopConnection(token: string): Promise<DesktopConne
       memberEmail: studioMembersTable.email,
       memberRole: studioMembersTable.role,
       deviceName: desktopConnectionsTable.deviceName,
+      status: desktopConnectionsTable.status,
+      retiredAt: desktopConnectionsTable.retiredAt,
+      retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
       tokenHash: desktopConnectionsTable.tokenHash,
     })
     .from(desktopConnectionsTable)
     .innerJoin(studioMembersTable, eq(desktopConnectionsTable.memberId, studioMembersTable.id))
     .where(and(
-      eq(desktopConnectionsTable.status, "active"),
+      inArray(desktopConnectionsTable.status, statuses),
       eq(studioMembersTable.status, "active"),
       eq(desktopConnectionsTable.tokenHash, tokenHash),
     ))
@@ -76,6 +86,9 @@ export async function refreshDesktopConnection(connectionId: number): Promise<De
       memberEmail: studioMembersTable.email,
       memberRole: studioMembersTable.role,
       deviceName: desktopConnectionsTable.deviceName,
+      status: desktopConnectionsTable.status,
+      retiredAt: desktopConnectionsTable.retiredAt,
+      retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
     })
     .from(desktopConnectionsTable)
     .innerJoin(studioMembersTable, eq(desktopConnectionsTable.memberId, studioMembersTable.id))
@@ -91,7 +104,7 @@ export async function refreshDesktopConnection(connectionId: number): Promise<De
     .update(desktopConnectionsTable)
     .set({ lastUsedAt: new Date() })
     .where(eq(desktopConnectionsTable.id, connection.connectionId));
-  return connection;
+  return { ...connection, status: "active" };
 }
 
 export async function requireDesktopConnection(
@@ -102,6 +115,22 @@ export async function requireDesktopConnection(
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
   const connection = token ? await findDesktopConnection(token) : null;
+  if (!connection) {
+    res.status(401).json({ error: "Invalid or revoked desktop connection" });
+    return;
+  }
+  (req as Request & { desktopConnection: DesktopConnection }).desktopConnection = connection;
+  next();
+}
+
+export async function requireDesktopConnectionWithRetirement(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const connection = token ? await findDesktopConnection(token, { includeRetired: true }) : null;
   if (!connection) {
     res.status(401).json({ error: "Invalid or revoked desktop connection" });
     return;

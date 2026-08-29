@@ -112,6 +112,7 @@ interface ElectronAPI {
   on(channel: 'photo:reassigned', listener: (data: PhotoReassignedEvent) => void): () => void
   on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
   on(channel: 'update:status', listener: (data: UpdateState) => void): () => void
+  on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
 }
 
 declare global {

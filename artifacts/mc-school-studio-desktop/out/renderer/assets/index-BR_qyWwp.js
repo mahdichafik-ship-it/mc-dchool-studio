@@ -17142,6 +17142,9 @@ function App() {
   reactExports.useEffect(() => {
     loadAuth().catch(() => setAuth({ status: "signed-out", error: "Could not check your desktop session." }));
   }, [loadAuth]);
+  reactExports.useEffect(() => window.api.on("auth:retired", (session) => {
+    setAuth({ status: "signed-out", error: session.error });
+  }), []);
   const signIn = reactExports.useCallback(async () => {
     setAuthBusy(true);
     setAuth({ status: "signed-out" });

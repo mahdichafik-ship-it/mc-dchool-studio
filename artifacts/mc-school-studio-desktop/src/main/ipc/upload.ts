@@ -45,9 +45,10 @@ export function saveConnectionToken(token: string) {
     ? `safe:${safeStorage.encryptString(token).toString('base64')}`
     : token
   setSetting('desktop_connection_token', value)
+  deleteSetting('desktop_retired')
 }
 
-function readConnectionToken(): string | null {
+export function readConnectionToken(): string | null {
   const stored = getSetting('desktop_connection_token')
   if (!stored) return null
   if (!stored.startsWith('safe:')) return stored
@@ -59,9 +60,10 @@ function readConnectionToken(): string | null {
 }
 
 export function getUploadConfig(): { apiUrl: string | null; connectionToken: string | null } {
+  const retired = getSetting('desktop_retired') === '1'
   return {
     apiUrl: getSetting('upload_api_url') ?? DEFAULT_API_URL,
-    connectionToken: readConnectionToken(),
+    connectionToken: retired ? null : readConnectionToken(),
   }
 }
 
@@ -83,7 +85,22 @@ function toServerFileUrl(fileUrl: string | null): string | null {
 // Upload a single photo to the cloud API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function uploadPhoto(
+let cloudSyncDisabledForRetirement = false
+const activeUploads = new Set<Promise<void>>()
+
+export function disableCloudSyncForRetirement(): void {
+  cloudSyncDisabledForRetirement = true
+}
+
+export function enableCloudSyncAfterSignIn(): void {
+  cloudSyncDisabledForRetirement = false
+}
+
+export async function waitForActiveUploads(): Promise<void> {
+  await Promise.allSettled([...activeUploads])
+}
+
+async function performUploadPhoto(
   projectId: number,
   studentId: number,
   photoId: number,
@@ -155,6 +172,21 @@ export async function uploadPhoto(
     notifyUploadStatus(photoId, studentId, 'error')
     throw err
   }
+}
+
+export function uploadPhoto(
+  projectId: number,
+  studentId: number,
+  photoId: number,
+  filePath: string,
+  fileName: string,
+  capturedAt: string,
+): Promise<void> {
+  if (cloudSyncDisabledForRetirement) return Promise.resolve()
+  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt)
+  activeUploads.add(task)
+  void task.finally(() => activeUploads.delete(task)).catch(() => {})
+  return task
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

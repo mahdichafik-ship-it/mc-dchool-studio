@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import {
   classesTable,
   db,
+  desktopConnectionsTable,
   pool,
   projectAssignmentsTable,
   projectsTable,
@@ -416,6 +417,69 @@ test("completes a one-time browser desktop sign-in for shoot-capable roles", asy
     body: JSON.stringify({ code: viewerCode }),
   });
   assert.equal(viewerApproval.status, 403, "view-only members must not connect the desktop app");
+});
+
+test("retires a desktop, blocks cloud data, and records its cleanup acknowledgement", async () => {
+  const credentials = createDesktopToken();
+  const [connection] = await db.insert(desktopConnectionsTable).values({
+    studioId,
+    memberId: ownerMemberId,
+    deviceName: `Retirement test Mac ${suffix}`,
+    tokenHash: credentials.tokenHash,
+    tokenPrefix: credentials.tokenPrefix,
+  }).returning({ id: desktopConnectionsTable.id });
+
+  const activeProjects = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${credentials.token}` },
+  });
+  assert.equal(activeProjects.status, 200);
+
+  const adminAttempt = await request(adminUserId, `/api/team/desktop-connections/${connection.id}/retire`, {
+    method: "POST",
+  });
+  assert.equal(adminAttempt.status, 403, "admins cannot remotely erase an owner's desktop");
+
+  const retirement = await request(ownerUserId, `/api/team/desktop-connections/${connection.id}/retire`, {
+    method: "POST",
+  });
+  assert.equal(retirement.status, 200);
+  const retired = await readJson<{ status: string; retiredAt: string; retirementAcknowledgedAt: string | null }>(retirement);
+  assert.equal(retired.status, "retired");
+  assert(retired.retiredAt);
+  assert.equal(retired.retirementAcknowledgedAt, null);
+
+  const blockedProjects = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${credentials.token}` },
+  });
+  assert.equal(blockedProjects.status, 401, "a retired desktop cannot list cloud projects");
+
+  const checkIn = await fetch(`${baseUrl}/api/desktop/me`, {
+    headers: { Authorization: `Bearer ${credentials.token}` },
+  });
+  assert.equal(checkIn.status, 200, "the retired token remains valid only for retirement check-in");
+  const checkInBody = await readJson<{
+    projectCount: number;
+    retirement: { retiredAt: string; acknowledgedAt: string | null };
+  }>(checkIn);
+  assert.equal(checkInBody.projectCount, 0);
+  assert.equal(checkInBody.retirement.retiredAt, retired.retiredAt);
+  assert.equal(checkInBody.retirement.acknowledgedAt, null);
+
+  const acknowledgement = await fetch(`${baseUrl}/api/desktop/retirement/acknowledge`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${credentials.token}` },
+  });
+  assert.equal(acknowledgement.status, 200);
+  const acknowledged = await readJson<{ acknowledgedAt: string }>(acknowledgement);
+  assert(acknowledged.acknowledgedAt);
+
+  const teamResponse = await request(ownerUserId, "/api/team");
+  const team = await readJson<{
+    desktopConnections: { id: number; status: string; retirementAcknowledgedAt: string | null }[];
+  }>(teamResponse);
+  const visibleConnection = team.desktopConnections.find((item) => item.id === connection.id);
+  assert.equal(visibleConnection?.status, "retired");
+  assert.equal(visibleConnection?.retirementAcknowledgedAt, acknowledged.acknowledgedAt);
 });
 
 test("rejects access to an unassigned or unknown project", async () => {

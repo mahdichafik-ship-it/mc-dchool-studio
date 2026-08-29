@@ -6,7 +6,7 @@ import { basename, extname, join } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema'
-import { getUploadConfig, uploadPhoto } from './upload'
+import { getSetting, getUploadConfig, uploadPhoto } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
 import { readQrFromImage } from '../lib/qrReader'
 import {
@@ -33,6 +33,24 @@ interface WatchSession {
 
 // Active watchers: projectId → watcher session
 const watchers = new Map<number, WatchSession>()
+let desktopRetiring = false
+
+export async function stopAllWatchersForRetirement(): Promise<void> {
+  desktopRetiring = true
+  const sessions = [...watchers.values()]
+  watchers.clear()
+  for (const session of sessions) {
+    if (session.flushTimer) clearTimeout(session.flushTimer)
+    session.flushTimer = null
+    session.pendingFiles = []
+  }
+  await Promise.allSettled(sessions.map((session) => session.watcher.close()))
+  await Promise.allSettled(sessions.map((session) => session.processing))
+}
+
+export function enableWatchersAfterSignIn(): void {
+  desktopRetiring = false
+}
 
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
@@ -79,6 +97,9 @@ export function registerWatcherHandlers() {
   const db = getDb()
 
   ipcMain.handle('watcher:start', async (_e, { projectId }: { projectId: number }) => {
+    if (desktopRetiring || getSetting('desktop_retired') === '1') {
+      throw new Error('Cloud sync is disabled because this desktop was retired')
+    }
     if (watchers.has(projectId)) return
 
     const [project] = db
@@ -134,6 +155,7 @@ export function registerWatcherHandlers() {
 }
 
 async function enqueuePhoto(projectId: number, filePath: string): Promise<void> {
+  if (desktopRetiring) return
   const session = watchers.get(projectId)
   if (!session || session.seenPaths.has(filePath)) return
 
@@ -182,6 +204,7 @@ async function handleNewPhoto(
   capture: CaptureFile,
   session: WatchSession,
 ): Promise<void> {
+  if (desktopRetiring) return
   const db = getDb()
   const win = getMainWindow()
   const qrResult = await readQrFromImage(capture.filePath)

@@ -12,6 +12,7 @@
     "test:naming": "node --experimental-strip-types --test test/photo-file-naming.test.ts",
     "test:sequence": "node --experimental-strip-types --test test/photo-sequence.test.ts",
     "test:watcher": "node --experimental-strip-types --test test/watcher-photo-processing.test.ts",
+    "test:retirement": "node --experimental-strip-types --test test/retirement.test.ts",
     "dist:mac": "pnpm run build && electron-builder --mac --publish never",
     "dist": "pnpm run dist:mac"
   },

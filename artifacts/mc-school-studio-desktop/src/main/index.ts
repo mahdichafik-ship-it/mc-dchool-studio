@@ -5,7 +5,7 @@ import { registerPhotoHandlers } from './ipc/photos'
 import { registerWatcherHandlers } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
 import { registerUploadHandlers } from './ipc/upload'
-import { registerAuthHandlers } from './ipc/auth'
+import { fetchCurrentSession, registerAuthHandlers } from './ipc/auth'
 import { registerCloudHandlers } from './ipc/cloud'
 import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
 import { getDb } from './db'
@@ -66,6 +66,19 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
+function monitorRetirement(mainWindow: BrowserWindow): void {
+  const checkRetirement = async () => {
+    const session = await fetchCurrentSession()
+    if (!session.signedIn && session.error?.startsWith('This desktop was retired')) {
+      mainWindow.webContents.send('auth:retired', session)
+    }
+  }
+  void checkRetirement()
+  const retirementTimer = setInterval(() => void checkRetirement(), 15_000)
+  retirementTimer.unref()
+  mainWindow.on('closed', () => clearInterval(retirementTimer))
+}
+
 app.whenReady().then(() => {
   // Initialize database (creates tables if needed)
   getDb()
@@ -80,12 +93,14 @@ app.whenReady().then(() => {
   registerCloudHandlers()
 
   const mainWindow = createWindow()
+  monitorRetirement(mainWindow)
   registerUpdateHandlers(mainWindow)
   scheduleUpdateCheck()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const window = createWindow()
+      monitorRetirement(window)
       registerUpdateHandlers(window)
       scheduleUpdateCheck()
     }

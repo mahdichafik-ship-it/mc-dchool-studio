@@ -61,6 +61,10 @@ export default function App() {
     loadAuth().catch(() => setAuth({ status: 'signed-out', error: 'Could not check your desktop session.' }))
   }, [loadAuth])
 
+  useEffect(() => window.api.on('auth:retired', (session) => {
+    setAuth({ status: 'signed-out', error: session.error })
+  }), [])
+
   const signIn = useCallback(async () => {
     setAuthBusy(true)
     setAuth({ status: 'signed-out' })

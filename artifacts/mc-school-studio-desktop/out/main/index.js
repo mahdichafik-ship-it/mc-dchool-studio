@@ -7,6 +7,7 @@ const drizzleOrm = require("drizzle-orm");
 const Database = require("better-sqlite3");
 const betterSqlite3 = require("drizzle-orm/better-sqlite3");
 const sqliteCore = require("drizzle-orm/sqlite-core");
+const node_path = require("node:path");
 const require$$0$1 = require("util");
 const require$$1 = require("stream");
 const require$$1$1 = require("zlib");
@@ -14,7 +15,6 @@ const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
-const node_path = require("node:path");
 const node_fs = require("node:fs");
 const node_crypto = require("node:crypto");
 const electronUpdater = require("electron-updater");
@@ -174,11 +174,32 @@ function setPhotosDir(dir) {
   else db.insert(settingsTable).values({ key: "storage_root", value: clean }).run();
   require$$0.mkdirSync(clean, { recursive: true });
 }
+function safeProjectFolderName(value) {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
+}
+function isInside(root, candidate) {
+  const pathFromRoot = node_path.relative(node_path.resolve(root), node_path.resolve(candidate));
+  return pathFromRoot !== "" && pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${node_path.sep}`);
+}
+function retireLocalProjects(store, fileSystem, photosRoot) {
+  const projects = store.listProjects();
+  const paths = /* @__PURE__ */ new Set();
+  for (const filePath of store.listPhotoPaths()) {
+    if (isInside(photosRoot, filePath)) paths.add(node_path.resolve(filePath));
+  }
+  for (const project of projects) {
+    paths.add(node_path.resolve(photosRoot, safeProjectFolderName(project.schoolName)));
+    paths.add(node_path.resolve(photosRoot, String(project.id)));
+  }
+  const orderedPaths = [...paths].sort((left, right) => right.length - left.length);
+  for (const path2 of orderedPaths) {
+    if (isInside(photosRoot, path2)) fileSystem.remove(path2);
+  }
+  store.clearProjects();
+  return { projectsCleared: projects.length, pathsRemoved: orderedPaths.length };
+}
 function now$2() {
   return (/* @__PURE__ */ new Date()).toISOString();
-}
-function safeFolderName$2(value) {
-  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
 function enrichProject(p, classCount, studentCount, photoCount) {
   return {
@@ -203,16 +224,16 @@ function registerProjectHandlers() {
   function prepareProjectFolders(projectId) {
     const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
     if (!project) return;
-    const projectDir = path.join(getPhotosDir(), safeFolderName$2(project.schoolName));
+    const projectDir = path.join(getPhotosDir(), safeProjectFolderName(project.schoolName));
     require$$0.mkdirSync(projectDir, { recursive: true });
     const classes = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
     for (const cls of classes) {
-      const classDir = path.join(projectDir, safeFolderName$2(cls.className));
+      const classDir = path.join(projectDir, safeProjectFolderName(cls.className));
       require$$0.mkdirSync(classDir, { recursive: true });
       const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.classId, cls.id)).all();
       for (const student of students) {
         require$$0.mkdirSync(
-          path.join(classDir, safeFolderName$2(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+          path.join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
           { recursive: true }
         );
       }
@@ -40735,6 +40756,7 @@ const DEFAULT_API_URL = "https://volumecapture.net";
 function saveConnectionToken(token) {
   const value = electron.safeStorage.isEncryptionAvailable() ? `safe:${electron.safeStorage.encryptString(token).toString("base64")}` : token;
   setSetting("desktop_connection_token", value);
+  deleteSetting("desktop_retired");
 }
 function readConnectionToken() {
   const stored = getSetting("desktop_connection_token");
@@ -40746,10 +40768,11 @@ function readConnectionToken() {
     return null;
   }
 }
-function getUploadConfig() {
+function getUploadConfig$1() {
+  const retired = getSetting("desktop_retired") === "1";
   return {
     apiUrl: getSetting("upload_api_url") ?? DEFAULT_API_URL,
-    connectionToken: readConnectionToken()
+    connectionToken: retired ? null : readConnectionToken()
   };
 }
 function notifyUploadStatus(photoId, studentId, status) {
@@ -40759,13 +40782,24 @@ function notifyUploadStatus(photoId, studentId, status) {
 function toServerFileUrl(fileUrl) {
   if (!fileUrl) return null;
   if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
-  const { apiUrl } = getUploadConfig();
+  const { apiUrl } = getUploadConfig$1();
   if (!apiUrl) return null;
   return `${apiUrl.replace(/\/+$/, "")}/${fileUrl.replace(/^\/+/, "")}`;
 }
-async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
+let cloudSyncDisabledForRetirement = false;
+const activeUploads = /* @__PURE__ */ new Set();
+function disableCloudSyncForRetirement() {
+  cloudSyncDisabledForRetirement = true;
+}
+function enableCloudSyncAfterSignIn() {
+  cloudSyncDisabledForRetirement = false;
+}
+async function waitForActiveUploads() {
+  await Promise.allSettled([...activeUploads]);
+}
+async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
   const db = getDb();
-  const { apiUrl, connectionToken } = getUploadConfig();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
   if (!apiUrl || !connectionToken) {
     console.log("[Upload] Cloud upload not configured, skipping.");
     return;
@@ -40807,9 +40841,17 @@ async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, ca
     throw err;
   }
 }
+function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
+  if (cloudSyncDisabledForRetirement) return Promise.resolve();
+  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt);
+  activeUploads.add(task);
+  void task.finally(() => activeUploads.delete(task)).catch(() => {
+  });
+  return task;
+}
 function registerUploadHandlers() {
   electron.ipcMain.handle("upload:testConnection", async () => {
-    const { apiUrl, connectionToken } = getUploadConfig();
+    const { apiUrl, connectionToken } = getUploadConfig$1();
     if (!apiUrl || !connectionToken) {
       return { ok: false, error: "Sign in to MC School Studio before testing the connection" };
     }
@@ -40881,6 +40923,11 @@ function extractStudentReference(fileName, studentIds) {
 }
 function createSequenceState() {
   return { activeStudentId: null };
+}
+function registerCapturePath(seenPaths, filePath) {
+  if (seenPaths.has(filePath)) return false;
+  seenPaths.add(filePath);
+  return true;
 }
 function sortCaptureFiles(files) {
   return [...files].sort((a, b) => {
@@ -40993,6 +41040,22 @@ async function processWatchedPhoto(projectId, filePath, { store, photosDir, read
 }
 const FLUSH_DELAY_MS = 500;
 const watchers = /* @__PURE__ */ new Map();
+let desktopRetiring = false;
+async function stopAllWatchersForRetirement() {
+  desktopRetiring = true;
+  const sessions = [...watchers.values()];
+  watchers.clear();
+  for (const session of sessions) {
+    if (session.flushTimer) clearTimeout(session.flushTimer);
+    session.flushTimer = null;
+    session.pendingFiles = [];
+  }
+  await Promise.allSettled(sessions.map((session) => session.watcher.close()));
+  await Promise.allSettled(sessions.map((session) => session.processing));
+}
+function enableWatchersAfterSignIn() {
+  desktopRetiring = false;
+}
 function getMainWindow() {
   const wins = electron.BrowserWindow.getAllWindows();
   return wins.length > 0 ? wins[0] : null;
@@ -41029,6 +41092,9 @@ function toStudentEvent(db, student) {
 function registerWatcherHandlers() {
   const db = getDb();
   electron.ipcMain.handle("watcher:start", async (_e, { projectId }) => {
+    if (desktopRetiring || getSetting("desktop_retired") === "1") {
+      throw new Error("Cloud sync is disabled because this desktop was retired");
+    }
     if (watchers.has(projectId)) return;
     const [project] = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).all();
     if (!project?.watchFolder) {
@@ -41070,6 +41136,7 @@ function registerWatcherHandlers() {
   });
 }
 async function enqueuePhoto(projectId, filePath) {
+  if (desktopRetiring) return;
   const session = watchers.get(projectId);
   if (!session || session.seenPaths.has(filePath)) return;
   const lower = filePath.toLowerCase();
@@ -41077,7 +41144,7 @@ async function enqueuePhoto(projectId, filePath) {
   try {
     const fileStat = await promises.stat(filePath);
     if (!fileStat.isFile()) return;
-    session.seenPaths.add(filePath);
+    if (!registerCapturePath(session.seenPaths, filePath)) return;
     session.pendingFiles.push({
       filePath,
       fileName: path.basename(filePath),
@@ -41106,27 +41173,9 @@ function scheduleFlush(projectId) {
   }, FLUSH_DELAY_MS);
 }
 async function handleNewPhoto(projectId, capture, session) {
+  if (desktopRetiring) return;
   const db = getDb();
   const win = getMainWindow();
-  const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
-  const filenameReference = extractStudentReference(
-    capture.fileName,
-    knownStudents.map((student2) => student2.generatedStudentId)
-  );
-  if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
-    const result = await processWatchedPhoto(projectId, capture.filePath, {
-      store: createWatchedPhotoStore(db),
-      photosDir: getPhotosDir(),
-      readQr: async () => null
-    });
-    if (result.kind === "unmatched") {
-      win?.webContents.send("photo:unmatched", result);
-      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
-      return;
-    }
-    finishMatchedPhoto(db, win, result.photo, result.student);
-    return;
-  }
   const qrResult = await readQrFromImage(capture.filePath);
   if (qrResult) {
     const student2 = db.select().from(studentsTable).where(
@@ -41151,6 +41200,27 @@ async function handleNewPhoto(projectId, capture, session) {
     });
     console.log(`[Watcher] QR marker ${capture.fileName} → ${student2.firstName} ${student2.lastName}`);
     return;
+  }
+  if (session.sequenceState.activeStudentId === null) {
+    const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
+    const filenameReference = extractStudentReference(
+      capture.fileName,
+      knownStudents.map((student2) => student2.generatedStudentId)
+    );
+    if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
+      const result = await processWatchedPhoto(projectId, capture.filePath, {
+        store: createWatchedPhotoStore(db),
+        photosDir: getPhotosDir(),
+        readQr: async () => null
+      });
+      if (result.kind === "unmatched") {
+        win?.webContents.send("photo:unmatched", result);
+        console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
+        return;
+      }
+      finishMatchedPhoto(db, win, result.photo, result.student);
+      return;
+    }
   }
   const decision = advanceSequence(session.sequenceState, { kind: "portrait" });
   if (decision.kind === "review") {
@@ -41204,7 +41274,7 @@ function finishMatchedPhoto(db, win, photo, student) {
     photo: photoForEvent,
     student: toStudentEvent(db, student)
   });
-  const { apiUrl, connectionToken } = getUploadConfig();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
   if (apiUrl && connectionToken) {
     db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
     win?.webContents.send("upload:statusChanged", {
@@ -41259,6 +41329,168 @@ function registerDialogHandlers() {
     return getPhotosDir();
   });
 }
+class WorkBarrier {
+  disabled = false;
+  active = /* @__PURE__ */ new Set();
+  isDisabled() {
+    return this.disabled;
+  }
+  run(work) {
+    if (this.disabled) return null;
+    const task = work();
+    this.active.add(task);
+    void task.finally(() => this.active.delete(task)).catch(() => {
+    });
+    return task;
+  }
+  async disableAndDrain() {
+    this.disabled = true;
+    await Promise.allSettled([...this.active]);
+  }
+  enable() {
+    this.disabled = false;
+  }
+}
+function now() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+const cloudImportBarrier = new WorkBarrier();
+function disableCloudImportsForRetirement() {
+  return cloudImportBarrier.disableAndDrain();
+}
+function enableCloudImportsAfterSignIn() {
+  cloudImportBarrier.enable();
+}
+function registerCloudHandlers() {
+  electron.ipcMain.handle("cloud:listProjects", async () => {
+    const { apiUrl, connectionToken } = getUploadConfig$1();
+    if (!apiUrl || !connectionToken) {
+      return { ok: false, error: "Sign in to MC School Studio before syncing projects." };
+    }
+    try {
+      const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return { ok: false, error: body.error ?? `Server returned ${res.status}` };
+      }
+      const projects = await res.json();
+      return { ok: true, projects };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle(
+    "cloud:pullProject",
+    async (_e, { cloudProjectId }) => {
+      if (cloudImportBarrier.isDisabled() || getSetting("desktop_retired") === "1") {
+        return { ok: false, error: "Cloud sync is disabled because this desktop was retired." };
+      }
+      const { apiUrl, connectionToken } = getUploadConfig$1();
+      if (!apiUrl || !connectionToken) {
+        return { ok: false, error: "Sign in to MC School Studio before pulling projects." };
+      }
+      const task = cloudImportBarrier.run(async () => {
+        try {
+          const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProjectId}/bundle`;
+          const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${connectionToken}` },
+            signal: AbortSignal.timeout(3e4)
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            return { ok: false, error: body.error ?? `Server returned ${res.status}` };
+          }
+          const bundle = await res.json();
+          if (cloudImportBarrier.isDisabled() || getSetting("desktop_retired") === "1") {
+            return { ok: false, error: "Cloud sync stopped because this desktop was retired." };
+          }
+          const db = getDb();
+          const { project: p, classes, students } = bundle;
+          const existing = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.schoolName, p.schoolName)).get();
+          let localProjectId;
+          if (existing) {
+            db.update(projectsTable).set({
+              schoolName: p.schoolName,
+              photoDate: p.photoDate ?? null,
+              address: p.address ?? null,
+              contactName: p.contactName ?? null,
+              contactEmail: p.contactEmail ?? null,
+              contactPhone: p.contactPhone ?? null,
+              notes: p.notes ?? null,
+              updatedAt: now()
+            }).where(drizzleOrm.eq(projectsTable.id, existing.id)).run();
+            localProjectId = existing.id;
+            db.delete(classesTable).where(drizzleOrm.eq(classesTable.projectId, localProjectId)).run();
+          } else {
+            const result = db.insert(projectsTable).values({
+              schoolName: p.schoolName,
+              photoDate: p.photoDate ?? null,
+              address: p.address ?? null,
+              contactName: p.contactName ?? null,
+              contactEmail: p.contactEmail ?? null,
+              contactPhone: p.contactPhone ?? null,
+              notes: p.notes ?? null
+            }).returning().get();
+            localProjectId = result.id;
+          }
+          const classIdMap = /* @__PURE__ */ new Map();
+          let classesImported = 0;
+          for (const cls of classes) {
+            const [inserted] = db.insert(classesTable).values({ projectId: localProjectId, className: cls.className }).returning().all();
+            classIdMap.set(cls.id, inserted.id);
+            classesImported++;
+          }
+          let studentsImported = 0;
+          for (const s of students) {
+            const localClassId = classIdMap.get(s.classId);
+            if (!localClassId) continue;
+            db.insert(studentsTable).values({
+              projectId: localProjectId,
+              classId: localClassId,
+              firstName: s.firstName,
+              lastName: s.lastName,
+              generatedStudentId: s.generatedStudentId,
+              email: s.email ?? null,
+              phone: s.phone ?? null,
+              simpleQr: s.simpleQr ?? null,
+              jsonQr: s.jsonQr ?? null
+            }).run();
+            studentsImported++;
+          }
+          return { ok: true, classesImported, studentsImported };
+        } catch (err) {
+          return { ok: false, error: String(err) };
+        }
+      });
+      return task ?? { ok: false, error: "Cloud sync is disabled because this desktop was retired." };
+    }
+  );
+}
+async function clearLocalProjectData() {
+  disableCloudSyncForRetirement();
+  const cloudImportsDrained = disableCloudImportsForRetirement();
+  await stopAllWatchersForRetirement();
+  await waitForActiveUploads();
+  await cloudImportsDrained;
+  const db = getDb();
+  return retireLocalProjects(
+    {
+      listProjects: () => db.select({ id: projectsTable.id, schoolName: projectsTable.schoolName }).from(projectsTable).all(),
+      listPhotoPaths: () => db.select({ filePath: photosTable.filePath }).from(photosTable).all().map((photo) => photo.filePath),
+      clearProjects: () => {
+        db.delete(projectsTable).run();
+      }
+    },
+    {
+      remove: (path2) => node_fs.rmSync(path2, { recursive: true, force: true })
+    },
+    getPhotosDir()
+  );
+}
 async function postJson(url, body, timeoutMs) {
   const response = await fetch(url, {
     method: "POST",
@@ -41269,8 +41501,9 @@ async function postJson(url, body, timeoutMs) {
   const payload = await response.json().catch(() => ({}));
   return { response, payload };
 }
-async function fetchCurrentSession() {
-  const { apiUrl, connectionToken } = getUploadConfig();
+async function performCurrentSessionCheck() {
+  const apiUrl = (getSetting("upload_api_url") ?? DEFAULT_API_URL).replace(/\/+$/, "");
+  const connectionToken = readConnectionToken();
   if (!connectionToken) return { signedIn: false };
   try {
     const response = await fetch(`${apiUrl}/api/desktop/me`, {
@@ -41278,6 +41511,29 @@ async function fetchCurrentSession() {
       signal: AbortSignal.timeout(5e3)
     });
     const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.retirement) {
+      setSetting("desktop_retired", "1");
+      try {
+        await clearLocalProjectData();
+      } catch (error) {
+        return {
+          signedIn: false,
+          error: `This desktop was retired, but its local project data could not be cleared. Close the app and try again. (${String(error)})`
+        };
+      }
+      const acknowledgement = await fetch(`${apiUrl}/api/desktop/retirement/acknowledge`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(5e3)
+      }).catch(() => null);
+      if (acknowledgement?.ok) {
+        deleteSetting("desktop_connection_token");
+      }
+      return {
+        signedIn: false,
+        error: acknowledgement?.ok ? "This desktop was retired by the studio owner. Local project and photo data was cleared and cloud sync is disabled." : "This desktop was retired by the studio owner. Local project and photo data was cleared and cloud sync is disabled. Retirement acknowledgement will retry when the app reconnects."
+      };
+    }
     if (response.ok && payload.member) return { signedIn: true, member: payload.member };
     if (response.status === 401) {
       return { signedIn: false, error: "Your desktop session was signed out or revoked. Sign in again." };
@@ -41286,6 +41542,14 @@ async function fetchCurrentSession() {
   } catch {
     return { signedIn: false, error: "Could not reach MC School Studio. Check your internet connection." };
   }
+}
+let currentSessionCheck = null;
+function fetchCurrentSession() {
+  if (currentSessionCheck) return currentSessionCheck;
+  currentSessionCheck = performCurrentSessionCheck().finally(() => {
+    currentSessionCheck = null;
+  });
+  return currentSessionCheck;
 }
 function registerAuthHandlers() {
   electron.ipcMain.handle("auth:getSession", fetchCurrentSession);
@@ -41347,6 +41611,9 @@ function registerAuthHandlers() {
         const member = exchanged.payload.member;
         setSetting("upload_api_url", apiUrl);
         saveConnectionToken(exchanged.payload.token);
+        enableCloudSyncAfterSignIn();
+        enableCloudImportsAfterSignIn();
+        enableWatchersAfterSignIn();
         return { signedIn: true, member };
       }
       return { signedIn: false, error: "Sign-in timed out. Click Sign in to try again." };
@@ -41357,109 +41624,6 @@ function registerAuthHandlers() {
       };
     }
   });
-}
-function now() {
-  return (/* @__PURE__ */ new Date()).toISOString();
-}
-function registerCloudHandlers() {
-  electron.ipcMain.handle("cloud:listProjects", async () => {
-    const { apiUrl, connectionToken } = getUploadConfig();
-    if (!apiUrl || !connectionToken) {
-      return { ok: false, error: "Sign in to MC School Studio before syncing projects." };
-    }
-    try {
-      const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${connectionToken}` },
-        signal: AbortSignal.timeout(1e4)
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        return { ok: false, error: body.error ?? `Server returned ${res.status}` };
-      }
-      const projects = await res.json();
-      return { ok: true, projects };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-  });
-  electron.ipcMain.handle(
-    "cloud:pullProject",
-    async (_e, { cloudProjectId }) => {
-      const { apiUrl, connectionToken } = getUploadConfig();
-      if (!apiUrl || !connectionToken) {
-        return { ok: false, error: "Sign in to MC School Studio before pulling projects." };
-      }
-      try {
-        const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProjectId}/bundle`;
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${connectionToken}` },
-          signal: AbortSignal.timeout(3e4)
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          return { ok: false, error: body.error ?? `Server returned ${res.status}` };
-        }
-        const bundle = await res.json();
-        const db = getDb();
-        const { project: p, classes, students } = bundle;
-        const existing = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.schoolName, p.schoolName)).get();
-        let localProjectId;
-        if (existing) {
-          db.update(projectsTable).set({
-            schoolName: p.schoolName,
-            photoDate: p.photoDate ?? null,
-            address: p.address ?? null,
-            contactName: p.contactName ?? null,
-            contactEmail: p.contactEmail ?? null,
-            contactPhone: p.contactPhone ?? null,
-            notes: p.notes ?? null,
-            updatedAt: now()
-          }).where(drizzleOrm.eq(projectsTable.id, existing.id)).run();
-          localProjectId = existing.id;
-          db.delete(classesTable).where(drizzleOrm.eq(classesTable.projectId, localProjectId)).run();
-        } else {
-          const result = db.insert(projectsTable).values({
-            schoolName: p.schoolName,
-            photoDate: p.photoDate ?? null,
-            address: p.address ?? null,
-            contactName: p.contactName ?? null,
-            contactEmail: p.contactEmail ?? null,
-            contactPhone: p.contactPhone ?? null,
-            notes: p.notes ?? null
-          }).returning().get();
-          localProjectId = result.id;
-        }
-        const classIdMap = /* @__PURE__ */ new Map();
-        let classesImported = 0;
-        for (const cls of classes) {
-          const [inserted] = db.insert(classesTable).values({ projectId: localProjectId, className: cls.className }).returning().all();
-          classIdMap.set(cls.id, inserted.id);
-          classesImported++;
-        }
-        let studentsImported = 0;
-        for (const s of students) {
-          const localClassId = classIdMap.get(s.classId);
-          if (!localClassId) continue;
-          db.insert(studentsTable).values({
-            projectId: localProjectId,
-            classId: localClassId,
-            firstName: s.firstName,
-            lastName: s.lastName,
-            generatedStudentId: s.generatedStudentId,
-            email: s.email ?? null,
-            phone: s.phone ?? null,
-            simpleQr: s.simpleQr ?? null,
-            jsonQr: s.jsonQr ?? null
-          }).run();
-          studentsImported++;
-        }
-        return { ok: true, classesImported, studentsImported };
-      } catch (err) {
-        return { ok: false, error: String(err) };
-      }
-    }
-  );
 }
 let mainWindow = null;
 let currentState = { status: "unsupported" };
@@ -41656,6 +41820,18 @@ function createWindow() {
   }
   return mainWindow2;
 }
+function monitorRetirement(mainWindow2) {
+  const checkRetirement = async () => {
+    const session = await fetchCurrentSession();
+    if (!session.signedIn && session.error?.startsWith("This desktop was retired")) {
+      mainWindow2.webContents.send("auth:retired", session);
+    }
+  };
+  void checkRetirement();
+  const retirementTimer = setInterval(() => void checkRetirement(), 15e3);
+  retirementTimer.unref();
+  mainWindow2.on("closed", () => clearInterval(retirementTimer));
+}
 electron.app.whenReady().then(() => {
   getDb();
   registerProjectHandlers();
@@ -41666,11 +41842,13 @@ electron.app.whenReady().then(() => {
   registerAuthHandlers();
   registerCloudHandlers();
   const mainWindow2 = createWindow();
+  monitorRetirement(mainWindow2);
   registerUpdateHandlers(mainWindow2);
   scheduleUpdateCheck();
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) {
       const window2 = createWindow();
+      monitorRetirement(window2);
       registerUpdateHandlers(window2);
       scheduleUpdateCheck();
     }

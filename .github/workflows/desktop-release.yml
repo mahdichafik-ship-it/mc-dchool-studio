@@ -1,12 +1,12 @@
-# Builds signed Windows and signed/notarized macOS desktop packages on every
-# `v*` tag push and attaches them to the GitHub Release.
+# Builds signed and notarized macOS desktop packages on every `v*` tag push
+# and attaches them to the GitHub Release.
 #
 # Trigger: git tag v1.2.3 && git push origin v1.2.3
 #
 # Note: pnpm-workspace.yaml contains overrides that exclude non-Linux platform
 # binaries so they are not installed inside the Replit environment. This
 # workflow strips those Replit-only overrides before running `pnpm install` so
-# that the correct native binaries are fetched for each runner OS.
+# that the correct native binaries are fetched for the macOS runner.
 
 name: Desktop Release
 
@@ -158,137 +158,8 @@ jobs:
             artifacts/mc-school-studio-desktop/dist/release/latest-mac.yml
             artifacts/mc-school-studio-desktop/dist/release/*.blockmap
 
-  # ---------------------------------------------------------------------------
-  # Windows — produces a signed NSIS .exe installer for x64 computers.
-  # ---------------------------------------------------------------------------
-  build-windows:
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify release tag matches app version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: node -e "const fs=require('fs'); const tag=process.env.RELEASE_TAG; const version=JSON.parse(fs.readFileSync('artifacts/mc-school-studio-desktop/package.json','utf8')).version; if(tag !== 'v'+version){console.error('Release tag '+tag+' must match desktop package version v'+version);process.exit(1)}"
-
-      - name: Verify Windows signing credentials
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          $requiredSecrets = @("WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD")
-          $missing = $requiredSecrets | Where-Object {
-            [string]::IsNullOrWhiteSpace(
-              [Environment]::GetEnvironmentVariable($_)
-            )
-          }
-
-          if ($missing) {
-            Write-Error (
-              "Tagged Windows releases require signing secrets: " +
-              ($missing -join ", ")
-            )
-            exit 1
-          }
-
-      - name: Decode Windows signing certificate
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-        run: |
-          $certificatePath = Join-Path `
-            $env:RUNNER_TEMP `
-            "windows-signing-certificate.pfx"
-          $certificate = [Convert]::FromBase64String($env:WIN_CSC_LINK)
-
-          if ($certificate.Length -eq 0) {
-            Write-Error "WIN_CSC_LINK did not decode to a certificate file"
-            exit 1
-          }
-
-          [IO.File]::WriteAllBytes($certificatePath, $certificate)
-          "WIN_CSC_LINK=$certificatePath" | Out-File `
-            -FilePath $env:GITHUB_ENV `
-            -Encoding utf8 `
-            -Append
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Strip Replit-only platform overrides
-        run: node scripts/strip-replit-overrides.mjs
-
-      - name: Install dependencies
-        # --no-frozen-lockfile because we modified pnpm-workspace.yaml above;
-        # the lockfile generated on Linux does not include win32 entries.
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Build & package Windows installer
-        run: pnpm --filter @workspace/mc-school-studio-desktop run dist:win
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-
-      - name: Verify Windows installer signature
-        shell: pwsh
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          $version = $env:RELEASE_TAG.TrimStart("v")
-          $releaseDirectory = "artifacts/mc-school-studio-desktop/dist/release"
-          $installer = Join-Path `
-            $releaseDirectory `
-            "mc-school-studio-$version-setup.exe"
-
-          if (-not (Test-Path $installer)) {
-            Write-Error "Expected Windows installer was not produced: $installer"
-            exit 1
-          }
-
-          $signature = Get-AuthenticodeSignature $installer
-          if ($signature.Status -ne "Valid") {
-            Write-Error (
-              "$installer does not have a valid Authenticode signature: " +
-              "$($signature.Status)"
-            )
-            exit 1
-          }
-
-          foreach ($requiredFile in @(
-            "$installer.blockmap",
-            (Join-Path $releaseDirectory "latest.yml")
-          )) {
-            if (-not (Test-Path $requiredFile)) {
-              Write-Error "Expected Windows update asset was not produced: $requiredFile"
-              exit 1
-            }
-          }
-
-      - name: Stage verified Windows packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-release-windows
-          if-no-files-found: error
-          path: |
-            artifacts/mc-school-studio-desktop/dist/release/*.exe
-            artifacts/mc-school-studio-desktop/dist/release/latest.yml
-            artifacts/mc-school-studio-desktop/dist/release/*.blockmap
-
   publish-release:
-    needs:
-      - build-mac
-      - build-windows
+    needs: build-mac
     runs-on: ubuntu-latest
 
     steps:
@@ -312,7 +183,6 @@ jobs:
           const names = new Set(fs.readdirSync('release'))
           const expected = [
             'latest-mac.yml',
-            'latest.yml',
             `mc-school-studio-${version}-arm64.dmg`,
             `mc-school-studio-${version}-arm64.dmg.blockmap`,
             `mc-school-studio-${version}-arm64.zip`,
@@ -321,8 +191,6 @@ jobs:
             `mc-school-studio-${version}-x64.dmg.blockmap`,
             `mc-school-studio-${version}-x64.zip`,
             `mc-school-studio-${version}-x64.zip.blockmap`,
-            `mc-school-studio-${version}-setup.exe`,
-            `mc-school-studio-${version}-setup.exe.blockmap`,
           ]
           const missing = expected.filter((name) => !names.has(name))
           const unexpected = [...names].filter((name) => !expected.includes(name))
@@ -334,18 +202,12 @@ jobs:
           }
 
           const macMetadata = fs.readFileSync('release/latest-mac.yml', 'utf8')
-          const windowsMetadata = fs.readFileSync('release/latest.yml', 'utf8')
           for (const arch of ['arm64', 'x64']) {
             const zip = `mc-school-studio-${version}-${arch}.zip`
             if (!macMetadata.includes(zip)) {
               console.error(`latest-mac.yml does not reference ${zip}`)
               process.exit(1)
             }
-          }
-          const exe = `mc-school-studio-${version}-setup.exe`
-          if (!windowsMetadata.includes(exe)) {
-            console.error(`latest.yml does not reference ${exe}`)
-            process.exit(1)
           }
 
           console.log(`Verified ${expected.length} desktop release assets.`)

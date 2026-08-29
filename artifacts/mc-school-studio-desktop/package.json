@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "MC School Studio",
@@ -13,8 +13,7 @@
     "test:sequence": "node --experimental-strip-types --test test/photo-sequence.test.ts",
     "test:watcher": "node --experimental-strip-types --test test/watcher-photo-processing.test.ts",
     "dist:mac": "pnpm run build && electron-builder --mac --publish never",
-    "dist:win": "pnpm run build && electron-builder --win --publish never",
-    "dist": "pnpm run build && electron-builder --mac --win --publish never"
+    "dist": "pnpm run dist:mac"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

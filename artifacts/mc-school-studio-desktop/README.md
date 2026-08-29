@@ -46,6 +46,7 @@ The app will open as a native window. Hot-reload is supported for the renderer.
 ```bash
 # macOS .dmg (universal — Intel + Apple Silicon)
 pnpm --filter @workspace/mc-school-studio-desktop run dist:mac
+
 ```
 
 Installers are written to `artifacts/mc-school-studio-desktop/dist/release/`.
@@ -96,8 +97,10 @@ GitHub Release assets install without Gatekeeper warnings.
 ## CI/CD — automated installers via GitHub Actions
 
 Pushing a `v*` tag triggers `.github/workflows/desktop-release.yml`, which
-builds macOS DMG and ZIP packages for Intel and Apple Silicon and attaches
-them to the GitHub Release automatically.
+builds macOS DMG and ZIP packages for Intel and Apple Silicon. It verifies
+Gatekeeper acceptance and notarization before the job can pass, and attaches
+the installers, update metadata, and blockmaps to the GitHub Release
+automatically.
 
 ```bash
 # Tag a release and push — CI does the rest
@@ -108,8 +111,7 @@ git push origin v1.0.0
 The workflow handles the Replit-only `pnpm-workspace.yaml` overrides
 automatically: it runs `node scripts/strip-replit-overrides.mjs` before
 `pnpm install` to remove the Linux-only platform-binary exclusions, so the
-the macOS runner fetches the correct native binaries.
-the macOS runner fetches the correct native binaries.
+macOS runner fetches the correct native binaries.
 
 ## Workflow on photo day
 

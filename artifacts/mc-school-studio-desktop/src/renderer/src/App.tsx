@@ -10,7 +10,7 @@ import type { PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent } from '@
 
 type Page = 'projects' | 'project-view' | 'settings'
 type AuthMember = { email: string; role: 'owner' | 'admin' | 'assistant' | 'photographer' }
-type AuthState = { status: 'loading' | 'signed-out' | 'signed-in'; member?: AuthMember; error?: string }
+type AuthState = { status: 'loading' | 'signed-out' | 'signed-in'; member?: AuthMember; error?: string; offline?: boolean }
 
 function SignInScreen({ onSignIn, error, busy }: { onSignIn: () => void; error?: string; busy: boolean }) {
   return (
@@ -53,7 +53,7 @@ export default function App() {
   const loadAuth = useCallback(async () => {
     const result = await window.api.invoke('auth:getSession')
     setAuth(result.signedIn
-      ? { status: 'signed-in', member: result.member }
+      ? { status: 'signed-in', member: result.member, offline: result.offline }
       : { status: 'signed-out', error: result.error })
   }, [])
 
@@ -61,7 +61,34 @@ export default function App() {
     loadAuth().catch(() => setAuth({ status: 'signed-out', error: 'Could not check your desktop session.' }))
   }, [loadAuth])
 
+  useEffect(() => {
+    if (auth.status !== 'signed-in') return
+    let checking = false
+    const refreshSession = async () => {
+      if (checking) return
+      checking = true
+      try {
+        const result = await window.api.invoke('auth:getSession')
+        setAuth(result.signedIn
+          ? { status: 'signed-in', member: result.member, offline: result.offline }
+          : { status: 'signed-out', error: result.error })
+      } finally {
+        checking = false
+      }
+    }
+    const interval = window.setInterval(() => { void refreshSession() }, 15_000)
+    window.addEventListener('online', refreshSession)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('online', refreshSession)
+    }
+  }, [auth.status])
+
   useEffect(() => window.api.on('auth:retired', (session) => {
+    setAuth({ status: 'signed-out', error: session.error })
+  }), [])
+
+  useEffect(() => window.api.on('auth:sessionInvalidated', (session) => {
     setAuth({ status: 'signed-out', error: session.error })
   }), [])
 
@@ -129,6 +156,7 @@ export default function App() {
       currentPage={currentPage}
       onNavigate={navigate}
       projectName={activeProjectName}
+      offline={auth.offline}
     >
       {currentPage === 'projects' && (
         <ProjectList onOpenProject={openProject} />

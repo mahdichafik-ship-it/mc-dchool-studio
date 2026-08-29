@@ -9,7 +9,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
 import { projectsTable, classesTable, studentsTable } from '../db/schema'
 import { getUploadConfig } from './upload'
-import { getSetting } from './upload'
+import { getSetting, invalidateDesktopCredentials } from './upload'
 import { WorkBarrier } from '../lib/workBarrier'
 
 function now() {
@@ -53,6 +53,7 @@ export function registerCloudHandlers() {
       })
 
       if (!res.ok) {
+        if (res.status === 401) invalidateDesktopCredentials(true)
         const body = await res.json().catch(() => ({})) as { error?: string }
         return { ok: false, error: body.error ?? `Server returned ${res.status}` }
       }
@@ -90,6 +91,7 @@ export function registerCloudHandlers() {
         })
 
         if (!res.ok) {
+          if (res.status === 401) invalidateDesktopCredentials(true)
           const body = await res.json().catch(() => ({})) as { error?: string }
           return { ok: false, error: body.error ?? `Server returned ${res.status}` }
         }

@@ -35,6 +35,7 @@ interface AuthSession {
   signedIn: boolean
   member?: AuthMember
   error?: string
+  offline?: boolean
 }
 
 interface UpdateState {
@@ -113,6 +114,7 @@ interface ElectronAPI {
   on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
   on(channel: 'update:status', listener: (data: UpdateState) => void): () => void
   on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
+  on(channel: 'auth:sessionInvalidated', listener: (session: AuthSession) => void): () => void
 }
 
 declare global {

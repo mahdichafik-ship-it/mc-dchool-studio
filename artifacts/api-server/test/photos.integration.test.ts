@@ -220,7 +220,10 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
     `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": "1",
+      },
       body: form,
     },
   );
@@ -244,6 +247,28 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   uploadedFilePath = path.resolve(process.cwd(), uploaded.fileUrl.replace(/^\//, ""));
   assert(fs.existsSync(uploadedFilePath), "upload should create the photo on disk");
   assert.deepEqual(await readFile(uploadedFilePath), jpegBytes);
+
+  const retryForm = new (globalThis as any).FormData();
+  retryForm.append(
+    "photo",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    "integration-portrait.jpg",
+  );
+  retryForm.append("capturedAt", "2026-08-22T12:34:56.000Z");
+  const retryResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": "1",
+      },
+      body: retryForm,
+    },
+  );
+  assert.equal(retryResponse.status, 200);
+  const retried = (await retryResponse.json()) as PhotoResponse;
+  assert.equal(retried.id, uploaded.id, "retry should return the original server photo");
 
   const listResponse = await fetch(
     `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,

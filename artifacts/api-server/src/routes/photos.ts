@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { db } from "@workspace/db";
 import { studentsTable, studentPhotosTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
@@ -208,20 +208,70 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       .replace(/\\/g, "/");
     const fileUrl = `/uploads/${relPath}`;
     const capturedAt = (req.body as Record<string, string>).capturedAt ?? null;
+    const clientUploadId = req.get("X-MC-Upload-Id");
+    if (clientUploadId && !/^[1-9]\d*$/.test(clientUploadId)) {
+      discardUploadedFile(req);
+      res.status(400).json({ error: "Invalid desktop upload identifier" });
+      return;
+    }
 
-    const [photo] = await db
-      .insert(studentPhotosTable)
-      .values({
-        projectId,
-        studentId,
-        fileName: req.file.originalname,
-        fileUrl,
-        mimeType: req.file.mimetype,
-        capturedAt: capturedAt || null,
-      })
-      .returning();
+    const savePhoto = async () => {
+      if (!clientUploadId) {
+        const [photo] = await db
+          .insert(studentPhotosTable)
+          .values({
+            projectId,
+            studentId,
+            fileName: req.file!.originalname,
+            fileUrl,
+            mimeType: req.file!.mimetype,
+            capturedAt: capturedAt || null,
+          })
+          .returning();
+        return { photo, reused: false };
+      }
 
-    res.status(201).json(photoToResponse(photo));
+      return db.transaction(async (tx) => {
+        const connection = getDesktopConnection(req);
+        const lockKey = `${connection.connectionId}:${clientUploadId}`;
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
+
+        const [existing] = await tx
+          .select()
+          .from(studentPhotosTable)
+          .where(and(
+            eq(studentPhotosTable.desktopConnectionId, connection.connectionId),
+            eq(studentPhotosTable.clientUploadId, clientUploadId),
+          ))
+          .limit(1);
+
+        if (existing) {
+          discardUploadedFile(req);
+          if (existing.projectId !== projectId || existing.studentId !== studentId) {
+            throw new Error("Desktop upload identifier was reused for a different photo target");
+          }
+          return { photo: existing, reused: true };
+        }
+
+        const [photo] = await tx
+          .insert(studentPhotosTable)
+          .values({
+            projectId,
+            studentId,
+            fileName: req.file!.originalname,
+            fileUrl,
+            mimeType: req.file!.mimetype,
+            capturedAt: capturedAt || null,
+            desktopConnectionId: connection.connectionId,
+            clientUploadId,
+          })
+          .returning();
+        return { photo, reused: false };
+      });
+    };
+
+    const result = await savePhoto();
+    res.status(result.reused ? 200 : 201).json(photoToResponse(result.photo));
   } catch (error) {
     discardUploadedFile(req);
     next(error);

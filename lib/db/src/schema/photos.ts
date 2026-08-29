@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import { studentsTable } from "./students";
 
@@ -14,7 +14,12 @@ export const studentPhotosTable = pgTable("student_photos", {
   fileUrl: text("file_url").notNull(),
   mimeType: text("mime_type").notNull().default("image/jpeg"),
   capturedAt: text("captured_at"),
+  desktopConnectionId: integer("desktop_connection_id"),
+  clientUploadId: text("client_upload_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("student_photos_desktop_upload_unique")
+    .on(table.desktopConnectionId, table.clientUploadId),
+]);
 
 export type StudentPhoto = typeof studentPhotosTable.$inferSelect;

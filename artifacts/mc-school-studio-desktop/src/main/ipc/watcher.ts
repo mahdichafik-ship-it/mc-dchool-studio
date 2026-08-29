@@ -343,18 +343,18 @@ function finishMatchedPhoto(
     student: toStudentEvent(db, student),
   })
 
+  db.update(photosTable)
+    .set({ uploadStatus: 'pending' })
+    .where(eq(photosTable.id, photo.id))
+    .run()
+  win?.webContents.send('upload:statusChanged', {
+    photoId: photo.id,
+    studentId: student.id,
+    status: 'pending',
+  })
+
   const { apiUrl, connectionToken } = getUploadConfig()
   if (apiUrl && connectionToken) {
-    db.update(photosTable)
-      .set({ uploadStatus: 'pending' })
-      .where(eq(photosTable.id, photo.id))
-      .run()
-    win?.webContents.send('upload:statusChanged', {
-      photoId: photo.id,
-      studentId: student.id,
-      status: 'pending',
-    })
-
     uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt)
       .catch(() => {})
   }

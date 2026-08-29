@@ -10,9 +10,10 @@ interface AppLayoutProps {
   currentPage: Page
   onNavigate: (page: Page) => void
   projectName?: string
+  offline?: boolean
 }
 
-export function AppLayout({ children, currentPage, onNavigate, projectName }: AppLayoutProps) {
+export function AppLayout({ children, currentPage, onNavigate, projectName, offline = false }: AppLayoutProps) {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
       {/* Sidebar */}
@@ -64,6 +65,14 @@ export function AppLayout({ children, currentPage, onNavigate, projectName }: Ap
 
       {/* Main content */}
       <main className="flex-1 overflow-hidden flex flex-col">
+        {offline && (
+          <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-800">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+            <span>
+              Offline mode: local projects and photo capture are available. Uploads will resume automatically when internet returns.
+            </span>
+          </div>
+        )}
         {children}
       </main>
     </div>

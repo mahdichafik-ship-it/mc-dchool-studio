@@ -170,7 +170,7 @@ export function ProjectList({ onOpenProject }: Props) {
                     <p className="text-sm font-medium text-red-700">Could not reach cloud</p>
                     <p className="text-xs text-red-600 mt-1">{syncError}</p>
                     <p className="text-xs text-slate-500 mt-2">
-                       Make sure the API URL and desktop connection token are configured in Settings.
+                      Check your internet connection. If the problem continues, sign out and sign in again.
                     </p>
                   </div>
                 </div>

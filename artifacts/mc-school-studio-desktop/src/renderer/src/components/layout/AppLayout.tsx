@@ -59,7 +59,7 @@ export function AppLayout({ children, currentPage, onNavigate, projectName, offl
             <Settings className="size-4" />
             Settings
           </Button>
-          <p className="text-xs text-slate-500 mt-3 px-2">MC School Studio v1.0</p>
+          <p className="text-xs text-slate-500 mt-3 px-2">MC School Studio v1.0.11</p>
         </div>
       </aside>
 

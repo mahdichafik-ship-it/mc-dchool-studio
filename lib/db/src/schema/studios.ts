@@ -47,3 +47,15 @@ export const desktopConnectionsTable = pgTable("desktop_connections", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
 });
+
+export const desktopAuthSessionsTable = pgTable("desktop_auth_sessions", {
+  id: serial("id").primaryKey(),
+  publicCode: text("public_code").notNull().unique(),
+  clientSecretHash: text("client_secret_hash").notNull(),
+  memberId: integer("member_id").references(() => studioMembersTable.id, { onDelete: "cascade" }),
+  status: text("status", { enum: ["pending", "approved", "used", "expired"] }).notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+});

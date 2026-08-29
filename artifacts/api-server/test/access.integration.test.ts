@@ -25,6 +25,8 @@ import photosRouter from "../src/routes/photos";
 import projectsRouter from "../src/routes/projects";
 import studentsRouter from "../src/routes/students";
 import teamRouter from "../src/routes/team";
+import desktopRouter from "../src/routes/desktop";
+import { createDesktopToken } from "../src/lib/desktopAuth";
 
 // The route keeps real Clerk authentication middleware via requireAuth. This
 // test only supplies Clerk's branded request contract, so no live account is
@@ -75,6 +77,7 @@ app.use("/api/projects/:projectId/students", studentsRouter);
 app.use("/api/projects/:projectId/export", exportRouter);
 app.use("/api/projects/:projectId/students", photosRouter);
 app.use("/api/team", teamRouter);
+app.use("/api/desktop", desktopRouter);
 
 async function request(userId: string, pathname: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -343,6 +346,76 @@ test("keeps Team data and invitation activation permission-aware", async () => {
     const desktop = await readJson<{ token: string }>(desktopResponse);
     assert.match(desktop.token, /^mcs_desktop_/, `${role} connection should return a one-time token`);
   }
+});
+
+test("completes a one-time browser desktop sign-in for shoot-capable roles", async () => {
+  const clientSecret = createDesktopToken().token;
+  const startResponse = await request(ownerUserId, "/api/desktop/auth/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientSecret }),
+  });
+  assert.equal(startResponse.status, 201);
+  const started = await readJson<{ code: string }>(startResponse);
+
+  const pendingResponse = await fetch(`${baseUrl}/api/desktop/auth/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: started.code, clientSecret }),
+  });
+  assert.equal(pendingResponse.status, 200);
+  assert.equal((await readJson<{ status: string }>(pendingResponse)).status, "pending");
+
+  const approvalResponse = await request(ownerUserId, "/api/desktop/auth/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: started.code }),
+  });
+  assert.equal(approvalResponse.status, 200);
+
+  const exchangeResponse = await fetch(`${baseUrl}/api/desktop/auth/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: started.code, clientSecret }),
+  });
+  assert.equal(exchangeResponse.status, 200);
+  const exchanged = await readJson<{ token: string; member: { role: string } }>(exchangeResponse);
+  assert.match(exchanged.token, /^mcs_desktop_/);
+  assert.equal(exchanged.member.role, "owner");
+
+  const refreshResponse = await fetch(`${baseUrl}/api/desktop/auth/refresh`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${exchanged.token}` },
+  });
+  assert.equal(refreshResponse.status, 200, "an active desktop session should rotate without browser approval");
+  const refreshed = await readJson<{ token: string }>(refreshResponse);
+  assert.match(refreshed.token, /^mcs_desktop_/);
+  assert.notEqual(refreshed.token, exchanged.token);
+  const oldTokenResponse = await fetch(`${baseUrl}/api/desktop/me`, {
+    headers: { Authorization: `Bearer ${exchanged.token}` },
+  });
+  assert.equal(oldTokenResponse.status, 401, "refresh should immediately invalidate the old credential");
+
+  const usedAgain = await fetch(`${baseUrl}/api/desktop/auth/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: started.code, clientSecret }),
+  });
+  assert.equal(usedAgain.status, 409, "a browser authorization request must only be exchanged once");
+
+  const viewerSecret = createDesktopToken().token;
+  const viewerStart = await request(viewerUserId, "/api/desktop/auth/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientSecret: viewerSecret }),
+  });
+  const viewerCode = (await readJson<{ code: string }>(viewerStart)).code;
+  const viewerApproval = await request(viewerUserId, "/api/desktop/auth/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: viewerCode }),
+  });
+  assert.equal(viewerApproval.status, 403, "view-only members must not connect the desktop app");
 });
 
 test("rejects access to an unassigned or unknown project", async () => {

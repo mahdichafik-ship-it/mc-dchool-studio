@@ -6,7 +6,7 @@
  * automatically queued and uploaded to the configured API endpoint.
  */
 
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { readFileSync } from 'fs'
 import { getDb } from '../db'
 import { settingsTable, photosTable } from '../db/schema'
@@ -17,13 +17,13 @@ import type { UploadStatus } from '../../shared/types'
 // Settings helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getSetting(key: string): string | null {
+export function getSetting(key: string): string | null {
   const db = getDb()
   const row = db.select().from(settingsTable).where(eq(settingsTable.key, key)).get()
   return row?.value ?? null
 }
 
-function setSetting(key: string, value: string) {
+export function setSetting(key: string, value: string) {
   const db = getDb()
   // upsert
   const existing = db.select().from(settingsTable).where(eq(settingsTable.key, key)).get()
@@ -34,10 +34,34 @@ function setSetting(key: string, value: string) {
   }
 }
 
+export function deleteSetting(key: string) {
+  getDb().delete(settingsTable).where(eq(settingsTable.key, key)).run()
+}
+
+export const DEFAULT_API_URL = 'https://volumecapture.net'
+
+export function saveConnectionToken(token: string) {
+  const value = safeStorage.isEncryptionAvailable()
+    ? `safe:${safeStorage.encryptString(token).toString('base64')}`
+    : token
+  setSetting('desktop_connection_token', value)
+}
+
+function readConnectionToken(): string | null {
+  const stored = getSetting('desktop_connection_token')
+  if (!stored) return null
+  if (!stored.startsWith('safe:')) return stored
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(5), 'base64'))
+  } catch {
+    return null
+  }
+}
+
 export function getUploadConfig(): { apiUrl: string | null; connectionToken: string | null } {
   return {
-    apiUrl: getSetting('upload_api_url'),
-    connectionToken: getSetting('desktop_connection_token'),
+    apiUrl: getSetting('upload_api_url') ?? DEFAULT_API_URL,
+    connectionToken: readConnectionToken(),
   }
 }
 
@@ -138,26 +162,11 @@ export async function uploadPhoto(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerUploadHandlers() {
-  // Get current cloud upload configuration
-  ipcMain.handle('upload:getConfig', () => {
-    return getUploadConfig()
-  })
-
-  // Save cloud upload configuration
-  ipcMain.handle(
-    'upload:setConfig',
-    (_e, { apiUrl, connectionToken }: { apiUrl: string; connectionToken: string }) => {
-      setSetting('upload_api_url', apiUrl.trim())
-      setSetting('desktop_connection_token', connectionToken.trim())
-      return { ok: true }
-    },
-  )
-
   // Test connection to API
   ipcMain.handle('upload:testConnection', async () => {
     const { apiUrl, connectionToken } = getUploadConfig()
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: 'API URL and desktop connection token are required' }
+      return { ok: false, error: 'Sign in to MC School Studio before testing the connection' }
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/me`

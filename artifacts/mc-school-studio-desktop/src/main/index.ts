@@ -5,6 +5,7 @@ import { registerPhotoHandlers } from './ipc/photos'
 import { registerWatcherHandlers } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
 import { registerUploadHandlers } from './ipc/upload'
+import { registerAuthHandlers } from './ipc/auth'
 import { registerCloudHandlers } from './ipc/cloud'
 import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
 import { getDb } from './db'
@@ -75,6 +76,7 @@ app.whenReady().then(() => {
   registerWatcherHandlers()
   registerDialogHandlers()
   registerUploadHandlers()
+  registerAuthHandlers()
   registerCloudHandlers()
 
   const mainWindow = createWindow()

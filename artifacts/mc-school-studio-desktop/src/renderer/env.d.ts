@@ -25,6 +25,17 @@ interface UploadResult {
   error?: string
 }
 
+interface AuthMember {
+  email: string
+  role: 'owner' | 'admin' | 'assistant' | 'photographer'
+}
+
+interface AuthSession {
+  signedIn: boolean
+  member?: AuthMember
+  error?: string
+}
+
 interface UpdateState {
   status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | 'unsupported'
   version?: string
@@ -78,9 +89,11 @@ interface ElectronAPI {
   invoke(channel: 'app:getPhotosDir'): Promise<string>
   invoke(channel: 'app:setPhotosDir', args: { dir: string }): Promise<string>
   // Cloud upload
-  invoke(channel: 'upload:getConfig'): Promise<UploadConfig>
-  invoke(channel: 'upload:setConfig', args: { apiUrl: string; connectionToken: string }): Promise<UploadResult>
   invoke(channel: 'upload:testConnection'): Promise<UploadResult>
+  invoke(channel: 'auth:getSession'): Promise<AuthSession>
+  invoke(channel: 'auth:refresh'): Promise<AuthSession>
+  invoke(channel: 'auth:signIn'): Promise<AuthSession>
+  invoke(channel: 'auth:signOut'): Promise<{ ok: boolean }>
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>

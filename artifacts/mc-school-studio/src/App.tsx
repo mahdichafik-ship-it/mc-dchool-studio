@@ -13,6 +13,7 @@ import ProjectOverview from "./pages/ProjectOverview";
 import ProjectImport from "./pages/ProjectImport";
 import ProjectQrPreview from "./pages/ProjectQrPreview";
 import Team from "./pages/Team";
+import DesktopConnect from "./pages/DesktopConnect";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -84,9 +85,15 @@ const clerkAppearance = {
 };
 
 function SignInPage() {
+  const redirectUrl = new URLSearchParams(window.location.search).get("redirect_url");
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 px-4">
-      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+      <SignIn
+        routing="path"
+        path={`${basePath}/sign-in`}
+        signUpUrl={`${basePath}/sign-up`}
+        fallbackRedirectUrl={redirectUrl || `${basePath}/dashboard`}
+      />
     </div>
   );
 }
@@ -155,6 +162,7 @@ function Router() {
       <Route path="/" component={HomeRedirect} />
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
+      <Route path="/desktop/connect" component={DesktopConnect} />
       
       <Route path="/dashboard" component={() => <AuthenticatedRoute component={Dashboard} />} />
       <Route path="/projects/new" component={() => <AuthenticatedRoute component={ProjectNew} />} />

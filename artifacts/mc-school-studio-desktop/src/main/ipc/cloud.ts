@@ -30,7 +30,7 @@ export function registerCloudHandlers() {
   ipcMain.handle('cloud:listProjects', async (): Promise<{ ok: boolean; projects?: CloudProject[]; error?: string }> => {
     const { apiUrl, connectionToken } = getUploadConfig()
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: 'Cloud connection not configured. Set API URL and desktop connection token in Settings.' }
+       return { ok: false, error: 'Sign in to MC School Studio before syncing projects.' }
     }
 
     try {
@@ -63,7 +63,7 @@ export function registerCloudHandlers() {
     }> => {
       const { apiUrl, connectionToken } = getUploadConfig()
       if (!apiUrl || !connectionToken) {
-        return { ok: false, error: 'Cloud connection not configured' }
+         return { ok: false, error: 'Sign in to MC School Studio before pulling projects.' }
       }
 
       try {

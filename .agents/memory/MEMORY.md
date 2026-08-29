@@ -1,2 +1,3 @@
 - [Clerk route integration tests](clerk-route-integration-tests.md) — fake authenticated requests must preserve Clerk's branded auth contract and session token type.
 - [Desktop release signing](desktop-release-signing.md) — Tagged desktop releases fail closed so unsigned installers never reach photographers.
+- [Desktop browser pairing](desktop-browser-pairing.md) — Browser handoff requires a public production deployment; never add a shared private-deployment bypass to the Mac app.

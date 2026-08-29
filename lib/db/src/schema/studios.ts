@@ -42,8 +42,22 @@ export const desktopConnectionsTable = pgTable("desktop_connections", {
   deviceName: text("device_name").notNull(),
   tokenHash: text("token_hash").notNull().unique(),
   tokenPrefix: text("token_prefix").notNull(),
-  status: text("status", { enum: ["active", "revoked"] }).notNull().default("active"),
+  status: text("status", { enum: ["active", "revoked", "retired"] }).notNull().default("active"),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+  retirementAcknowledgedAt: timestamp("retirement_acknowledged_at", { withTimezone: true }),
+});
+
+export const desktopAuthSessionsTable = pgTable("desktop_auth_sessions", {
+  id: serial("id").primaryKey(),
+  publicCode: text("public_code").notNull().unique(),
+  clientSecretHash: text("client_secret_hash").notNull(),
+  memberId: integer("member_id").references(() => studioMembersTable.id, { onDelete: "cascade" }),
+  status: text("status", { enum: ["pending", "approved", "used", "expired"] }).notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  usedAt: timestamp("used_at", { withTimezone: true }),
 });

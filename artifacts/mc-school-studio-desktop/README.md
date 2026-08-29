@@ -1,6 +1,6 @@
 # MC School Studio — Desktop App
 
-macOS Electron desktop app for use on photo day. Works alongside the MC School Studio web app.
+macOS and Windows Electron desktop app for use on photo day. Works alongside the MC School Studio web app.
 
 ## What it does
 
@@ -24,7 +24,7 @@ git clone <your-repo-url>
 cd <repo>
 ```
 
-**Important:** The Replit workspace excludes non-Linux platform binaries by default. Before installing on Mac, comment out or remove the `overrides` block in `pnpm-workspace.yaml` (the section that excludes `@esbuild/darwin-*`, etc.).
+**Important:** The Replit workspace excludes non-Linux platform binaries by default. Before installing on Mac or Windows, comment out or remove the `overrides` block in `pnpm-workspace.yaml` (the section that excludes `@esbuild/darwin-*`, `@esbuild/win32-*`, etc.).
 
 Then:
 
@@ -46,6 +46,12 @@ The app will open as a native window. Hot-reload is supported for the renderer.
 ```bash
 # macOS .dmg (universal — Intel + Apple Silicon)
 pnpm --filter @workspace/mc-school-studio-desktop run dist:mac
+
+# Windows x64 .exe installer
+pnpm --filter @workspace/mc-school-studio-desktop run dist:win
+
+# Both platforms
+pnpm --filter @workspace/mc-school-studio-desktop run dist
 ```
 
 Installers are written to `artifacts/mc-school-studio-desktop/dist/release/`.
@@ -90,14 +96,29 @@ The macOS job verifies all five values before packaging and then sets
 notarization for the macOS target, so a tagged release cannot publish an
 unsigned or unnotarized DMG.
 
+#### Windows signing
+
+1. Obtain a code-signing certificate that includes its private key from your
+   certificate authority and export it as a password-protected `.p12` or
+   `.pfx` file.
+2. Convert the certificate file to one-line base64 and add it as the
+   `WIN_CSC_LINK` GitHub Actions secret.
+3. Add the certificate export password as `WIN_CSC_KEY_PASSWORD`.
+
+The Windows job checks both values before packaging and verifies the
+Authenticode signature on every generated installer. Tagged releases fail
+closed rather than publishing an unsigned installer.
+
 After configuring the secrets, push a version tag and confirm the resulting
 GitHub Release assets install without Gatekeeper warnings.
 
 ## CI/CD — automated installers via GitHub Actions
 
 Pushing a `v*` tag triggers `.github/workflows/desktop-release.yml`, which
-builds macOS DMG and ZIP packages for Intel and Apple Silicon and attaches
-them to the GitHub Release automatically.
+builds macOS DMG and ZIP packages for Intel and Apple Silicon plus a Windows
+x64 NSIS installer. It verifies Gatekeeper/notarization and Authenticode before
+the jobs can pass, and attaches the installers, update metadata, and blockmaps
+to the GitHub Release automatically.
 
 ```bash
 # Tag a release and push — CI does the rest
@@ -108,8 +129,7 @@ git push origin v1.0.0
 The workflow handles the Replit-only `pnpm-workspace.yaml` overrides
 automatically: it runs `node scripts/strip-replit-overrides.mjs` before
 `pnpm install` to remove the Linux-only platform-binary exclusions, so the
-the macOS runner fetches the correct native binaries.
-the macOS runner fetches the correct native binaries.
+macOS and Windows runners fetch the correct native binaries.
 
 ## Workflow on photo day
 

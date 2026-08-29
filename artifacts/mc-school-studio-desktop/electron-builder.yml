@@ -26,6 +26,19 @@ asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/**/*
 
+win:
+  executableName: mc-school-studio
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+
 mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist

@@ -6,24 +6,24 @@
  * automatically queued and uploaded to the configured API endpoint.
  */
 
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { readFileSync } from 'fs'
 import { getDb } from '../db'
 import { settingsTable, photosTable } from '../db/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, or } from 'drizzle-orm'
 import type { UploadStatus } from '../../shared/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getSetting(key: string): string | null {
+export function getSetting(key: string): string | null {
   const db = getDb()
   const row = db.select().from(settingsTable).where(eq(settingsTable.key, key)).get()
   return row?.value ?? null
 }
 
-function setSetting(key: string, value: string) {
+export function setSetting(key: string, value: string) {
   const db = getDb()
   // upsert
   const existing = db.select().from(settingsTable).where(eq(settingsTable.key, key)).get()
@@ -34,10 +34,36 @@ function setSetting(key: string, value: string) {
   }
 }
 
+export function deleteSetting(key: string) {
+  getDb().delete(settingsTable).where(eq(settingsTable.key, key)).run()
+}
+
+export const DEFAULT_API_URL = 'https://volumecapture.net'
+
+export function saveConnectionToken(token: string) {
+  const value = safeStorage.isEncryptionAvailable()
+    ? `safe:${safeStorage.encryptString(token).toString('base64')}`
+    : token
+  setSetting('desktop_connection_token', value)
+  deleteSetting('desktop_retired')
+}
+
+export function readConnectionToken(): string | null {
+  const stored = getSetting('desktop_connection_token')
+  if (!stored) return null
+  if (!stored.startsWith('safe:')) return stored
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(5), 'base64'))
+  } catch {
+    return null
+  }
+}
+
 export function getUploadConfig(): { apiUrl: string | null; connectionToken: string | null } {
+  const retired = getSetting('desktop_retired') === '1'
   return {
-    apiUrl: getSetting('upload_api_url'),
-    connectionToken: getSetting('desktop_connection_token'),
+    apiUrl: getSetting('upload_api_url') ?? DEFAULT_API_URL,
+    connectionToken: retired ? null : readConnectionToken(),
   }
 }
 
@@ -59,7 +85,64 @@ function toServerFileUrl(fileUrl: string | null): string | null {
 // Upload a single photo to the cloud API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function uploadPhoto(
+let cloudSyncDisabledForRetirement = false
+let cloudSessionVerified = false
+const activeUploads = new Set<Promise<void>>()
+const activePhotoUploads = new Map<number, Promise<void>>()
+let retryInProgress = false
+
+class RetryableUploadError extends Error {}
+
+export function disableCloudSyncForRetirement(): void {
+  cloudSyncDisabledForRetirement = true
+  cloudSessionVerified = false
+}
+
+export function enableCloudSyncAfterSignIn(): void {
+  cloudSyncDisabledForRetirement = false
+  cloudSessionVerified = true
+  retryPendingUploads()
+}
+
+export function markCloudSessionUnavailable(): void {
+  cloudSessionVerified = false
+}
+
+export function markCloudSessionVerified(): void {
+  if (cloudSyncDisabledForRetirement) return
+  cloudSessionVerified = true
+  retryPendingUploads()
+}
+
+export function isCloudSessionVerified(): boolean {
+  return cloudSessionVerified && !cloudSyncDisabledForRetirement
+}
+
+export function invalidateDesktopCredentials(notifyRenderer = false): void {
+  markCloudSessionUnavailable()
+  deleteSetting('desktop_connection_token')
+  deleteSetting('desktop_cached_member')
+  if (notifyRenderer) {
+    BrowserWindow.getAllWindows()[0]?.webContents.send('auth:sessionInvalidated', {
+      signedIn: false,
+      error: 'Your desktop session was signed out or revoked. Sign in again.',
+    })
+  }
+}
+
+export async function waitForActiveUploads(): Promise<void> {
+  await Promise.allSettled([...activeUploads])
+}
+
+function isRetryableUploadFailure(error: unknown): boolean {
+  if (error instanceof RetryableUploadError) return true
+  if (!(error instanceof Error)) return false
+  return error.name === 'AbortError'
+    || error.name === 'TimeoutError'
+    || error.name === 'TypeError'
+}
+
+async function performUploadPhoto(
   projectId: number,
   studentId: number,
   photoId: number,
@@ -95,12 +178,20 @@ export async function uploadPhoto(
       method: 'POST',
       headers: {
         Authorization: `Bearer ${connectionToken}`,
+        'X-MC-Upload-Id': String(photoId),
       },
       body: formData,
+      signal: AbortSignal.timeout(30000),
     })
 
     if (!response.ok) {
       const text = await response.text()
+      if (response.status === 401) {
+        invalidateDesktopCredentials(true)
+      }
+      if (response.status === 429 || response.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`)
+      }
       throw new Error(`HTTP ${response.status}: ${text}`)
     }
 
@@ -123,14 +214,72 @@ export async function uploadPhoto(
 
     console.log(`[Upload] Photo ${photoId} uploaded successfully`)
   } catch (err) {
-    console.error('[Upload] Upload failed:', err)
+    const retryable = isRetryableUploadFailure(err)
+    if (retryable) markCloudSessionUnavailable()
+    console.error(`[Upload] Upload ${retryable ? 'waiting for connectivity' : 'failed'}:`, err)
     db.update(photosTable)
-      .set({ uploadStatus: 'error' })
+      .set({ uploadStatus: retryable ? 'pending' : 'error' })
       .where(eq(photosTable.id, photoId))
       .run()
-    notifyUploadStatus(photoId, studentId, 'error')
+    notifyUploadStatus(photoId, studentId, retryable ? 'pending' : 'error')
     throw err
   }
+}
+
+export function uploadPhoto(
+  projectId: number,
+  studentId: number,
+  photoId: number,
+  filePath: string,
+  fileName: string,
+  capturedAt: string,
+): Promise<void> {
+  if (!isCloudSessionVerified()) return Promise.resolve()
+  const existing = activePhotoUploads.get(photoId)
+  if (existing) return existing
+
+  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt)
+  activePhotoUploads.set(photoId, task)
+  activeUploads.add(task)
+  void task.finally(() => {
+    activeUploads.delete(task)
+    activePhotoUploads.delete(photoId)
+  }).catch(() => {})
+  return task
+}
+
+export function retryPendingUploads(): void {
+  if (retryInProgress || !isCloudSessionVerified()) return
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!apiUrl || !connectionToken) return
+
+  retryInProgress = true
+  void (async () => {
+    const db = getDb()
+    const pending = db
+      .select()
+      .from(photosTable)
+      .where(or(
+        eq(photosTable.uploadStatus, 'pending'),
+        eq(photosTable.uploadStatus, 'uploading'),
+      ))
+      .all()
+
+    await Promise.allSettled(
+      pending
+        .filter((photo) => photo.studentId !== null)
+        .map((photo) => uploadPhoto(
+          photo.projectId,
+          photo.studentId!,
+          photo.id,
+          photo.filePath,
+          photo.fileName,
+          photo.capturedAt,
+        )),
+    )
+  })().finally(() => {
+    retryInProgress = false
+  }).catch(() => {})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,26 +287,11 @@ export async function uploadPhoto(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerUploadHandlers() {
-  // Get current cloud upload configuration
-  ipcMain.handle('upload:getConfig', () => {
-    return getUploadConfig()
-  })
-
-  // Save cloud upload configuration
-  ipcMain.handle(
-    'upload:setConfig',
-    (_e, { apiUrl, connectionToken }: { apiUrl: string; connectionToken: string }) => {
-      setSetting('upload_api_url', apiUrl.trim())
-      setSetting('desktop_connection_token', connectionToken.trim())
-      return { ok: true }
-    },
-  )
-
   // Test connection to API
   ipcMain.handle('upload:testConnection', async () => {
     const { apiUrl, connectionToken } = getUploadConfig()
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: 'API URL and desktop connection token are required' }
+      return { ok: false, error: 'Sign in to MC School Studio before testing the connection' }
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/me`
@@ -168,6 +302,7 @@ export function registerUploadHandlers() {
       if (response.ok) {
         return { ok: true }
       }
+      if (response.status === 401) invalidateDesktopCredentials(true)
       const body = await response.json().catch(() => ({})) as { error?: string }
       return { ok: false, error: body.error ?? `Server returned ${response.status}` }
     } catch (err) {
@@ -180,6 +315,9 @@ export function registerUploadHandlers() {
     const db = getDb()
     const photo = db.select().from(photosTable).where(eq(photosTable.id, photoId)).get()
     if (!photo || !photo.studentId) return { ok: false, error: 'Photo not found or not matched' }
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: 'Upload is waiting for an internet connection and a verified studio session.' }
+    }
     try {
       await uploadPhoto(
         photo.projectId,

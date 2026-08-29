@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { db } from "@workspace/db";
 import { studentsTable, studentPhotosTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
@@ -111,6 +111,191 @@ function discardUploadedFile(req: Request): void {
   }
 }
 
+type PhotoDeleteBackup = {
+  directory: string;
+  filePath: string;
+};
+
+type DiscoveredPhotoDeleteBackup = PhotoDeleteBackup & {
+  originalPath: string;
+  fileUrl: string;
+};
+
+function createPhotoDeleteBackup(filePath: string): PhotoDeleteBackup {
+  if (!fs.existsSync(filePath)) {
+    throw new Error("Photo file not found on server; deletion aborted");
+  }
+
+  const directory = fs.mkdtempSync(path.join(path.dirname(filePath), ".photo-delete-"));
+  const backupPath = path.join(directory, path.basename(filePath));
+  try {
+    fs.copyFileSync(filePath, backupPath, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    try {
+      fs.rmSync(directory, { recursive: true, force: true });
+    } catch (cleanupError) {
+      console.error("Could not clean up a failed photo deletion backup", {
+        error: cleanupError,
+        backupPath,
+      });
+    }
+    throw error;
+  }
+
+  return { directory, filePath: backupPath };
+}
+
+function removePhotoDeleteBackup(backup: PhotoDeleteBackup): void {
+  fs.rmSync(backup.directory, { recursive: true, force: true });
+}
+
+function photoFileUrl(filePath: string): string {
+  const relativePath = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
+  return `/${relativePath}`;
+}
+
+function discoverPhotoDeleteBackups(): DiscoveredPhotoDeleteBackup[] {
+  const discovered: DiscoveredPhotoDeleteBackup[] = [];
+
+  function visit(directory: string): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (error) {
+      console.error("Could not inspect a photo deletion directory", { error, directory });
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory() && entry.name.startsWith(".photo-delete-")) {
+        let backupEntries: fs.Dirent[];
+        try {
+          backupEntries = fs.readdirSync(entryPath, { withFileTypes: true });
+        } catch (error) {
+          console.error("Could not inspect a photo deletion backup", {
+            error,
+            backupDirectory: entryPath,
+          });
+          continue;
+        }
+
+        const backupFiles = backupEntries.filter((backupEntry) => backupEntry.isFile());
+        if (backupFiles.length !== 1 || backupEntries.length !== 1) {
+          // A process may have stopped before the copy completed, or a backup
+          // may have been tampered with. There is no safe original path to
+          // reconcile in that case, so leave it for manual inspection.
+          if (backupEntries.length > 0) {
+            console.error("Leaving an ambiguous photo deletion backup in place", {
+              backupDirectory: entryPath,
+            });
+          } else {
+            // Empty temporary directories contain no uploaded bytes and can
+            // be removed without making a recovery decision.
+            try {
+              removePhotoDeleteBackup({ directory: entryPath, filePath: "" });
+            } catch (error) {
+              console.error("Could not clean up an empty photo deletion backup", {
+                error,
+                backupDirectory: entryPath,
+              });
+            }
+          }
+          continue;
+        }
+
+        const backupFile = backupFiles[0];
+        const originalPath = path.join(directory, backupFile.name);
+        discovered.push({
+          directory: entryPath,
+          filePath: path.join(entryPath, backupFile.name),
+          originalPath,
+          fileUrl: photoFileUrl(originalPath),
+        });
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      }
+    }
+  }
+
+  if (fs.existsSync(UPLOADS_ROOT)) {
+    visit(UPLOADS_ROOT);
+  }
+  return discovered;
+}
+
+/**
+ * Reconcile deletion backups left behind by a process interruption.
+ *
+ * The database row is authoritative:
+ * - A surviving row plus a missing original gets its original bytes restored.
+ * - A surviving original is never overwritten, even if a backup exists.
+ * - A deleted row permits cleanup of both the backup and its now-unreferenced
+ *   original file.
+ */
+export async function recoverPhotoDeleteBackups(): Promise<void> {
+  const backups = discoverPhotoDeleteBackups();
+
+  for (const backup of backups) {
+    try {
+      const [photo] = await db
+        .select()
+        .from(studentPhotosTable)
+        .where(eq(studentPhotosTable.fileUrl, backup.fileUrl))
+        .limit(1);
+      const originalExists = fs.existsSync(backup.originalPath);
+
+      if (photo) {
+        if (!originalExists) {
+          fs.copyFileSync(backup.filePath, backup.originalPath, fs.constants.COPYFILE_EXCL);
+          if (!fs.existsSync(backup.originalPath)) {
+            throw new Error("Restored photo file was not found after copying");
+          }
+        }
+        removePhotoDeleteBackup(backup);
+        continue;
+      }
+
+      // The row deletion is durable. Only remove an original after confirming
+      // there is no database row that points at this path, so a valid photo
+      // can never be deleted as part of backup cleanup.
+      if (originalExists) {
+        const [referencingPhoto] = await db
+          .select({ id: studentPhotosTable.id })
+          .from(studentPhotosTable)
+          .where(eq(studentPhotosTable.fileUrl, backup.fileUrl))
+          .limit(1);
+        if (!referencingPhoto) {
+          fs.unlinkSync(backup.originalPath);
+        }
+      }
+      removePhotoDeleteBackup(backup);
+    } catch (error) {
+      // Keep the backup when any part of reconciliation is uncertain. It is
+      // the durable copy that makes a later retry safe.
+      console.error("Could not reconcile a photo deletion backup", {
+        error,
+        backupPath: backup.filePath,
+        originalPath: backup.originalPath,
+      });
+    }
+  }
+}
+
+async function restoreDeletedPhoto(
+  photo: typeof studentPhotosTable.$inferSelect,
+  filePath: string,
+  backup: PhotoDeleteBackup,
+): Promise<void> {
+  if (!fs.existsSync(filePath)) {
+    fs.copyFileSync(backup.filePath, filePath, fs.constants.COPYFILE_EXCL);
+  }
+  await db.insert(studentPhotosTable).values(photo);
+}
+
 function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
   return {
     id: photo.id,
@@ -164,20 +349,70 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       .replace(/\\/g, "/");
     const fileUrl = `/uploads/${relPath}`;
     const capturedAt = (req.body as Record<string, string>).capturedAt ?? null;
+    const clientUploadId = req.get("X-MC-Upload-Id");
+    if (clientUploadId && !/^[1-9]\d*$/.test(clientUploadId)) {
+      discardUploadedFile(req);
+      res.status(400).json({ error: "Invalid desktop upload identifier" });
+      return;
+    }
 
-    const [photo] = await db
-      .insert(studentPhotosTable)
-      .values({
-        projectId,
-        studentId,
-        fileName: req.file.originalname,
-        fileUrl,
-        mimeType: req.file.mimetype,
-        capturedAt: capturedAt || null,
-      })
-      .returning();
+    const savePhoto = async () => {
+      if (!clientUploadId) {
+        const [photo] = await db
+          .insert(studentPhotosTable)
+          .values({
+            projectId,
+            studentId,
+            fileName: req.file!.originalname,
+            fileUrl,
+            mimeType: req.file!.mimetype,
+            capturedAt: capturedAt || null,
+          })
+          .returning();
+        return { photo, reused: false };
+      }
 
-    res.status(201).json(photoToResponse(photo));
+      return db.transaction(async (tx) => {
+        const connection = getDesktopConnection(req);
+        const lockKey = `${connection.connectionId}:${clientUploadId}`;
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
+
+        const [existing] = await tx
+          .select()
+          .from(studentPhotosTable)
+          .where(and(
+            eq(studentPhotosTable.desktopConnectionId, connection.connectionId),
+            eq(studentPhotosTable.clientUploadId, clientUploadId),
+          ))
+          .limit(1);
+
+        if (existing) {
+          discardUploadedFile(req);
+          if (existing.projectId !== projectId || existing.studentId !== studentId) {
+            throw new Error("Desktop upload identifier was reused for a different photo target");
+          }
+          return { photo: existing, reused: true };
+        }
+
+        const [photo] = await tx
+          .insert(studentPhotosTable)
+          .values({
+            projectId,
+            studentId,
+            fileName: req.file!.originalname,
+            fileUrl,
+            mimeType: req.file!.mimetype,
+            capturedAt: capturedAt || null,
+            desktopConnectionId: connection.connectionId,
+            clientUploadId,
+          })
+          .returning();
+        return { photo, reused: false };
+      });
+    };
+
+    const result = await savePhoto();
+    res.status(result.reused ? 200 : 201).json(photoToResponse(result.photo));
   } catch (error) {
     discardUploadedFile(req);
     next(error);
@@ -291,16 +526,70 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
     return;
   }
 
-  try {
-    const filePath = resolveFilePath(photo.fileUrl);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-  } catch {
-    // Non-fatal
-  }
+  const filePath = resolveFilePath(photo.fileUrl);
+  const backup = createPhotoDeleteBackup(filePath);
+  let rowDeleted = false;
+  let preserveBackup = false;
 
-  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photoId));
+  try {
+    const [deletedPhoto] = await db
+      .delete(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, photoId))
+      .returning({ id: studentPhotosTable.id });
+
+    if (!deletedPhoto) {
+      throw new Error("Photo could not be deleted");
+    }
+    rowDeleted = true;
+
+    try {
+      fs.unlinkSync(filePath);
+    } catch (error) {
+      try {
+        await restoreDeletedPhoto(photo, filePath, backup);
+        rowDeleted = false;
+      } catch (restoreError) {
+        preserveBackup = true;
+        console.error("Could not restore a photo after file deletion failed", {
+          error: restoreError,
+          photoId,
+          backupPath: backup.filePath,
+        });
+      }
+      throw error;
+    }
+
+    try {
+      removePhotoDeleteBackup(backup);
+    } catch (cleanupError) {
+      // The requested deletion has succeeded. Keep any surviving backup as
+      // cleanup debt rather than trying to roll back from a possibly partial
+      // recursive removal.
+      console.error("Could not clean up a completed photo deletion backup", {
+        error: cleanupError,
+        photoId,
+        backupPath: backup.filePath,
+      });
+    }
+  } catch (error) {
+    // A failed compensation must retain the only durable recovery copy.
+    // Otherwise, the row still exists (DB failure) or has been restored, so
+    // the backup can be removed safely.
+    if (!preserveBackup && (!rowDeleted || fs.existsSync(filePath))) {
+      try {
+        if (fs.existsSync(backup.directory)) {
+          removePhotoDeleteBackup(backup);
+        }
+      } catch (cleanupError) {
+        console.error("Could not clean up a photo deletion backup", {
+          error: cleanupError,
+          photoId,
+          backupPath: backup.filePath,
+        });
+      }
+    }
+    throw error;
+  }
 
   res.status(204).send();
 });

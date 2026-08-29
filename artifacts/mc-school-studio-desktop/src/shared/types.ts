@@ -58,6 +58,12 @@ export interface PhotoMatchedEvent {
   student: Student
 }
 
+export interface PhotoMarkerEvent {
+  fileName: string
+  capturedAt: string
+  student: Student
+}
+
 export interface PhotoUnmatchedEvent {
   filePath: string
   fileName: string

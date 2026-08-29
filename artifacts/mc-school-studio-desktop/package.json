@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test:naming": "node --experimental-strip-types --test test/photo-file-naming.test.ts",
+    "test:sequence": "node --experimental-strip-types --test test/photo-sequence.test.ts",
     "dist:mac": "pnpm run build && electron-builder --mac",
     "dist": "pnpm run dist:mac"
   },

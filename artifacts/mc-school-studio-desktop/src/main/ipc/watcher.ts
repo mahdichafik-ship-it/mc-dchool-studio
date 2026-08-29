@@ -1,17 +1,35 @@
 import { ipcMain, BrowserWindow } from 'electron'
-import { uploadPhoto, getUploadConfig } from './upload'
 import chokidar, { FSWatcher } from 'chokidar'
 import { copyFileSync, mkdirSync } from 'fs'
+import { stat as statFile } from 'fs/promises'
 import { join, basename } from 'path'
 import { eq, and } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
+import { getUploadConfig, uploadPhoto } from './upload'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
 import { readQrFromImage } from '../lib/qrReader'
-import { extractStudentReference } from '../lib/photoFileNaming'
+import {
+  advanceSequence,
+  createSequenceState,
+  sortCaptureFiles,
+  type CaptureFile,
+  type SequenceState,
+} from '../lib/photoSequence'
 import type { Photo, Student } from '../../shared/types'
 
-// Active watchers: projectId → FSWatcher
-const watchers = new Map<number, FSWatcher>()
+const FLUSH_DELAY_MS = 500
+
+interface WatchSession {
+  watcher: FSWatcher
+  pendingFiles: CaptureFile[]
+  flushTimer: NodeJS.Timeout | null
+  processing: Promise<void>
+  seenPaths: Set<string>
+  sequenceState: SequenceState
+}
+
+// Active watchers: projectId → watcher session
+const watchers = new Map<number, WatchSession>()
 
 function now() {
   return new Date().toISOString()
@@ -26,11 +44,38 @@ function safeFolderName(value: string): string {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
 }
 
+function captureTimestamp(stat: Awaited<ReturnType<typeof statFile>>): number {
+  if (Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0) return stat.birthtimeMs
+  if (Number.isFinite(stat.mtimeMs) && stat.mtimeMs > 0) return stat.mtimeMs
+  return Date.now()
+}
+
+function toStudentEvent(
+  db: ReturnType<typeof getDb>,
+  student: typeof studentsTable.$inferSelect,
+): Student {
+  const classRow = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).get()
+  return {
+    id: student.id,
+    projectId: student.projectId,
+    classId: student.classId,
+    className: classRow?.className ?? '',
+    firstName: student.firstName,
+    lastName: student.lastName,
+    generatedStudentId: student.generatedStudentId,
+    simpleQr: student.simpleQr,
+    jsonQr: student.jsonQr,
+    photoCount: 0,
+    createdAt: student.createdAt,
+    updatedAt: student.updatedAt,
+  }
+}
+
 export function registerWatcherHandlers() {
   const db = getDb()
 
   ipcMain.handle('watcher:start', async (_e, { projectId }: { projectId: number }) => {
-    if (watchers.has(projectId)) return // already watching
+    if (watchers.has(projectId)) return
 
     const [project] = db
       .select()
@@ -48,24 +93,35 @@ export function registerWatcherHandlers() {
       awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 },
     })
 
-    watcher.on('add', async (filePath) => {
-      const lower = filePath.toLowerCase()
-      if (!lower.endsWith('.jpg') && !lower.endsWith('.jpeg')) return
+    const session: WatchSession = {
+      watcher,
+      pendingFiles: [],
+      flushTimer: null,
+      processing: Promise.resolve(),
+      seenPaths: new Set(),
+      sequenceState: createSequenceState(),
+    }
+    watchers.set(projectId, session)
 
-      await handleNewPhoto(projectId, filePath)
+    watcher.on('add', (filePath) => {
+      void enqueuePhoto(projectId, filePath)
+    })
+    watcher.on('error', (error) => {
+      console.error(`[Watcher] Error for project ${projectId}`, error)
     })
 
-    watchers.set(projectId, watcher)
     console.log(`[Watcher] Started watching ${project.watchFolder} for project ${projectId}`)
   })
 
   ipcMain.handle('watcher:stop', async (_e, { projectId }: { projectId: number }) => {
-    const w = watchers.get(projectId)
-    if (w) {
-      await w.close()
-      watchers.delete(projectId)
-      console.log(`[Watcher] Stopped watching for project ${projectId}`)
-    }
+    const session = watchers.get(projectId)
+    if (!session) return
+
+    if (session.flushTimer) clearTimeout(session.flushTimer)
+    session.pendingFiles = []
+    await session.watcher.close()
+    watchers.delete(projectId)
+    console.log(`[Watcher] Stopped watching for project ${projectId}`)
   })
 
   ipcMain.handle('watcher:isRunning', (_e, { projectId }: { projectId: number }): boolean => {
@@ -73,118 +129,141 @@ export function registerWatcherHandlers() {
   })
 }
 
-async function handleNewPhoto(projectId: number, filePath: string) {
+async function enqueuePhoto(projectId: number, filePath: string): Promise<void> {
+  const session = watchers.get(projectId)
+  if (!session || session.seenPaths.has(filePath)) return
+
+  const lower = filePath.toLowerCase()
+  if (!lower.endsWith('.jpg') && !lower.endsWith('.jpeg')) return
+
+  try {
+    const fileStat = await statFile(filePath)
+    if (!fileStat.isFile()) return
+    session.seenPaths.add(filePath)
+    session.pendingFiles.push({
+      filePath,
+      fileName: basename(filePath),
+      capturedAtMs: captureTimestamp(fileStat),
+    })
+    scheduleFlush(projectId)
+  } catch (error) {
+    console.error(`[Watcher] Could not inspect ${filePath}`, error)
+  }
+}
+
+function scheduleFlush(projectId: number): void {
+  const session = watchers.get(projectId)
+  if (!session) return
+
+  if (session.flushTimer) clearTimeout(session.flushTimer)
+  session.flushTimer = setTimeout(() => {
+    session.flushTimer = null
+    const batch = sortCaptureFiles(session.pendingFiles.splice(0))
+    if (batch.length === 0) return
+
+    session.processing = session.processing
+      .then(async () => {
+        for (const capture of batch) {
+          await handleNewPhoto(projectId, capture, session)
+        }
+      })
+      .catch((error) => {
+        console.error(`[Watcher] Could not process project ${projectId} capture batch`, error)
+      })
+  }, FLUSH_DELAY_MS)
+}
+
+async function handleNewPhoto(
+  projectId: number,
+  capture: CaptureFile,
+  session: WatchSession,
+): Promise<void> {
   const db = getDb()
   const win = getMainWindow()
-  const fileName = basename(filePath)
+  const qrResult = await readQrFromImage(capture.filePath)
 
-  console.log(`[Watcher] New photo: ${fileName}`)
+  if (qrResult) {
+    const student = db
+      .select()
+      .from(studentsTable)
+      .where(
+        and(
+          eq(studentsTable.projectId, projectId),
+          eq(studentsTable.generatedStudentId, qrResult.studentId),
+        ),
+      )
+      .get()
 
-  // Smart Shooter normally places the student reference at the end of the filename,
-  // e.g. Smith_John_class_school-001234.jpg. QR-in-image remains a fallback.
-  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
-  const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
-  const filenameReference = extractStudentReference(fileName, knownStudents.map((student) => student.generatedStudentId))
-  const qrResult = filenameReference ? null : await readQrFromImage(filePath)
-  const reference = filenameReference ?? qrResult?.studentId
-
-  if (!reference) {
-    console.log(`[Watcher] No QR found in ${fileName}`)
-    // Store as unmatched photo
-    db.insert(photosTable)
-      .values({
-        projectId,
-        studentId: null,
-        filePath,
-        fileName,
-        capturedAt: now(),
-        isMatched: false,
-      })
-      .run()
-
-    win?.webContents.send('photo:unmatched', {
-      filePath,
-      fileName,
-      reason: 'No QR code detected',
+    const decision = advanceSequence(session.sequenceState, {
+      kind: 'marker',
+      studentId: student?.id ?? null,
+      reference: qrResult.studentId,
     })
+
+    if (decision.kind === 'review') {
+      recordUnmatched(db, win, projectId, capture, decision.reason)
+      return
+    }
+
+    win?.webContents.send('photo:marker', {
+      fileName: capture.fileName,
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      student: toStudentEvent(db, student!),
+    })
+    console.log(`[Watcher] QR marker ${capture.fileName} → ${student!.firstName} ${student!.lastName}`)
     return
   }
 
-  // Find student by generatedStudentId scoped to this project
+  const decision = advanceSequence(session.sequenceState, { kind: 'portrait' })
+  if (decision.kind === 'review') {
+    recordUnmatched(db, win, projectId, capture, decision.reason)
+    return
+  }
+
   const student = db
     .select()
     .from(studentsTable)
     .where(
       and(
         eq(studentsTable.projectId, projectId),
-        eq(studentsTable.generatedStudentId, reference),
+        eq(studentsTable.id, decision.studentId),
       ),
     )
     .get()
 
   if (!student) {
-    console.log(`[Watcher] QR student ID ${qrResult.studentId} not found in project ${projectId}`)
-    db.insert(photosTable)
-      .values({
-        projectId,
-        studentId: null,
-        filePath,
-        fileName,
-        capturedAt: now(),
-        isMatched: false,
-      })
-      .run()
-
-    win?.webContents.send('photo:unmatched', {
-      filePath,
-      fileName,
-      reason: `Student ID "${qrResult.studentId}" not found in this project`,
-    })
+    session.sequenceState.activeStudentId = null
+    recordUnmatched(db, win, projectId, capture, 'The active student is no longer in this project roster')
     return
   }
 
   const [classRow] = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).all()
+  const [project] = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).all()
   const projectFolder = safeFolderName(project?.schoolName ?? `Project ${projectId}`)
   const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
   const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
   // Keep the source untouched; organize a durable local copy by project/class/student.
   const destDir = join(getPhotosDir(), projectFolder, classFolder, studentFolder)
   mkdirSync(destDir, { recursive: true })
-  const destPath = join(destDir, fileName)
-  copyFileSync(filePath, destPath)
+  const destPath = join(destDir, capture.fileName)
+  copyFileSync(capture.filePath, destPath)
 
-  // Save to DB
   const photo = db
     .insert(photosTable)
     .values({
       projectId,
       studentId: student.id,
       filePath: destPath,
-      fileName,
-      capturedAt: now(),
+      fileName: capture.fileName,
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
       isMatched: true,
     })
     .returning()
     .get()
 
-  console.log(`[Watcher] Matched ${fileName} → ${student.firstName} ${student.lastName}`)
+  console.log(`[Watcher] Matched ${capture.fileName} → ${student.firstName} ${student.lastName}`)
 
-  // Notify renderer
-  const studentForEvent: Omit<Student, 'photoCount'> & { photoCount: number } = {
-    id: student.id,
-    projectId: student.projectId,
-    classId: student.classId,
-    className: '',
-    firstName: student.firstName,
-    lastName: student.lastName,
-    generatedStudentId: student.generatedStudentId,
-    simpleQr: student.simpleQr,
-    jsonQr: student.jsonQr,
-    photoCount: 1,
-    createdAt: student.createdAt,
-    updatedAt: student.updatedAt,
-  }
-
+  const studentForEvent = toStudentEvent(db, student)
   const photoForEvent: Photo = {
     id: photo.id,
     projectId: photo.projectId,
@@ -202,10 +281,9 @@ async function handleNewPhoto(projectId: number, filePath: string) {
     student: studentForEvent,
   })
 
-  // Auto-upload if cloud upload is configured
+  // Auto-upload only portraits. QR marker images return before reaching this path.
   const { apiUrl, connectionToken } = getUploadConfig()
   if (apiUrl && connectionToken) {
-    // Mark as pending first so the UI shows it immediately
     db.update(photosTable)
       .set({ uploadStatus: 'pending' })
       .where(eq(photosTable.id, photo.id))
@@ -216,8 +294,32 @@ async function handleNewPhoto(projectId: number, filePath: string) {
       status: 'pending',
     })
 
-    // Fire-and-forget upload; progress is reflected via uploadStatus in DB
     uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt)
       .catch(() => {})
   }
+}
+
+function recordUnmatched(
+  db: ReturnType<typeof getDb>,
+  win: BrowserWindow | null,
+  projectId: number,
+  capture: CaptureFile,
+  reason: string,
+): void {
+  db.insert(photosTable)
+    .values({
+      projectId,
+      studentId: null,
+      filePath: capture.filePath,
+      fileName: capture.fileName,
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      isMatched: false,
+    })
+    .run()
+
+  win?.webContents.send('photo:unmatched', {
+    filePath: capture.filePath,
+    fileName: capture.fileName,
+    reason,
+  })
 }

@@ -196,9 +196,10 @@ export function Settings({ member, onSignedOut }: SettingsProps) {
               <li>Open the project and set the watch folder (SmartShooter output folder)</li>
               <li>Start the watcher — the green "Live" indicator appears</li>
               <li>Select a student to display their QR code on screen</li>
-              <li>Photograph the student — SmartShooter saves the photo to the watch folder</li>
-              <li>The app detects the new photo, reads the QR code, and assigns it automatically</li>
-               <li>When signed in, the photo is uploaded to the web app instantly</li>
+               <li>Photograph the QR code first — this marks the start of that student’s capture sequence</li>
+               <li>Photograph the student; every following portrait is assigned to that student until the next QR marker</li>
+               <li>QR marker images stay in the spool folder but are not added to student galleries</li>
+               <li>When signed in, matched portraits are uploaded to the web app automatically</li>
             </ol>
           </div>
         </div>

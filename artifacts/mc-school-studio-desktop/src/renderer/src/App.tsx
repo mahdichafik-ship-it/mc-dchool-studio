@@ -6,7 +6,7 @@ import { Settings } from '@/pages/Settings'
 import { Toaster } from '@/components/ui/toast'
 import { usePhotoEvents } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
-import type { PhotoMatchedEvent, PhotoUnmatchedEvent } from '@/hooks/useApi'
+import type { PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent } from '@/hooks/useApi'
 
 type Page = 'projects' | 'project-view' | 'settings'
 type AuthMember = { email: string; role: 'owner' | 'admin' | 'assistant' | 'photographer' }
@@ -92,7 +92,15 @@ export default function App() {
     })
   }, [])
 
-  usePhotoEvents(handleMatched, handleUnmatched)
+  const handleMarker = useCallback((data: PhotoMarkerEvent) => {
+    addToast({
+      type: 'info',
+      title: `Now photographing: ${data.student.firstName} ${data.student.lastName}`,
+      description: 'The next portraits will be assigned to this student until the next QR marker.',
+    })
+  }, [])
+
+  usePhotoEvents(handleMatched, handleUnmatched, handleMarker)
 
   if (auth.status === 'loading') {
     return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500">Checking your session…</div>

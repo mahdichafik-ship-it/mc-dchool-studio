@@ -6,6 +6,7 @@ import type {
   Student,
   Photo,
   PhotoMatchedEvent,
+  PhotoMarkerEvent,
   PhotoUnmatchedEvent,
   PhotoDeletedEvent,
   PhotoReassignedEvent,
@@ -105,6 +106,7 @@ interface ElectronAPI {
   invoke(channel: 'cloud:listProjects'): Promise<CloudProjectListResult>
   invoke(channel: 'cloud:pullProject', args: { cloudProjectId: number }): Promise<CloudProjectPullResult>
   on(channel: 'photo:matched', listener: (data: PhotoMatchedEvent) => void): () => void
+  on(channel: 'photo:marker', listener: (data: PhotoMarkerEvent) => void): () => void
   on(channel: 'photo:unmatched', listener: (data: PhotoUnmatchedEvent) => void): () => void
   on(channel: 'photo:deleted', listener: (data: PhotoDeletedEvent) => void): () => void
   on(channel: 'photo:reassigned', listener: (data: PhotoReassignedEvent) => void): () => void

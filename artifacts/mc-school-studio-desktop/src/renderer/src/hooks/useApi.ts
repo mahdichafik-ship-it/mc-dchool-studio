@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow } from '../../../shared/types'
+import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow } from '../../../shared/types'
 
 // Re-export types for convenience
-export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow }
+export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow }
 
 const api = window.api
 
@@ -216,10 +216,14 @@ export function useWatcherStatus(projectId: number | null) {
 export function usePhotoEvents(
   onMatched?: (data: PhotoMatchedEvent) => void,
   onUnmatched?: (data: PhotoUnmatchedEvent) => void,
+  onMarker?: (data: PhotoMarkerEvent) => void,
 ) {
   useEffect(() => {
     const unsubMatched = onMatched
       ? api.on('photo:matched', onMatched)
+      : undefined
+    const unsubMarker = onMarker
+      ? api.on('photo:marker', onMarker)
       : undefined
     const unsubUnmatched = onUnmatched
       ? api.on('photo:unmatched', onUnmatched)
@@ -227,9 +231,10 @@ export function usePhotoEvents(
 
     return () => {
       unsubMatched?.()
+      unsubMarker?.()
       unsubUnmatched?.()
     }
-  }, [onMatched, onUnmatched])
+  }, [onMatched, onUnmatched, onMarker])
 }
 
 // Upload status per student: Map<studentId, { pending, uploading, done, error } counts>

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { FolderOpen, Cloud, Info, CheckCircle, XCircle, Loader, AlertTriangle, RefreshCw } from 'lucide-react'
+import { FolderOpen, UserCircle, Info, Loader, AlertTriangle, RefreshCw, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useGlobalErrorCount } from '@/hooks/useApi'
 
-type ConnectionStatus = 'idle' | 'testing' | 'ok' | 'error'
 type UpdateStatus =
   | 'checking'
   | 'available'
@@ -20,26 +19,19 @@ interface UpdateState {
   message?: string
 }
 
-export function Settings() {
+interface SettingsProps {
+  member?: { email: string; role: string }
+  onSignedOut: () => void
+}
+
+export function Settings({ member, onSignedOut }: SettingsProps) {
   const [photosDir, setPhotosDir] = useState<string>('')
-  const [apiUrl, setApiUrl] = useState<string>('')
-  const [connectionToken, setConnectionToken] = useState<string>('')
-  const [saving, setSaving] = useState(false)
-  const [savedOk, setSavedOk] = useState(false)
-  const [connStatus, setConnStatus] = useState<ConnectionStatus>('idle')
-  const [connError, setConnError] = useState<string | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'unsupported' })
   const { count: globalErrorCount } = useGlobalErrorCount()
 
   useEffect(() => {
     window.api.invoke('app:getPhotosDir').then((dir) => {
       setPhotosDir(dir as string)
-    })
-
-    window.api.invoke('upload:getConfig').then((cfg) => {
-      const { apiUrl: url, connectionToken: token } = cfg as { apiUrl: string | null; connectionToken: string | null }
-      setApiUrl(url ?? '')
-      setConnectionToken(token ?? '')
     })
 
     window.api.invoke('update:getState').then(setUpdateState)
@@ -59,36 +51,9 @@ export function Settings() {
     setPhotosDir(saved)
   }
 
-  async function handleSaveConfig() {
-    setSaving(true)
-    setSavedOk(false)
-    try {
-      await window.api.invoke('upload:setConfig', { apiUrl, connectionToken })
-      setSavedOk(true)
-      setTimeout(() => setSavedOk(false), 3000)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleTestConnection() {
-    // Save first
-    await window.api.invoke('upload:setConfig', { apiUrl, connectionToken })
-    setConnStatus('testing')
-    setConnError(null)
-    try {
-      const result = await window.api.invoke('upload:testConnection') as { ok: boolean; error?: string }
-      if (result.ok) {
-        setConnStatus('ok')
-        setTimeout(() => setConnStatus('idle'), 4000)
-      } else {
-        setConnStatus('error')
-        setConnError(result.error ?? 'Connection failed')
-      }
-    } catch (e) {
-      setConnStatus('error')
-      setConnError(String(e))
-    }
+  async function handleSignOut() {
+    await window.api.invoke('auth:signOut')
+    onSignedOut()
   }
 
   async function handleCheckForUpdates() {
@@ -122,8 +87,6 @@ export function Settings() {
         return 'Updates are checked from an installed release.'
     }
   }
-
-  const hasConfig = apiUrl.trim() !== '' && connectionToken.trim() !== ''
 
   return (
     <div className="flex flex-col h-full">
@@ -202,90 +165,23 @@ export function Settings() {
             </div>
           </div>
 
-          {/* Cloud upload */}
+          {/* Account */}
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="flex items-center gap-3 mb-3">
-              <Cloud className="size-5 text-teal-600" />
-              <h3 className="font-semibold text-slate-900">Cloud upload</h3>
+              <UserCircle className="size-5 text-teal-600" />
+              <h3 className="font-semibold text-slate-900">Studio account</h3>
             </div>
             <p className="text-sm text-slate-500 mb-4">
-               After each photo is matched, it is automatically uploaded to your MC School
-               Studio web app so clients can view their photos online. Your connection is
-               limited to the projects assigned to this desktop.
+              Signed in as <span className="font-medium text-slate-700">{member?.email ?? 'studio member'}</span>.
+              Projects and uploads are limited by your studio role.
             </p>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Web app URL
-                </label>
-                <input
-                  type="url"
-                  value={apiUrl}
-                  onChange={(e) => setApiUrl(e.target.value)}
-                  placeholder="https://your-app.replit.app"
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white"
-                />
-                <p className="text-xs text-slate-400 mt-1">
-                  The base URL of your web app (no trailing slash).
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                   Desktop connection token
-                </label>
-                <input
-                  type="password"
-                   value={connectionToken}
-                   onChange={(e) => setConnectionToken(e.target.value)}
-                   placeholder="Paste the token created in the web app"
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white font-mono"
-                />
-                <p className="text-xs text-slate-400 mt-1">
-                   An owner or admin creates a token from the web app’s Team page. Each token
-                   is linked to a team member and device, and the owner can revoke it at any time.
-                </p>
-              </div>
-
-              {/* Connection test result */}
-              {connStatus === 'ok' && (
-                <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                  <CheckCircle className="size-4 shrink-0" />
-                  Connected successfully
-                </div>
-              )}
-              {connStatus === 'error' && (
-                <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                  <XCircle className="size-4 shrink-0" />
-                  {connError ?? 'Connection failed'}
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={handleTestConnection}
-                  disabled={!hasConfig || connStatus === 'testing'}
-                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  {connStatus === 'testing' ? (
-                    <Loader className="size-3.5 animate-spin" />
-                  ) : (
-                    <Cloud className="size-3.5" />
-                  )}
-                  Test connection
-                </button>
-
-                <button
-                  onClick={handleSaveConfig}
-                  disabled={saving}
-                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg disabled:opacity-40"
-                >
-                  {savedOk ? <CheckCircle className="size-3.5" /> : null}
-                  {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save settings'}
-                </button>
-              </div>
-            </div>
+            <button
+              onClick={handleSignOut}
+              className="inline-flex items-center gap-2 text-sm px-3 py-1.5 border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50"
+            >
+              <LogOut className="size-3.5" />
+              Sign out of desktop
+            </button>
           </div>
 
           {/* How to use */}
@@ -300,9 +196,10 @@ export function Settings() {
               <li>Open the project and set the watch folder (SmartShooter output folder)</li>
               <li>Start the watcher — the green "Live" indicator appears</li>
               <li>Select a student to display their QR code on screen</li>
-              <li>Photograph the student — SmartShooter saves the photo to the watch folder</li>
-              <li>The app detects the new photo, reads the QR code, and assigns it automatically</li>
-              <li>If cloud upload is configured, the photo is uploaded to the web app instantly</li>
+               <li>Photograph the QR code first — this marks the start of that student’s capture sequence</li>
+               <li>Photograph the student; every following portrait is assigned to that student until the next QR marker</li>
+               <li>QR marker images stay in the spool folder but are not added to student galleries</li>
+               <li>When signed in, matched portraits are uploaded to the web app automatically</li>
             </ol>
           </div>
         </div>

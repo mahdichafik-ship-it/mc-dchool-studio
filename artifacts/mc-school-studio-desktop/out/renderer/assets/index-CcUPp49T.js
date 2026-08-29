@@ -12090,18 +12090,18 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$q = [
+const __iconNode$s = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$q);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$s);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$p = [
+const __iconNode$r = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12111,14 +12111,14 @@ const __iconNode$p = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$p);
+const BookOpen = createLucideIcon("book-open", __iconNode$r);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$o = [
+const __iconNode$q = [
   [
     "path",
     {
@@ -12128,15 +12128,38 @@ const __iconNode$o = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$o);
+const Camera = createLucideIcon("camera", __iconNode$q);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$n = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$n);
+const __iconNode$p = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$p);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$o = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$o);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$n = [
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+];
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$n);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12145,10 +12168,10 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$n);
  */
 const __iconNode$m = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
+  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$m);
+const CircleUser = createLucideIcon("circle-user", __iconNode$m);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12156,10 +12179,11 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$m);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$l = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$l);
+const CircleX = createLucideIcon("circle-x", __iconNode$l);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12167,11 +12191,11 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$l);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$k = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M12 13v8", key: "1l5pq0" }],
+  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
+  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$k);
+const CloudUpload = createLucideIcon("cloud-upload", __iconNode$k);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12179,11 +12203,9 @@ const CircleX = createLucideIcon("circle-x", __iconNode$k);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$j = [
-  ["path", { d: "M12 13v8", key: "1l5pq0" }],
-  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
-  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const CloudUpload = createLucideIcon("cloud-upload", __iconNode$j);
+const Cloud = createLucideIcon("cloud", __iconNode$j);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12191,9 +12213,11 @@ const CloudUpload = createLucideIcon("cloud-upload", __iconNode$j);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$i = [
-  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const Cloud = createLucideIcon("cloud", __iconNode$i);
+const Download = createLucideIcon("download", __iconNode$i);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12201,11 +12225,11 @@ const Cloud = createLucideIcon("cloud", __iconNode$i);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$h = [
-  ["path", { d: "M12 15V3", key: "m9g1x1" }],
-  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
-  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const Download = createLucideIcon("download", __iconNode$h);
+const ExternalLink = createLucideIcon("external-link", __iconNode$h);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12213,11 +12237,15 @@ const Download = createLucideIcon("download", __iconNode$h);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$g = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+  [
+    "path",
+    {
+      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
+      key: "usdka0"
+    }
+  ]
 ];
-const ExternalLink = createLucideIcon("external-link", __iconNode$g);
+const FolderOpen = createLucideIcon("folder-open", __iconNode$g);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12228,12 +12256,12 @@ const __iconNode$f = [
   [
     "path",
     {
-      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
-      key: "usdka0"
+      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+      key: "1kt360"
     }
   ]
 ];
-const FolderOpen = createLucideIcon("folder-open", __iconNode$f);
+const Folder = createLucideIcon("folder", __iconNode$f);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12241,15 +12269,11 @@ const FolderOpen = createLucideIcon("folder-open", __iconNode$f);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$e = [
-  [
-    "path",
-    {
-      d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
-      key: "1kt360"
-    }
-  ]
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
 ];
-const Folder = createLucideIcon("folder", __iconNode$e);
+const Image = createLucideIcon("image", __iconNode$e);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12257,11 +12281,11 @@ const Folder = createLucideIcon("folder", __iconNode$e);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$d = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
 ];
-const Image = createLucideIcon("image", __iconNode$d);
+const Info = createLucideIcon("info", __iconNode$d);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12269,11 +12293,12 @@ const Image = createLucideIcon("image", __iconNode$d);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$c = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
+  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
+  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
+  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
 ];
-const Info = createLucideIcon("info", __iconNode$c);
+const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$c);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12281,19 +12306,6 @@ const Info = createLucideIcon("info", __iconNode$c);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$b = [
-  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
-  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
-  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
-  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
-];
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$b);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$a = [
   ["path", { d: "M12 2v4", key: "3427ic" }],
   ["path", { d: "m16.2 7.8 2.9-2.9", key: "r700ao" }],
   ["path", { d: "M18 12h4", key: "wj9ykh" }],
@@ -12303,7 +12315,19 @@ const __iconNode$a = [
   ["path", { d: "M2 12h4", key: "j09sii" }],
   ["path", { d: "m4.9 4.9 2.9 2.9", key: "giyufr" }]
 ];
-const Loader = createLucideIcon("loader", __iconNode$a);
+const Loader = createLucideIcon("loader", __iconNode$b);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$a = [
+  ["path", { d: "m16 17 5-5-5-5", key: "1bji2h" }],
+  ["path", { d: "M21 12H9", key: "dn1m92" }],
+  ["path", { d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", key: "1uf3rs" }]
+];
+const LogOut = createLucideIcon("log-out", __iconNode$a);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -16022,15 +16046,17 @@ function useWatcherStatus(projectId) {
   }, [projectId]);
   return { isRunning, start, stop, refresh: check };
 }
-function usePhotoEvents(onMatched, onUnmatched) {
+function usePhotoEvents(onMatched, onUnmatched, onMarker) {
   reactExports.useEffect(() => {
     const unsubMatched = onMatched ? api.on("photo:matched", onMatched) : void 0;
+    const unsubMarker = onMarker ? api.on("photo:marker", onMarker) : void 0;
     const unsubUnmatched = onUnmatched ? api.on("photo:unmatched", onUnmatched) : void 0;
     return () => {
       unsubMatched?.();
+      unsubMarker?.();
       unsubUnmatched?.();
     };
-  }, [onMatched, onUnmatched]);
+  }, [onMatched, onUnmatched, onMarker]);
 }
 function useUploadStatus(projectId) {
   const [statusMap, setStatusMap] = reactExports.useState(/* @__PURE__ */ new Map());
@@ -16931,24 +16957,13 @@ function ReassignDialog({
     ] })
   ] });
 }
-function Settings() {
+function Settings({ member, onSignedOut }) {
   const [photosDir, setPhotosDir] = reactExports.useState("");
-  const [apiUrl, setApiUrl] = reactExports.useState("");
-  const [connectionToken, setConnectionToken] = reactExports.useState("");
-  const [saving, setSaving] = reactExports.useState(false);
-  const [savedOk, setSavedOk] = reactExports.useState(false);
-  const [connStatus, setConnStatus] = reactExports.useState("idle");
-  const [connError, setConnError] = reactExports.useState(null);
   const [updateState, setUpdateState] = reactExports.useState({ status: "unsupported" });
   const { count: globalErrorCount } = useGlobalErrorCount();
   reactExports.useEffect(() => {
     window.api.invoke("app:getPhotosDir").then((dir) => {
       setPhotosDir(dir);
-    });
-    window.api.invoke("upload:getConfig").then((cfg) => {
-      const { apiUrl: url, connectionToken: token } = cfg;
-      setApiUrl(url ?? "");
-      setConnectionToken(token ?? "");
     });
     window.api.invoke("update:getState").then(setUpdateState);
     return window.api.on("update:status", setUpdateState);
@@ -16964,34 +16979,9 @@ function Settings() {
     const saved = await window.api.invoke("app:setPhotosDir", { dir: selected });
     setPhotosDir(saved);
   }
-  async function handleSaveConfig() {
-    setSaving(true);
-    setSavedOk(false);
-    try {
-      await window.api.invoke("upload:setConfig", { apiUrl, connectionToken });
-      setSavedOk(true);
-      setTimeout(() => setSavedOk(false), 3e3);
-    } finally {
-      setSaving(false);
-    }
-  }
-  async function handleTestConnection() {
-    await window.api.invoke("upload:setConfig", { apiUrl, connectionToken });
-    setConnStatus("testing");
-    setConnError(null);
-    try {
-      const result = await window.api.invoke("upload:testConnection");
-      if (result.ok) {
-        setConnStatus("ok");
-        setTimeout(() => setConnStatus("idle"), 4e3);
-      } else {
-        setConnStatus("error");
-        setConnError(result.error ?? "Connection failed");
-      }
-    } catch (e) {
-      setConnStatus("error");
-      setConnError(String(e));
-    }
+  async function handleSignOut() {
+    await window.api.invoke("auth:signOut");
+    onSignedOut();
   }
   async function handleCheckForUpdates() {
     setUpdateState({ status: "checking" });
@@ -17020,7 +17010,6 @@ function Settings() {
         return "Updates are checked from an installed release.";
     }
   }
-  const hasConfig = apiUrl.trim() !== "" && connectionToken.trim() !== "";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-5", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-xl font-bold text-slate-900", children: "Settings" }),
@@ -17082,74 +17071,25 @@ function Settings() {
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-5 text-teal-600" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Cloud upload" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleUser, { className: "size-5 text-teal-600" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Studio account" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-4", children: "After each photo is matched, it is automatically uploaded to your MC School Studio web app so clients can view their photos online. Your connection is limited to the projects assigned to this desktop." }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-medium text-slate-700 mb-1", children: "Web app URL" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "input",
-              {
-                type: "url",
-                value: apiUrl,
-                onChange: (e) => setApiUrl(e.target.value),
-                placeholder: "https://your-app.replit.app",
-                className: "w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white"
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-1", children: "The base URL of your web app (no trailing slash)." })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-medium text-slate-700 mb-1", children: "Desktop connection token" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "input",
-              {
-                type: "password",
-                value: connectionToken,
-                onChange: (e) => setConnectionToken(e.target.value),
-                placeholder: "Paste the token created in the web app",
-                className: "w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white font-mono"
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-1", children: "An owner or admin creates a token from the web app’s Team page. Each token is linked to a team member and device, and the owner can revoke it at any time." })
-          ] }),
-          connStatus === "ok" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-4 shrink-0" }),
-            "Connected successfully"
-          ] }),
-          connStatus === "error" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-4 shrink-0" }),
-            connError ?? "Connection failed"
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              "button",
-              {
-                onClick: handleTestConnection,
-                disabled: !hasConfig || connStatus === "testing",
-                className: "flex items-center gap-1.5 text-sm px-3 py-1.5 border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-40",
-                children: [
-                  connStatus === "testing" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-3.5" }),
-                  "Test connection"
-                ]
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              "button",
-              {
-                onClick: handleSaveConfig,
-                disabled: saving,
-                className: "flex items-center gap-1.5 text-sm px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg disabled:opacity-40",
-                children: [
-                  savedOk ? /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3.5" }) : null,
-                  saving ? "Saving…" : savedOk ? "Saved!" : "Save settings"
-                ]
-              }
-            )
-          ] })
-        ] })
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-slate-500 mb-4", children: [
+          "Signed in as ",
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-slate-700", children: member?.email ?? "studio member" }),
+          ". Projects and uploads are limited by your studio role."
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            onClick: handleSignOut,
+            className: "inline-flex items-center gap-2 text-sm px-3 py-1.5 border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(LogOut, { className: "size-3.5" }),
+              "Sign out of desktop"
+            ]
+          }
+        )
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-teal-50 border border-teal-200 rounded-xl p-5", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
@@ -17162,18 +17102,58 @@ function Settings() {
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Open the project and set the watch folder (SmartShooter output folder)" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: 'Start the watcher — the green "Live" indicator appears' }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Select a student to display their QR code on screen" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the student — SmartShooter saves the photo to the watch folder" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "The app detects the new photo, reads the QR code, and assigns it automatically" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "If cloud upload is configured, the photo is uploaded to the web app instantly" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the QR code first — this marks the start of that student’s capture sequence" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the student; every following portrait is assigned to that student until the next QR marker" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "QR marker images stay in the spool folder but are not added to student galleries" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "When signed in, matched portraits are uploaded to the web app automatically" })
         ] })
       ] })
     ] }) })
   ] });
 }
+function SignInScreen({ onSignIn, error, busy }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-slate-50 flex items-center justify-center px-6", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-sm p-8 text-center", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mx-auto mb-5 w-14 h-14 rounded-2xl bg-teal-600 flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-2xl", children: "📷" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-slate-900", children: "Sign in to MC School Studio" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 text-sm leading-6 text-slate-500", children: "Sign in securely in your browser. Your studio projects and permissions will be loaded automatically." }),
+    error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-left text-sm text-red-700", children: error }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        className: "mt-6 w-full rounded-lg bg-teal-600 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50",
+        onClick: onSignIn,
+        disabled: busy,
+        children: busy ? "Waiting for browser sign-in…" : "Sign in with your studio account"
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-5 text-xs text-slate-400", children: "A browser window will open. No Mac or connection token setup is required." })
+  ] }) });
+}
 function App() {
   const [currentPage, setCurrentPage] = reactExports.useState("projects");
   const [activeProjectId, setActiveProjectId] = reactExports.useState(null);
   const [activeProjectName, setActiveProjectName] = reactExports.useState("");
+  const [auth, setAuth] = reactExports.useState({ status: "loading" });
+  const [authBusy, setAuthBusy] = reactExports.useState(false);
+  const loadAuth = reactExports.useCallback(async () => {
+    const result = await window.api.invoke("auth:getSession");
+    setAuth(result.signedIn ? { status: "signed-in", member: result.member } : { status: "signed-out", error: result.error });
+  }, []);
+  reactExports.useEffect(() => {
+    loadAuth().catch(() => setAuth({ status: "signed-out", error: "Could not check your desktop session." }));
+  }, [loadAuth]);
+  const signIn = reactExports.useCallback(async () => {
+    setAuthBusy(true);
+    setAuth({ status: "signed-out" });
+    try {
+      const result = await window.api.invoke("auth:signIn");
+      setAuth(result.signedIn ? { status: "signed-in", member: result.member } : { status: "signed-out", error: result.error });
+    } catch {
+      setAuth({ status: "signed-out", error: "Sign-in could not be completed. Please try again." });
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
   const handleMatched = reactExports.useCallback((data) => {
     addToast({
       type: "success",
@@ -17188,7 +17168,20 @@ function App() {
       description: data.reason
     });
   }, []);
-  usePhotoEvents(handleMatched, handleUnmatched);
+  const handleMarker = reactExports.useCallback((data) => {
+    addToast({
+      type: "info",
+      title: `Now photographing: ${data.student.firstName} ${data.student.lastName}`,
+      description: "The next portraits will be assigned to this student until the next QR marker."
+    });
+  }, []);
+  usePhotoEvents(handleMatched, handleUnmatched, handleMarker);
+  if (auth.status === "loading") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500", children: "Checking your session…" });
+  }
+  if (auth.status !== "signed-in") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(SignInScreen, { onSignIn: signIn, error: auth.error, busy: authBusy });
+  }
   const openProject = (id, name) => {
     setActiveProjectId(id);
     setActiveProjectName(name);
@@ -17212,7 +17205,7 @@ function App() {
             onBack: () => setCurrentPage("projects")
           }
         ),
-        currentPage === "settings" && /* @__PURE__ */ jsxRuntimeExports.jsx(Settings, {}),
+        currentPage === "settings" && /* @__PURE__ */ jsxRuntimeExports.jsx(Settings, { member: auth.member, onSignedOut: () => setAuth({ status: "signed-out", error: "You have signed out of this desktop." }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(Toaster, {})
       ]
     }

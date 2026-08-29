@@ -13,7 +13,10 @@ const require$$1$1 = require("zlib");
 const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
 const chokidar = require("chokidar");
+const promises = require("fs/promises");
 const node_path = require("node:path");
+const node_fs = require("node:fs");
+const node_crypto = require("node:crypto");
 const electronUpdater = require("electron-updater");
 const projectsTable = sqliteCore.sqliteTable("projects", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
@@ -174,7 +177,7 @@ function setPhotosDir(dir) {
 function now$2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
-function safeFolderName$1(value) {
+function safeFolderName$2(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
 function enrichProject(p, classCount, studentCount, photoCount) {
@@ -200,16 +203,16 @@ function registerProjectHandlers() {
   function prepareProjectFolders(projectId) {
     const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
     if (!project) return;
-    const projectDir = path.join(getPhotosDir(), safeFolderName$1(project.schoolName));
+    const projectDir = path.join(getPhotosDir(), safeFolderName$2(project.schoolName));
     require$$0.mkdirSync(projectDir, { recursive: true });
     const classes = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
     for (const cls of classes) {
-      const classDir = path.join(projectDir, safeFolderName$1(cls.className));
+      const classDir = path.join(projectDir, safeFolderName$2(cls.className));
       require$$0.mkdirSync(classDir, { recursive: true });
       const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.classId, cls.id)).all();
       for (const student of students) {
         require$$0.mkdirSync(
-          path.join(classDir, safeFolderName$1(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+          path.join(classDir, safeFolderName$2(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
           { recursive: true }
         );
       }
@@ -40725,10 +40728,28 @@ function setSetting(key, value) {
     db.insert(settingsTable).values({ key, value }).run();
   }
 }
+function deleteSetting(key) {
+  getDb().delete(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).run();
+}
+const DEFAULT_API_URL = "https://volumecapture.net";
+function saveConnectionToken(token) {
+  const value = electron.safeStorage.isEncryptionAvailable() ? `safe:${electron.safeStorage.encryptString(token).toString("base64")}` : token;
+  setSetting("desktop_connection_token", value);
+}
+function readConnectionToken() {
+  const stored = getSetting("desktop_connection_token");
+  if (!stored) return null;
+  if (!stored.startsWith("safe:")) return stored;
+  try {
+    return electron.safeStorage.decryptString(Buffer.from(stored.slice(5), "base64"));
+  } catch {
+    return null;
+  }
+}
 function getUploadConfig() {
   return {
-    apiUrl: getSetting("upload_api_url"),
-    connectionToken: getSetting("desktop_connection_token")
+    apiUrl: getSetting("upload_api_url") ?? DEFAULT_API_URL,
+    connectionToken: readConnectionToken()
   };
 }
 function notifyUploadStatus(photoId, studentId, status) {
@@ -40787,21 +40808,10 @@ async function uploadPhoto(projectId, studentId, photoId, filePath, fileName, ca
   }
 }
 function registerUploadHandlers() {
-  electron.ipcMain.handle("upload:getConfig", () => {
-    return getUploadConfig();
-  });
-  electron.ipcMain.handle(
-    "upload:setConfig",
-    (_e, { apiUrl, connectionToken }) => {
-      setSetting("upload_api_url", apiUrl.trim());
-      setSetting("desktop_connection_token", connectionToken.trim());
-      return { ok: true };
-    }
-  );
   electron.ipcMain.handle("upload:testConnection", async () => {
     const { apiUrl, connectionToken } = getUploadConfig();
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: "API URL and desktop connection token are required" };
+      return { ok: false, error: "Sign in to MC School Studio before testing the connection" };
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/me`;
@@ -40869,16 +40879,152 @@ function extractStudentReference(fileName, studentIds) {
   });
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
-const watchers = /* @__PURE__ */ new Map();
+function createSequenceState() {
+  return { activeStudentId: null };
+}
+function sortCaptureFiles(files) {
+  return [...files].sort((a, b) => {
+    const timestampDifference = a.capturedAtMs - b.capturedAtMs;
+    if (timestampDifference !== 0) return timestampDifference;
+    const fileNameDifference = a.fileName.localeCompare(b.fileName, void 0, {
+      numeric: true,
+      sensitivity: "base"
+    });
+    if (fileNameDifference !== 0) return fileNameDifference;
+    return a.filePath.localeCompare(b.filePath, void 0, { sensitivity: "base" });
+  });
+}
+function advanceSequence(state, capture) {
+  if (capture.kind === "marker") {
+    state.activeStudentId = capture.studentId;
+    if (capture.studentId === null) {
+      return {
+        kind: "review",
+        reason: `QR marker "${capture.reference}" does not match a student in this project`
+      };
+    }
+    return { kind: "marker", studentId: capture.studentId };
+  }
+  if (state.activeStudentId === null) {
+    return {
+      kind: "review",
+      reason: "Portrait was captured before a valid student QR marker"
+    };
+  }
+  return { kind: "matched", studentId: state.activeStudentId };
+}
+function createWatchedPhotoStore(db) {
+  return {
+    findProject: (projectId) => db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get(),
+    listStudents: (projectId) => db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all(),
+    findStudent: (projectId, generatedStudentId) => db.select().from(studentsTable).where(
+      drizzleOrm.and(
+        drizzleOrm.eq(studentsTable.projectId, projectId),
+        drizzleOrm.eq(studentsTable.generatedStudentId, generatedStudentId)
+      )
+    ).get(),
+    findClass: (classId) => db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, classId)).get(),
+    insertPhoto: (photo) => db.insert(photosTable).values(photo).returning().get()
+  };
+}
 function now$1() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+function safeFolderName$1(value) {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
+}
+function saveUnmatchedPhoto(store, projectId, filePath, fileName, reason) {
+  store.insertPhoto({
+    projectId,
+    studentId: null,
+    filePath,
+    fileName,
+    capturedAt: now$1(),
+    isMatched: false
+  });
+  return {
+    kind: "unmatched",
+    filePath,
+    fileName,
+    reason
+  };
+}
+async function processWatchedPhoto(projectId, filePath, { store, photosDir, readQr }) {
+  const fileName = node_path.basename(filePath);
+  const project = store.findProject(projectId);
+  if (!project) throw new Error(`Project ${projectId} not found`);
+  const knownStudents = store.listStudents(projectId);
+  const filenameReference = extractStudentReference(
+    fileName,
+    knownStudents.map((student2) => student2.generatedStudentId)
+  );
+  const qrResult = filenameReference ? null : await readQr(filePath);
+  const reference = filenameReference ?? qrResult?.studentId;
+  if (!reference) {
+    return saveUnmatchedPhoto(store, projectId, filePath, fileName, "No QR code detected");
+  }
+  const student = store.findStudent(projectId, reference);
+  if (!student) {
+    return saveUnmatchedPhoto(
+      store,
+      projectId,
+      filePath,
+      fileName,
+      `Student ID "${reference}" not found in this project`
+    );
+  }
+  const classRow = store.findClass(student.classId);
+  const projectFolder = safeFolderName$1(project.schoolName);
+  const classFolder = safeFolderName$1(classRow?.className ?? "Unassigned Class");
+  const studentFolder = safeFolderName$1(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`);
+  const destDir = node_path.join(photosDir, projectFolder, classFolder, studentFolder);
+  node_fs.mkdirSync(destDir, { recursive: true });
+  const destPath = node_path.join(destDir, fileName);
+  node_fs.copyFileSync(filePath, destPath);
+  const photo = store.insertPhoto({
+    projectId,
+    studentId: student.id,
+    filePath: destPath,
+    fileName,
+    capturedAt: now$1(),
+    isMatched: true
+  });
+  return { kind: "matched", photo, student };
+}
+const FLUSH_DELAY_MS = 500;
+const watchers = /* @__PURE__ */ new Map();
 function getMainWindow() {
   const wins = electron.BrowserWindow.getAllWindows();
   return wins.length > 0 ? wins[0] : null;
 }
 function safeFolderName(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
+}
+function looksLikeSmartShooterName(fileName) {
+  const stem = path.basename(fileName, path.extname(fileName));
+  return /^[^_]+_[^_]+_[^_]+_[^_]+(?:[-_].*)?$/.test(stem);
+}
+function captureTimestamp(stat) {
+  if (Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0) return stat.birthtimeMs;
+  if (Number.isFinite(stat.mtimeMs) && stat.mtimeMs > 0) return stat.mtimeMs;
+  return Date.now();
+}
+function toStudentEvent(db, student) {
+  const classRow = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
+  return {
+    id: student.id,
+    projectId: student.projectId,
+    classId: student.classId,
+    className: classRow?.className ?? "",
+    firstName: student.firstName,
+    lastName: student.lastName,
+    generatedStudentId: student.generatedStudentId,
+    simpleQr: student.simpleQr,
+    jsonQr: student.jsonQr,
+    photoCount: 0,
+    createdAt: student.createdAt,
+    updatedAt: student.updatedAt
+  };
 }
 function registerWatcherHandlers() {
   const db = getDb();
@@ -40893,107 +41039,156 @@ function registerWatcherHandlers() {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 }
     });
-    watcher.on("add", async (filePath) => {
-      const lower = filePath.toLowerCase();
-      if (!lower.endsWith(".jpg") && !lower.endsWith(".jpeg")) return;
-      await handleNewPhoto(projectId, filePath);
+    const session = {
+      watcher,
+      pendingFiles: [],
+      flushTimer: null,
+      processing: Promise.resolve(),
+      seenPaths: /* @__PURE__ */ new Set(),
+      sequenceState: createSequenceState()
+    };
+    watchers.set(projectId, session);
+    watcher.on("add", (filePath) => {
+      void enqueuePhoto(projectId, filePath);
     });
-    watchers.set(projectId, watcher);
+    watcher.on("error", (error) => {
+      console.error(`[Watcher] Error for project ${projectId}`, error);
+    });
     console.log(`[Watcher] Started watching ${project.watchFolder} for project ${projectId}`);
   });
   electron.ipcMain.handle("watcher:stop", async (_e, { projectId }) => {
-    const w = watchers.get(projectId);
-    if (w) {
-      await w.close();
-      watchers.delete(projectId);
-      console.log(`[Watcher] Stopped watching for project ${projectId}`);
-    }
+    const session = watchers.get(projectId);
+    if (!session) return;
+    if (session.flushTimer) clearTimeout(session.flushTimer);
+    session.pendingFiles = [];
+    await session.watcher.close();
+    watchers.delete(projectId);
+    console.log(`[Watcher] Stopped watching for project ${projectId}`);
   });
   electron.ipcMain.handle("watcher:isRunning", (_e, { projectId }) => {
     return watchers.has(projectId);
   });
 }
-async function handleNewPhoto(projectId, filePath) {
+async function enqueuePhoto(projectId, filePath) {
+  const session = watchers.get(projectId);
+  if (!session || session.seenPaths.has(filePath)) return;
+  const lower = filePath.toLowerCase();
+  if (!lower.endsWith(".jpg") && !lower.endsWith(".jpeg")) return;
+  try {
+    const fileStat = await promises.stat(filePath);
+    if (!fileStat.isFile()) return;
+    session.seenPaths.add(filePath);
+    session.pendingFiles.push({
+      filePath,
+      fileName: path.basename(filePath),
+      capturedAtMs: captureTimestamp(fileStat)
+    });
+    scheduleFlush(projectId);
+  } catch (error) {
+    console.error(`[Watcher] Could not inspect ${filePath}`, error);
+  }
+}
+function scheduleFlush(projectId) {
+  const session = watchers.get(projectId);
+  if (!session) return;
+  if (session.flushTimer) clearTimeout(session.flushTimer);
+  session.flushTimer = setTimeout(() => {
+    session.flushTimer = null;
+    const batch = sortCaptureFiles(session.pendingFiles.splice(0));
+    if (batch.length === 0) return;
+    session.processing = session.processing.then(async () => {
+      for (const capture of batch) {
+        await handleNewPhoto(projectId, capture, session);
+      }
+    }).catch((error) => {
+      console.error(`[Watcher] Could not process project ${projectId} capture batch`, error);
+    });
+  }, FLUSH_DELAY_MS);
+}
+async function handleNewPhoto(projectId, capture, session) {
   const db = getDb();
   const win = getMainWindow();
-  const fileName = path.basename(filePath);
-  console.log(`[Watcher] New photo: ${fileName}`);
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
-  const filenameReference = extractStudentReference(fileName, knownStudents.map((student2) => student2.generatedStudentId));
-  const qrResult = filenameReference ? null : await readQrFromImage(filePath);
-  const reference = filenameReference ?? qrResult?.studentId;
-  if (!reference) {
-    console.log(`[Watcher] No QR found in ${fileName}`);
-    db.insert(photosTable).values({
-      projectId,
-      studentId: null,
-      filePath,
-      fileName,
-      capturedAt: now$1(),
-      isMatched: false
-    }).run();
-    win?.webContents.send("photo:unmatched", {
-      filePath,
-      fileName,
-      reason: "No QR code detected"
+  const filenameReference = extractStudentReference(
+    capture.fileName,
+    knownStudents.map((student2) => student2.generatedStudentId)
+  );
+  if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
+    const result = await processWatchedPhoto(projectId, capture.filePath, {
+      store: createWatchedPhotoStore(db),
+      photosDir: getPhotosDir(),
+      readQr: async () => null
     });
+    if (result.kind === "unmatched") {
+      win?.webContents.send("photo:unmatched", result);
+      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
+      return;
+    }
+    finishMatchedPhoto(db, win, result.photo, result.student);
+    return;
+  }
+  const qrResult = await readQrFromImage(capture.filePath);
+  if (qrResult) {
+    const student2 = db.select().from(studentsTable).where(
+      drizzleOrm.and(
+        drizzleOrm.eq(studentsTable.projectId, projectId),
+        drizzleOrm.eq(studentsTable.generatedStudentId, qrResult.studentId)
+      )
+    ).get();
+    const decision2 = advanceSequence(session.sequenceState, {
+      kind: "marker",
+      studentId: student2?.id ?? null,
+      reference: qrResult.studentId
+    });
+    if (decision2.kind === "review") {
+      recordUnmatched(db, win, projectId, capture, decision2.reason);
+      return;
+    }
+    win?.webContents.send("photo:marker", {
+      fileName: capture.fileName,
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      student: toStudentEvent(db, student2)
+    });
+    console.log(`[Watcher] QR marker ${capture.fileName} → ${student2.firstName} ${student2.lastName}`);
+    return;
+  }
+  const decision = advanceSequence(session.sequenceState, { kind: "portrait" });
+  if (decision.kind === "review") {
+    recordUnmatched(db, win, projectId, capture, decision.reason);
     return;
   }
   const student = db.select().from(studentsTable).where(
     drizzleOrm.and(
       drizzleOrm.eq(studentsTable.projectId, projectId),
-      drizzleOrm.eq(studentsTable.generatedStudentId, reference)
+      drizzleOrm.eq(studentsTable.id, decision.studentId)
     )
   ).get();
   if (!student) {
-    console.log(`[Watcher] QR student ID ${qrResult.studentId} not found in project ${projectId}`);
-    db.insert(photosTable).values({
-      projectId,
-      studentId: null,
-      filePath,
-      fileName,
-      capturedAt: now$1(),
-      isMatched: false
-    }).run();
-    win?.webContents.send("photo:unmatched", {
-      filePath,
-      fileName,
-      reason: `Student ID "${qrResult.studentId}" not found in this project`
-    });
+    session.sequenceState.activeStudentId = null;
+    recordUnmatched(db, win, projectId, capture, "The active student is no longer in this project roster");
     return;
   }
   const [classRow] = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).all();
+  const [project] = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).all();
   const projectFolder = safeFolderName(project?.schoolName ?? `Project ${projectId}`);
   const classFolder = safeFolderName(classRow?.className ?? "Unassigned Class");
   const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`);
   const destDir = path.join(getPhotosDir(), projectFolder, classFolder, studentFolder);
   require$$0.mkdirSync(destDir, { recursive: true });
-  const destPath = path.join(destDir, fileName);
-  require$$0.copyFileSync(filePath, destPath);
+  const destPath = path.join(destDir, capture.fileName);
+  require$$0.copyFileSync(capture.filePath, destPath);
   const photo = db.insert(photosTable).values({
     projectId,
     studentId: student.id,
     filePath: destPath,
-    fileName,
-    capturedAt: now$1(),
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
     isMatched: true
   }).returning().get();
-  console.log(`[Watcher] Matched ${fileName} → ${student.firstName} ${student.lastName}`);
-  const studentForEvent = {
-    id: student.id,
-    projectId: student.projectId,
-    classId: student.classId,
-    className: "",
-    firstName: student.firstName,
-    lastName: student.lastName,
-    generatedStudentId: student.generatedStudentId,
-    simpleQr: student.simpleQr,
-    jsonQr: student.jsonQr,
-    photoCount: 1,
-    createdAt: student.createdAt,
-    updatedAt: student.updatedAt
-  };
+  finishMatchedPhoto(db, win, photo, student);
+}
+function finishMatchedPhoto(db, win, photo, student) {
+  console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`);
   const photoForEvent = {
     id: photo.id,
     projectId: photo.projectId,
@@ -41007,7 +41202,7 @@ async function handleNewPhoto(projectId, filePath) {
   };
   win?.webContents.send("photo:matched", {
     photo: photoForEvent,
-    student: studentForEvent
+    student: toStudentEvent(db, student)
   });
   const { apiUrl, connectionToken } = getUploadConfig();
   if (apiUrl && connectionToken) {
@@ -41020,6 +41215,21 @@ async function handleNewPhoto(projectId, filePath) {
     uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).catch(() => {
     });
   }
+}
+function recordUnmatched(db, win, projectId, capture, reason) {
+  db.insert(photosTable).values({
+    projectId,
+    studentId: null,
+    filePath: capture.filePath,
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+    isMatched: false
+  }).run();
+  win?.webContents.send("photo:unmatched", {
+    filePath: capture.filePath,
+    fileName: capture.fileName,
+    reason
+  });
 }
 function registerDialogHandlers() {
   electron.ipcMain.handle(
@@ -41049,6 +41259,105 @@ function registerDialogHandlers() {
     return getPhotosDir();
   });
 }
+async function postJson(url, body, timeoutMs) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  const payload = await response.json().catch(() => ({}));
+  return { response, payload };
+}
+async function fetchCurrentSession() {
+  const { apiUrl, connectionToken } = getUploadConfig();
+  if (!connectionToken) return { signedIn: false };
+  try {
+    const response = await fetch(`${apiUrl}/api/desktop/me`, {
+      headers: { Authorization: `Bearer ${connectionToken}` },
+      signal: AbortSignal.timeout(5e3)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.member) return { signedIn: true, member: payload.member };
+    if (response.status === 401) {
+      return { signedIn: false, error: "Your desktop session was signed out or revoked. Sign in again." };
+    }
+    return { signedIn: false, error: payload.error ?? `Could not reach MC School Studio (${response.status})` };
+  } catch {
+    return { signedIn: false, error: "Could not reach MC School Studio. Check your internet connection." };
+  }
+}
+function registerAuthHandlers() {
+  electron.ipcMain.handle("auth:getSession", fetchCurrentSession);
+  electron.ipcMain.handle("auth:refresh", async () => {
+    const { apiUrl, connectionToken } = getUploadConfig();
+    if (!connectionToken) return { signedIn: false, error: "Sign in to MC School Studio first." };
+    try {
+      const response = await fetch(`${apiUrl}/api/desktop/auth/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(5e3)
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.token || !payload.member) {
+        return { signedIn: false, error: payload.error ?? "Your desktop session could not be refreshed." };
+      }
+      saveConnectionToken(payload.token);
+      return { signedIn: true, member: payload.member };
+    } catch {
+      return { signedIn: false, error: "Could not refresh the desktop session." };
+    }
+  });
+  electron.ipcMain.handle("auth:signOut", () => {
+    deleteSetting("desktop_connection_token");
+    return { ok: true };
+  });
+  electron.ipcMain.handle("auth:signIn", async () => {
+    const apiUrl = (getSetting("upload_api_url") ?? DEFAULT_API_URL).replace(/\/+$/, "");
+    const clientSecret = node_crypto.randomBytes(32).toString("base64url");
+    try {
+      const started = await postJson(`${apiUrl}/api/desktop/auth/start`, { clientSecret }, 1e4);
+      if (!started.response.ok || typeof started.payload.code !== "string") {
+        return {
+          signedIn: false,
+          error: typeof started.payload.error === "string" ? started.payload.error : "Could not start browser sign-in. Make sure the desktop release is up to date."
+        };
+      }
+      const code = started.payload.code;
+      const connectUrl = `${apiUrl}/desktop/connect?code=${encodeURIComponent(code)}`;
+      await electron.shell.openExternal(connectUrl);
+      const deadline = Date.now() + 10 * 60 * 1e3;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2e3));
+        const status = await postJson(`${apiUrl}/api/desktop/auth/status`, { code, clientSecret }, 1e4);
+        if (!status.response.ok) {
+          return { signedIn: false, error: "The desktop sign-in request could not be verified. Start again." };
+        }
+        if (status.payload.status === "expired") {
+          return { signedIn: false, error: "The browser sign-in request expired. Click Sign in to try again." };
+        }
+        if (status.payload.status !== "approved") continue;
+        const exchanged = await postJson(`${apiUrl}/api/desktop/auth/exchange`, { code, clientSecret }, 1e4);
+        if (!exchanged.response.ok || typeof exchanged.payload.token !== "string") {
+          return {
+            signedIn: false,
+            error: typeof exchanged.payload.error === "string" ? exchanged.payload.error : "The browser sign-in could not be completed. Start again."
+          };
+        }
+        const member = exchanged.payload.member;
+        setSetting("upload_api_url", apiUrl);
+        saveConnectionToken(exchanged.payload.token);
+        return { signedIn: true, member };
+      }
+      return { signedIn: false, error: "Sign-in timed out. Click Sign in to try again." };
+    } catch {
+      return {
+        signedIn: false,
+        error: "Could not connect to MC School Studio. Check your internet connection and try again."
+      };
+    }
+  });
+}
 function now() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
@@ -41056,7 +41365,7 @@ function registerCloudHandlers() {
   electron.ipcMain.handle("cloud:listProjects", async () => {
     const { apiUrl, connectionToken } = getUploadConfig();
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: "Cloud connection not configured. Set API URL and desktop connection token in Settings." };
+      return { ok: false, error: "Sign in to MC School Studio before syncing projects." };
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`;
@@ -41079,7 +41388,7 @@ function registerCloudHandlers() {
     async (_e, { cloudProjectId }) => {
       const { apiUrl, connectionToken } = getUploadConfig();
       if (!apiUrl || !connectionToken) {
-        return { ok: false, error: "Cloud connection not configured" };
+        return { ok: false, error: "Sign in to MC School Studio before pulling projects." };
       }
       try {
         const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProjectId}/bundle`;
@@ -41354,6 +41663,7 @@ electron.app.whenReady().then(() => {
   registerWatcherHandlers();
   registerDialogHandlers();
   registerUploadHandlers();
+  registerAuthHandlers();
   registerCloudHandlers();
   const mainWindow2 = createWindow();
   registerUpdateHandlers(mainWindow2);

@@ -2,11 +2,12 @@ import { ipcMain, BrowserWindow } from 'electron'
 import chokidar, { FSWatcher } from 'chokidar'
 import { copyFileSync, mkdirSync } from 'fs'
 import { stat as statFile } from 'fs/promises'
-import { join, basename } from 'path'
-import { eq, and } from 'drizzle-orm'
+import { basename, extname, join } from 'path'
+import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
+import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema'
 import { getUploadConfig, uploadPhoto } from './upload'
-import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
+import { extractStudentReference } from '../lib/photoFileNaming'
 import { readQrFromImage } from '../lib/qrReader'
 import {
   advanceSequence,
@@ -16,6 +17,7 @@ import {
   type SequenceState,
 } from '../lib/photoSequence'
 import type { Photo, Student } from '../../shared/types'
+import { createWatchedPhotoStore, processWatchedPhoto } from '../lib/watchedPhotoProcessor'
 
 const FLUSH_DELAY_MS = 500
 
@@ -31,10 +33,6 @@ interface WatchSession {
 // Active watchers: projectId → watcher session
 const watchers = new Map<number, WatchSession>()
 
-function now() {
-  return new Date().toISOString()
-}
-
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
   return wins.length > 0 ? wins[0] : null
@@ -42,6 +40,11 @@ function getMainWindow(): BrowserWindow | null {
 
 function safeFolderName(value: string): string {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
+}
+
+function looksLikeSmartShooterName(fileName: string): boolean {
+  const stem = basename(fileName, extname(fileName))
+  return /^[^_]+_[^_]+_[^_]+_[^_]+(?:[-_].*)?$/.test(stem)
 }
 
 function captureTimestamp(stat: Awaited<ReturnType<typeof statFile>>): number {
@@ -180,6 +183,29 @@ async function handleNewPhoto(
 ): Promise<void> {
   const db = getDb()
   const win = getMainWindow()
+  const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
+  const filenameReference = extractStudentReference(
+    capture.fileName,
+    knownStudents.map((student) => student.generatedStudentId),
+  )
+
+  if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
+    const result = await processWatchedPhoto(projectId, capture.filePath, {
+      store: createWatchedPhotoStore(db),
+      photosDir: getPhotosDir(),
+      readQr: async () => null,
+    })
+
+    if (result.kind === 'unmatched') {
+      win?.webContents.send('photo:unmatched', result)
+      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
+      return
+    }
+
+    finishMatchedPhoto(db, win, result.photo, result.student)
+    return
+  }
+
   const qrResult = await readQrFromImage(capture.filePath)
 
   if (qrResult) {
@@ -261,9 +287,16 @@ async function handleNewPhoto(
     .returning()
     .get()
 
-  console.log(`[Watcher] Matched ${capture.fileName} → ${student.firstName} ${student.lastName}`)
+  finishMatchedPhoto(db, win, photo, student)
+}
 
-  const studentForEvent = toStudentEvent(db, student)
+function finishMatchedPhoto(
+  db: ReturnType<typeof getDb>,
+  win: BrowserWindow | null,
+  photo: typeof photosTable.$inferSelect,
+  student: typeof studentsTable.$inferSelect,
+): void {
+  console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`)
   const photoForEvent: Photo = {
     id: photo.id,
     projectId: photo.projectId,
@@ -278,10 +311,9 @@ async function handleNewPhoto(
 
   win?.webContents.send('photo:matched', {
     photo: photoForEvent,
-    student: studentForEvent,
+    student: toStudentEvent(db, student),
   })
 
-  // Auto-upload only portraits. QR marker images return before reaching this path.
   const { apiUrl, connectionToken } = getUploadConfig()
   if (apiUrl && connectionToken) {
     db.update(photosTable)

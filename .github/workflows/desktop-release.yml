@@ -67,6 +67,9 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      - name: Test electron-updater metadata contract
+        run: pnpm --filter @workspace/mc-school-studio-desktop run test:updater
+
       - name: Decode macOS signing certificate
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -106,6 +109,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Validate generated electron-updater metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          pnpm --filter @workspace/mc-school-studio-desktop run validate:updater \
+            dist/release/latest-mac.yml "$version"
 
       - name: Verify macOS packages are signed and notarized
         env:

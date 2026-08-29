@@ -1,0 +1,11 @@
+version: 1.0.11
+files:
+  - url: mc-school-studio-1.0.11-arm64.zip
+    sha512: D+X+cQ4DMdNxe488eHhSvlhVwvA643soRverNtisgOGN5WO1UZMuec3AZKn2EuU/IMaxF70VUT1KgKJbE208bw==
+    size: 123456
+  - url: mc-school-studio-1.0.11-x64.zip
+    sha512: D+X+cQ4DMdNxe488eHhSvlhVwvA643soRverNtisgOGN5WO1UZMuec3AZKn2EuU/IMaxF70VUT1KgKJbE208bw==
+    size: 123456
+path: mc-school-studio-1.0.11-arm64.zip
+sha512: D+X+cQ4DMdNxe488eHhSvlhVwvA643soRverNtisgOGN5WO1UZMuec3AZKn2EuU/IMaxF70VUT1KgKJbE208bw==
+releaseDate: '2026-08-29T00:00:00.000Z'

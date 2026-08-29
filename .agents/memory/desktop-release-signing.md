@@ -20,3 +20,15 @@ inherited macOS entitlements whenever hardened runtime signing is enabled.
 Verify both installer and updater payload signatures before staging, reject
 missing or unexpected assets, and keep the GitHub Release in draft state until
 the complete uploaded asset set has been checked.
+
+For macOS update metadata, treat ZIPs—not DMGs—as the electron-builder update
+payloads. Validate each metadata SHA-512 against the corresponding ZIP and
+require each ZIP's sibling blockmap before staging.
+
+**Why:** The pinned builder emits architecture-specific ZIP entries in
+`latest-mac.yml`; DMGs are separate release artifacts and do not belong in that
+metadata file.
+
+**How to apply:** Keep DMG checks in the complete release-asset verification,
+while updater metadata validation checks ZIP names, versions, preferred path,
+checksums, and adjacent ZIP blockmaps against generated output.

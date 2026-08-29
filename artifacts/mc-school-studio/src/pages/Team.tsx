@@ -3,7 +3,7 @@ import { Users, UserPlus } from "lucide-react";
 
 type Member = { id: number; email: string; role: string; status: string; userId: string };
 type Invite = { id: number; email: string; role: string; status: string };
-type DesktopConnection = { id: number; memberId: number; memberEmail: string; deviceName: string; tokenPrefix: string; status: "active" | "revoked"; createdAt: string; lastUsedAt: string | null; revokedAt: string | null };
+type DesktopConnection = { id: number; memberId: number; memberEmail: string; deviceName: string; tokenPrefix: string; status: "active" | "revoked" | "retired"; createdAt: string; lastUsedAt: string | null; revokedAt: string | null; retiredAt: string | null; retirementAcknowledgedAt: string | null };
 type TeamData = { currentMember: Member; members: Member[]; invites: Invite[]; projects: { id: number; schoolName: string }[]; assignments: { projectId: number; memberId: number }[]; desktopConnections: DesktopConnection[] };
 
 export default function Team() {
@@ -54,6 +54,13 @@ export default function Team() {
     if (!res.ok) { setDesktopError("Could not revoke the desktop connection."); return; }
     await load();
   }
+  async function retireDesktopConnection(connection: DesktopConnection) {
+    if (!window.confirm(`Retire ${connection.deviceName}? Cloud access stops immediately. If the computer reconnects, the desktop app will erase its local project and photo data. A computer that never reconnects cannot be erased remotely.`)) return;
+    setDesktopError(null);
+    const res = await fetch(`/api/team/desktop-connections/${connection.id}/retire`, { method: "POST" });
+    if (!res.ok) { setDesktopError("Could not retire the desktop connection."); return; }
+    await load();
+  }
   if (!data) return <div className="p-8 text-slate-500">Loading your studio team…</div>;
   return <div className="flex-1 overflow-auto bg-slate-50 p-8">
     <div className="mx-auto max-w-5xl space-y-6">
@@ -75,6 +82,7 @@ export default function Team() {
       </div>}
        {canManage && <div data-testid="team-desktop-connections" className="rounded-xl border bg-white p-5 shadow-sm">
          <h2 className="font-semibold text-slate-900">Desktop connections</h2><p className="mt-1 text-sm text-slate-500">Create one token per computer. Owners and admins can access every studio project; assistants and photographers see only assigned projects.</p>
+         <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">Retirement stops cloud access immediately and asks the desktop app to erase local project and photo data when it next reconnects. If a lost computer never reconnects, its local files cannot be erased remotely.</p>
          <form onSubmit={(event) => void createDesktopConnection(event)} className="mt-4 grid gap-3 md:grid-cols-[1fr_1.4fr_auto]">
            <select required value={desktopMemberId} onChange={(e) => setDesktopMemberId(e.target.value)} className="h-10 rounded-md border border-slate-300 px-3 text-sm" aria-label="Desktop connection member"><option value="">Choose a member</option>{data.members.filter((member) => member.status === "active" && member.role !== "viewer").map((member) => <option key={member.id} value={member.id}>{member.email} · {member.role}{member.id === data.currentMember.id ? " · You" : ""}</option>)}</select>
            <input required value={deviceName} onChange={(e) => setDeviceName(e.target.value)} maxLength={100} placeholder="e.g. Studio MacBook 1" className="h-10 rounded-md border border-slate-300 px-3 text-sm" />
@@ -82,7 +90,7 @@ export default function Team() {
          </form>
          {desktopError && <p role="alert" className="mt-3 text-sm text-red-600">{desktopError}</p>}
          {newDesktopToken && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-medium text-amber-900">Copy this token now — it will not be shown again.</p><textarea readOnly value={newDesktopToken} onFocus={(event) => event.currentTarget.select()} aria-label="New desktop connection token" className="mt-2 h-16 w-full resize-none rounded border border-amber-300 bg-white p-2 font-mono text-xs text-slate-800" /></div>}
-         {data.desktopConnections.length > 0 && <div className="mt-5 divide-y rounded-lg border">{data.desktopConnections.map((connection) => <div key={connection.id} className="flex items-center justify-between gap-4 px-4 py-3"><div className="min-w-0"><p className="font-medium text-slate-900">{connection.deviceName}</p><p className="mt-0.5 text-xs text-slate-500">{connection.memberEmail} · {connection.tokenPrefix}… · {connection.status === "active" ? (connection.lastUsedAt ? `Last used ${new Date(connection.lastUsedAt).toLocaleString()}` : "Not used yet") : "Revoked"}</p></div>{data.currentMember.role === "owner" && connection.status === "active" && <button type="button" onClick={() => void revokeDesktopConnection(connection)} className="shrink-0 rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">Revoke</button>}</div>)}</div>}
+          {data.desktopConnections.length > 0 && <div className="mt-5 divide-y rounded-lg border">{data.desktopConnections.map((connection) => <div key={connection.id} className="flex items-center justify-between gap-4 px-4 py-3"><div className="min-w-0"><p className="font-medium text-slate-900">{connection.deviceName}</p><p className="mt-0.5 text-xs text-slate-500">{connection.memberEmail} · {connection.tokenPrefix}… · {connection.status === "active" ? (connection.lastUsedAt ? `Last used ${new Date(connection.lastUsedAt).toLocaleString()}` : "Not used yet") : connection.status === "revoked" ? "Revoked" : connection.retirementAcknowledgedAt ? `Retirement acknowledged ${new Date(connection.retirementAcknowledgedAt).toLocaleString()}` : "Retirement pending — waiting for this computer to reconnect"}</p></div>{data.currentMember.role === "owner" && connection.status === "active" && <div className="flex shrink-0 gap-2"><button type="button" onClick={() => void revokeDesktopConnection(connection)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Revoke</button><button type="button" onClick={() => void retireDesktopConnection(connection)} className="rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">Retire &amp; erase</button></div>}</div>)}</div>}
        </div>}
        {data.invites.filter((invite) => invite.status === "pending").length > 0 && <div data-testid="team-pending-invitations" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold text-amber-900">Pending invitations</h2>{data.invites.filter((invite) => invite.status === "pending").map((invite) => <p key={invite.id} className="mt-2 text-sm text-amber-800">{invite.email} · {invite.role}</p>)}</div>}
     </div>

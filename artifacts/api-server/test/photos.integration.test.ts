@@ -19,7 +19,7 @@ import {
   studioMembersTable,
   studiosTable,
 } from "@workspace/db";
-import photosRouter from "../src/routes/photos";
+import photosRouter, { recoverPhotoDeleteBackups } from "../src/routes/photos";
 import desktopRouter from "../src/routes/desktop";
 import { createDesktopToken } from "../src/lib/desktopAuth";
 
@@ -529,6 +529,71 @@ test("finishes deletion when only backup cleanup fails", async () => {
     }
     await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
     await rm(filePath, { force: true });
+  }
+});
+
+test("restores a photo after a process stops with only its deletion backup", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("interrupted-delete.jpg");
+  const backupDirectory = path.join(path.dirname(filePath), ".photo-delete-interrupted");
+  const backupPath = path.join(backupDirectory, path.basename(filePath));
+  await rm(filePath, { force: true });
+  await fs.promises.mkdir(backupDirectory, { recursive: true });
+  await fs.promises.writeFile(backupPath, jpegBytes);
+
+  try {
+    await recoverPhotoDeleteBackups();
+    assert.deepEqual(await readFile(filePath), jpegBytes, "recovery must preserve uploaded bytes");
+    assert.equal(fs.existsSync(backupDirectory), false, "a recovered backup should be removed");
+    const [storedPhoto] = await db
+      .select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, uploaded.id));
+    assert(storedPhoto, "recovery must retain the database row");
+  } finally {
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+    await rm(backupDirectory, { recursive: true, force: true });
+  }
+});
+
+test("does not overwrite a valid original when an interrupted backup is stale", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("valid-original-delete.jpg");
+  const backupDirectory = path.join(path.dirname(filePath), ".photo-delete-stale");
+  const backupPath = path.join(backupDirectory, path.basename(filePath));
+  const validOriginalBytes = Buffer.from("valid-original");
+  const staleBackupBytes = Buffer.from("stale-backup");
+  await fs.promises.writeFile(filePath, validOriginalBytes);
+  await fs.promises.mkdir(backupDirectory, { recursive: true });
+  await fs.promises.writeFile(backupPath, staleBackupBytes);
+
+  try {
+    await recoverPhotoDeleteBackups();
+    assert.deepEqual(await readFile(filePath), validOriginalBytes);
+    assert.notDeepEqual(await readFile(filePath), staleBackupBytes);
+    assert.equal(fs.existsSync(backupDirectory), false, "a stale backup should be cleaned");
+  } finally {
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+    await rm(backupDirectory, { recursive: true, force: true });
+  }
+});
+
+test("cleans an interrupted deletion after its database row is gone", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("committed-delete.jpg");
+  const backupDirectory = path.join(path.dirname(filePath), ".photo-delete-committed");
+  const backupPath = path.join(backupDirectory, path.basename(filePath));
+  await fs.promises.mkdir(backupDirectory, { recursive: true });
+  await fs.promises.copyFile(filePath, backupPath);
+  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+
+  try {
+    await recoverPhotoDeleteBackups();
+    assert.equal(fs.existsSync(filePath), false, "a deleted row permits orphan cleanup");
+    assert.equal(fs.existsSync(backupDirectory), false, "the orphaned backup should be cleaned");
+  } finally {
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+    await rm(backupDirectory, { recursive: true, force: true });
   }
 });
 

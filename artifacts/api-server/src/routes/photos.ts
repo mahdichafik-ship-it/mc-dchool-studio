@@ -116,6 +116,11 @@ type PhotoDeleteBackup = {
   filePath: string;
 };
 
+type DiscoveredPhotoDeleteBackup = PhotoDeleteBackup & {
+  originalPath: string;
+  fileUrl: string;
+};
+
 function createPhotoDeleteBackup(filePath: string): PhotoDeleteBackup {
   if (!fs.existsSync(filePath)) {
     throw new Error("Photo file not found on server; deletion aborted");
@@ -142,6 +147,142 @@ function createPhotoDeleteBackup(filePath: string): PhotoDeleteBackup {
 
 function removePhotoDeleteBackup(backup: PhotoDeleteBackup): void {
   fs.rmSync(backup.directory, { recursive: true, force: true });
+}
+
+function photoFileUrl(filePath: string): string {
+  const relativePath = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
+  return `/${relativePath}`;
+}
+
+function discoverPhotoDeleteBackups(): DiscoveredPhotoDeleteBackup[] {
+  const discovered: DiscoveredPhotoDeleteBackup[] = [];
+
+  function visit(directory: string): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (error) {
+      console.error("Could not inspect a photo deletion directory", { error, directory });
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory() && entry.name.startsWith(".photo-delete-")) {
+        let backupEntries: fs.Dirent[];
+        try {
+          backupEntries = fs.readdirSync(entryPath, { withFileTypes: true });
+        } catch (error) {
+          console.error("Could not inspect a photo deletion backup", {
+            error,
+            backupDirectory: entryPath,
+          });
+          continue;
+        }
+
+        const backupFiles = backupEntries.filter((backupEntry) => backupEntry.isFile());
+        if (backupFiles.length !== 1 || backupEntries.length !== 1) {
+          // A process may have stopped before the copy completed, or a backup
+          // may have been tampered with. There is no safe original path to
+          // reconcile in that case, so leave it for manual inspection.
+          if (backupEntries.length > 0) {
+            console.error("Leaving an ambiguous photo deletion backup in place", {
+              backupDirectory: entryPath,
+            });
+          } else {
+            // Empty temporary directories contain no uploaded bytes and can
+            // be removed without making a recovery decision.
+            try {
+              removePhotoDeleteBackup({ directory: entryPath, filePath: "" });
+            } catch (error) {
+              console.error("Could not clean up an empty photo deletion backup", {
+                error,
+                backupDirectory: entryPath,
+              });
+            }
+          }
+          continue;
+        }
+
+        const backupFile = backupFiles[0];
+        const originalPath = path.join(directory, backupFile.name);
+        discovered.push({
+          directory: entryPath,
+          filePath: path.join(entryPath, backupFile.name),
+          originalPath,
+          fileUrl: photoFileUrl(originalPath),
+        });
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      }
+    }
+  }
+
+  if (fs.existsSync(UPLOADS_ROOT)) {
+    visit(UPLOADS_ROOT);
+  }
+  return discovered;
+}
+
+/**
+ * Reconcile deletion backups left behind by a process interruption.
+ *
+ * The database row is authoritative:
+ * - A surviving row plus a missing original gets its original bytes restored.
+ * - A surviving original is never overwritten, even if a backup exists.
+ * - A deleted row permits cleanup of both the backup and its now-unreferenced
+ *   original file.
+ */
+export async function recoverPhotoDeleteBackups(): Promise<void> {
+  const backups = discoverPhotoDeleteBackups();
+
+  for (const backup of backups) {
+    try {
+      const [photo] = await db
+        .select()
+        .from(studentPhotosTable)
+        .where(eq(studentPhotosTable.fileUrl, backup.fileUrl))
+        .limit(1);
+      const originalExists = fs.existsSync(backup.originalPath);
+
+      if (photo) {
+        if (!originalExists) {
+          fs.copyFileSync(backup.filePath, backup.originalPath, fs.constants.COPYFILE_EXCL);
+          if (!fs.existsSync(backup.originalPath)) {
+            throw new Error("Restored photo file was not found after copying");
+          }
+        }
+        removePhotoDeleteBackup(backup);
+        continue;
+      }
+
+      // The row deletion is durable. Only remove an original after confirming
+      // there is no database row that points at this path, so a valid photo
+      // can never be deleted as part of backup cleanup.
+      if (originalExists) {
+        const [referencingPhoto] = await db
+          .select({ id: studentPhotosTable.id })
+          .from(studentPhotosTable)
+          .where(eq(studentPhotosTable.fileUrl, backup.fileUrl))
+          .limit(1);
+        if (!referencingPhoto) {
+          fs.unlinkSync(backup.originalPath);
+        }
+      }
+      removePhotoDeleteBackup(backup);
+    } catch (error) {
+      // Keep the backup when any part of reconciliation is uncertain. It is
+      // the durable copy that makes a later retry safe.
+      console.error("Could not reconcile a photo deletion backup", {
+        error,
+        backupPath: backup.filePath,
+        originalPath: backup.originalPath,
+      });
+    }
+  }
 }
 
 async function restoreDeletedPhoto(

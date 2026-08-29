@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { recoverPhotoDeleteBackups } from "./routes/photos";
 
 const rawPort = process.env["PORT"];
 
@@ -13,6 +14,12 @@ const port = Number(rawPort);
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
+}
+
+try {
+  await recoverPhotoDeleteBackups();
+} catch (error) {
+  logger.error({ err: error }, "Could not recover interrupted photo deletions");
 }
 
 app.listen(port, (err) => {

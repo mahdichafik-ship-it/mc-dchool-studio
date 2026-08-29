@@ -5,13 +5,10 @@ import { eq, count } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
 import type { Project, Class, Student, ImportResult } from '../../shared/types'
+import { safeProjectFolderName } from '../lib/retirement'
 
 function now() {
   return new Date().toISOString()
-}
-
-function safeFolderName(value: string): string {
-  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
 }
 
 function enrichProject(
@@ -45,18 +42,18 @@ export function registerProjectHandlers() {
     const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
     if (!project) return
 
-    const projectDir = join(getPhotosDir(), safeFolderName(project.schoolName))
+    const projectDir = join(getPhotosDir(), safeProjectFolderName(project.schoolName))
     mkdirSync(projectDir, { recursive: true })
 
     const classes = db.select().from(classesTable).where(eq(classesTable.projectId, projectId)).all()
     for (const cls of classes) {
-      const classDir = join(projectDir, safeFolderName(cls.className))
+      const classDir = join(projectDir, safeProjectFolderName(cls.className))
       mkdirSync(classDir, { recursive: true })
 
       const students = db.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
       for (const student of students) {
         mkdirSync(
-          join(classDir, safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+          join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
           { recursive: true },
         )
       }

@@ -15803,7 +15803,7 @@ const Button = reactExports.forwardRef(
   )
 );
 Button.displayName = "Button";
-function AppLayout({ children, currentPage, onNavigate, projectName }) {
+function AppLayout({ children, currentPage, onNavigate, projectName, offline = false }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-screen bg-slate-50 overflow-hidden", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "w-60 flex-shrink-0 bg-[#0f172a] flex flex-col", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "h-16 flex items-center px-5 border-b border-white/10", style: { paddingTop: "env(titlebar-area-height, 0)" }, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
@@ -15845,10 +15845,16 @@ function AppLayout({ children, currentPage, onNavigate, projectName }) {
             ]
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-3 px-2", children: "MC School Studio v1.0" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-3 px-2", children: "MC School Studio v1.0.11" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("main", { className: "flex-1 overflow-hidden flex flex-col", children })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "flex-1 overflow-hidden flex flex-col", children: [
+      offline && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-800", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "h-2 w-2 shrink-0 rounded-full bg-amber-500" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Offline mode: local projects and photo capture are available. Uploads will resume automatically when internet returns." })
+      ] }),
+      children
+    ] })
   ] });
 }
 function Badge({ className, variant = "default", ...props }) {
@@ -16267,7 +16273,7 @@ function ProjectList({ onOpenProject }) {
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-700", children: "Could not reach cloud" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mt-1", children: syncError }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-2", children: "Make sure the API URL and desktop connection token are configured in Settings." })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-2", children: "Check your internet connection. If the problem continues, sign out and sign in again." })
           ] })
         ] }),
         !syncLoading && !syncError && cloudProjects.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center py-12 text-slate-500 text-sm", children: "No projects found on the cloud." }),
@@ -17137,12 +17143,37 @@ function App() {
   const [authBusy, setAuthBusy] = reactExports.useState(false);
   const loadAuth = reactExports.useCallback(async () => {
     const result = await window.api.invoke("auth:getSession");
-    setAuth(result.signedIn ? { status: "signed-in", member: result.member } : { status: "signed-out", error: result.error });
+    setAuth(result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error });
   }, []);
   reactExports.useEffect(() => {
     loadAuth().catch(() => setAuth({ status: "signed-out", error: "Could not check your desktop session." }));
   }, [loadAuth]);
+  reactExports.useEffect(() => {
+    if (auth.status !== "signed-in") return;
+    let checking = false;
+    const refreshSession = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const result = await window.api.invoke("auth:getSession");
+        setAuth(result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error });
+      } finally {
+        checking = false;
+      }
+    };
+    const interval = window.setInterval(() => {
+      void refreshSession();
+    }, 15e3);
+    window.addEventListener("online", refreshSession);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("online", refreshSession);
+    };
+  }, [auth.status]);
   reactExports.useEffect(() => window.api.on("auth:retired", (session) => {
+    setAuth({ status: "signed-out", error: session.error });
+  }), []);
+  reactExports.useEffect(() => window.api.on("auth:sessionInvalidated", (session) => {
     setAuth({ status: "signed-out", error: session.error });
   }), []);
   const signIn = reactExports.useCallback(async () => {
@@ -17199,6 +17230,7 @@ function App() {
       currentPage,
       onNavigate: navigate,
       projectName: activeProjectName,
+      offline: auth.offline,
       children: [
         currentPage === "projects" && /* @__PURE__ */ jsxRuntimeExports.jsx(ProjectList, { onOpenProject: openProject }),
         currentPage === "project-view" && activeProjectId && /* @__PURE__ */ jsxRuntimeExports.jsx(

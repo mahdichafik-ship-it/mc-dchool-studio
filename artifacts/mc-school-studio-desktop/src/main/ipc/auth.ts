@@ -7,8 +7,8 @@ import { retireLocalProjects } from '../lib/retirement'
 import { enableWatchersAfterSignIn, stopAllWatchersForRetirement } from './watcher'
 import { disableCloudImportsForRetirement, enableCloudImportsAfterSignIn } from './cloud'
 import {
-  DEFAULT_API_URL,
   deleteSetting,
+  getDesktopApiUrl,
   getSetting,
   readConnectionToken,
   saveConnectionToken,
@@ -71,7 +71,7 @@ async function postJson(url: string, body: Record<string, unknown>, timeoutMs: n
 }
 
 async function performCurrentSessionCheck(): Promise<AuthSession> {
-  const apiUrl = (getSetting('upload_api_url') ?? DEFAULT_API_URL).replace(/\/+$/, '')
+  const apiUrl = getDesktopApiUrl().replace(/\/+$/, '')
   const connectionToken = readConnectionToken()
   if (!connectionToken) return { signedIn: false }
   if (getSetting('desktop_retired') === '1') {
@@ -207,7 +207,7 @@ export function registerAuthHandlers() {
   })
 
   ipcMain.handle('auth:signIn', async (): Promise<AuthSession> => {
-    const apiUrl = (getSetting('upload_api_url') ?? DEFAULT_API_URL).replace(/\/+$/, '')
+    const apiUrl = getDesktopApiUrl().replace(/\/+$/, '')
     const clientSecret = randomBytes(32).toString('base64url')
 
     try {
@@ -223,7 +223,9 @@ export function registerAuthHandlers() {
 
       const code = started.payload.code
       const connectUrl = `${apiUrl}/desktop/connect?code=${encodeURIComponent(code)}`
-      await shell.openExternal(connectUrl)
+      if (!(process.env.CI === 'true' && process.env.MC_SCHOOL_STUDIO_SMOKE_SKIP_BROWSER === '1')) {
+        await shell.openExternal(connectUrl)
+      }
 
       const deadline = Date.now() + 10 * 60 * 1000
       while (Date.now() < deadline) {

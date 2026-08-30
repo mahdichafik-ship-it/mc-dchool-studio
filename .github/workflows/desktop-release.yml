@@ -110,6 +110,18 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      - name: Set up Node.js for retirement release checks
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 provides native TypeScript type stripping for the Team
+          # contract test and the WebSocket client used by the packaged smoke.
+          node-version: 22
+
+      - name: Verify Team retirement status and limitation copy
+        run: |
+          pnpm --filter @workspace/mc-school-studio run typecheck
+          pnpm --filter @workspace/mc-school-studio-desktop run test:retirement-copy
+
       - name: Validate generated electron-updater metadata
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -158,6 +170,29 @@ jobs:
           done
 
           test -f artifacts/mc-school-studio-desktop/dist/release/latest-mac.yml
+
+      - name: Exercise retirement reconnect in packaged signed app
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          case "$(uname -m)" in
+            arm64) smoke_arch="arm64" ;;
+            x86_64) smoke_arch="x64" ;;
+            *)
+              echo "::error::Unsupported macOS runner architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
+          smoke_dir="$(mktemp -d)"
+          ditto -x -k \
+            "artifacts/mc-school-studio-desktop/dist/release/mc-school-studio-${version}-${smoke_arch}.zip" \
+            "$smoke_dir"
+          app_path="$(find "$smoke_dir" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app_path"
+          MC_SCHOOL_STUDIO_APP_PATH="$app_path/Contents/MacOS/MC School Studio" \
+            pnpm --filter @workspace/mc-school-studio-desktop run test:retirement-release
 
       - name: Stage verified macOS packages
         uses: actions/upload-artifact@v4

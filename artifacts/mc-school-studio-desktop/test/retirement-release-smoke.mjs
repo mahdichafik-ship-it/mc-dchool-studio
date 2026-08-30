@@ -1,0 +1,345 @@
+import { strict as assert } from 'node:assert'
+import { spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
+
+const appExecutable = process.env.MC_SCHOOL_STUDIO_APP_PATH
+if (!appExecutable) throw new Error('MC_SCHOOL_STUDIO_APP_PATH must point to the packaged app executable')
+if (!existsSync(appExecutable)) throw new Error(`Packaged app executable not found: ${appExecutable}`)
+
+const token = 'release-retirement-smoke-token'
+const projectName = 'Release Retirement School'
+const studentReference = '001234'
+const root = mkdtempSync(join(tmpdir(), 'mc-school-studio-retirement-release-'))
+const userDataDir = join(root, 'user-data')
+const storageRoot = join(root, 'managed-photos')
+const watchFolder = join(root, 'camera-originals')
+const sourcePhoto = join(watchFolder, `Smith_John_release-${studentReference}.jpg`)
+const debugPort = 9327
+let online = true
+let retired = false
+let acknowledgedAt = null
+
+mkdirSync(userDataDir, { recursive: true })
+mkdirSync(storageRoot, { recursive: true })
+mkdirSync(watchFolder, { recursive: true })
+
+function json(response, status, body) {
+  response.writeHead(status, { 'content-type': 'application/json' })
+  response.end(JSON.stringify(body))
+}
+
+function authorized(request) {
+  return request.headers.authorization === `Bearer ${token}`
+}
+
+const server = createServer((request, response) => {
+  if (!online) {
+    request.socket.destroy()
+    return
+  }
+
+  const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+  if (request.method === 'POST' && url.pathname === '/api/desktop/auth/start') {
+    json(response, 201, { code: 'release-retirement-smoke-code' })
+    return
+  }
+  if (request.method === 'POST' && url.pathname === '/api/desktop/auth/status') {
+    json(response, 200, { status: 'approved' })
+    return
+  }
+  if (request.method === 'POST' && url.pathname === '/api/desktop/auth/exchange') {
+    json(response, 200, {
+      token,
+      member: { email: 'release-smoke@example.test', role: 'photographer' },
+    })
+    return
+  }
+  if (!authorized(request)) {
+    json(response, 401, { error: 'Invalid desktop connection' })
+    return
+  }
+  if (request.method === 'GET' && url.pathname === '/api/desktop/me') {
+    json(response, 200, {
+      member: { email: 'release-smoke@example.test', role: 'photographer' },
+      retirement: retired
+        ? { retiredAt: '2026-08-29T12:00:00.000Z', acknowledgedAt }
+        : null,
+    })
+    return
+  }
+  if (request.method === 'POST' && url.pathname === '/api/desktop/retirement/acknowledge') {
+    assert.equal(retired, true, 'an active connection must not acknowledge retirement')
+    acknowledgedAt ||= new Date().toISOString()
+    json(response, 200, { ok: true, acknowledgedAt })
+    return
+  }
+  if (retired) {
+    json(response, 401, { error: 'Invalid or retired desktop connection' })
+    return
+  }
+  if (request.method === 'GET' && url.pathname === '/api/desktop/projects') {
+    json(response, 200, [{
+      id: 41,
+      schoolName: projectName,
+      photoDate: '2026-09-01',
+      address: null,
+      contactName: null,
+      classCount: 1,
+      studentCount: 1,
+      updatedAt: '2026-08-29T12:00:00.000Z',
+    }])
+    return
+  }
+  if (request.method === 'GET' && url.pathname === '/api/desktop/projects/41/bundle') {
+    json(response, 200, {
+      project: {
+        id: 41,
+        schoolName: projectName,
+        photoDate: '2026-09-01',
+        address: null,
+        contactName: null,
+        contactEmail: null,
+        contactPhone: null,
+        notes: null,
+      },
+      classes: [{ id: 51, className: 'Class A' }],
+      students: [{
+        id: 61,
+        classId: 51,
+        firstName: 'John',
+        lastName: 'Smith',
+        generatedStudentId: studentReference,
+        email: null,
+        phone: null,
+        simpleQr: null,
+        jsonQr: null,
+      }],
+    })
+    return
+  }
+  json(response, 404, { error: `Unhandled smoke-test route ${request.method} ${url.pathname}` })
+})
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitFor(description, check, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs
+  let lastError
+  while (Date.now() < deadline) {
+    try {
+      const value = await check()
+      if (value) return value
+    } catch (error) {
+      lastError = error
+    }
+    await wait(250)
+  }
+  throw new Error(`Timed out waiting for ${description}${lastError ? `: ${lastError}` : ''}`)
+}
+
+class CdpClient {
+  constructor(socket) {
+    this.socket = socket
+    this.nextId = 1
+    this.pending = new Map()
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data))
+      if (!message.id) return
+      const pending = this.pending.get(message.id)
+      if (!pending) return
+      this.pending.delete(message.id)
+      if (message.error) pending.reject(new Error(message.error.message))
+      else pending.resolve(message.result)
+    })
+  }
+
+  static async connect() {
+    const page = await waitFor('packaged renderer debug endpoint', async () => {
+      const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`).catch(() => null)
+      if (!response?.ok) return null
+      const pages = await response.json()
+      return pages.find((candidate) => candidate.type === 'page')
+    })
+    const socket = new WebSocket(page.webSocketDebuggerUrl)
+    await new Promise((resolve, reject) => {
+      socket.addEventListener('open', resolve, { once: true })
+      socket.addEventListener('error', reject, { once: true })
+    })
+    return new CdpClient(socket)
+  }
+
+  send(method, params = {}) {
+    const id = this.nextId++
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject })
+      this.socket.send(JSON.stringify({ id, method, params }))
+    })
+  }
+
+  async evaluate(expression) {
+    const result = await this.send('Runtime.evaluate', {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    })
+    if (result.exceptionDetails) {
+      throw new Error(result.exceptionDetails.exception?.description ?? 'Renderer evaluation failed')
+    }
+    return result.result.value
+  }
+
+  close() {
+    this.socket.close()
+  }
+}
+
+function findFiles(directory) {
+  if (!existsSync(directory)) return []
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    return entry.isDirectory() ? findFiles(path) : [path]
+  })
+}
+
+function querySqlite(dbPath, sql) {
+  return execFileSync('/usr/bin/sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim()
+}
+
+const apiAddress = await new Promise((resolve, reject) => {
+  server.once('error', reject)
+  server.listen(0, '127.0.0.1', () => resolve(server.address()))
+})
+if (!apiAddress || typeof apiAddress === 'string') throw new Error('Could not start smoke API')
+const apiUrl = `http://127.0.0.1:${apiAddress.port}`
+
+const appProcess = spawn(appExecutable, [`--remote-debugging-port=${debugPort}`], {
+  env: {
+    ...process.env,
+    CI: 'true',
+    MC_SCHOOL_STUDIO_SMOKE_API_URL: apiUrl,
+    MC_SCHOOL_STUDIO_SMOKE_SKIP_BROWSER: '1',
+    MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR: userDataDir,
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
+})
+let appOutput = ''
+appProcess.stdout.on('data', (chunk) => { appOutput += chunk })
+appProcess.stderr.on('data', (chunk) => { appOutput += chunk })
+
+let cdp
+try {
+  cdp = await CdpClient.connect()
+  await waitFor('sign-in screen', () => cdp.evaluate(
+    `document.body.innerText.includes('Sign in with your studio account')`,
+  ))
+
+  const signedIn = await cdp.evaluate(`window.api.invoke('auth:signIn')`)
+  assert.equal(signedIn.signedIn, true)
+
+  const dbPath = join(userDataDir, 'mc-school-studio.db')
+  await waitFor('desktop SQLite database', () => existsSync(dbPath))
+  const storedToken = querySqlite(
+    dbPath,
+    "SELECT value FROM settings WHERE key = 'desktop_connection_token';",
+  )
+  assert.match(storedToken, /^safe:/, 'the packaged Mac must encrypt its connection token with safeStorage')
+
+  const cloudProjects = await cdp.evaluate(`window.api.invoke('cloud:listProjects')`)
+  assert.equal(cloudProjects.ok, true)
+  assert.equal(cloudProjects.projects[0].schoolName, projectName)
+
+  const pulled = await cdp.evaluate(`window.api.invoke('cloud:pullProject', { cloudProjectId: 41 })`)
+  assert.deepEqual(
+    { ok: pulled.ok, classesImported: pulled.classesImported, studentsImported: pulled.studentsImported },
+    { ok: true, classesImported: 1, studentsImported: 1 },
+  )
+
+  const localProjects = await cdp.evaluate(`window.api.invoke('projects:list')`)
+  assert.equal(localProjects.length, 1)
+  const localProjectId = localProjects[0].id
+  await cdp.evaluate(`window.api.invoke('app:setPhotosDir', { dir: ${JSON.stringify(storageRoot)} })`)
+  await cdp.evaluate(`window.api.invoke('projects:setWatchFolder', {
+    projectId: ${localProjectId},
+    folderPath: ${JSON.stringify(watchFolder)}
+  })`)
+  await cdp.evaluate(`window.api.invoke('watcher:start', { projectId: ${localProjectId} })`)
+
+  // A valid 1×1 JPEG named with the imported student reference exercises the
+  // packaged watcher, image decoder, native SQLite binding, and managed copy.
+  writeFileSync(sourcePhoto, Buffer.from(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
+    'base64',
+  ))
+
+  await waitFor('managed photo copy and SQLite photo row', async () => {
+    const project = await cdp.evaluate(`window.api.invoke('projects:get', { projectId: ${localProjectId} })`)
+    return project?.photoCount === 1 && findFiles(storageRoot).some((path) => basename(path) === basename(sourcePhoto))
+  }, 40_000)
+  const managedPhoto = findFiles(storageRoot).find((path) => basename(path) === basename(sourcePhoto))
+  assert(managedPhoto)
+  assert.deepEqual(readFileSync(managedPhoto), readFileSync(sourcePhoto))
+
+  online = false
+  const offlineSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
+  assert.equal(offlineSession.signedIn, true)
+  assert.equal(offlineSession.offline, true, 'the running app must observe the outage')
+  retired = true
+  const stillOfflineSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
+  assert.equal(stillOfflineSession.signedIn, true)
+  assert.equal(stillOfflineSession.offline, true)
+  assert.equal(existsSync(managedPhoto), true, 'an offline Mac cannot be erased remotely')
+  assert.equal(acknowledgedAt, null)
+
+  online = true
+  const oldSessionResponse = await fetch(`${apiUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  assert.equal(oldSessionResponse.status, 401, 'the retired token must lose cloud data access immediately')
+  await waitFor('retirement acknowledgement', () => acknowledgedAt, 35_000)
+  await waitFor('retirement message in the packaged UI', () => cdp.evaluate(
+    `document.body.innerText.includes('Local project and photo data was cleared and cloud sync is disabled.')`,
+  ))
+
+  assert.equal(existsSync(sourcePhoto), true, 'camera originals outside app-managed storage must remain')
+  assert.equal(existsSync(dirname(managedPhoto)), false, 'the managed student photo folder must be removed')
+  assert.deepEqual(await cdp.evaluate(`window.api.invoke('projects:list')`), [])
+  const blockedCloud = await cdp.evaluate(`window.api.invoke('cloud:listProjects')`)
+  assert.equal(blockedCloud.ok, false)
+  assert.match(blockedCloud.error, /Sign in/)
+
+  assert.equal(querySqlite(dbPath, 'SELECT count(*) FROM projects;'), '0')
+  assert.equal(querySqlite(dbPath, 'SELECT count(*) FROM students;'), '0')
+  assert.equal(querySqlite(dbPath, 'SELECT count(*) FROM photos;'), '0')
+  assert.equal(
+    querySqlite(dbPath, "SELECT value FROM settings WHERE key = 'desktop_retired';"),
+    '1',
+  )
+  assert.equal(
+    querySqlite(dbPath, "SELECT value FROM settings WHERE key = 'desktop_connection_token';"),
+    '',
+  )
+
+  console.log('Packaged retirement smoke test passed.')
+} catch (error) {
+  console.error(appOutput)
+  throw error
+} finally {
+  cdp?.close()
+  appProcess.kill('SIGTERM')
+  server.close()
+  rmSync(root, { recursive: true, force: true })
+}

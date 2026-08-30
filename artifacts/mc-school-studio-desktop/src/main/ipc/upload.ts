@@ -40,6 +40,13 @@ export function deleteSetting(key: string) {
 
 export const DEFAULT_API_URL = 'https://volumecapture.net'
 
+export function getDesktopApiUrl(): string {
+  const smokeTestUrl = process.env.CI === 'true'
+    ? process.env.MC_SCHOOL_STUDIO_SMOKE_API_URL?.trim()
+    : undefined
+  return smokeTestUrl || getSetting('upload_api_url') || DEFAULT_API_URL
+}
+
 export function saveConnectionToken(token: string) {
   const value = safeStorage.isEncryptionAvailable()
     ? `safe:${safeStorage.encryptString(token).toString('base64')}`
@@ -62,7 +69,7 @@ export function readConnectionToken(): string | null {
 export function getUploadConfig(): { apiUrl: string | null; connectionToken: string | null } {
   const retired = getSetting('desktop_retired') === '1'
   return {
-    apiUrl: getSetting('upload_api_url') ?? DEFAULT_API_URL,
+    apiUrl: getDesktopApiUrl(),
     connectionToken: retired ? null : readConnectionToken(),
   }
 }

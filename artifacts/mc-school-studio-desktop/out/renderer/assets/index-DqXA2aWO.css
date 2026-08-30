@@ -703,6 +703,9 @@
   .bg-\[\#0f172a\] {
     background-color: #0f172a;
   }
+  .bg-amber-50 {
+    background-color: var(--color-amber-50);
+  }
   .bg-amber-50\/95 {
     background-color: color-mix(in srgb, oklch(98.7% 0.022 95.277) 95%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -711,6 +714,9 @@
   }
   .bg-amber-100 {
     background-color: var(--color-amber-100);
+  }
+  .bg-amber-500 {
+    background-color: var(--color-amber-500);
   }
   .bg-black\/50 {
     background-color: color-mix(in srgb, #000 50%, transparent);

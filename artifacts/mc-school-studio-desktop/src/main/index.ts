@@ -12,6 +12,11 @@ import { getDb } from './db'
 
 const isDev = !app.isPackaged
 
+const smokeUserDataDir = process.env.CI === 'true'
+  ? process.env.MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR?.trim()
+  : undefined
+if (smokeUserDataDir) app.setPath('userData', smokeUserDataDir)
+
 function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1440,

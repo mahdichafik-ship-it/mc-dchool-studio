@@ -40753,6 +40753,10 @@ function deleteSetting(key) {
   getDb().delete(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).run();
 }
 const DEFAULT_API_URL = "https://volumecapture.net";
+function getDesktopApiUrl() {
+  const smokeTestUrl = process.env.CI === "true" ? process.env.MC_SCHOOL_STUDIO_SMOKE_API_URL?.trim() : void 0;
+  return smokeTestUrl || getSetting("upload_api_url") || DEFAULT_API_URL;
+}
 function saveConnectionToken(token) {
   const value = electron.safeStorage.isEncryptionAvailable() ? `safe:${electron.safeStorage.encryptString(token).toString("base64")}` : token;
   setSetting("desktop_connection_token", value);
@@ -40771,7 +40775,7 @@ function readConnectionToken() {
 function getUploadConfig$1() {
   const retired = getSetting("desktop_retired") === "1";
   return {
-    apiUrl: getSetting("upload_api_url") ?? DEFAULT_API_URL,
+    apiUrl: getDesktopApiUrl(),
     connectionToken: retired ? null : readConnectionToken()
   };
 }
@@ -40783,24 +40787,58 @@ function toServerFileUrl(fileUrl) {
   if (!fileUrl) return null;
   if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
   const { apiUrl } = getUploadConfig$1();
-  if (!apiUrl) return null;
   return `${apiUrl.replace(/\/+$/, "")}/${fileUrl.replace(/^\/+/, "")}`;
 }
 let cloudSyncDisabledForRetirement = false;
+let cloudSessionVerified = false;
 const activeUploads = /* @__PURE__ */ new Set();
+const activePhotoUploads = /* @__PURE__ */ new Map();
+let retryInProgress = false;
+class RetryableUploadError extends Error {
+}
 function disableCloudSyncForRetirement() {
   cloudSyncDisabledForRetirement = true;
+  cloudSessionVerified = false;
 }
 function enableCloudSyncAfterSignIn() {
   cloudSyncDisabledForRetirement = false;
+  cloudSessionVerified = true;
+  retryPendingUploads();
+}
+function markCloudSessionUnavailable() {
+  cloudSessionVerified = false;
+}
+function markCloudSessionVerified() {
+  if (cloudSyncDisabledForRetirement) return;
+  cloudSessionVerified = true;
+  retryPendingUploads();
+}
+function isCloudSessionVerified() {
+  return cloudSessionVerified && !cloudSyncDisabledForRetirement;
+}
+function invalidateDesktopCredentials(notifyRenderer = false) {
+  markCloudSessionUnavailable();
+  deleteSetting("desktop_connection_token");
+  deleteSetting("desktop_cached_member");
+  if (notifyRenderer) {
+    electron.BrowserWindow.getAllWindows()[0]?.webContents.send("auth:sessionInvalidated", {
+      signedIn: false,
+      error: "Your desktop session was signed out or revoked. Sign in again."
+    });
+  }
 }
 async function waitForActiveUploads() {
   await Promise.allSettled([...activeUploads]);
 }
+function isRetryableUploadFailure(error) {
+  if (error instanceof RetryableUploadError) return true;
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
+}
 async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
   const db = getDb();
   const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!apiUrl || !connectionToken) {
+  if (!connectionToken) {
     console.log("[Upload] Cloud upload not configured, skipping.");
     return;
   }
@@ -40816,12 +40854,20 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${connectionToken}`
+        Authorization: `Bearer ${connectionToken}`,
+        "X-MC-Upload-Id": String(photoId)
       },
-      body: formData
+      body: formData,
+      signal: AbortSignal.timeout(3e4)
     });
     if (!response.ok) {
       const text = await response.text();
+      if (response.status === 401) {
+        invalidateDesktopCredentials(true);
+      }
+      if (response.status === 429 || response.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
+      }
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
     let fileUrl = null;
@@ -40835,24 +40881,58 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
     notifyUploadStatus(photoId, studentId, "done");
     console.log(`[Upload] Photo ${photoId} uploaded successfully`);
   } catch (err) {
-    console.error("[Upload] Upload failed:", err);
-    db.update(photosTable).set({ uploadStatus: "error" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
-    notifyUploadStatus(photoId, studentId, "error");
+    const retryable = isRetryableUploadFailure(err);
+    if (retryable) markCloudSessionUnavailable();
+    console.error(`[Upload] Upload ${retryable ? "waiting for connectivity" : "failed"}:`, err);
+    db.update(photosTable).set({ uploadStatus: retryable ? "pending" : "error" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    notifyUploadStatus(photoId, studentId, retryable ? "pending" : "error");
     throw err;
   }
 }
 function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
-  if (cloudSyncDisabledForRetirement) return Promise.resolve();
+  if (!isCloudSessionVerified()) return Promise.resolve();
+  const existing = activePhotoUploads.get(photoId);
+  if (existing) return existing;
   const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt);
+  activePhotoUploads.set(photoId, task);
   activeUploads.add(task);
-  void task.finally(() => activeUploads.delete(task)).catch(() => {
+  void task.finally(() => {
+    activeUploads.delete(task);
+    activePhotoUploads.delete(photoId);
+  }).catch(() => {
   });
   return task;
+}
+function retryPendingUploads() {
+  if (retryInProgress || !isCloudSessionVerified()) return;
+  const { connectionToken } = getUploadConfig$1();
+  if (!connectionToken) return;
+  retryInProgress = true;
+  void (async () => {
+    const db = getDb();
+    const pending = db.select().from(photosTable).where(drizzleOrm.or(
+      drizzleOrm.eq(photosTable.uploadStatus, "pending"),
+      drizzleOrm.eq(photosTable.uploadStatus, "uploading")
+    )).all();
+    await Promise.allSettled(
+      pending.filter((photo) => photo.studentId !== null).map((photo) => uploadPhoto(
+        photo.projectId,
+        photo.studentId,
+        photo.id,
+        photo.filePath,
+        photo.fileName,
+        photo.capturedAt
+      ))
+    );
+  })().finally(() => {
+    retryInProgress = false;
+  }).catch(() => {
+  });
 }
 function registerUploadHandlers() {
   electron.ipcMain.handle("upload:testConnection", async () => {
     const { apiUrl, connectionToken } = getUploadConfig$1();
-    if (!apiUrl || !connectionToken) {
+    if (!connectionToken) {
       return { ok: false, error: "Sign in to MC School Studio before testing the connection" };
     }
     try {
@@ -40864,6 +40944,7 @@ function registerUploadHandlers() {
       if (response.ok) {
         return { ok: true };
       }
+      if (response.status === 401) invalidateDesktopCredentials(true);
       const body = await response.json().catch(() => ({}));
       return { ok: false, error: body.error ?? `Server returned ${response.status}` };
     } catch (err) {
@@ -40874,6 +40955,9 @@ function registerUploadHandlers() {
     const db = getDb();
     const photo = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).get();
     if (!photo || !photo.studentId) return { ok: false, error: "Photo not found or not matched" };
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
+    }
     try {
       await uploadPhoto(
         photo.projectId,
@@ -41274,14 +41358,14 @@ function finishMatchedPhoto(db, win, photo, student) {
     photo: photoForEvent,
     student: toStudentEvent(db, student)
   });
-  const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (apiUrl && connectionToken) {
-    db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
-    win?.webContents.send("upload:statusChanged", {
-      photoId: photo.id,
-      studentId: student.id,
-      status: "pending"
-    });
+  db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
+  win?.webContents.send("upload:statusChanged", {
+    photoId: photo.id,
+    studentId: student.id,
+    status: "pending"
+  });
+  const { connectionToken } = getUploadConfig$1();
+  if (connectionToken) {
     uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).catch(() => {
     });
   }
@@ -41364,7 +41448,7 @@ function enableCloudImportsAfterSignIn() {
 function registerCloudHandlers() {
   electron.ipcMain.handle("cloud:listProjects", async () => {
     const { apiUrl, connectionToken } = getUploadConfig$1();
-    if (!apiUrl || !connectionToken) {
+    if (!connectionToken) {
       return { ok: false, error: "Sign in to MC School Studio before syncing projects." };
     }
     try {
@@ -41374,6 +41458,7 @@ function registerCloudHandlers() {
         signal: AbortSignal.timeout(1e4)
       });
       if (!res.ok) {
+        if (res.status === 401) invalidateDesktopCredentials(true);
         const body = await res.json().catch(() => ({}));
         return { ok: false, error: body.error ?? `Server returned ${res.status}` };
       }
@@ -41390,7 +41475,7 @@ function registerCloudHandlers() {
         return { ok: false, error: "Cloud sync is disabled because this desktop was retired." };
       }
       const { apiUrl, connectionToken } = getUploadConfig$1();
-      if (!apiUrl || !connectionToken) {
+      if (!connectionToken) {
         return { ok: false, error: "Sign in to MC School Studio before pulling projects." };
       }
       const task = cloudImportBarrier.run(async () => {
@@ -41401,6 +41486,7 @@ function registerCloudHandlers() {
             signal: AbortSignal.timeout(3e4)
           });
           if (!res.ok) {
+            if (res.status === 401) invalidateDesktopCredentials(true);
             const body = await res.json().catch(() => ({}));
             return { ok: false, error: body.error ?? `Server returned ${res.status}` };
           }
@@ -41470,6 +41556,26 @@ function registerCloudHandlers() {
     }
   );
 }
+function parseCachedDesktopMember(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed.email !== "string" || !["owner", "admin", "assistant", "photographer"].includes(parsed.role ?? "")) {
+      return null;
+    }
+    return { email: parsed.email, role: parsed.role };
+  } catch {
+    return null;
+  }
+}
+function getOfflineDesktopSession(options) {
+  if (!options.cachedMember) return null;
+  return {
+    signedIn: true,
+    member: options.cachedMember,
+    offline: true
+  };
+}
 async function clearLocalProjectData() {
   disableCloudSyncForRetirement();
   const cloudImportsDrained = disableCloudImportsForRetirement();
@@ -41502,9 +41608,43 @@ async function postJson(url, body, timeoutMs) {
   return { response, payload };
 }
 async function performCurrentSessionCheck() {
-  const apiUrl = (getSetting("upload_api_url") ?? DEFAULT_API_URL).replace(/\/+$/, "");
+  const apiUrl = getDesktopApiUrl().replace(/\/+$/, "");
   const connectionToken = readConnectionToken();
   if (!connectionToken) return { signedIn: false };
+  if (getSetting("desktop_retired") === "1") {
+    try {
+      await clearLocalProjectData();
+    } catch (error) {
+      return {
+        signedIn: false,
+        error: `This desktop was retired, but its local project data could not be cleared. Close the app and try again. (${String(error)})`
+      };
+    }
+    if (connectionToken) {
+      const acknowledgement = await fetch(`${apiUrl}/api/desktop/retirement/acknowledge`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(5e3)
+      }).catch(() => null);
+      if (acknowledgement?.ok) {
+        deleteSetting("desktop_connection_token");
+        deleteSetting("desktop_cached_member");
+      }
+    }
+    return {
+      signedIn: false,
+      error: "This desktop was retired by the studio owner. Local project and photo data was cleared and cloud sync is disabled."
+    };
+  }
+  const getOfflineSession = () => {
+    const cachedSession = getOfflineDesktopSession({
+      cachedMember: parseCachedDesktopMember(getSetting("desktop_cached_member"))
+    });
+    return cachedSession ?? {
+      signedIn: false,
+      error: "Could not reach MC School Studio. Connect to the internet once to finish setting up this desktop."
+    };
+  };
   try {
     const response = await fetch(`${apiUrl}/api/desktop/me`, {
       headers: { Authorization: `Bearer ${connectionToken}` },
@@ -41534,13 +41674,24 @@ async function performCurrentSessionCheck() {
         error: acknowledgement?.ok ? "This desktop was retired by the studio owner. Local project and photo data was cleared and cloud sync is disabled." : "This desktop was retired by the studio owner. Local project and photo data was cleared and cloud sync is disabled. Retirement acknowledgement will retry when the app reconnects."
       };
     }
-    if (response.ok && payload.member) return { signedIn: true, member: payload.member };
+    if (response.ok && payload.member) {
+      setSetting("desktop_cached_member", JSON.stringify(payload.member));
+      markCloudSessionVerified();
+      return { signedIn: true, member: payload.member };
+    }
     if (response.status === 401) {
+      invalidateDesktopCredentials();
       return { signedIn: false, error: "Your desktop session was signed out or revoked. Sign in again." };
     }
+    if (response.status >= 500) {
+      markCloudSessionUnavailable();
+      return getOfflineSession();
+    }
+    markCloudSessionUnavailable();
     return { signedIn: false, error: payload.error ?? `Could not reach MC School Studio (${response.status})` };
   } catch {
-    return { signedIn: false, error: "Could not reach MC School Studio. Check your internet connection." };
+    markCloudSessionUnavailable();
+    return getOfflineSession();
   }
 }
 let currentSessionCheck = null;
@@ -41564,20 +41715,23 @@ function registerAuthHandlers() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.token || !payload.member) {
+        if (response.status === 401) invalidateDesktopCredentials();
         return { signedIn: false, error: payload.error ?? "Your desktop session could not be refreshed." };
       }
       saveConnectionToken(payload.token);
+      setSetting("desktop_cached_member", JSON.stringify(payload.member));
+      enableCloudSyncAfterSignIn();
       return { signedIn: true, member: payload.member };
     } catch {
       return { signedIn: false, error: "Could not refresh the desktop session." };
     }
   });
   electron.ipcMain.handle("auth:signOut", () => {
-    deleteSetting("desktop_connection_token");
+    invalidateDesktopCredentials();
     return { ok: true };
   });
   electron.ipcMain.handle("auth:signIn", async () => {
-    const apiUrl = (getSetting("upload_api_url") ?? DEFAULT_API_URL).replace(/\/+$/, "");
+    const apiUrl = getDesktopApiUrl().replace(/\/+$/, "");
     const clientSecret = node_crypto.randomBytes(32).toString("base64url");
     try {
       const started = await postJson(`${apiUrl}/api/desktop/auth/start`, { clientSecret }, 1e4);
@@ -41589,7 +41743,9 @@ function registerAuthHandlers() {
       }
       const code = started.payload.code;
       const connectUrl = `${apiUrl}/desktop/connect?code=${encodeURIComponent(code)}`;
-      await electron.shell.openExternal(connectUrl);
+      if (!(process.env.CI === "true" && process.env.MC_SCHOOL_STUDIO_SMOKE_SKIP_BROWSER === "1")) {
+        await electron.shell.openExternal(connectUrl);
+      }
       const deadline = Date.now() + 10 * 60 * 1e3;
       while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 2e3));
@@ -41610,6 +41766,7 @@ function registerAuthHandlers() {
         }
         const member = exchanged.payload.member;
         setSetting("upload_api_url", apiUrl);
+        setSetting("desktop_cached_member", JSON.stringify(member));
         saveConnectionToken(exchanged.payload.token);
         enableCloudSyncAfterSignIn();
         enableCloudImportsAfterSignIn();
@@ -41775,6 +41932,8 @@ function scheduleUpdateCheck() {
   }, 1500);
 }
 const isDev = !electron.app.isPackaged;
+const smokeUserDataDir = process.env.CI === "true" ? process.env.MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR?.trim() : void 0;
+if (smokeUserDataDir) electron.app.setPath("userData", smokeUserDataDir);
 function createWindow() {
   const mainWindow2 = new electron.BrowserWindow({
     width: 1440,

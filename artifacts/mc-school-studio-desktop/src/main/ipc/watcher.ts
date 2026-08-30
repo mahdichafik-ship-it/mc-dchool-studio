@@ -5,7 +5,7 @@ import { stat as statFile } from 'fs/promises'
 import { basename, extname, join, parse, resolve } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema'
+import { capturesTable, classesTable, photosTable, projectsTable, studentsTable } from '../db/schema'
 import { getSetting, getUploadConfig, uploadPhoto } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
 import { readQrFromImage } from '../lib/qrReader'
@@ -398,6 +398,16 @@ function handleNewRaw(
   })
 
   if (result.kind === 'duplicate') return
+  const savedCapture = db
+    .select()
+    .from(capturesTable)
+    .where(eq(capturesTable.id, result.captureId))
+    .get()
+  getMainWindow()?.webContents.send('capture:updated', {
+    projectId,
+    captureId: result.captureId,
+    studentId: savedCapture?.studentId ?? null,
+  })
   console.log(
     `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
       + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
@@ -427,6 +437,18 @@ function finishMatchedPhoto(
     photo: photoForEvent,
     student: toStudentEvent(db, student),
   })
+  const capture = db
+    .select()
+    .from(capturesTable)
+    .where(eq(capturesTable.legacyPhotoId, photo.id))
+    .get()
+  if (capture) {
+    win?.webContents.send('capture:updated', {
+      projectId: photo.projectId,
+      captureId: capture.id,
+      studentId: photo.studentId,
+    })
+  }
 
   db.update(photosTable)
     .set({ uploadStatus: 'pending' })

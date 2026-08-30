@@ -1,8 +1,42 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow } from '../../../shared/types'
+import type {
+  Project,
+  Class,
+  Student,
+  Photo,
+  ImportResult,
+  CaptureReview,
+  CaptureCompletenessSummary,
+  CaptureUpdatedEvent,
+  PhotoMatchedEvent,
+  PhotoMarkerEvent,
+  PhotoUnmatchedEvent,
+  PhotoDeletedEvent,
+  PhotoReassignedEvent,
+  UploadStatus,
+  UploadStatusChangedEvent,
+  ProjectUploadStatusRow,
+} from '../../../shared/types'
 
 // Re-export types for convenience
-export type { Project, Class, Student, Photo, ImportResult, PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent, PhotoDeletedEvent, PhotoReassignedEvent, UploadStatus, UploadStatusChangedEvent, ProjectUploadStatusRow }
+export type {
+  Project,
+  Class,
+  Student,
+  Photo,
+  ImportResult,
+  CaptureReview,
+  CaptureCompletenessSummary,
+  CaptureUpdatedEvent,
+  PhotoMatchedEvent,
+  PhotoMarkerEvent,
+  PhotoUnmatchedEvent,
+  PhotoDeletedEvent,
+  PhotoReassignedEvent,
+  UploadStatus,
+  UploadStatusChangedEvent,
+  ProjectUploadStatusRow,
+}
 
 const api = window.api
 
@@ -184,6 +218,77 @@ export function usePhotos(studentId: number | null) {
 
   useEffect(() => { load() }, [load])
   return { data, loading, reload: load }
+}
+
+export function useCaptures(studentId: number | null) {
+  const [data, setData] = useState<CaptureReview[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!studentId) return
+    setLoading(true)
+    try {
+      const result = await api.invoke('captures:list', { studentId })
+      setData(result as CaptureReview[])
+    } finally {
+      setLoading(false)
+    }
+  }, [studentId])
+
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!studentId) return
+    const unsubCapture = api.on('capture:updated', (event: CaptureUpdatedEvent) => {
+      if (event.studentId === studentId) void load()
+    })
+    const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
+      if (event.student.id === studentId) void load()
+    })
+    return () => {
+      unsubCapture()
+      unsubMatched()
+    }
+  }, [studentId, load])
+
+  return { data, loading, reload: load }
+}
+
+export function useCaptureSummary(projectId: number | null) {
+  const [data, setData] = useState<CaptureCompletenessSummary>({
+    total: 0,
+    complete: 0,
+    jpegOnly: 0,
+    rawOnly: 0,
+    unpaired: 0,
+  })
+
+  const load = useCallback(async () => {
+    if (!projectId) return
+    const result = await api.invoke('captures:summary', { projectId })
+    setData(result as CaptureCompletenessSummary)
+  }, [projectId])
+
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!projectId) return
+    const refresh = (event: CaptureUpdatedEvent) => {
+      if (event.projectId === projectId) void load()
+    }
+    const unsubCapture = api.on('capture:updated', refresh)
+    const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
+      if (event.student.projectId === projectId) void load()
+    })
+    const unsubUnmatched = api.on('photo:unmatched', () => void load())
+    return () => {
+      unsubCapture()
+      unsubMatched()
+      unsubUnmatched()
+    }
+  }, [projectId, load])
+
+  return { data, reload: load }
 }
 
 export function useWatcherStatus(projectId: number | null) {

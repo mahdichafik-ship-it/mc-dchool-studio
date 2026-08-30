@@ -1,11 +1,15 @@
 import { ipcMain, shell, BrowserWindow } from 'electron'
 import { copyFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { eq, count } from 'drizzle-orm'
+import { and, eq, count, or } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { photosTable, studentsTable } from '../db/schema'
+import { capturesTable, imageFilesTable, photosTable, studentsTable } from '../db/schema'
 import { generateThumbnail } from '../lib/qrReader'
-import type { Photo } from '../../shared/types'
+import type {
+  CaptureCompletenessSummary,
+  CaptureReview,
+  Photo,
+} from '../../shared/types'
 
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
@@ -30,6 +34,33 @@ function rowToPhoto(row: typeof photosTable.$inferSelect, thumbnailData: string 
   }
 }
 
+function rowToCaptureFile(row: typeof imageFilesTable.$inferSelect) {
+  return {
+    id: row.id,
+    fileRole: row.fileRole,
+    fileFormat: row.fileFormat,
+    originalFilename: row.originalFilename,
+    storedPath: row.storedPath,
+    fileSize: row.fileSize,
+    uploadStatus: row.uploadStatus,
+    fileUrl: row.fileUrl,
+  }
+}
+
+function getCaptureSummary(rows: Array<typeof capturesTable.$inferSelect>): CaptureCompletenessSummary {
+  return rows.reduce<CaptureCompletenessSummary>(
+    (summary, capture) => {
+      summary.total++
+      if (capture.pairingStatus === 'complete') summary.complete++
+      else if (capture.pairingStatus === 'jpeg_only') summary.jpegOnly++
+      else if (capture.pairingStatus === 'raw_only') summary.rawOnly++
+      else summary.unpaired++
+      return summary
+    },
+    { total: 0, complete: 0, jpegOnly: 0, rawOnly: 0, unpaired: 0 },
+  )
+}
+
 export function registerPhotoHandlers() {
   const db = getDb()
 
@@ -48,6 +79,59 @@ export function registerPhotoHandlers() {
     }
     return result
   })
+
+  ipcMain.handle(
+    'captures:list',
+    async (_e, { studentId }: { studentId: number }): Promise<CaptureReview[]> => {
+      const rows = db
+        .select({ capture: capturesTable, photo: photosTable })
+        .from(capturesTable)
+        .leftJoin(photosTable, eq(capturesTable.legacyPhotoId, photosTable.id))
+        .where(or(
+          eq(capturesTable.studentId, studentId),
+          eq(photosTable.studentId, studentId),
+        ))
+        .orderBy(capturesTable.capturedAt)
+        .all()
+
+      const result: CaptureReview[] = []
+      for (const { capture, photo } of rows) {
+        const files = db
+          .select()
+          .from(imageFilesTable)
+          .where(eq(imageFilesTable.captureId, capture.id))
+          .all()
+        const jpegFile = files.find((file) => file.fileRole === 'JPEG')
+        const thumbnailData = jpegFile ? await generateThumbnail(jpegFile.storedPath) : null
+        result.push({
+          id: capture.id,
+          projectId: capture.projectId,
+          studentId: capture.studentId,
+          classId: capture.classId,
+          baseFilename: capture.baseFilename,
+          capturedAt: capture.capturedAt,
+          pairingStatus: capture.pairingStatus,
+          assignmentLocked: capture.assignmentLocked,
+          files: files.map(rowToCaptureFile),
+          thumbnailData,
+          legacyPhoto: photo ? rowToPhoto(photo, thumbnailData) : null,
+        })
+      }
+      return result
+    },
+  )
+
+  ipcMain.handle(
+    'captures:summary',
+    (_e, { projectId }: { projectId: number }): CaptureCompletenessSummary => {
+      const rows = db
+        .select()
+        .from(capturesTable)
+        .where(eq(capturesTable.projectId, projectId))
+        .all()
+      return getCaptureSummary(rows)
+    },
+  )
 
   ipcMain.handle(
     'photos:getThumbnail',
@@ -77,6 +161,24 @@ export function registerPhotoHandlers() {
         .set({ studentId, filePath: destPath, isMatched: true })
         .where(eq(photosTable.id, photoId))
         .run()
+      const capture = db
+        .select()
+        .from(capturesTable)
+        .where(eq(capturesTable.legacyPhotoId, photoId))
+        .get()
+      if (capture) {
+        db.update(imageFilesTable)
+          .set({ storedPath: destPath })
+          .where(and(
+            eq(imageFilesTable.captureId, capture.id),
+            eq(imageFilesTable.fileRole, 'JPEG'),
+          ))
+          .run()
+        db.update(capturesTable)
+          .set({ updatedAt: now() })
+          .where(eq(capturesTable.id, capture.id))
+          .run()
+      }
 
       // Notify renderer so sidebar counts update immediately
       const win = getMainWindow()
@@ -86,13 +188,50 @@ export function registerPhotoHandlers() {
         fromStudentId: photo.studentId,
         toStudentId: studentId,
       })
+      if (capture) {
+        win?.webContents.send('capture:updated', {
+          projectId: photo.projectId,
+          captureId: capture.id,
+          studentId,
+        })
+      }
     },
   )
 
   ipcMain.handle('photos:delete', async (_e, { photoId }: { photoId: number }) => {
     // Fetch before deleting so we can include projectId in the event
     const [photo] = db.select().from(photosTable).where(eq(photosTable.id, photoId)).all()
+    const capture = db
+      .select()
+      .from(capturesTable)
+      .where(eq(capturesTable.legacyPhotoId, photoId))
+      .get()
     db.delete(photosTable).where(eq(photosTable.id, photoId)).run()
+    if (capture) {
+      db.delete(imageFilesTable)
+        .where(and(
+          eq(imageFilesTable.captureId, capture.id),
+          eq(imageFilesTable.fileRole, 'JPEG'),
+        ))
+        .run()
+      const remainingFiles = db
+        .select()
+        .from(imageFilesTable)
+        .where(eq(imageFilesTable.captureId, capture.id))
+        .all()
+      if (remainingFiles.length === 0) {
+        db.delete(capturesTable).where(eq(capturesTable.id, capture.id)).run()
+      } else {
+        db.update(capturesTable)
+          .set({
+            legacyPhotoId: null,
+            pairingStatus: 'raw_only',
+            updatedAt: now(),
+          })
+          .where(eq(capturesTable.id, capture.id))
+          .run()
+      }
+    }
 
     // Notify renderer so sidebar counts update immediately
     if (photo) {
@@ -102,6 +241,13 @@ export function registerPhotoHandlers() {
         projectId: photo.projectId,
         studentId: photo.studentId,
       })
+      if (capture) {
+        win?.webContents.send('capture:updated', {
+          projectId: photo.projectId,
+          captureId: capture.id,
+          studentId: photo.studentId,
+        })
+      }
     }
   })
 

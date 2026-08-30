@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   ArrowLeft,
   Folder,
@@ -23,9 +23,25 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { useProject, useClasses, useStudents, usePhotos, useWatcherStatus, usePhotoEvents, useUploadStatus } from '@/hooks/useApi'
+import {
+  useProject,
+  useClasses,
+  useStudents,
+  useCaptures,
+  useCaptureSummary,
+  useWatcherStatus,
+  useUploadStatus,
+} from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
-import type { Student, Class, Photo, PhotoMatchedEvent, StudentUploadSummary, ProjectUploadStatusRow, UploadStatus } from '@/hooks/useApi'
+import type {
+  Student,
+  Class,
+  Photo,
+  CaptureReview,
+  StudentUploadSummary,
+  ProjectUploadStatusRow,
+  UploadStatus,
+} from '@/hooks/useApi'
 
 interface Props {
   projectId: number
@@ -33,8 +49,19 @@ interface Props {
   offline?: boolean
 }
 
+type CaptureFilter = 'all' | CaptureReview['pairingStatus']
+
+const captureFilterOptions: Array<{ value: CaptureFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'complete', label: 'JPEG + RAW' },
+  { value: 'jpeg_only', label: 'JPEG only' },
+  { value: 'raw_only', label: 'RAW only' },
+  { value: 'unpaired', label: 'Needs review' },
+]
+
 export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
+  const { data: captureSummary } = useCaptureSummary(projectId)
   const { data: classes } = useClasses(projectId)
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
@@ -125,8 +152,17 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         <div className="flex-1 min-w-0">
           <h1 className="font-bold text-slate-900 truncate">{project?.schoolName ?? '…'}</h1>
           <p className="text-xs text-slate-500">
-            {project?.classCount} classes · {project?.studentCount} students · {project?.photoCount} photos taken
+            {project?.classCount} classes · {project?.studentCount} students · {
+              captureSummary.total > 0
+                ? `${captureSummary.total} captures`
+                : `${project?.photoCount ?? 0} photos taken`
+            }
           </p>
+          {captureSummary.total > 0 && (
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              {captureSummary.complete} paired · {captureSummary.jpegOnly} JPEG only · {captureSummary.rawOnly} RAW only
+            </p>
+          )}
            {pendingUploadCount > 0 && (
              <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
                <Upload className="size-3" />
@@ -370,24 +406,26 @@ function StudentDetail({
   onReassign: () => void
   offline: boolean
 }) {
-  const { data: photos, reload: reloadPhotos } = usePhotos(student.id)
+  const { data: captures, reload: reloadCaptures } = useCaptures(student.id)
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignPhoto, setReassignPhoto] = useState<Photo | null>(null)
   const [retryingPhotoId, setRetryingPhotoId] = useState<number | null>(null)
+  const [pairingFilter, setPairingFilter] = useState<CaptureFilter>('all')
 
-  const handlePhotoMatched = useCallback(
-    (data: PhotoMatchedEvent) => {
-      if (data.student.id === student.id) {
-        reloadPhotos()
-      }
+  const captureCounts = captures.reduce(
+    (counts, capture) => {
+      counts[capture.pairingStatus]++
+      return counts
     },
-    [student.id, reloadPhotos],
+    { complete: 0, jpeg_only: 0, raw_only: 0, unpaired: 0, pending: 0 } as Record<CaptureReview['pairingStatus'], number>,
   )
-  usePhotoEvents(handlePhotoMatched)
+  const filteredCaptures = pairingFilter === 'all'
+    ? captures
+    : captures.filter((capture) => capture.pairingStatus === pairingFilter)
 
   async function handleDeletePhoto(photoId: number) {
     await window.api.invoke('photos:delete', { photoId })
-    reloadPhotos()
+    reloadCaptures()
     onReassign()
   }
 
@@ -413,7 +451,7 @@ function StudentDetail({
       addToast({ type: 'error', title: 'Photo upload failed', description: String(error) })
     } finally {
       setRetryingPhotoId(null)
-      reloadPhotos()
+       reloadCaptures()
       onReassign()
     }
   }
@@ -434,8 +472,8 @@ function StudentDetail({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {photos.length > 0 ? (
-            <Badge variant="success">{photos.length} photo{photos.length !== 1 ? 's' : ''} captured</Badge>
+           {captures.length > 0 ? (
+             <Badge variant="success">{captures.length} capture{captures.length !== 1 ? 's' : ''} recorded</Badge>
           ) : (
             <Badge variant="warning">Not yet photographed</Badge>
           )}
@@ -472,32 +510,54 @@ function StudentDetail({
         {/* Photo gallery */}
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
-            Captured photos ({photos.length})
+            Capture review ({filteredCaptures.length})
           </p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {captureFilterOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setPairingFilter(option.value)}
+                className={cn(
+                  'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                  pairingFilter === option.value
+                    ? 'border-teal-200 bg-teal-50 text-teal-700'
+                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700',
+                )}
+              >
+                {option.label} ({option.value === 'all' ? captures.length : captureCounts[option.value]})
+              </button>
+            ))}
+          </div>
 
-          {photos.length === 0 ? (
+          {captures.length === 0 ? (
             <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
               <Image className="size-8 text-slate-300 mb-2" />
-              <p className="text-sm text-slate-400">No photos yet</p>
+              <p className="text-sm text-slate-400">No captures yet</p>
               <p className="text-xs text-slate-400 mt-0.5">
-                Photos will appear here automatically when captured
+                JPEG and RAW files will appear here automatically when captured
               </p>
+            </div>
+          ) : filteredCaptures.length === 0 ? (
+            <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
+              <AlertCircle className="size-8 text-slate-300 mb-2" />
+              <p className="text-sm text-slate-400">No captures match this filter</p>
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-3">
-              {photos.map((photo) => (
-                <PhotoTile
-                  key={photo.id}
-                  photo={photo}
-                  uploadStatus={photoStatusMap.get(photo.id)}
-                  onOpen={() => handleOpenPhoto(photo.filePath)}
-                  onDelete={() => handleDeletePhoto(photo.id)}
-                   onRetry={() => handleRetryPhoto(photo.id)}
-                   retrying={retryingPhotoId === photo.id}
-                  onReassign={() => {
-                    setReassignPhoto(photo)
+              {filteredCaptures.map((capture) => (
+                <CaptureTile
+                  key={capture.id}
+                  capture={capture}
+                  uploadStatus={capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : undefined}
+                  onOpen={() => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? '')}
+                  onDelete={capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto!.id) : undefined}
+                  onRetry={capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto!.id) : undefined}
+                  retrying={capture.legacyPhoto?.id === retryingPhotoId}
+                  onReassign={capture.legacyPhoto ? () => {
+                    setReassignPhoto(capture.legacyPhoto)
                     setReassignOpen(true)
-                  }}
+                  } : undefined}
                 />
               ))}
             </div>
@@ -513,7 +573,7 @@ function StudentDetail({
           onClose={() => setReassignOpen(false)}
           onDone={() => {
             setReassignOpen(false)
-            reloadPhotos()
+            reloadCaptures()
             onReassign()
           }}
         />
@@ -621,6 +681,92 @@ function PhotoTile({
         <p className="text-white text-[10px] truncate">{photo.fileName}</p>
       </div>
     </div>
+  )
+}
+
+function CaptureTile({
+  capture,
+  uploadStatus,
+  onOpen,
+  onDelete,
+  onReassign,
+  onRetry,
+  retrying,
+}: {
+  capture: CaptureReview
+  uploadStatus?: ProjectUploadStatusRow
+  onOpen: () => void
+  onDelete?: () => void
+  onReassign?: () => void
+  onRetry?: () => void
+  retrying: boolean
+}) {
+  const photo = capture.legacyPhoto
+  if (photo) {
+    return (
+      <div className="relative">
+        <PhotoTile
+          photo={photo}
+          uploadStatus={uploadStatus}
+          onOpen={onOpen}
+          onDelete={onDelete!}
+          onReassign={onReassign!}
+          onRetry={onRetry!}
+          retrying={retrying}
+        />
+        <CaptureStatusBadge status={capture.pairingStatus} />
+      </div>
+    )
+  }
+
+  const rawFile = capture.files.find((file) => file.fileRole === 'RAW')
+  return (
+    <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
+      <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400">
+        <Image className="size-10" />
+        <span className="text-xs font-semibold tracking-wide">RAW ORIGINAL</span>
+        <span className="text-[10px] text-slate-400">{capture.files[0]?.fileFormat ?? 'RAW'}</span>
+      </div>
+      <CaptureStatusBadge status={capture.pairingStatus} />
+      <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-3">
+        <p className="text-center text-xs text-white">
+          RAW file recorded without a JPEG partner
+        </p>
+        {rawFile && (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1"
+          >
+            <ExternalLink className="size-3 inline mr-1" /> Open RAW
+          </button>
+        )}
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
+        <p className="text-white text-[10px] truncate">{capture.baseFilename}</p>
+      </div>
+    </div>
+  )
+}
+
+function CaptureStatusBadge({ status }: { status: CaptureReview['pairingStatus'] }) {
+  const meta = {
+    complete: { label: 'JPEG + RAW', className: 'bg-green-100/95 text-green-700 border-green-200' },
+    jpeg_only: { label: 'JPEG only', className: 'bg-amber-100/95 text-amber-700 border-amber-200' },
+    raw_only: { label: 'RAW only', className: 'bg-blue-100/95 text-blue-700 border-blue-200' },
+    unpaired: { label: 'Needs review', className: 'bg-red-100/95 text-red-700 border-red-200' },
+    pending: { label: 'Pending', className: 'bg-slate-100/95 text-slate-600 border-slate-200' },
+  }[status]
+
+  return (
+    <span
+      className={cn(
+        'absolute top-1.5 left-1.5 z-10 rounded-full border px-1.5 py-1 text-[9px] font-semibold shadow-sm',
+        meta.className,
+      )}
+    >
+      {meta.label}
+    </span>
   )
 }
 

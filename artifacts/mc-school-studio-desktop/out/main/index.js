@@ -424,7 +424,7 @@ function retireLocalProjects(store, fileSystem, photosRoot) {
   store.clearProjects();
   return { projectsCleared: projects.length, pathsRemoved: orderedPaths.length };
 }
-function now$2() {
+function now$3() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function enrichProject(p, classCount, studentCount, photoCount) {
@@ -486,7 +486,7 @@ function registerProjectHandlers() {
   electron.ipcMain.handle(
     "projects:setWatchFolder",
     async (_e, { projectId, folderPath }) => {
-      db.update(projectsTable).set({ watchFolder: folderPath, updatedAt: now$2() }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
+      db.update(projectsTable).set({ watchFolder: folderPath, updatedAt: now$3() }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
     }
   );
   electron.ipcMain.handle("projects:import", async (_e, { filePath }) => {
@@ -504,7 +504,7 @@ function registerProjectHandlers() {
         contactEmail: p.contactEmail ?? null,
         contactPhone: p.contactPhone ?? null,
         notes: p.notes ?? null,
-        updatedAt: now$2()
+        updatedAt: now$3()
       }).where(drizzleOrm.eq(projectsTable.id, existing.id)).run();
       projectId = existing.id;
       db.delete(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).run();
@@ -517,8 +517,8 @@ function registerProjectHandlers() {
         contactEmail: p.contactEmail ?? null,
         contactPhone: p.contactPhone ?? null,
         notes: p.notes ?? null,
-        createdAt: p.createdAt ?? now$2(),
-        updatedAt: now$2()
+        createdAt: p.createdAt ?? now$3(),
+        updatedAt: now$3()
       }).returning().get();
       projectId = result.id;
     }
@@ -527,8 +527,8 @@ function registerProjectHandlers() {
       const result = db.insert(classesTable).values({
         projectId,
         className: cls.className,
-        createdAt: cls.createdAt ?? now$2(),
-        updatedAt: cls.updatedAt ?? now$2()
+        createdAt: cls.createdAt ?? now$3(),
+        updatedAt: cls.updatedAt ?? now$3()
       }).returning().get();
       classIdMap.set(cls.id, result.id);
     }
@@ -544,8 +544,8 @@ function registerProjectHandlers() {
         generatedStudentId: stu.generatedStudentId,
         simpleQr: stu.simpleQr ?? null,
         jsonQr: stu.jsonQr ?? null,
-        createdAt: stu.createdAt ?? now$2(),
-        updatedAt: stu.updatedAt ?? now$2()
+        createdAt: stu.createdAt ?? now$3(),
+        updatedAt: stu.updatedAt ?? now$3()
       }).run();
       studentsImported++;
     }
@@ -40884,6 +40884,9 @@ function getMainWindow$1() {
   const wins = electron.BrowserWindow.getAllWindows();
   return wins.length > 0 ? wins[0] : null;
 }
+function now$2() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
 function rowToPhoto(row, thumbnailData = null) {
   return {
     id: row.id,
@@ -40897,6 +40900,31 @@ function rowToPhoto(row, thumbnailData = null) {
     createdAt: row.createdAt
   };
 }
+function rowToCaptureFile(row) {
+  return {
+    id: row.id,
+    fileRole: row.fileRole,
+    fileFormat: row.fileFormat,
+    originalFilename: row.originalFilename,
+    storedPath: row.storedPath,
+    fileSize: row.fileSize,
+    uploadStatus: row.uploadStatus,
+    fileUrl: row.fileUrl
+  };
+}
+function getCaptureSummary(rows) {
+  return rows.reduce(
+    (summary, capture) => {
+      summary.total++;
+      if (capture.pairingStatus === "complete") summary.complete++;
+      else if (capture.pairingStatus === "jpeg_only") summary.jpegOnly++;
+      else if (capture.pairingStatus === "raw_only") summary.rawOnly++;
+      else summary.unpaired++;
+      return summary;
+    },
+    { total: 0, complete: 0, jpegOnly: 0, rawOnly: 0, unpaired: 0 }
+  );
+}
 function registerPhotoHandlers() {
   const db = getDb();
   electron.ipcMain.handle("photos:list", async (_e, { studentId }) => {
@@ -40908,6 +40936,42 @@ function registerPhotoHandlers() {
     }
     return result;
   });
+  electron.ipcMain.handle(
+    "captures:list",
+    async (_e, { studentId }) => {
+      const rows = db.select({ capture: capturesTable, photo: photosTable }).from(capturesTable).leftJoin(photosTable, drizzleOrm.eq(capturesTable.legacyPhotoId, photosTable.id)).where(drizzleOrm.or(
+        drizzleOrm.eq(capturesTable.studentId, studentId),
+        drizzleOrm.eq(photosTable.studentId, studentId)
+      )).orderBy(capturesTable.capturedAt).all();
+      const result = [];
+      for (const { capture, photo } of rows) {
+        const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
+        const jpegFile = files.find((file) => file.fileRole === "JPEG");
+        const thumbnailData = jpegFile ? await generateThumbnail(jpegFile.storedPath) : null;
+        result.push({
+          id: capture.id,
+          projectId: capture.projectId,
+          studentId: capture.studentId,
+          classId: capture.classId,
+          baseFilename: capture.baseFilename,
+          capturedAt: capture.capturedAt,
+          pairingStatus: capture.pairingStatus,
+          assignmentLocked: capture.assignmentLocked,
+          files: files.map(rowToCaptureFile),
+          thumbnailData,
+          legacyPhoto: photo ? rowToPhoto(photo, thumbnailData) : null
+        });
+      }
+      return result;
+    }
+  );
+  electron.ipcMain.handle(
+    "captures:summary",
+    (_e, { projectId }) => {
+      const rows = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
+      return getCaptureSummary(rows);
+    }
+  );
   electron.ipcMain.handle(
     "photos:getThumbnail",
     async (_e, { filePath }) => {
@@ -40927,6 +40991,14 @@ function registerPhotoHandlers() {
       const destPath = path.join(destDir, photo.fileName);
       require$$0.copyFileSync(photo.filePath, destPath);
       db2.update(photosTable).set({ studentId, filePath: destPath, isMatched: true }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+      const capture = db2.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photoId)).get();
+      if (capture) {
+        db2.update(imageFilesTable).set({ storedPath: destPath }).where(drizzleOrm.and(
+          drizzleOrm.eq(imageFilesTable.captureId, capture.id),
+          drizzleOrm.eq(imageFilesTable.fileRole, "JPEG")
+        )).run();
+        db2.update(capturesTable).set({ updatedAt: now$2() }).where(drizzleOrm.eq(capturesTable.id, capture.id)).run();
+      }
       const win = getMainWindow$1();
       win?.webContents.send("photo:reassigned", {
         photoId,
@@ -40934,11 +41006,35 @@ function registerPhotoHandlers() {
         fromStudentId: photo.studentId,
         toStudentId: studentId
       });
+      if (capture) {
+        win?.webContents.send("capture:updated", {
+          projectId: photo.projectId,
+          captureId: capture.id,
+          studentId
+        });
+      }
     }
   );
   electron.ipcMain.handle("photos:delete", async (_e, { photoId }) => {
     const [photo] = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).all();
+    const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photoId)).get();
     db.delete(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    if (capture) {
+      db.delete(imageFilesTable).where(drizzleOrm.and(
+        drizzleOrm.eq(imageFilesTable.captureId, capture.id),
+        drizzleOrm.eq(imageFilesTable.fileRole, "JPEG")
+      )).run();
+      const remainingFiles = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
+      if (remainingFiles.length === 0) {
+        db.delete(capturesTable).where(drizzleOrm.eq(capturesTable.id, capture.id)).run();
+      } else {
+        db.update(capturesTable).set({
+          legacyPhotoId: null,
+          pairingStatus: "raw_only",
+          updatedAt: now$2()
+        }).where(drizzleOrm.eq(capturesTable.id, capture.id)).run();
+      }
+    }
     if (photo) {
       const win = getMainWindow$1();
       win?.webContents.send("photo:deleted", {
@@ -40946,6 +41042,13 @@ function registerPhotoHandlers() {
         projectId: photo.projectId,
         studentId: photo.studentId
       });
+      if (capture) {
+        win?.webContents.send("capture:updated", {
+          projectId: photo.projectId,
+          captureId: capture.id,
+          studentId: photo.studentId
+        });
+      }
     }
   });
   electron.ipcMain.handle("photos:unmatched", async (_e, { projectId }) => {
@@ -41817,6 +41920,12 @@ function handleNewRaw(projectId, capture, session, db) {
     capturedAt: new Date(capture.capturedAtMs).toISOString()
   });
   if (result.kind === "duplicate") return;
+  const savedCapture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, result.captureId)).get();
+  getMainWindow()?.webContents.send("capture:updated", {
+    projectId,
+    captureId: result.captureId,
+    studentId: savedCapture?.studentId ?? null
+  });
   console.log(
     `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
   );
@@ -41838,6 +41947,14 @@ function finishMatchedPhoto(db, win, photo, student) {
     photo: photoForEvent,
     student: toStudentEvent(db, student)
   });
+  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
+  if (capture) {
+    win?.webContents.send("capture:updated", {
+      projectId: photo.projectId,
+      captureId: capture.id,
+      studentId: photo.studentId
+    });
+  }
   db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
   win?.webContents.send("upload:statusChanged", {
     photoId: photo.id,

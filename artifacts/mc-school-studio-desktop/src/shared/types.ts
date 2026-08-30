@@ -53,6 +53,47 @@ export interface Photo {
   createdAt: string
 }
 
+export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
+
+export interface CaptureFileReview {
+  id: number
+  fileRole: 'JPEG' | 'RAW'
+  fileFormat: string
+  originalFilename: string
+  storedPath: string
+  fileSize: number | null
+  uploadStatus: UploadStatus
+  fileUrl: string | null
+}
+
+export interface CaptureReview {
+  id: number
+  projectId: number
+  studentId: number | null
+  classId: number | null
+  baseFilename: string
+  capturedAt: string
+  pairingStatus: CapturePairingStatus
+  assignmentLocked: boolean
+  files: CaptureFileReview[]
+  thumbnailData: string | null
+  legacyPhoto: Photo | null
+}
+
+export interface CaptureCompletenessSummary {
+  total: number
+  complete: number
+  jpegOnly: number
+  rawOnly: number
+  unpaired: number
+}
+
+export interface CaptureUpdatedEvent {
+  projectId: number
+  captureId: number
+  studentId: number | null
+}
+
 export interface PhotoMatchedEvent {
   photo: Photo
   student: Student

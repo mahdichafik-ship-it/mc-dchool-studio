@@ -16015,14 +16015,14 @@ function useStudents(projectId, classId) {
   }, [projectId, load]);
   return { data, loading, reload: load };
 }
-function usePhotos(studentId) {
+function useCaptures(studentId) {
   const [data, setData] = reactExports.useState([]);
   const [loading, setLoading] = reactExports.useState(false);
   const load = reactExports.useCallback(async () => {
     if (!studentId) return;
     setLoading(true);
     try {
-      const result = await api.invoke("photos:list", { studentId });
+      const result = await api.invoke("captures:list", { studentId });
       setData(result);
     } finally {
       setLoading(false);
@@ -16031,7 +16031,54 @@ function usePhotos(studentId) {
   reactExports.useEffect(() => {
     load();
   }, [load]);
+  reactExports.useEffect(() => {
+    if (!studentId) return;
+    const unsubCapture = api.on("capture:updated", (event) => {
+      if (event.studentId === studentId) void load();
+    });
+    const unsubMatched = api.on("photo:matched", (event) => {
+      if (event.student.id === studentId) void load();
+    });
+    return () => {
+      unsubCapture();
+      unsubMatched();
+    };
+  }, [studentId, load]);
   return { data, loading, reload: load };
+}
+function useCaptureSummary(projectId) {
+  const [data, setData] = reactExports.useState({
+    total: 0,
+    complete: 0,
+    jpegOnly: 0,
+    rawOnly: 0,
+    unpaired: 0
+  });
+  const load = reactExports.useCallback(async () => {
+    if (!projectId) return;
+    const result = await api.invoke("captures:summary", { projectId });
+    setData(result);
+  }, [projectId]);
+  reactExports.useEffect(() => {
+    load();
+  }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId) return;
+    const refresh = (event) => {
+      if (event.projectId === projectId) void load();
+    };
+    const unsubCapture = api.on("capture:updated", refresh);
+    const unsubMatched = api.on("photo:matched", (event) => {
+      if (event.student.projectId === projectId) void load();
+    });
+    const unsubUnmatched = api.on("photo:unmatched", () => void load());
+    return () => {
+      unsubCapture();
+      unsubMatched();
+      unsubUnmatched();
+    };
+  }, [projectId, load]);
+  return { data, reload: load };
 }
 function useWatcherStatus(projectId) {
   const [isRunning, setIsRunning] = reactExports.useState(false);
@@ -16425,8 +16472,16 @@ function Dialog({ open, onClose, title, children, className }) {
     ] })
   ] });
 }
+const captureFilterOptions = [
+  { value: "all", label: "All" },
+  { value: "complete", label: "JPEG + RAW" },
+  { value: "jpeg_only", label: "JPEG only" },
+  { value: "raw_only", label: "RAW only" },
+  { value: "unpaired", label: "Needs review" }
+];
 function ProjectView({ projectId, onBack, offline = false }) {
   const { data: project, reload: reloadProject } = useProject(projectId);
+  const { data: captureSummary } = useCaptureSummary(projectId);
   const { data: classes } = useClasses(projectId);
   const [selectedClassId, setSelectedClassId] = reactExports.useState(null);
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? void 0);
@@ -16505,8 +16560,15 @@ function ProjectView({ projectId, onBack, offline = false }) {
           " classes · ",
           project?.studentCount,
           " students · ",
-          project?.photoCount,
-          " photos taken"
+          captureSummary.total > 0 ? `${captureSummary.total} captures` : `${project?.photoCount ?? 0} photos taken`
+        ] }),
+        captureSummary.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-0.5 text-[11px] text-slate-400", children: [
+          captureSummary.complete,
+          " paired · ",
+          captureSummary.jpegOnly,
+          " JPEG only · ",
+          captureSummary.rawOnly,
+          " RAW only"
         ] }),
         pendingUploadCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-amber-700", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3" }),
@@ -16690,22 +16752,22 @@ function StudentDetail({
   onReassign,
   offline
 }) {
-  const { data: photos, reload: reloadPhotos } = usePhotos(student.id);
+  const { data: captures, reload: reloadCaptures } = useCaptures(student.id);
   const [reassignOpen, setReassignOpen] = reactExports.useState(false);
   const [reassignPhoto, setReassignPhoto] = reactExports.useState(null);
   const [retryingPhotoId, setRetryingPhotoId] = reactExports.useState(null);
-  const handlePhotoMatched = reactExports.useCallback(
-    (data) => {
-      if (data.student.id === student.id) {
-        reloadPhotos();
-      }
+  const [pairingFilter, setPairingFilter] = reactExports.useState("all");
+  const captureCounts = captures.reduce(
+    (counts, capture) => {
+      counts[capture.pairingStatus]++;
+      return counts;
     },
-    [student.id, reloadPhotos]
+    { complete: 0, jpeg_only: 0, raw_only: 0, unpaired: 0, pending: 0 }
   );
-  usePhotoEvents(handlePhotoMatched);
+  const filteredCaptures = pairingFilter === "all" ? captures : captures.filter((capture) => capture.pairingStatus === pairingFilter);
   async function handleDeletePhoto(photoId) {
     await window.api.invoke("photos:delete", { photoId });
-    reloadPhotos();
+    reloadCaptures();
     onReassign();
   }
   async function handleOpenPhoto(filePath) {
@@ -16729,7 +16791,7 @@ function StudentDetail({
       addToast({ type: "error", title: "Photo upload failed", description: String(error) });
     } finally {
       setRetryingPhotoId(null);
-      reloadPhotos();
+      reloadCaptures();
       onReassign();
     }
   }
@@ -16746,11 +16808,11 @@ function StudentDetail({
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-500", children: student.className })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2", children: photos.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", children: [
-        photos.length,
-        " photo",
-        photos.length !== 1 ? "s" : "",
-        " captured"
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2", children: captures.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", children: [
+        captures.length,
+        " capture",
+        captures.length !== 1 ? "s" : "",
+        " recorded"
       ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "warning", children: "Not yet photographed" }) })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-8 p-8", children: [
@@ -16779,29 +16841,50 @@ function StudentDetail({
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs font-medium text-slate-500 uppercase tracking-wider mb-3", children: [
-          "Captured photos (",
-          photos.length,
+          "Capture review (",
+          filteredCaptures.length,
           ")"
         ] }),
-        photos.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300 mb-2" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No photos yet" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-0.5", children: "Photos will appear here automatically when captured" })
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-3 gap-3", children: photos.map((photo) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-          PhotoTile,
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1.5 mb-3", children: captureFilterOptions.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
           {
-            photo,
-            uploadStatus: photoStatusMap.get(photo.id),
-            onOpen: () => handleOpenPhoto(photo.filePath),
-            onDelete: () => handleDeletePhoto(photo.id),
-            onRetry: () => handleRetryPhoto(photo.id),
-            retrying: retryingPhotoId === photo.id,
-            onReassign: () => {
-              setReassignPhoto(photo);
-              setReassignOpen(true);
-            }
+            type: "button",
+            onClick: () => setPairingFilter(option.value),
+            className: cn(
+              "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+              pairingFilter === option.value ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+            ),
+            children: [
+              option.label,
+              " (",
+              option.value === "all" ? captures.length : captureCounts[option.value],
+              ")"
+            ]
           },
-          photo.id
+          option.value
+        )) }),
+        captures.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300 mb-2" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No captures yet" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-0.5", children: "JPEG and RAW files will appear here automatically when captured" })
+        ] }) : filteredCaptures.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-8 text-slate-300 mb-2" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No captures match this filter" })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-3 gap-3", children: filteredCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          CaptureTile,
+          {
+            capture,
+            uploadStatus: capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : void 0,
+            onOpen: () => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? ""),
+            onDelete: capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto.id) : void 0,
+            onRetry: capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto.id) : void 0,
+            retrying: capture.legacyPhoto?.id === retryingPhotoId,
+            onReassign: capture.legacyPhoto ? () => {
+              setReassignPhoto(capture.legacyPhoto);
+              setReassignOpen(true);
+            } : void 0
+          },
+          capture.id
         )) })
       ] })
     ] }),
@@ -16813,7 +16896,7 @@ function StudentDetail({
         onClose: () => setReassignOpen(false),
         onDone: () => {
           setReassignOpen(false);
-          reloadPhotos();
+          reloadCaptures();
           onReassign();
         }
       }
@@ -16917,6 +17000,78 @@ function PhotoTile({
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: photo.fileName }) })
   ] });
+}
+function CaptureTile({
+  capture,
+  uploadStatus,
+  onOpen,
+  onDelete,
+  onReassign,
+  onRetry,
+  retrying
+}) {
+  const photo = capture.legacyPhoto;
+  if (photo) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        PhotoTile,
+        {
+          photo,
+          uploadStatus,
+          onOpen,
+          onDelete,
+          onReassign,
+          onRetry,
+          retrying
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureStatusBadge, { status: capture.pairingStatus })
+    ] });
+  }
+  const rawFile = capture.files.find((file) => file.fileRole === "RAW");
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-10" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-semibold tracking-wide", children: "RAW ORIGINAL" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-slate-400", children: capture.files[0]?.fileFormat ?? "RAW" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureStatusBadge, { status: capture.pairingStatus }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-center text-xs text-white", children: "RAW file recorded without a JPEG partner" }),
+      rawFile && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
+          onClick: onOpen,
+          className: "w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3 inline mr-1" }),
+            " Open RAW"
+          ]
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: capture.baseFilename }) })
+  ] });
+}
+function CaptureStatusBadge({ status }) {
+  const meta = {
+    complete: { label: "JPEG + RAW", className: "bg-green-100/95 text-green-700 border-green-200" },
+    jpeg_only: { label: "JPEG only", className: "bg-amber-100/95 text-amber-700 border-amber-200" },
+    raw_only: { label: "RAW only", className: "bg-blue-100/95 text-blue-700 border-blue-200" },
+    unpaired: { label: "Needs review", className: "bg-red-100/95 text-red-700 border-red-200" },
+    pending: { label: "Pending", className: "bg-slate-100/95 text-slate-600 border-slate-200" }
+  }[status];
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "span",
+    {
+      className: cn(
+        "absolute top-1.5 left-1.5 z-10 rounded-full border px-1.5 py-1 text-[9px] font-semibold shadow-sm",
+        meta.className
+      ),
+      children: meta.label
+    }
+  );
 }
 function getUploadStatusMeta(status) {
   switch (status) {

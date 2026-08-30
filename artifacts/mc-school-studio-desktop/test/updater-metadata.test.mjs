@@ -20,6 +20,27 @@ test('accepts electron-builder metadata with both architectures and blockmaps', 
   })
 })
 
+test('accepts metadata that also lists both signed DMG payloads', () => {
+  const arm64DmgChecksum = fixtureAssets.get(
+    'mc-school-studio-1.0.11-arm64.dmg',
+  )
+  const x64DmgChecksum = fixtureAssets.get('mc-school-studio-1.0.11-x64.dmg')
+  const withDmgPayloads = fixture.replace(
+    'files:\n',
+    [
+      'files:',
+      '  - url: mc-school-studio-1.0.11-arm64.dmg',
+      `    sha512: ${arm64DmgChecksum}`,
+      '  - url: mc-school-studio-1.0.11-x64.dmg',
+      `    sha512: ${x64DmgChecksum}`,
+      '',
+    ].join('\n'),
+  )
+
+  assert.doesNotThrow(() => {
+    validateLatestMacMetadata(withDmgPayloads, fixtureVersion, fixtureAssets)
+  })
+})
 test('rejects metadata with a missing payload', () => {
   const withoutArm64Zip = fixture.replace(
     /^  - url: mc-school-studio-1\.0\.11-arm64\.zip\n(?:    .+\n)+/m,
@@ -55,7 +76,7 @@ test('rejects metadata whose checksum does not match the release ZIP', () => {
 
   assert.throws(
     () => validateLatestMacMetadata(withStaleChecksum, fixtureVersion, fixtureAssets),
-    /checksum for mc-school-studio-1\.0\.11-arm64\.zip does not match the release ZIP/,
+    /checksum for mc-school-studio-1\.0\.11-arm64\.zip does not match the release asset/,
   )
 })
 

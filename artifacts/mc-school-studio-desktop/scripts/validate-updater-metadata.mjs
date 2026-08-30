@@ -12,6 +12,13 @@ function expectedPayloads(version) {
   )
 }
 
+function expectedInstallerAssets(version) {
+  return architectures.flatMap((architecture) => {
+    const base = `mc-school-studio-${version}-${architecture}`
+    return [`${base}.dmg`, `${base}.dmg.blockmap`, `${base}.zip`, `${base}.zip.blockmap`]
+  })
+}
+
 function parseMetadata(metadata) {
   const version = metadata.match(/^version:\s*([^\s#]+)\s*$/m)?.[1]
   const path = metadata.match(/^path:\s*([^\s#]+)\s*$/m)?.[1]
@@ -38,7 +45,7 @@ export async function indexReleaseAssets(assetDirectory) {
     entries
       .filter((entry) => entry.isFile())
       .map(async (entry) => {
-        if (!entry.name.endsWith('.zip')) {
+        if (!entry.name.endsWith('.zip') && !entry.name.endsWith('.dmg')) {
           assets.set(entry.name, null)
           return
         }
@@ -66,13 +73,23 @@ export function validateLatestMacMetadata(
     )
   }
 
-  const expected = expectedPayloads(expectedVersion)
-  const expectedSet = new Set(expected)
+   const expected = expectedPayloads(expectedVersion)
+   const expectedSet = new Set([
+     ...expected,
+     ...architectures.map(
+       (architecture) => `mc-school-studio-${expectedVersion}-${architecture}.dmg`,
+     ),
+   ])
   const actual = parsed.files.map(({ url }) => url)
   const missing = expected.filter((payload) => !actual.includes(payload))
   const unexpected = actual.filter((payload) => !expectedSet.has(payload))
 
-  if (missing.length > 0 || unexpected.length > 0 || actual.length !== expected.length) {
+   if (
+     missing.length > 0 ||
+     unexpected.length > 0 ||
+     actual.length < expected.length ||
+     actual.length > expectedSet.size
+   ) {
     throw new Error(
       [
         missing.length > 0 ? `missing payloads: ${missing.join(', ')}` : '',
@@ -90,7 +107,7 @@ export function validateLatestMacMetadata(
     }
     if (releaseAssets.get(file.url) !== file.sha512) {
       throw new Error(
-        `latest-mac.yml checksum for ${file.url} does not match the release ZIP`,
+        `latest-mac.yml checksum for ${file.url} does not match the release asset`,
       )
     }
   }
@@ -105,9 +122,9 @@ export function validateLatestMacMetadata(
     throw new Error('latest-mac.yml path checksum does not match its file entry')
   }
 
-  const missingAssets = expected
-    .flatMap((payload) => [payload, `${payload}.blockmap`])
-    .filter((asset) => !releaseAssets.has(asset))
+   const missingAssets = expectedInstallerAssets(expectedVersion).filter(
+     (asset) => !releaseAssets.has(asset),
+   )
   if (missingAssets.length > 0) {
     throw new Error(`missing release assets: ${missingAssets.join(', ')}`)
   }

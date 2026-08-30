@@ -6,6 +6,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { mkdirSync } from 'fs'
 import * as schema from './schema'
+import { ensureLegacyColumns } from './migrations'
 
 let _db: ReturnType<typeof drizzle> | null = null
 
@@ -94,35 +95,9 @@ function initializeSchema(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
   `)
 
-  // Add upload_status column to photos if it doesn't exist (idempotent migration)
-  try {
-    sqlite.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT`)
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Store the server URL returned after a successful cloud upload.
-  try {
-    sqlite.exec(`ALTER TABLE photos ADD COLUMN file_url TEXT`)
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Preserve the authoritative cloud identifiers separately from local
-  // autoincrement IDs. Upload routes must always use these remote IDs.
-  for (const statement of [
-    `ALTER TABLE projects ADD COLUMN cloud_id INTEGER`,
-    `ALTER TABLE classes ADD COLUMN cloud_id INTEGER`,
-    `ALTER TABLE students ADD COLUMN cloud_id INTEGER`,
-    `ALTER TABLE students ADD COLUMN email TEXT`,
-    `ALTER TABLE students ADD COLUMN phone TEXT`,
-  ]) {
-    try {
-      sqlite.exec(statement)
-    } catch {
-      // Column already exists — ignore
-    }
-  }
+  // Upgrade databases created by older desktop releases without replacing
+  // projects, rosters, or captured photos.
+  ensureLegacyColumns(sqlite)
 
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_projects_cloud_id ON projects(cloud_id);

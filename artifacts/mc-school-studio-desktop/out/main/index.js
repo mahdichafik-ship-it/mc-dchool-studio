@@ -81,6 +81,24 @@ const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   settingsTable,
   studentsTable
 }, Symbol.toStringTag, { value: "Module" }));
+function ensureColumn(sqlite, table, column, definition) {
+  const columns = sqlite.pragma(`table_info(${table})`);
+  if (columns.some((item) => item.name === column)) return;
+  sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+function ensureLegacyColumns(sqlite) {
+  for (const migration of [
+    ["photos", "upload_status", "TEXT"],
+    ["photos", "file_url", "TEXT"],
+    ["projects", "cloud_id", "INTEGER"],
+    ["classes", "cloud_id", "INTEGER"],
+    ["students", "cloud_id", "INTEGER"],
+    ["students", "email", "TEXT"],
+    ["students", "phone", "TEXT"]
+  ]) {
+    ensureColumn(sqlite, ...migration);
+  }
+}
 let _db = null;
 function getDb() {
   if (_db) return _db;
@@ -157,26 +175,7 @@ function initializeSchema(sqlite) {
     CREATE INDEX IF NOT EXISTS idx_photos_student ON photos(student_id);
     CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
   `);
-  try {
-    sqlite.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT`);
-  } catch {
-  }
-  try {
-    sqlite.exec(`ALTER TABLE photos ADD COLUMN file_url TEXT`);
-  } catch {
-  }
-  for (const statement of [
-    `ALTER TABLE projects ADD COLUMN cloud_id INTEGER`,
-    `ALTER TABLE classes ADD COLUMN cloud_id INTEGER`,
-    `ALTER TABLE students ADD COLUMN cloud_id INTEGER`,
-    `ALTER TABLE students ADD COLUMN email TEXT`,
-    `ALTER TABLE students ADD COLUMN phone TEXT`
-  ]) {
-    try {
-      sqlite.exec(statement);
-    } catch {
-    }
-  }
+  ensureLegacyColumns(sqlite);
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_projects_cloud_id ON projects(cloud_id);
     CREATE INDEX IF NOT EXISTS idx_classes_cloud_id ON classes(project_id, cloud_id);
@@ -41835,6 +41834,7 @@ let ipcHandlersRegistered = false;
 let availableUpdate = null;
 function setState(state) {
   currentState = state;
+  console.log("Desktop updater state:", JSON.stringify(state));
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("update:status", state);
   }
@@ -41858,6 +41858,7 @@ async function promptToDownload(info) {
     });
     if (result.response === 0) {
       try {
+        console.log("Desktop updater lifecycle: download-requested");
         await electronUpdater.autoUpdater.downloadUpdate();
       } catch (error) {
         setState({ status: "error", message: errorMessage(error) });
@@ -41882,6 +41883,7 @@ async function promptToInstall() {
       noLink: true
     });
     if (result.response === 0) {
+      console.log("Desktop updater lifecycle: install-requested");
       electronUpdater.autoUpdater.quitAndInstall();
     }
   } finally {
@@ -41910,9 +41912,17 @@ function registerUpdaterEvents() {
   electronUpdater.autoUpdater.on("update-downloaded", (info) => {
     availableUpdate = null;
     setState({ status: "downloaded", version: info.version, percent: 100 });
+    console.log(
+      "Desktop updater lifecycle:",
+      JSON.stringify({ event: "update-downloaded", version: info.version })
+    );
     void promptToInstall();
   });
   electronUpdater.autoUpdater.on("error", (error) => {
+    console.error(
+      "Desktop updater lifecycle:",
+      JSON.stringify({ event: "error", message: errorMessage(error) })
+    );
     console.error("Failed to check for desktop updates:", error);
     setState({ status: "error", message: errorMessage(error) });
   });

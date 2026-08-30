@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell } from 'electron'
+import { app, ipcMain, dialog, shell } from 'electron'
 import { getPhotosDir, setPhotosDir } from '../db'
 
 export function registerDialogHandlers() {
@@ -30,6 +30,8 @@ export function registerDialogHandlers() {
   ipcMain.handle('app:getPhotosDir', () => {
     return getPhotosDir()
   })
+
+  ipcMain.handle('app:getVersion', () => app.getVersion())
 
   ipcMain.handle('app:setPhotosDir', (_e, { dir }: { dir: string }) => {
     setPhotosDir(dir)

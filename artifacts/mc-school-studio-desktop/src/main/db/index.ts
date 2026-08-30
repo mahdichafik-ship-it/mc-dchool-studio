@@ -6,6 +6,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { mkdirSync } from 'fs'
 import * as schema from './schema'
+import { ensureLegacyColumns } from './migrations'
 
 let _db: ReturnType<typeof drizzle> | null = null
 
@@ -34,6 +35,7 @@ function initializeSchema(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       school_name TEXT NOT NULL,
       photo_date TEXT,
       address TEXT,
@@ -48,6 +50,7 @@ function initializeSchema(sqlite: Database.Database) {
 
     CREATE TABLE IF NOT EXISTS classes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       class_name TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -56,11 +59,14 @@ function initializeSchema(sqlite: Database.Database) {
 
     CREATE TABLE IF NOT EXISTS students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       generated_student_id TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
       simple_qr TEXT,
       json_qr TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -89,19 +95,15 @@ function initializeSchema(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
   `)
 
-  // Add upload_status column to photos if it doesn't exist (idempotent migration)
-  try {
-    sqlite.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT`)
-  } catch {
-    // Column already exists — ignore
-  }
+  // Upgrade databases created by older desktop releases without replacing
+  // projects, rosters, or captured photos.
+  ensureLegacyColumns(sqlite)
 
-  // Store the server URL returned after a successful cloud upload.
-  try {
-    sqlite.exec(`ALTER TABLE photos ADD COLUMN file_url TEXT`)
-  } catch {
-    // Column already exists — ignore
-  }
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_projects_cloud_id ON projects(cloud_id);
+    CREATE INDEX IF NOT EXISTS idx_classes_cloud_id ON classes(project_id, cloud_id);
+    CREATE INDEX IF NOT EXISTS idx_students_cloud_id ON students(project_id, cloud_id);
+  `)
 }
 
 export function getPhotosDir(): string {

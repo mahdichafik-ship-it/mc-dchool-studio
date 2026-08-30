@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import { readFile, readdir, rm } from "node:fs/promises";
@@ -399,6 +400,154 @@ async function uploadFailureTestPhoto(fileName: string): Promise<{
     filePath: path.resolve(process.cwd(), uploaded.fileUrl.replace(/^\//, "")),
   };
 }
+
+async function reservePort(): Promise<number> {
+  const probe = createServer();
+  probe.listen(0, "127.0.0.1");
+  await once(probe, "listening");
+  const address = probe.address();
+  assert(address && typeof address !== "string");
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => {
+    probe.close((error) => (error ? reject(error) : resolve()));
+  });
+  return port;
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function startProductionServer(): Promise<{
+  child: ChildProcess;
+  output: () => string;
+}> {
+  const port = await reservePort();
+  const child = spawn(process.execPath, [path.resolve(process.cwd(), "dist/index.mjs")], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      NODE_ENV: "test",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+
+  const healthUrl = `http://127.0.0.1:${port}/api/healthz`;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`Production server exited before becoming ready:\n${output}`);
+    }
+
+    try {
+      const response = await fetch(healthUrl);
+      if (response.ok) {
+        return { child, output: () => output };
+      }
+    } catch {
+      // The child may still be recovering the deletion backups or binding its port.
+    }
+    await wait(50);
+  }
+
+  child.kill("SIGTERM");
+  throw new Error(`Production server did not become ready:\n${output}`);
+}
+
+async function stopProductionServer(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return;
+  child.kill("SIGTERM");
+  await once(child, "exit");
+}
+
+test("recovers interrupted photo deletions before a restarted server accepts requests", async () => {
+  const restored = await uploadFailureTestPhoto("restart-restored.jpg");
+  const preserved = await uploadFailureTestPhoto("restart-preserved.jpg");
+  const deleted = await uploadFailureTestPhoto("restart-deleted.jpg");
+  const fixtures = [restored, preserved, deleted];
+  const backupDirectories = fixtures.map(({ filePath }, index) =>
+    path.join(path.dirname(filePath), `.photo-delete-restart-${index}`),
+  );
+  const backupPaths = fixtures.map(({ filePath }, index) =>
+    path.join(backupDirectories[index], path.basename(filePath)),
+  );
+  const preservedOriginalBytes = Buffer.from("the surviving original");
+  const staleBackupBytes = Buffer.from("stale backup bytes");
+  let productionServer: ChildProcess | undefined;
+
+  try {
+    // Simulate the process stopping after the backup copy, before its next
+    // deletion step, for each possible database/filesystem state.
+    await rm(restored.filePath, { force: true });
+    await fs.promises.mkdir(backupDirectories[0], { recursive: true });
+    await fs.promises.writeFile(backupPaths[0], jpegBytes);
+
+    await fs.promises.writeFile(preserved.filePath, preservedOriginalBytes);
+    await fs.promises.mkdir(backupDirectories[1], { recursive: true });
+    await fs.promises.writeFile(backupPaths[1], staleBackupBytes);
+
+    await fs.promises.mkdir(backupDirectories[2], { recursive: true });
+    await fs.promises.copyFile(deleted.filePath, backupPaths[2]);
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, deleted.uploaded.id));
+
+    const started = await startProductionServer();
+    productionServer = started.child;
+
+    const [restoredRow] = await db
+      .select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, restored.uploaded.id));
+    const [preservedRow] = await db
+      .select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, preserved.uploaded.id));
+    const [deletedRow] = await db
+      .select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, deleted.uploaded.id));
+
+    assert(restoredRow, "a surviving row must remain after restart recovery");
+    assert(preservedRow, "a row with a surviving original must remain after restart recovery");
+    assert.equal(deletedRow, undefined, "a committed row deletion must remain committed");
+    assert.deepEqual(await readFile(restored.filePath), jpegBytes, "missing originals must be restored");
+    assert.deepEqual(
+      await readFile(preserved.filePath),
+      preservedOriginalBytes,
+      "recovery must not overwrite a surviving original",
+    );
+    assert.equal(
+      fs.existsSync(deleted.filePath),
+      false,
+      "an original without a database row must be removed",
+    );
+    for (const backupDirectory of backupDirectories) {
+      assert.equal(
+        fs.existsSync(backupDirectory),
+        false,
+        "successfully reconciled backups must be removed",
+      );
+    }
+  } finally {
+    if (productionServer) {
+      await stopProductionServer(productionServer);
+    }
+    for (const fixture of fixtures) {
+      await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, fixture.uploaded.id));
+      await rm(fixture.filePath, { force: true });
+    }
+    for (const backupDirectory of backupDirectories) {
+      await rm(backupDirectory, { recursive: true, force: true });
+    }
+  }
+});
 
 test("restores the photo row when removing its file fails", async () => {
   const { uploaded, filePath } = await uploadFailureTestPhoto("unlink-failure.jpg");

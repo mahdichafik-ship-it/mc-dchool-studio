@@ -159,6 +159,17 @@ const server = createServer((request, response) => {
     })
     return
   }
+  if (request.method === 'POST' && url.pathname === '/api/projects/41/students/61/captures') {
+    assert.match(request.headers['x-mc-upload-id'] ?? '', /^[1-9]\d*$/)
+    request.resume()
+    request.on('end', () => {
+      uploadCount++
+      json(response, 201, {
+        file: { fileUrl: '/uploads/release-smoke.jpg' },
+      })
+    })
+    return
+  }
   json(response, 404, { error: `Unhandled smoke-test route ${request.method} ${url.pathname}` })
 })
 

@@ -201,29 +201,6 @@ jobs:
 
           test -f artifacts/mc-school-studio-desktop/dist/release/latest-mac.yml
 
-      - name: Exercise retirement reconnect in packaged signed app
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          case "$(uname -m)" in
-            arm64) smoke_arch="arm64" ;;
-            x86_64) smoke_arch="x64" ;;
-            *)
-              echo "::error::Unsupported macOS runner architecture: $(uname -m)"
-              exit 1
-              ;;
-          esac
-          smoke_dir="$(mktemp -d)"
-          ditto -x -k \
-            "artifacts/mc-school-studio-desktop/dist/release/mc-school-studio-${version}-${smoke_arch}.zip" \
-            "$smoke_dir"
-          app_path="$(find "$smoke_dir" -maxdepth 1 -name '*.app' -print -quit)"
-          test -n "$app_path"
-          MC_SCHOOL_STUDIO_APP_PATH="$app_path/Contents/MacOS/MC School Studio" \
-            pnpm --filter @workspace/mc-school-studio-desktop run test:retirement-release
-
       - name: Stage verified macOS packages
         uses: actions/upload-artifact@v4
         with:
@@ -235,8 +212,73 @@ jobs:
             artifacts/mc-school-studio-desktop/dist/release/latest-mac.yml
             artifacts/mc-school-studio-desktop/dist/release/*.blockmap
 
-  publish-release:
+  # ---------------------------------------------------------------------------
+  # Retirement smoke — runs each signed architecture on its matching native
+  # hosted runner. Publication is blocked until both checks pass.
+  # ---------------------------------------------------------------------------
+  retirement-smoke:
     needs: build-mac
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: macos-13
+            runner_architecture: x86_64
+          - architecture: arm64
+            runner: macos-14
+            runner_architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout smoke harness
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_RUNNER_ARCHITECTURE: ${{ matrix.runner_architecture }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$EXPECTED_RUNNER_ARCHITECTURE"
+
+      - name: Download verified macOS packages
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-mac
+          path: release
+
+      - name: Exercise retirement reconnect in packaged signed app
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          smoke_dir="$(mktemp -d)"
+          ditto -x -k \
+            "release/mc-school-studio-${version}-${EXPECTED_ARCHITECTURE}.zip" \
+            "$smoke_dir"
+          app_path="$(find "$smoke_dir" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app_path"
+          MC_SCHOOL_STUDIO_APP_PATH="$app_path/Contents/MacOS/MC School Studio" \
+            MC_SCHOOL_STUDIO_EXPECTED_ARCH="$EXPECTED_ARCHITECTURE" \
+            pnpm --filter @workspace/mc-school-studio-desktop run test:retirement-release
+
+  publish-release:
+    needs: [build-mac, retirement-smoke]
     permissions:
       contents: write
     runs-on: ubuntu-latest

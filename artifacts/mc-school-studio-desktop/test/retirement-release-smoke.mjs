@@ -17,6 +17,26 @@ import { basename, dirname, join } from 'node:path'
 const appExecutable = process.env.MC_SCHOOL_STUDIO_APP_PATH
 if (!appExecutable) throw new Error('MC_SCHOOL_STUDIO_APP_PATH must point to the packaged app executable')
 if (!existsSync(appExecutable)) throw new Error(`Packaged app executable not found: ${appExecutable}`)
+const expectedArchitecture = required('MC_SCHOOL_STUDIO_EXPECTED_ARCH')
+const nativeArchitecture = {
+  arm64: 'arm64',
+  x86_64: 'x64',
+}[execFileSync('/usr/bin/uname', ['-m'], { encoding: 'utf8' }).trim()]
+if (!nativeArchitecture) throw new Error('Unsupported macOS runner architecture')
+assert.equal(
+  nativeArchitecture,
+  expectedArchitecture,
+  `retirement smoke must run on a native ${expectedArchitecture} runner`,
+)
+const executableArchitectures = execFileSync('/usr/bin/lipo', ['-archs', appExecutable], {
+  encoding: 'utf8',
+}).trim().split(/\s+/)
+const expectedExecutableArchitecture = expectedArchitecture === 'arm64' ? 'arm64' : 'x86_64'
+assert.deepEqual(
+  executableArchitectures,
+  [expectedExecutableArchitecture],
+  `expected a thin ${expectedArchitecture} packaged executable, found ${executableArchitectures.join(', ')}`,
+)
 
 const token = 'release-retirement-smoke-token'
 const projectName = 'Release Retirement School'
@@ -227,6 +247,12 @@ function findFiles(directory) {
 
 function querySqlite(dbPath, sql) {
   return execFileSync('/usr/bin/sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim()
+}
+
+function required(name) {
+  const value = process.env[name]?.trim()
+  if (!value) throw new Error(`${name} is required`)
+  return value
 }
 
 const apiAddress = await new Promise((resolve, reject) => {

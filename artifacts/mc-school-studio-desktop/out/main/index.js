@@ -41915,6 +41915,20 @@ function registerWatcherHandlers() {
     watcher.on("error", (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error);
     });
+    await new Promise((resolveReady, rejectReady) => {
+      const handleReady = () => {
+        watcher.off("error", handleStartupError);
+        resolveReady();
+      };
+      const handleStartupError = (error) => {
+        watcher.off("ready", handleReady);
+        watchers.delete(projectId);
+        void watcher.close();
+        rejectReady(error);
+      };
+      watcher.once("ready", handleReady);
+      watcher.once("error", handleStartupError);
+    });
     console.log(
       `[Watcher] Started ${watchFolders.mode} watching for project ${projectId}: ${watchFolders.paths.join(", ")}`
     );

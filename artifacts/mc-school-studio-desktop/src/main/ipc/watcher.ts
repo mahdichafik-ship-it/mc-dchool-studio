@@ -151,6 +151,22 @@ export function registerWatcherHandlers() {
       console.error(`[Watcher] Error for project ${projectId}`, error)
     })
 
+    await new Promise<void>((resolveReady, rejectReady) => {
+      const handleReady = () => {
+        watcher.off('error', handleStartupError)
+        resolveReady()
+      }
+      const handleStartupError = (error: Error) => {
+        watcher.off('ready', handleReady)
+        watchers.delete(projectId)
+        void watcher.close()
+        rejectReady(error)
+      }
+
+      watcher.once('ready', handleReady)
+      watcher.once('error', handleStartupError)
+    })
+
     console.log(
       `[Watcher] Started ${watchFolders.mode} watching for project ${projectId}: ${watchFolders.paths.join(', ')}`,
     )

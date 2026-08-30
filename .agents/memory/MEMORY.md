@@ -7,3 +7,4 @@
 - [Platform-owner desktop scope](platform-owner-desktop-scope.md) — platform-owner desktop connections can pull every studio's projects; ordinary desktop roles remain studio-scoped.
 - [OpenAPI Zod compatibility](openapi-zod-compatibility.md) — avoid OpenAPI email formats until the generated Zod target supports the emitted validator.
 - [Bundled Node test logging](pino-test-transport.md) — disable threaded pretty logging in Node’s bundled ESM test context because `__dirname` is unavailable.
+- [GitHub desktop release publishing](github-desktop-release-publishing.md) — this workspace’s Git remote lacks credentials; publish Mac tags through the installed GitHub integration.

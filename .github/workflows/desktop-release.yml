@@ -290,3 +290,165 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --draft=false \
             --latest
+
+  # ---------------------------------------------------------------------------
+  # Update smoke — installs the previous signed release and exercises its
+  # native electron-updater flow against the release published above.
+  # These jobs intentionally run after publish-release and do not stage or
+  # publish release assets.
+  # ---------------------------------------------------------------------------
+  update-smoke-intel:
+    needs: publish-release
+    runs-on: macos-13
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout smoke harness
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Verify Intel runner
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+
+      - name: Resolve previous signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          release_list="$RUNNER_TEMP/mc-school-studio-releases.json"
+          gh release list \
+            --repo "$GITHUB_REPOSITORY" \
+            --limit 100 \
+            --json tagName,isDraft,isPrerelease > "$release_list"
+          previous_tag="$(node artifacts/mc-school-studio-desktop/scripts/resolve-previous-release.mjs \
+            "$TARGET_TAG" "$release_list")"
+          test -n "$previous_tag"
+          previous_version="${previous_tag#v}"
+          echo "MC_SCHOOL_STUDIO_SOURCE_VERSION=$previous_version" >> "$GITHUB_ENV"
+          echo "Resolved signed update source: $previous_tag"
+
+      - name: Download and install previous signed Intel release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/mc-school-studio-source.zip"
+          gh release download "v$MC_SCHOOL_STUDIO_SOURCE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "mc-school-studio-$MC_SCHOOL_STUDIO_SOURCE_VERSION-x64.zip" \
+            --output "$archive"
+          mkdir -p "$RUNNER_TEMP/mc-school-studio-source"
+          ditto -x -k "$archive" "$RUNNER_TEMP/mc-school-studio-source"
+          app_path="$(find "$RUNNER_TEMP/mc-school-studio-source" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app_path"
+          echo "MC_SCHOOL_STUDIO_APP_PATH=$app_path" >> "$GITHUB_ENV"
+          echo "Installed source bundle: $app_path"
+
+      - name: Exercise signed Intel update and restart
+        env:
+          MC_SCHOOL_STUDIO_TARGET_VERSION: ${{ github.ref_name }}
+          MC_SCHOOL_STUDIO_UPDATE_SMOKE_LOG: ${{ runner.temp }}/mc-school-studio-update-smoke/lifecycle.jsonl
+        run: |
+          set -euo pipefail
+          export MC_SCHOOL_STUDIO_TARGET_VERSION="${MC_SCHOOL_STUDIO_TARGET_VERSION#v}"
+          pnpm --filter @workspace/mc-school-studio-desktop run test:update-release
+
+      - name: Upload Intel updater lifecycle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-update-smoke-intel
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/mc-school-studio-update-smoke/lifecycle.jsonl
+
+  update-smoke-arm64:
+    needs: publish-release
+    runs-on: macos-14
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout smoke harness
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Verify Apple silicon runner
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+
+      - name: Resolve previous signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          release_list="$RUNNER_TEMP/mc-school-studio-releases.json"
+          gh release list \
+            --repo "$GITHUB_REPOSITORY" \
+            --limit 100 \
+            --json tagName,isDraft,isPrerelease > "$release_list"
+          previous_tag="$(node artifacts/mc-school-studio-desktop/scripts/resolve-previous-release.mjs \
+            "$TARGET_TAG" "$release_list")"
+          test -n "$previous_tag"
+          previous_version="${previous_tag#v}"
+          echo "MC_SCHOOL_STUDIO_SOURCE_VERSION=$previous_version" >> "$GITHUB_ENV"
+          echo "Resolved signed update source: $previous_tag"
+
+      - name: Download and install previous signed Apple-silicon release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/mc-school-studio-source.zip"
+          gh release download "v$MC_SCHOOL_STUDIO_SOURCE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "mc-school-studio-$MC_SCHOOL_STUDIO_SOURCE_VERSION-arm64.zip" \
+            --output "$archive"
+          mkdir -p "$RUNNER_TEMP/mc-school-studio-source"
+          ditto -x -k "$archive" "$RUNNER_TEMP/mc-school-studio-source"
+          app_path="$(find "$RUNNER_TEMP/mc-school-studio-source" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app_path"
+          echo "MC_SCHOOL_STUDIO_APP_PATH=$app_path" >> "$GITHUB_ENV"
+          echo "Installed source bundle: $app_path"
+
+      - name: Exercise signed Apple-silicon update and restart
+        env:
+          MC_SCHOOL_STUDIO_TARGET_VERSION: ${{ github.ref_name }}
+          MC_SCHOOL_STUDIO_UPDATE_SMOKE_LOG: ${{ runner.temp }}/mc-school-studio-update-smoke/lifecycle.jsonl
+        run: |
+          set -euo pipefail
+          export MC_SCHOOL_STUDIO_TARGET_VERSION="${MC_SCHOOL_STUDIO_TARGET_VERSION#v}"
+          pnpm --filter @workspace/mc-school-studio-desktop run test:update-release
+
+      - name: Upload Apple-silicon updater lifecycle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-update-smoke-arm64
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/mc-school-studio-update-smoke/lifecycle.jsonl

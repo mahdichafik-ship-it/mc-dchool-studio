@@ -34,6 +34,19 @@ valid, signed output after packaging had already succeeded.
 than a ZIP-only fixture. Keep strict name, version, checksum, preferred-path, and
 blockmap validation for the complete release set.
 
+Installed-app update smoke tests must drive the already-published older binary;
+do not rely on test hooks added only to the target release. A launch-time
+Electron main-process inspector can exercise that older binary's real updater
+singleton without weakening production behavior.
+
+**Why:** New environment flags or IPC hooks do not exist in the signed source
+release being upgraded, while hosted macOS UI scripting depends on Accessibility
+permissions that are not reliable across runner images.
+
+**How to apply:** Trigger the packaged source app's real update check, download,
+install, bundle replacement, and relaunch. Require a distinct target process to
+stay alive and re-run signature, Gatekeeper, and notarization checks afterward.
+
 Replit's GitHub OAuth connection may have repository access without permission
 to modify workflow files. When that occurs, use a user-provided GitHub token with
 `repo` and `workflow` scopes through Replit Secrets, never through chat.

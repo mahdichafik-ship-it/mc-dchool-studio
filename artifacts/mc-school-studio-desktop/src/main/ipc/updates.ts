@@ -30,6 +30,7 @@ let availableUpdate: UpdateInfo | null = null
 
 function setState(state: UpdateState) {
   currentState = state
+  console.log('Desktop updater state:', JSON.stringify(state))
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('update:status', state)
   }
@@ -57,6 +58,7 @@ async function promptToDownload(info: UpdateInfo) {
 
     if (result.response === 0) {
       try {
+        console.log('Desktop updater lifecycle: download-requested')
         await autoUpdater.downloadUpdate()
       } catch (error) {
         setState({ status: 'error', message: errorMessage(error) })
@@ -84,6 +86,7 @@ async function promptToInstall() {
     })
 
     if (result.response === 0) {
+      console.log('Desktop updater lifecycle: install-requested')
       autoUpdater.quitAndInstall()
     }
   } finally {
@@ -117,10 +120,18 @@ function registerUpdaterEvents() {
   autoUpdater.on('update-downloaded', (info) => {
     availableUpdate = null
     setState({ status: 'downloaded', version: info.version, percent: 100 })
+    console.log(
+      'Desktop updater lifecycle:',
+      JSON.stringify({ event: 'update-downloaded', version: info.version }),
+    )
     void promptToInstall()
   })
 
   autoUpdater.on('error', (error) => {
+    console.error(
+      'Desktop updater lifecycle:',
+      JSON.stringify({ event: 'error', message: errorMessage(error) }),
+    )
     console.error('Failed to check for desktop updates:', error)
     setState({ status: 'error', message: errorMessage(error) })
   })

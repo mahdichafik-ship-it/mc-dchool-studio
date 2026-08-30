@@ -15,6 +15,7 @@
     "test:retirement": "node --experimental-strip-types --test test/retirement.test.ts",
     "test:retirement-copy": "node --experimental-strip-types --test test/retirement-team-copy.test.ts",
     "test:retirement-release": "node test/retirement-release-smoke.mjs",
+    "test:update-release": "node test/update-release-smoke.mjs",
     "test:updater": "node --test test/updater-metadata.test.mjs",
     "validate:updater": "node scripts/validate-updater-metadata.mjs",
     "dist:mac": "pnpm run build && electron-builder --mac --publish never",

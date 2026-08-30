@@ -7,6 +7,7 @@ const drizzleOrm = require("drizzle-orm");
 const Database = require("better-sqlite3");
 const betterSqlite3 = require("drizzle-orm/better-sqlite3");
 const sqliteCore = require("drizzle-orm/sqlite-core");
+const node_fs = require("node:fs");
 const node_path = require("node:path");
 const require$$0$1 = require("util");
 const require$$1 = require("stream");
@@ -15,7 +16,6 @@ const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
-const node_fs = require("node:fs");
 const node_crypto = require("node:crypto");
 const electronUpdater = require("electron-updater");
 const projectsTable = sqliteCore.sqliteTable("projects", {
@@ -69,13 +69,52 @@ const photosTable = sqliteCore.sqliteTable("photos", {
   fileUrl: sqliteCore.text("file_url"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
+const capturesTable = sqliteCore.sqliteTable("captures", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  captureKey: sqliteCore.text("capture_key").notNull().unique(),
+  projectId: sqliteCore.integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  studentId: sqliteCore.integer("student_id").references(() => studentsTable.id, { onDelete: "set null" }),
+  classId: sqliteCore.integer("class_id").references(() => classesTable.id, { onDelete: "set null" }),
+  groupId: sqliteCore.text("group_id"),
+  baseFilename: sqliteCore.text("base_filename").notNull(),
+  capturedAt: sqliteCore.text("captured_at").notNull(),
+  sequence: sqliteCore.integer("sequence"),
+  favorite: sqliteCore.integer("favorite", { mode: "boolean" }).notNull().default(false),
+  rejected: sqliteCore.integer("rejected", { mode: "boolean" }).notNull().default(false),
+  selected: sqliteCore.integer("selected", { mode: "boolean" }).notNull().default(false),
+  notes: sqliteCore.text("notes"),
+  shootSessionId: sqliteCore.text("shoot_session_id"),
+  cameraSerial: sqliteCore.text("camera_serial"),
+  assignmentLocked: sqliteCore.integer("assignment_locked", { mode: "boolean" }).notNull().default(false),
+  pairingStatus: sqliteCore.text("pairing_status").$type().notNull().default("pending"),
+  legacyPhotoId: sqliteCore.integer("legacy_photo_id").references(() => photosTable.id, { onDelete: "set null" }),
+  createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
+  updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
+const imageFilesTable = sqliteCore.sqliteTable("image_files", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  captureId: sqliteCore.integer("capture_id").notNull().references(() => capturesTable.id, { onDelete: "cascade" }),
+  fileRole: sqliteCore.text("file_role").$type().notNull(),
+  fileFormat: sqliteCore.text("file_format").notNull(),
+  originalFilename: sqliteCore.text("original_filename").notNull(),
+  storedPath: sqliteCore.text("stored_path").notNull(),
+  sourcePath: sqliteCore.text("source_path"),
+  fileSize: sqliteCore.integer("file_size"),
+  checksum: sqliteCore.text("checksum"),
+  importTime: sqliteCore.text("import_time").notNull(),
+  uploadStatus: sqliteCore.text("upload_status").$type(),
+  fileUrl: sqliteCore.text("file_url"),
+  createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
 const settingsTable = sqliteCore.sqliteTable("settings", {
   key: sqliteCore.text("key").primaryKey(),
   value: sqliteCore.text("value").notNull()
 });
 const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
+  capturesTable,
   classesTable,
+  imageFilesTable,
   photosTable,
   projectsTable,
   settingsTable,
@@ -98,6 +137,132 @@ function ensureLegacyColumns(sqlite) {
   ]) {
     ensureColumn(sqlite, ...migration);
   }
+}
+function ensureCaptureTables(sqlite) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS captures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      capture_key TEXT NOT NULL UNIQUE,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
+      class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+      group_id TEXT,
+      base_filename TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      sequence INTEGER,
+      favorite INTEGER NOT NULL DEFAULT 0,
+      rejected INTEGER NOT NULL DEFAULT 0,
+      selected INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      shoot_session_id TEXT,
+      camera_serial TEXT,
+      assignment_locked INTEGER NOT NULL DEFAULT 0,
+      pairing_status TEXT NOT NULL DEFAULT 'pending',
+      legacy_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS image_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      capture_id INTEGER NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
+      file_role TEXT NOT NULL,
+      file_format TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      source_path TEXT,
+      file_size INTEGER,
+      checksum TEXT,
+      import_time TEXT NOT NULL,
+      upload_status TEXT,
+      file_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(capture_id, file_role)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_captures_project ON captures(project_id);
+    CREATE INDEX IF NOT EXISTS idx_captures_student ON captures(student_id);
+    CREATE INDEX IF NOT EXISTS idx_captures_pairing ON captures(project_id, base_filename, pairing_status);
+    CREATE INDEX IF NOT EXISTS idx_image_files_capture ON image_files(capture_id);
+    CREATE INDEX IF NOT EXISTS idx_image_files_checksum ON image_files(checksum);
+  `);
+  sqlite.exec(`
+    INSERT OR IGNORE INTO captures (
+      capture_key, project_id, student_id, class_id, base_filename, captured_at,
+      assignment_locked, pairing_status, legacy_photo_id, created_at, updated_at
+    )
+    SELECT
+      'legacy-photo:' || p.id,
+      p.project_id,
+      p.student_id,
+      (SELECT s.class_id FROM students s WHERE s.id = p.student_id),
+      CASE
+        WHEN instr(p.file_name, '.') > 0
+        THEN substr(p.file_name, 1, instr(p.file_name, '.') - 1)
+        ELSE p.file_name
+      END,
+      p.captured_at,
+      1,
+      CASE
+        WHEN p.is_matched = 1 THEN 'jpeg_only'
+        ELSE 'unpaired'
+      END,
+      p.id,
+      p.created_at,
+      p.created_at
+    FROM photos p;
+
+    INSERT OR IGNORE INTO image_files (
+      capture_id, file_role, file_format, original_filename, stored_path,
+      source_path, import_time, upload_status, file_url, created_at
+    )
+    SELECT
+      c.id,
+      'JPEG',
+      CASE
+        WHEN lower(p.file_name) LIKE '%.jpeg' THEN 'JPEG'
+        ELSE 'JPG'
+      END,
+      p.file_name,
+      p.file_path,
+      p.file_path,
+      p.created_at,
+      p.upload_status,
+      p.file_url,
+      p.created_at
+    FROM photos p
+    JOIN captures c ON c.legacy_photo_id = p.id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM image_files f
+      WHERE f.capture_id = c.id AND f.file_role = 'JPEG'
+    );
+  `);
+}
+function getPhotoSystemLayout(homeDir, configuredRoot) {
+  const root = node_path.join(homeDir, "MC_PhotoSystem");
+  return {
+    root,
+    jobs: node_path.join(root, "Jobs"),
+    spool: node_path.join(root, "Spool"),
+    spoolJpeg: node_path.join(root, "Spool", "JPEG"),
+    spoolRaw: node_path.join(root, "Spool", "RAW"),
+    cache: node_path.join(root, "Cache"),
+    settings: node_path.join(root, "Settings")
+  };
+}
+function ensurePhotoSystemLayout(layout) {
+  for (const directory of [
+    layout.root,
+    layout.jobs,
+    layout.spool,
+    layout.spoolJpeg,
+    layout.spoolRaw,
+    layout.cache,
+    layout.settings
+  ]) {
+    node_fs.mkdirSync(directory, { recursive: true });
+  }
+  return layout;
 }
 let _db = null;
 function getDb() {
@@ -176,6 +341,8 @@ function initializeSchema(sqlite) {
     CREATE INDEX IF NOT EXISTS idx_photos_project ON photos(project_id);
   `);
   ensureLegacyColumns(sqlite);
+  ensureCaptureTables(sqlite);
+  ensurePhotoSystemLayout(getPhotoSystemLayout(electron.app.getPath("home")));
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_projects_cloud_id ON projects(cloud_id);
     CREATE INDEX IF NOT EXISTS idx_classes_cloud_id ON classes(project_id, cloud_id);
@@ -41076,6 +41243,61 @@ function advanceSequence(state, capture) {
   }
   return { kind: "matched", studentId: state.activeStudentId };
 }
+const JPEG_EXTENSIONS = /* @__PURE__ */ new Set([".jpg", ".jpeg"]);
+const RAW_EXTENSIONS = /* @__PURE__ */ new Set([".nef", ".nrw", ".cr2", ".cr3", ".arw", ".raf", ".orf", ".rw2", ".dng"]);
+function getCaptureFileRole(fileName) {
+  const extension = node_path.extname(fileName).toLowerCase();
+  if (JPEG_EXTENSIONS.has(extension)) return "JPEG";
+  if (RAW_EXTENSIONS.has(extension)) return "RAW";
+  return null;
+}
+function getCaptureFileFormat(fileName) {
+  return node_path.extname(fileName).replace(/^\./, "").toUpperCase() || "UNKNOWN";
+}
+function normalizeBaseFilename(fileName) {
+  return node_path.parse(fileName).name.trim().normalize("NFKC").toLocaleLowerCase();
+}
+function mirrorPhotoAsCapture(db, photo) {
+  const existing = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
+  if (existing) return;
+  const role = getCaptureFileRole(photo.fileName);
+  if (role !== "JPEG") return;
+  const student = photo.studentId === null ? void 0 : db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, photo.studentId)).get();
+  const classRow = student ? db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get() : void 0;
+  const fileSize = (() => {
+    try {
+      return node_fs.statSync(photo.filePath).size;
+    } catch {
+      return null;
+    }
+  })();
+  const capture = db.insert(capturesTable).values({
+    captureKey: `legacy-photo:${photo.id}`,
+    projectId: photo.projectId,
+    studentId: photo.studentId,
+    classId: classRow?.id ?? null,
+    baseFilename: normalizeBaseFilename(photo.fileName),
+    capturedAt: photo.capturedAt,
+    assignmentLocked: true,
+    pairingStatus: photo.isMatched ? "jpeg_only" : "unpaired",
+    legacyPhotoId: photo.id,
+    createdAt: photo.createdAt,
+    updatedAt: photo.createdAt
+  }).returning().get();
+  db.insert(imageFilesTable).values({
+    captureId: capture.id,
+    fileRole: role,
+    fileFormat: getCaptureFileFormat(photo.fileName),
+    originalFilename: photo.fileName,
+    storedPath: photo.filePath,
+    sourcePath: photo.filePath,
+    fileSize,
+    importTime: photo.createdAt,
+    uploadStatus: photo.uploadStatus,
+    fileUrl: photo.fileUrl,
+    createdAt: photo.createdAt
+  }).run();
+}
 function createWatchedPhotoStore(db) {
   return {
     findProject: (projectId) => db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get(),
@@ -41087,7 +41309,11 @@ function createWatchedPhotoStore(db) {
       )
     ).get(),
     findClass: (classId) => db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, classId)).get(),
-    insertPhoto: (photo) => db.insert(photosTable).values(photo).returning().get()
+    insertPhoto: (photo) => {
+      const saved = db.insert(photosTable).values(photo).returning().get();
+      mirrorPhotoAsCapture(db, saved);
+      return saved;
+    }
   };
 }
 function now$1() {
@@ -41371,6 +41597,7 @@ async function handleNewPhoto(projectId, capture, session) {
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
     isMatched: true
   }).returning().get();
+  mirrorPhotoAsCapture(db, photo);
   finishMatchedPhoto(db, win, photo, student);
 }
 function finishMatchedPhoto(db, win, photo, student) {
@@ -41403,14 +41630,15 @@ function finishMatchedPhoto(db, win, photo, student) {
   }
 }
 function recordUnmatched(db, win, projectId, capture, reason) {
-  db.insert(photosTable).values({
+  const photo = db.insert(photosTable).values({
     projectId,
     studentId: null,
     filePath: capture.filePath,
     fileName: capture.fileName,
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
     isMatched: false
-  }).run();
+  }).returning().get();
+  mirrorPhotoAsCapture(db, photo);
   win?.webContents.send("photo:unmatched", {
     filePath: capture.filePath,
     fileName: capture.fileName,

@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
-import { ensureLegacyColumns } from '../src/main/db/migrations.ts'
+import { ensureCaptureTables, ensureLegacyColumns } from '../src/main/db/migrations.ts'
 
 test('upgrades an older local database without replacing existing rows', () => {
   const columns = new Map<string, Set<string>>([
@@ -35,4 +35,27 @@ test('upgrades an older local database without replacing existing rows', () => {
   assert(columns.get('students')?.has('email'))
   assert(columns.get('students')?.has('phone'))
   assert.equal(columns.get('students')?.size, 9)
+})
+
+test('capture migration is repeatable and keeps legacy rows as the compatibility source', () => {
+  const statements: string[] = []
+  const sqlite = {
+    pragma() {
+      return []
+    },
+    exec(source: string) {
+      statements.push(source)
+    },
+  }
+
+  ensureCaptureTables(sqlite)
+  ensureCaptureTables(sqlite)
+
+  assert.equal(statements.length, 4)
+  assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS captures/)
+  assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS image_files/)
+  assert.match(statements[1] ?? '', /INSERT OR IGNORE INTO captures/)
+  assert.match(statements[1] ?? '', /FROM photos p/)
+  assert.match(statements[1] ?? '', /INSERT OR IGNORE INTO image_files/)
+  assert.match(statements[1] ?? '', /WHERE NOT EXISTS/)
 })

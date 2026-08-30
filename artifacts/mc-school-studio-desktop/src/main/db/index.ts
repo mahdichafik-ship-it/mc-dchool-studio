@@ -6,7 +6,8 @@ import { app } from 'electron'
 import { join } from 'path'
 import { mkdirSync } from 'fs'
 import * as schema from './schema'
-import { ensureLegacyColumns } from './migrations'
+import { ensureCaptureTables, ensureLegacyColumns } from './migrations'
+import { ensurePhotoSystemLayout, getPhotoSystemLayout } from '../lib/storageLayout'
 
 let _db: ReturnType<typeof drizzle> | null = null
 
@@ -98,6 +99,8 @@ function initializeSchema(sqlite: Database.Database) {
   // Upgrade databases created by older desktop releases without replacing
   // projects, rosters, or captured photos.
   ensureLegacyColumns(sqlite)
+  ensureCaptureTables(sqlite)
+  ensurePhotoSystemLayout(getPhotoSystemLayout(app.getPath('home')))
 
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_projects_cloud_id ON projects(cloud_id);

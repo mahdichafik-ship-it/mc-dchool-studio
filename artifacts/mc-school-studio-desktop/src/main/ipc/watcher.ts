@@ -19,6 +19,7 @@ import {
 } from '../lib/photoSequence'
 import type { Photo, Student } from '../../shared/types'
 import { createWatchedPhotoStore, processWatchedPhoto } from '../lib/watchedPhotoProcessor'
+import { mirrorPhotoAsCapture } from '../lib/captureRepository'
 
 const FLUSH_DELAY_MS = 500
 
@@ -315,6 +316,7 @@ async function handleNewPhoto(
     })
     .returning()
     .get()
+  mirrorPhotoAsCapture(db, photo)
 
   finishMatchedPhoto(db, win, photo, student)
 }
@@ -367,7 +369,7 @@ function recordUnmatched(
   capture: CaptureFile,
   reason: string,
 ): void {
-  db.insert(photosTable)
+  const photo = db.insert(photosTable)
     .values({
       projectId,
       studentId: null,
@@ -376,7 +378,9 @@ function recordUnmatched(
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       isMatched: false,
     })
-    .run()
+    .returning()
+    .get()
+  mirrorPhotoAsCapture(db, photo)
 
   win?.webContents.send('photo:unmatched', {
     filePath: capture.filePath,

@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import type { getDb } from '../db'
 import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema.ts'
 import { extractStudentReference } from './photoFileNaming.ts'
+import { mirrorPhotoAsCapture } from './captureRepository.ts'
 
 type DesktopDb = ReturnType<typeof getDb>
 type ProjectRow = typeof projectsTable.$inferSelect
@@ -38,8 +39,11 @@ export function createWatchedPhotoStore(db: DesktopDb): WatchedPhotoStore {
         .get(),
     findClass: (classId) =>
       db.select().from(classesTable).where(eq(classesTable.id, classId)).get(),
-    insertPhoto: (photo) =>
-      db.insert(photosTable).values(photo).returning().get(),
+    insertPhoto: (photo) => {
+      const saved = db.insert(photosTable).values(photo).returning().get()
+      mirrorPhotoAsCapture(db, saved)
+      return saved
+    },
   }
 }
 

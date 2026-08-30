@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import { readFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { eq, count } from 'drizzle-orm'
@@ -6,6 +6,11 @@ import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
 import type { Project, Class, Student, ImportResult } from '../../shared/types'
 import { safeProjectFolderName } from '../lib/retirement'
+import {
+  ensureProjectStorageLayout,
+  getPhotoSystemLayout,
+  getProjectStorageLayout,
+} from '../lib/storageLayout'
 
 function now() {
   return new Date().toISOString()
@@ -35,30 +40,41 @@ function enrichProject(
   }
 }
 
-export function registerProjectHandlers() {
-  const db = getDb()
+export function prepareProjectFolders(
+  projectDb: ReturnType<typeof getDb>,
+  projectId: number,
+): void {
+  const project = projectDb.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  if (!project) return
 
-  function prepareProjectFolders(projectId: number): void {
-    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
-    if (!project) return
+  const projectDir = join(getPhotosDir(), safeProjectFolderName(project.schoolName))
+  mkdirSync(projectDir, { recursive: true })
 
-    const projectDir = join(getPhotosDir(), safeProjectFolderName(project.schoolName))
-    mkdirSync(projectDir, { recursive: true })
+  const classes = projectDb.select().from(classesTable).where(eq(classesTable.projectId, projectId)).all()
+  for (const cls of classes) {
+    const classDir = join(projectDir, safeProjectFolderName(cls.className))
+    mkdirSync(classDir, { recursive: true })
 
-    const classes = db.select().from(classesTable).where(eq(classesTable.projectId, projectId)).all()
-    for (const cls of classes) {
-      const classDir = join(projectDir, safeProjectFolderName(cls.className))
-      mkdirSync(classDir, { recursive: true })
-
-      const students = db.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
-      for (const student of students) {
-        mkdirSync(
-          join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
-          { recursive: true },
-        )
-      }
+    const students = projectDb.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
+    for (const student of students) {
+      mkdirSync(
+        join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+        { recursive: true },
+      )
     }
   }
+
+  ensureProjectStorageLayout(
+    getProjectStorageLayout(
+      getPhotoSystemLayout(app.getPath('home')),
+      project.id,
+      project.schoolName,
+    ),
+  )
+}
+
+export function registerProjectHandlers() {
+  const db = getDb()
 
   ipcMain.handle('projects:list', async (): Promise<Project[]> => {
     const projects = db.select().from(projectsTable).orderBy(projectsTable.updatedAt).all()
@@ -88,7 +104,7 @@ export function registerProjectHandlers() {
     const [{ classCount }] = db.select({ classCount: count() }).from(classesTable).where(eq(classesTable.projectId, p.id)).all()
     const [{ studentCount }] = db.select({ studentCount: count() }).from(studentsTable).where(eq(studentsTable.projectId, p.id)).all()
     const [{ photoCount }] = db.select({ photoCount: count() }).from(photosTable).where(eq(photosTable.projectId, p.id)).all()
-    prepareProjectFolders(projectId)
+    prepareProjectFolders(db, projectId)
     return enrichProject(p, classCount, studentCount, photoCount)
   })
 
@@ -187,6 +203,7 @@ export function registerProjectHandlers() {
     }
 
     const proj = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()!
+    prepareProjectFolders(db, projectId)
     return {
       project: enrichProject(proj, classes.length, studentsImported, 0),
       classesImported: classes.length,

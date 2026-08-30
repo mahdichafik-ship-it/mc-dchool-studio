@@ -8,6 +8,7 @@ import { ipcMain } from 'electron'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
 import { projectsTable, classesTable, studentsTable } from '../db/schema'
+import { prepareProjectFolders } from './projects'
 import {
   getUploadConfig,
   getSetting,
@@ -222,9 +223,10 @@ export function registerCloudHandlers() {
             studentsImported++
           }
 
-          return { classesImported: classes.length, studentsImported }
+          return { projectId: localProject.id, classesImported: classes.length, studentsImported }
         })
 
+        prepareProjectFolders(db, imported.projectId)
         return { ok: true, ...imported }
       } catch (err) {
         return { ok: false, error: String(err) }

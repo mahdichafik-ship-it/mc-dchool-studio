@@ -445,26 +445,33 @@ function enrichProject(p, classCount, studentCount, photoCount) {
     updatedAt: p.updatedAt
   };
 }
-function registerProjectHandlers() {
-  const db = getDb();
-  function prepareProjectFolders(projectId) {
-    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-    if (!project) return;
-    const projectDir = path.join(getPhotosDir(), safeProjectFolderName(project.schoolName));
-    require$$0.mkdirSync(projectDir, { recursive: true });
-    const classes = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
-    for (const cls of classes) {
-      const classDir = path.join(projectDir, safeProjectFolderName(cls.className));
-      require$$0.mkdirSync(classDir, { recursive: true });
-      const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.classId, cls.id)).all();
-      for (const student of students) {
-        require$$0.mkdirSync(
-          path.join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
-          { recursive: true }
-        );
-      }
+function prepareProjectFolders(projectDb, projectId) {
+  const project = projectDb.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project) return;
+  const projectDir = path.join(getPhotosDir(), safeProjectFolderName(project.schoolName));
+  require$$0.mkdirSync(projectDir, { recursive: true });
+  const classes = projectDb.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
+  for (const cls of classes) {
+    const classDir = path.join(projectDir, safeProjectFolderName(cls.className));
+    require$$0.mkdirSync(classDir, { recursive: true });
+    const students = projectDb.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.classId, cls.id)).all();
+    for (const student of students) {
+      require$$0.mkdirSync(
+        path.join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+        { recursive: true }
+      );
     }
   }
+  ensureProjectStorageLayout(
+    getProjectStorageLayout(
+      getPhotoSystemLayout(electron.app.getPath("home")),
+      project.id,
+      project.schoolName
+    )
+  );
+}
+function registerProjectHandlers() {
+  const db = getDb();
   electron.ipcMain.handle("projects:list", async () => {
     const projects = db.select().from(projectsTable).orderBy(projectsTable.updatedAt).all();
     return projects.map((p) => {
@@ -480,7 +487,7 @@ function registerProjectHandlers() {
     const [{ classCount }] = db.select({ classCount: drizzleOrm.count() }).from(classesTable).where(drizzleOrm.eq(classesTable.projectId, p.id)).all();
     const [{ studentCount }] = db.select({ studentCount: drizzleOrm.count() }).from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, p.id)).all();
     const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(photosTable).where(drizzleOrm.eq(photosTable.projectId, p.id)).all();
-    prepareProjectFolders(projectId);
+    prepareProjectFolders(db, projectId);
     return enrichProject(p, classCount, studentCount, photoCount);
   });
   electron.ipcMain.handle(
@@ -550,6 +557,7 @@ function registerProjectHandlers() {
       studentsImported++;
     }
     const proj = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    prepareProjectFolders(db, projectId);
     return {
       project: enrichProject(proj, classes.length, studentsImported, 0),
       classesImported: classes.length,
@@ -42405,8 +42413,9 @@ function registerCloudHandlers() {
               }
               studentsImported++;
             }
-            return { classesImported: classes.length, studentsImported };
+            return { projectId: localProject.id, classesImported: classes.length, studentsImported };
           });
+          prepareProjectFolders(db, imported.projectId);
           return { ok: true, ...imported };
         } catch (err) {
           return { ok: false, error: String(err) };

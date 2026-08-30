@@ -18,6 +18,8 @@ import {
   XCircle,
   Loader,
   RefreshCw,
+  Star,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -41,6 +43,7 @@ import type {
   StudentUploadSummary,
   ProjectUploadStatusRow,
   UploadStatus,
+  CaptureExportMode,
 } from '@/hooks/useApi'
 
 interface Props {
@@ -72,6 +75,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [settingFolder, setSettingFolder] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
+  const [exporting, setExporting] = useState(false)
   const pendingUploadCount = [...uploadStatusMap.values()]
     .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
 
@@ -132,6 +137,32 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
+  async function handleExportCaptures() {
+    const destinationDir = await window.api.invoke('dialog:openFolder') as string | null
+    if (!destinationDir) return
+    setExporting(true)
+    try {
+      const result = await window.api.invoke('captures:export', {
+        projectId,
+        destinationDir,
+        mode: exportMode,
+      })
+      if (!result.ok) {
+        addToast({ type: 'error', title: 'Export failed', description: result.error })
+        return
+      }
+      addToast({
+        type: 'success',
+        title: 'Capture export complete',
+        description: `${result.exportedFileCount ?? 0} file${result.exportedFileCount === 1 ? '' : 's'} from ${result.exportedCaptureCount ?? 0} capture${result.exportedCaptureCount === 1 ? '' : 's'} exported`,
+      })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Export failed', description: String(error) })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const filteredStudents = students.filter((s) => {
     if (!search) return true
     const q = search.toLowerCase()
@@ -173,6 +204,28 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
         {/* Watch folder controls */}
         <div className="flex items-center gap-2 shrink-0">
+           {captureSummary.total > 0 && (
+             <div className="flex items-center gap-1.5">
+               <select
+                 value={exportMode}
+                 onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
+                 className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                 aria-label="Capture export mode"
+               >
+                 <option value="all">Export all captures</option>
+                 <option value="paired">Export paired JPEG + RAW</option>
+                 <option value="jpeg_only">Export JPEG-only</option>
+                 <option value="raw_only">Export RAW-only</option>
+                 <option value="selected">Export selected</option>
+                 <option value="favorite">Export favorites</option>
+                 <option value="final_selection">Export final selection</option>
+               </select>
+               <Button variant="outline" size="sm" onClick={handleExportCaptures} disabled={exporting}>
+                 {exporting ? <Loader className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                 {exporting ? 'Exporting…' : 'Export'}
+               </Button>
+             </div>
+           )}
           {project?.watchFolder ? (
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 max-w-[200px] truncate hidden lg:block">
@@ -410,6 +463,7 @@ function StudentDetail({
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignPhoto, setReassignPhoto] = useState<Photo | null>(null)
   const [retryingPhotoId, setRetryingPhotoId] = useState<number | null>(null)
+  const [retryingFileId, setRetryingFileId] = useState<number | null>(null)
   const [pairingFilter, setPairingFilter] = useState<CaptureFilter>('all')
 
   const captureCounts = captures.reduce(
@@ -453,6 +507,41 @@ function StudentDetail({
       setRetryingPhotoId(null)
        reloadCaptures()
       onReassign()
+    }
+  }
+
+  async function handleRetryFile(fileId: number) {
+    if (retryingFileId !== null) return
+    setRetryingFileId(fileId)
+    try {
+      const result = await window.api.invoke('upload:retryFile', { fileId })
+      if (result.ok) {
+        addToast({ type: 'success', title: 'Capture file upload retried' })
+      } else {
+        addToast({
+          type: 'error',
+          title: offline ? 'Upload still waiting' : 'Capture file upload failed',
+          description: result.error,
+        })
+      }
+    } catch (error) {
+      addToast({ type: 'error', title: 'Capture file upload failed', description: String(error) })
+    } finally {
+      setRetryingFileId(null)
+      reloadCaptures()
+      onReassign()
+    }
+  }
+
+  async function handleUpdateCaptureReview(
+    captureId: number,
+    values: { favorite?: boolean; rejected?: boolean; selected?: boolean },
+  ) {
+    try {
+      await window.api.invoke('captures:updateReview', { captureId, ...values })
+      await reloadCaptures()
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not update capture review', description: String(error) })
     }
   }
 
@@ -554,6 +643,9 @@ function StudentDetail({
                   onDelete={capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto!.id) : undefined}
                   onRetry={capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto!.id) : undefined}
                   retrying={capture.legacyPhoto?.id === retryingPhotoId}
+                   onRetryFile={handleRetryFile}
+                   retryingFileId={retryingFileId}
+                   onUpdateReview={handleUpdateCaptureReview}
                   onReassign={capture.legacyPhoto ? () => {
                     setReassignPhoto(capture.legacyPhoto)
                     setReassignOpen(true)
@@ -692,6 +784,9 @@ function CaptureTile({
   onReassign,
   onRetry,
   retrying,
+  onRetryFile,
+  retryingFileId,
+  onUpdateReview,
 }: {
   capture: CaptureReview
   uploadStatus?: ProjectUploadStatusRow
@@ -700,11 +795,15 @@ function CaptureTile({
   onReassign?: () => void
   onRetry?: () => void
   retrying: boolean
+  onRetryFile?: (fileId: number) => void
+  retryingFileId?: number | null
+  onUpdateReview?: (captureId: number, values: { favorite?: boolean; rejected?: boolean; selected?: boolean }) => void
 }) {
   const photo = capture.legacyPhoto
+  const rawFile = capture.files.find((file) => file.fileRole === 'RAW')
   if (photo) {
     return (
-      <div className="relative">
+      <div className="group relative">
         <PhotoTile
           photo={photo}
           uploadStatus={uploadStatus}
@@ -715,11 +814,22 @@ function CaptureTile({
           retrying={retrying}
         />
         <CaptureStatusBadge status={capture.pairingStatus} />
+        <CaptureUploadBadge capture={capture} />
+        <CaptureReviewControls capture={capture} onUpdateReview={onUpdateReview} />
+        {rawFile?.uploadStatus === 'error' && onRetryFile && (
+          <button
+            type="button"
+            onClick={() => onRetryFile(rawFile.id)}
+            disabled={retryingFileId === rawFile.id}
+            className="absolute bottom-8 right-1.5 z-10 rounded bg-red-600/90 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-60"
+          >
+            {retryingFileId === rawFile.id ? 'Retrying…' : 'Retry RAW'}
+          </button>
+        )}
       </div>
     )
   }
 
-  const rawFile = capture.files.find((file) => file.fileRole === 'RAW')
   return (
     <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
       <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400">
@@ -728,6 +838,8 @@ function CaptureTile({
         <span className="text-[10px] text-slate-400">{capture.files[0]?.fileFormat ?? 'RAW'}</span>
       </div>
       <CaptureStatusBadge status={capture.pairingStatus} />
+       <CaptureUploadBadge capture={capture} />
+       <CaptureReviewControls capture={capture} onUpdateReview={onUpdateReview} />
       <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-3">
         <p className="text-center text-xs text-white">
           RAW file recorded without a JPEG partner
@@ -741,11 +853,106 @@ function CaptureTile({
             <ExternalLink className="size-3 inline mr-1" /> Open RAW
           </button>
         )}
+         {rawFile?.uploadStatus === 'error' && onRetryFile && (
+           <button
+             type="button"
+             onClick={() => onRetryFile(rawFile.id)}
+             disabled={retryingFileId === rawFile.id}
+             className="w-full text-white text-xs bg-red-500/70 hover:bg-red-500 disabled:opacity-60 rounded px-2 py-1"
+           >
+             {retryingFileId === rawFile.id ? 'Retrying…' : 'Retry RAW upload'}
+           </button>
+         )}
       </div>
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
         <p className="text-white text-[10px] truncate">{capture.baseFilename}</p>
       </div>
     </div>
+  )
+}
+
+function CaptureReviewControls({
+  capture,
+  onUpdateReview,
+}: {
+  capture: CaptureReview
+  onUpdateReview?: (captureId: number, values: { favorite?: boolean; rejected?: boolean; selected?: boolean }) => void
+}) {
+  if (!onUpdateReview) return null
+  return (
+    <div className="absolute bottom-1.5 left-1.5 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      <button
+        type="button"
+        aria-label={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
+        title={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
+        onClick={() => onUpdateReview(capture.id, { favorite: !capture.favorite })}
+        className={cn(
+          'rounded-full border p-1.5 shadow-sm',
+          capture.favorite
+            ? 'border-amber-300 bg-amber-100 text-amber-600'
+            : 'border-white/70 bg-black/50 text-white hover:bg-black/70',
+        )}
+      >
+        <Star className="size-3" fill={capture.favorite ? 'currentColor' : 'none'} />
+      </button>
+      <button
+        type="button"
+        aria-label={capture.selected ? 'Remove from selection' : 'Add to selection'}
+        title={capture.selected ? 'Remove from selection' : 'Add to selection'}
+        onClick={() => onUpdateReview(capture.id, { selected: !capture.selected, rejected: false })}
+        className={cn(
+          'rounded-full border p-1.5 shadow-sm',
+          capture.selected
+            ? 'border-teal-300 bg-teal-100 text-teal-700'
+            : 'border-white/70 bg-black/50 text-white hover:bg-black/70',
+        )}
+      >
+        <Check className="size-3" />
+      </button>
+      <button
+        type="button"
+        aria-label={capture.rejected ? 'Restore capture' : 'Reject capture'}
+        title={capture.rejected ? 'Restore capture' : 'Reject capture'}
+        onClick={() => onUpdateReview(capture.id, { rejected: !capture.rejected, selected: false })}
+        className={cn(
+          'rounded-full border p-1.5 shadow-sm',
+          capture.rejected
+            ? 'border-red-300 bg-red-100 text-red-700'
+            : 'border-white/70 bg-black/50 text-white hover:bg-black/70',
+        )}
+      >
+        <XCircle className="size-3" />
+      </button>
+    </div>
+  )
+}
+
+function CaptureUploadBadge({ capture }: { capture: CaptureReview }) {
+  const statuses = capture.files
+    .filter((file) => file.fileRole === 'RAW')
+    .map((file) => file.uploadStatus)
+    .filter(Boolean)
+  if (statuses.length === 0) return null
+  const status = statuses.includes('error')
+    ? 'error'
+    : statuses.includes('uploading')
+      ? 'uploading'
+      : statuses.includes('pending')
+        ? 'pending'
+        : 'done'
+  const meta = getUploadStatusMeta(status)
+  const StatusIcon = meta.icon
+  return (
+    <span
+      className={cn(
+        'absolute top-1.5 right-1.5 z-10 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm',
+        meta.badgeClass,
+      )}
+      title={`Capture upload: ${meta.label}`}
+    >
+      <StatusIcon className={cn('size-3', meta.iconClass)} />
+      <span className="sr-only">{meta.label}</span>
+    </span>
   )
 }
 

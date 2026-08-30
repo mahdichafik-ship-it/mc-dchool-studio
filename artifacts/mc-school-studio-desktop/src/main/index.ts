@@ -5,6 +5,7 @@ import { registerPhotoHandlers } from './ipc/photos'
 import { registerWatcherHandlers } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
 import { registerUploadHandlers } from './ipc/upload'
+import { registerCaptureExportHandlers } from './ipc/captureExport'
 import { fetchCurrentSession, registerAuthHandlers } from './ipc/auth'
 import { registerCloudHandlers } from './ipc/cloud'
 import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
@@ -94,6 +95,7 @@ app.whenReady().then(() => {
   registerWatcherHandlers()
   registerDialogHandlers()
   registerUploadHandlers()
+  registerCaptureExportHandlers()
   registerAuthHandlers()
   registerCloudHandlers()
 

@@ -8,6 +8,9 @@ import type {
   CaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
+  CaptureFileUploadStatusChangedEvent,
+  CaptureExportMode,
+  CaptureExportResult,
   PhotoMatchedEvent,
   PhotoMarkerEvent,
   PhotoUnmatchedEvent,
@@ -28,6 +31,9 @@ export type {
   CaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
+  CaptureFileUploadStatusChangedEvent,
+  CaptureExportMode,
+  CaptureExportResult,
   PhotoMatchedEvent,
   PhotoMarkerEvent,
   PhotoUnmatchedEvent,
@@ -245,9 +251,13 @@ export function useCaptures(studentId: number | null) {
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.id === studentId) void load()
     })
+    const unsubFileUpload = api.on('capture:fileUploadStatusChanged', (event: CaptureFileUploadStatusChangedEvent) => {
+      if (event.studentId === studentId) void load()
+    })
     return () => {
       unsubCapture()
       unsubMatched()
+      unsubFileUpload()
     }
   }, [studentId, load])
 

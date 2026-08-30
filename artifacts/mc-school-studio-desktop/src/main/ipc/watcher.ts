@@ -6,7 +6,7 @@ import { basename, extname, join, parse, resolve } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { capturesTable, classesTable, photosTable, projectsTable, studentsTable } from '../db/schema'
-import { getSetting, getUploadConfig, uploadPhoto } from './upload'
+import { getSetting, getUploadConfig, queueCaptureUploads, uploadPhoto } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
 import { readQrFromImage } from '../lib/qrReader'
 import {
@@ -408,6 +408,7 @@ function handleNewRaw(
     captureId: result.captureId,
     studentId: savedCapture?.studentId ?? null,
   })
+  void queueCaptureUploads(result.captureId).catch(() => {})
   console.log(
     `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
       + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
@@ -460,10 +461,14 @@ function finishMatchedPhoto(
     status: 'pending',
   })
 
-  const { apiUrl, connectionToken } = getUploadConfig()
-  if (apiUrl && connectionToken) {
-    uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt)
-      .catch(() => {})
+  if (capture) {
+    void queueCaptureUploads(capture.id).catch(() => {})
+  } else {
+    const { apiUrl, connectionToken } = getUploadConfig()
+    if (apiUrl && connectionToken) {
+      uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt)
+        .catch(() => {})
+    }
   }
 }
 

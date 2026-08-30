@@ -40955,6 +40955,10 @@ function registerPhotoHandlers() {
           classId: capture.classId,
           baseFilename: capture.baseFilename,
           capturedAt: capture.capturedAt,
+          sequence: capture.sequence,
+          favorite: capture.favorite,
+          rejected: capture.rejected,
+          selected: capture.selected,
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
           files: files.map(rowToCaptureFile),
@@ -40970,6 +40974,25 @@ function registerPhotoHandlers() {
     (_e, { projectId }) => {
       const rows = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
       return getCaptureSummary(rows);
+    }
+  );
+  electron.ipcMain.handle(
+    "captures:updateReview",
+    (_e, {
+      captureId,
+      favorite,
+      rejected,
+      selected
+    }) => {
+      const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+      if (!capture) return null;
+      db.update(capturesTable).set({
+        ...favorite === void 0 ? {} : { favorite },
+        ...rejected === void 0 ? {} : { rejected },
+        ...selected === void 0 ? {} : { selected },
+        updatedAt: now$2()
+      }).where(drizzleOrm.eq(capturesTable.id, captureId)).run();
+      return db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get() ?? null;
     }
   );
   electron.ipcMain.handle(
@@ -41112,6 +41135,16 @@ function notifyUploadStatus(photoId, studentId, status) {
   const win = electron.BrowserWindow.getAllWindows()[0];
   win?.webContents.send("upload:statusChanged", { photoId, studentId, status });
 }
+function notifyCaptureFileStatus(captureId, fileId, studentId, fileRole, status) {
+  const win = electron.BrowserWindow.getAllWindows()[0];
+  win?.webContents.send("capture:fileUploadStatusChanged", {
+    captureId,
+    fileId,
+    studentId,
+    fileRole,
+    status
+  });
+}
 function toServerFileUrl(fileUrl) {
   if (!fileUrl) return null;
   if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
@@ -41122,6 +41155,7 @@ let cloudSyncDisabledForRetirement = false;
 let cloudSessionVerified = false;
 const activeUploads = /* @__PURE__ */ new Set();
 const activePhotoUploads = /* @__PURE__ */ new Map();
+const activeCaptureFileUploads = /* @__PURE__ */ new Map();
 let retryInProgress = false;
 class RetryableUploadError extends Error {
 }
@@ -41237,6 +41271,106 @@ function uploadPhoto(projectId, studentId, photoId, filePath, fileName, captured
   });
   return task;
 }
+function setCaptureFileStatus(captureId, fileId, status, fileUrl) {
+  const db = getDb();
+  const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+  if (!file || !capture || file.captureId !== captureId || capture.studentId === null) return;
+  db.update(imageFilesTable).set({
+    uploadStatus: status,
+    ...fileUrl !== void 0 ? { fileUrl } : {}
+  }).where(drizzleOrm.eq(imageFilesTable.id, fileId)).run();
+  if (file.fileRole === "JPEG" && capture.legacyPhotoId !== null) {
+    db.update(photosTable).set({
+      uploadStatus: status,
+      ...fileUrl !== void 0 ? { fileUrl } : {}
+    }).where(drizzleOrm.eq(photosTable.id, capture.legacyPhotoId)).run();
+    notifyUploadStatus(capture.legacyPhotoId, capture.studentId, status);
+  }
+  notifyCaptureFileStatus(captureId, fileId, capture.studentId, file.fileRole, status);
+}
+async function performUploadCaptureFile(captureId, fileId) {
+  const db = getDb();
+  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+  const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+  if (!capture || !file || file.captureId !== captureId || capture.studentId === null) return;
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!connectionToken) return;
+  setCaptureFileStatus(captureId, fileId, "uploading", null);
+  try {
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
+    const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get();
+    if (!project?.cloudId || !student?.cloudId) {
+      throw new Error("This project needs to be re-synced before its captures can upload.");
+    }
+    const fileBuffer = require$$0.readFileSync(file.storedPath);
+    const mimeType = file.fileRole === "JPEG" ? "image/jpeg" : "application/octet-stream";
+    const formData = new FormData();
+    formData.append("file", new Blob([fileBuffer], { type: mimeType }), file.originalFilename);
+    formData.append("captureKey", capture.captureKey);
+    formData.append("fileRole", file.fileRole);
+    formData.append("fileFormat", file.fileFormat);
+    formData.append("baseFilename", capture.baseFilename);
+    if (capture.capturedAt) formData.append("capturedAt", capture.capturedAt);
+    if (capture.sequence !== null) formData.append("sequence", String(capture.sequence));
+    formData.append("favorite", String(capture.favorite));
+    formData.append("rejected", String(capture.rejected));
+    formData.append("selected", String(capture.selected));
+    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/captures`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        "X-MC-Upload-Id": String(file.id)
+      },
+      body: formData,
+      signal: AbortSignal.timeout(12e4)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      if (response.status === 401) invalidateDesktopCredentials(true);
+      if (response.status === 429 || response.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
+      }
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    let serverFileUrl = null;
+    try {
+      const payload = await response.json();
+      if (typeof payload.file?.fileUrl === "string") serverFileUrl = toServerFileUrl(payload.file.fileUrl);
+    } catch {
+      console.warn("[Upload] Capture file uploaded but did not return a readable fileUrl");
+    }
+    setCaptureFileStatus(captureId, fileId, "done", serverFileUrl);
+    console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`);
+  } catch (error) {
+    const retryable = isRetryableUploadFailure(error);
+    if (retryable) markCloudSessionUnavailable();
+    console.error(`[Upload] Capture file ${retryable ? "waiting for connectivity" : "failed"}:`, error);
+    setCaptureFileStatus(captureId, fileId, retryable ? "pending" : "error", void 0);
+    throw error;
+  }
+}
+function uploadCaptureFile(captureId, fileId) {
+  if (!isCloudSessionVerified()) return Promise.resolve();
+  const existing = activeCaptureFileUploads.get(fileId);
+  if (existing) return existing;
+  const task = performUploadCaptureFile(captureId, fileId);
+  activeCaptureFileUploads.set(fileId, task);
+  activeUploads.add(task);
+  void task.finally(() => {
+    activeUploads.delete(task);
+    activeCaptureFileUploads.delete(fileId);
+  }).catch(() => {
+  });
+  return task;
+}
+async function queueCaptureUploads(captureId) {
+  if (!isCloudSessionVerified()) return;
+  const db = getDb();
+  const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, captureId)).all().filter((file) => file.uploadStatus !== "done");
+  await Promise.allSettled(files.map((file) => uploadCaptureFile(captureId, file.id)));
+}
 function retryPendingUploads() {
   if (retryInProgress || !isCloudSessionVerified()) return;
   const { connectionToken } = getUploadConfig$1();
@@ -41248,8 +41382,20 @@ function retryPendingUploads() {
       drizzleOrm.eq(photosTable.uploadStatus, "pending"),
       drizzleOrm.eq(photosTable.uploadStatus, "uploading")
     )).all();
+    const captureFileRows = db.select({ captureId: imageFilesTable.captureId }).from(imageFilesTable).innerJoin(capturesTable, drizzleOrm.eq(imageFilesTable.captureId, capturesTable.id)).where(drizzleOrm.and(
+      drizzleOrm.or(
+        drizzleOrm.eq(imageFilesTable.uploadStatus, "pending"),
+        drizzleOrm.eq(imageFilesTable.uploadStatus, "uploading"),
+        drizzleOrm.isNull(imageFilesTable.uploadStatus)
+      )
+    )).all();
+    const captureIds = [...new Set(captureFileRows.map((row) => row.captureId))];
+    await Promise.allSettled(captureIds.map((captureId) => queueCaptureUploads(captureId)));
+    const mirroredPhotoIds = new Set(
+      db.select({ photoId: capturesTable.legacyPhotoId }).from(capturesTable).all().map((row) => row.photoId).filter((photoId) => photoId !== null)
+    );
     await Promise.allSettled(
-      pending.filter((photo) => photo.studentId !== null).map((photo) => uploadPhoto(
+      pending.filter((photo) => photo.studentId !== null && !mirroredPhotoIds.has(photo.id)).map((photo) => uploadPhoto(
         photo.projectId,
         photo.studentId,
         photo.id,
@@ -41296,6 +41442,12 @@ function registerUploadHandlers() {
       return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
     }
     try {
+      const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photoId)).get();
+      const jpegFile = capture ? db.select().from(imageFilesTable).where(drizzleOrm.and(drizzleOrm.eq(imageFilesTable.captureId, capture.id), drizzleOrm.eq(imageFilesTable.fileRole, "JPEG"))).get() : void 0;
+      if (capture && jpegFile) {
+        await uploadCaptureFile(capture.id, jpegFile.id);
+        return { ok: true };
+      }
       await uploadPhoto(
         photo.projectId,
         photo.studentId,
@@ -41307,6 +41459,22 @@ function registerUploadHandlers() {
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle("upload:retryFile", async (_e, { fileId }) => {
+    const db = getDb();
+    const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+    if (!file) return { ok: false, error: "Capture file not found" };
+    const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, file.captureId)).get();
+    if (!capture?.studentId) return { ok: false, error: "Capture is not matched to a student" };
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
+    }
+    try {
+      await uploadCaptureFile(capture.id, file.id);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
     }
   });
   electron.ipcMain.handle(
@@ -41328,7 +41496,11 @@ function registerUploadHandlers() {
   electron.ipcMain.handle("upload:getGlobalErrorCount", () => {
     const db = getDb();
     const photos = db.select({ id: photosTable.id }).from(photosTable).where(drizzleOrm.eq(photosTable.uploadStatus, "error")).all();
-    return photos.length;
+    const captureFiles = db.select({ id: imageFilesTable.id }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.uploadStatus, "error")).all();
+    const mirroredPhotoIds = new Set(
+      db.select({ photoId: capturesTable.legacyPhotoId }).from(capturesTable).all().map((row) => row.photoId).filter((photoId) => photoId !== null)
+    );
+    return photos.filter((photo) => !mirroredPhotoIds.has(photo.id)).length + captureFiles.length;
   });
 }
 function escapeRegExp(value) {
@@ -41926,6 +42098,8 @@ function handleNewRaw(projectId, capture, session, db) {
     captureId: result.captureId,
     studentId: savedCapture?.studentId ?? null
   });
+  void queueCaptureUploads(result.captureId).catch(() => {
+  });
   console.log(
     `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
   );
@@ -41961,10 +42135,15 @@ function finishMatchedPhoto(db, win, photo, student) {
     studentId: student.id,
     status: "pending"
   });
-  const { connectionToken } = getUploadConfig$1();
-  if (connectionToken) {
-    uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).catch(() => {
+  if (capture) {
+    void queueCaptureUploads(capture.id).catch(() => {
     });
+  } else {
+    const { connectionToken } = getUploadConfig$1();
+    if (connectionToken) {
+      uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).catch(() => {
+      });
+    }
   }
 }
 function recordUnmatched(db, win, projectId, capture, reason) {
@@ -42011,6 +42190,78 @@ function registerDialogHandlers() {
     setPhotosDir(dir);
     return getPhotosDir();
   });
+}
+function safeName(value) {
+  return value.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, " ").trim().slice(0, 100) || "captures";
+}
+function shouldExport(mode, capture) {
+  switch (mode) {
+    case "paired":
+      return capture.pairingStatus === "complete";
+    case "jpeg_only":
+      return capture.pairingStatus === "jpeg_only";
+    case "raw_only":
+      return capture.pairingStatus === "raw_only";
+    case "selected":
+      return capture.selected;
+    case "favorite":
+      return capture.favorite;
+    case "final_selection":
+      return capture.selected && !capture.rejected;
+    case "all":
+      return true;
+  }
+}
+function registerCaptureExportHandlers() {
+  electron.ipcMain.handle(
+    "captures:export",
+    (_event, {
+      projectId,
+      destinationDir,
+      mode
+    }) => {
+      if (!destinationDir || !Number.isInteger(projectId)) {
+        return { ok: false, error: "Choose a destination folder and a valid project." };
+      }
+      try {
+        const db = getDb();
+        const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+        if (!project) return { ok: false, error: "Project not found." };
+        const outputDir = path.join(destinationDir, `${safeName(project.schoolName)}-captures`);
+        require$$0.mkdirSync(outputDir, { recursive: true });
+        const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().filter((capture) => shouldExport(mode, capture));
+        let exportedCaptureCount = 0;
+        let exportedFileCount = 0;
+        let skippedMissingFiles = 0;
+        for (const capture of captures) {
+          const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
+          const sequence = String(capture.sequence ?? capture.id).padStart(6, "0");
+          const captureDir = path.join(outputDir, `${sequence}_${safeName(capture.baseFilename)}`);
+          let captureExported = false;
+          for (const file of files) {
+            if (!require$$0.existsSync(file.storedPath)) {
+              skippedMissingFiles++;
+              continue;
+            }
+            require$$0.mkdirSync(captureDir, { recursive: true });
+            require$$0.copyFileSync(file.storedPath, path.join(captureDir, safeName(file.originalFilename)));
+            exportedFileCount++;
+            captureExported = true;
+          }
+          if (captureExported) exportedCaptureCount++;
+        }
+        return {
+          ok: true,
+          outputDir,
+          exportedCaptureCount,
+          exportedFileCount,
+          skippedMissingFiles
+        };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
 }
 class WorkBarrier {
   disabled = false;
@@ -42618,6 +42869,7 @@ electron.app.whenReady().then(() => {
   registerWatcherHandlers();
   registerDialogHandlers();
   registerUploadHandlers();
+  registerCaptureExportHandlers();
   registerAuthHandlers();
   registerCloudHandlers();
   const mainWindow2 = createWindow();

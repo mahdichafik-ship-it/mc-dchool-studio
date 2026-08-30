@@ -10,6 +10,8 @@ import express from "express";
 import { and, eq } from "drizzle-orm";
 import {
   classesTable,
+  capturesTable,
+  captureFilesTable,
   db,
   desktopConnectionsTable,
   pool,
@@ -29,6 +31,7 @@ const jpegBytes = Buffer.from(
   "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/AX//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/AX//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
   "base64",
 );
+const rawBytes = Buffer.from("sample-raw-capture-bytes");
 
 type PhotoResponse = {
   id: number;
@@ -53,6 +56,7 @@ let adminMemberId: number;
 let hiddenProjectId: number;
 let uploadedPhotoId: number | undefined;
 let uploadedFilePath: string | undefined;
+const captureFilePaths: string[] = [];
 const desktopCredentials = createDesktopToken();
 const otherDesktopCredentials = createDesktopToken();
 const adminDesktopCredentials = createDesktopToken();
@@ -199,6 +203,7 @@ after(async () => {
   if (uploadedFilePath) {
     await rm(uploadedFilePath, { force: true });
   }
+  await Promise.all(captureFilePaths.map((filePath) => rm(filePath, { force: true })));
   if (studioId) {
     await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
   }
@@ -206,6 +211,126 @@ after(async () => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
   await pool.end();
+});
+
+test("uploads paired JPEG and RAW members idempotently and serves the RAW member", async () => {
+  const captureKey = `capture-integration-${process.pid}-${Date.now()}`;
+  const jpegForm = new (globalThis as any).FormData();
+  jpegForm.append(
+    "file",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    "portrait-original.jpg",
+  );
+  jpegForm.append("captureKey", captureKey);
+  jpegForm.append("baseFilename", "portrait-original");
+  jpegForm.append("fileRole", "JPEG");
+  jpegForm.append("capturedAt", "2026-08-22T12:34:56.000Z");
+  jpegForm.append("sequence", "7");
+
+  const jpegResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": `${captureKey}-jpeg`,
+      },
+      body: jpegForm,
+    },
+  );
+  assert.equal(jpegResponse.status, 201);
+  const jpegUploaded = await jpegResponse.json() as {
+    captureId: number;
+    pairingStatus: string;
+    file: { id: number; fileRole: string; fileUrl: string };
+  };
+  assert.equal(jpegUploaded.pairingStatus, "jpeg_only");
+  assert.equal(jpegUploaded.file.fileRole, "JPEG");
+  captureFilePaths.push(path.resolve(process.cwd(), jpegUploaded.file.fileUrl.replace(/^\//, "")));
+
+  const retryForm = new (globalThis as any).FormData();
+  retryForm.append(
+    "file",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    "portrait-original.jpg",
+  );
+  retryForm.append("captureKey", captureKey);
+  retryForm.append("fileRole", "JPEG");
+  const retryResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": `${captureKey}-jpeg`,
+      },
+      body: retryForm,
+    },
+  );
+  assert.equal(retryResponse.status, 200);
+  const retried = await retryResponse.json() as { captureId: number; file: { id: number } };
+  assert.equal(retried.captureId, jpegUploaded.captureId);
+  assert.equal(retried.file.id, jpegUploaded.file.id);
+
+  const rawForm = new (globalThis as any).FormData();
+  rawForm.append(
+    "file",
+    new (globalThis as any).Blob([rawBytes], { type: "application/octet-stream" }),
+    "portrait-original.nef",
+  );
+  rawForm.append("captureKey", captureKey);
+  rawForm.append("baseFilename", "portrait-original");
+  rawForm.append("fileRole", "RAW");
+  rawForm.append("fileFormat", "NEF");
+  rawForm.append("capturedAt", "2026-08-22T12:34:56.000Z");
+  rawForm.append("sequence", "7");
+  const rawResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": `${captureKey}-raw`,
+      },
+      body: rawForm,
+    },
+  );
+  assert.equal(rawResponse.status, 201);
+  const rawUploaded = await rawResponse.json() as {
+    captureId: number;
+    pairingStatus: string;
+    file: { id: number; fileRole: string; originalFilename: string; fileUrl: string };
+  };
+  assert.equal(rawUploaded.captureId, jpegUploaded.captureId);
+  assert.equal(rawUploaded.pairingStatus, "complete");
+  assert.equal(rawUploaded.file.fileRole, "RAW");
+  assert.equal(rawUploaded.file.originalFilename, "portrait-original.nef");
+  const rawPath = path.resolve(process.cwd(), rawUploaded.file.fileUrl.replace(/^\//, ""));
+  captureFilePaths.push(rawPath);
+  assert.deepEqual(await readFile(rawPath), rawBytes);
+
+  const [capture] = await db
+    .select()
+    .from(capturesTable)
+    .where(eq(capturesTable.id, jpegUploaded.captureId));
+  assert(capture);
+  assert.equal(capture.pairingStatus, "complete");
+  const files = await db
+    .select()
+    .from(captureFilesTable)
+    .where(eq(captureFilesTable.captureId, capture.id));
+  assert.equal(files.length, 2);
+  assert.deepEqual(
+    files.map((file) => file.fileRole).sort(),
+    ["JPEG", "RAW"],
+  );
+
+  const rawFileResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures/${capture.id}/files/${rawUploaded.file.id}/file`,
+  );
+  assert.equal(rawFileResponse.status, 200);
+  assert.equal(rawFileResponse.headers.get("content-type"), "application/octet-stream");
+  assert.deepEqual(Buffer.from(await rawFileResponse.arrayBuffer()), rawBytes);
 });
 
 test("preserves a photo through upload, delivery, and deletion", async () => {

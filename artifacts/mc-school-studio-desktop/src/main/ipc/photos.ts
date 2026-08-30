@@ -110,6 +110,10 @@ export function registerPhotoHandlers() {
           classId: capture.classId,
           baseFilename: capture.baseFilename,
           capturedAt: capture.capturedAt,
+          sequence: capture.sequence,
+          favorite: capture.favorite,
+          rejected: capture.rejected,
+          selected: capture.selected,
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
           files: files.map(rowToCaptureFile),
@@ -130,6 +134,37 @@ export function registerPhotoHandlers() {
         .where(eq(capturesTable.projectId, projectId))
         .all()
       return getCaptureSummary(rows)
+    },
+  )
+
+  ipcMain.handle(
+    'captures:updateReview',
+    (
+      _e,
+      {
+        captureId,
+        favorite,
+        rejected,
+        selected,
+      }: {
+        captureId: number
+        favorite?: boolean
+        rejected?: boolean
+        selected?: boolean
+      },
+    ) => {
+      const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
+      if (!capture) return null
+      db.update(capturesTable)
+        .set({
+          ...(favorite === undefined ? {} : { favorite }),
+          ...(rejected === undefined ? {} : { rejected }),
+          ...(selected === undefined ? {} : { selected }),
+          updatedAt: now(),
+        })
+        .where(eq(capturesTable.id, captureId))
+        .run()
+      return db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null
     },
   )
 

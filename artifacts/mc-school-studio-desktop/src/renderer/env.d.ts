@@ -17,6 +17,9 @@ import type {
   CaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
+  CaptureExportMode,
+  CaptureExportResult,
+  CaptureFileUploadStatusChangedEvent,
 } from '../shared/types'
 
 interface UploadConfig {
@@ -82,6 +85,12 @@ interface ElectronAPI {
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
   invoke(channel: 'captures:list', args: { studentId: number }): Promise<CaptureReview[]>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>
+  invoke(channel: 'captures:updateReview', args: {
+    captureId: number
+    favorite?: boolean
+    rejected?: boolean
+    selected?: boolean
+  }): Promise<CaptureReview | null>
   invoke(channel: 'photos:getThumbnail', args: { filePath: string }): Promise<string | null>
   invoke(channel: 'photos:reassign', args: { photoId: number; studentId: number }): Promise<void>
   invoke(channel: 'photos:delete', args: { photoId: number }): Promise<void>
@@ -103,8 +112,14 @@ interface ElectronAPI {
   invoke(channel: 'auth:signIn'): Promise<AuthSession>
   invoke(channel: 'auth:signOut'): Promise<{ ok: boolean }>
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
+  invoke(channel: 'upload:retryFile', args: { fileId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
+  invoke(channel: 'captures:export', args: {
+    projectId: number
+    destinationDir: string
+    mode: CaptureExportMode
+  }): Promise<CaptureExportResult>
   // Desktop updates
   invoke(channel: 'update:getState'): Promise<UpdateState>
   invoke(channel: 'update:check'): Promise<UpdateState>
@@ -122,6 +137,7 @@ interface ElectronAPI {
   on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
   on(channel: 'auth:sessionInvalidated', listener: (session: AuthSession) => void): () => void
   on(channel: 'capture:updated', listener: (event: CaptureUpdatedEvent) => void): () => void
+  on(channel: 'capture:fileUploadStatusChanged', listener: (event: CaptureFileUploadStatusChangedEvent) => void): () => void
 }
 
 declare global {

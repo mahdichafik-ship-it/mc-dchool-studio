@@ -9,8 +9,15 @@
 import { BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { readFileSync } from 'fs'
 import { getDb } from '../db'
-import { settingsTable, photosTable, projectsTable, studentsTable } from '../db/schema'
-import { eq, and, or } from 'drizzle-orm'
+import {
+  capturesTable,
+  imageFilesTable,
+  settingsTable,
+  photosTable,
+  projectsTable,
+  studentsTable,
+} from '../db/schema'
+import { eq, and, or, isNull } from 'drizzle-orm'
 import type { UploadStatus } from '../../shared/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,6 +86,23 @@ function notifyUploadStatus(photoId: number, studentId: number, status: UploadSt
   win?.webContents.send('upload:statusChanged', { photoId, studentId, status })
 }
 
+function notifyCaptureFileStatus(
+  captureId: number,
+  fileId: number,
+  studentId: number,
+  fileRole: 'JPEG' | 'RAW',
+  status: UploadStatus,
+) {
+  const win = BrowserWindow.getAllWindows()[0]
+  win?.webContents.send('capture:fileUploadStatusChanged', {
+    captureId,
+    fileId,
+    studentId,
+    fileRole,
+    status,
+  })
+}
+
 function toServerFileUrl(fileUrl: string | null): string | null {
   if (!fileUrl) return null
   if (/^https?:\/\//i.test(fileUrl)) return fileUrl
@@ -96,6 +120,7 @@ let cloudSyncDisabledForRetirement = false
 let cloudSessionVerified = false
 const activeUploads = new Set<Promise<void>>()
 const activePhotoUploads = new Map<number, Promise<void>>()
+const activeCaptureFileUploads = new Map<number, Promise<void>>()
 let retryInProgress = false
 
 class RetryableUploadError extends Error {}
@@ -261,6 +286,137 @@ export function uploadPhoto(
   return task
 }
 
+function setCaptureFileStatus(
+  captureId: number,
+  fileId: number,
+  status: UploadStatus,
+  fileUrl: string | null | undefined,
+): void {
+  const db = getDb()
+  const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, fileId)).get()
+  const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
+  if (!file || !capture || file.captureId !== captureId || capture.studentId === null) return
+
+  db.update(imageFilesTable)
+    .set({
+      uploadStatus: status,
+      ...(fileUrl !== undefined ? { fileUrl } : {}),
+    })
+    .where(eq(imageFilesTable.id, fileId))
+    .run()
+
+  if (file.fileRole === 'JPEG' && capture.legacyPhotoId !== null) {
+    db.update(photosTable)
+      .set({
+        uploadStatus: status,
+        ...(fileUrl !== undefined ? { fileUrl } : {}),
+      })
+      .where(eq(photosTable.id, capture.legacyPhotoId))
+      .run()
+    notifyUploadStatus(capture.legacyPhotoId, capture.studentId, status)
+  }
+  notifyCaptureFileStatus(captureId, fileId, capture.studentId, file.fileRole, status)
+}
+
+async function performUploadCaptureFile(captureId: number, fileId: number): Promise<void> {
+  const db = getDb()
+  const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
+  const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, fileId)).get()
+  if (!capture || !file || file.captureId !== captureId || capture.studentId === null) return
+
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!apiUrl || !connectionToken) return
+
+  setCaptureFileStatus(captureId, fileId, 'uploading', null)
+
+  try {
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, capture.projectId)).get()
+    const student = db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get()
+    if (!project?.cloudId || !student?.cloudId) {
+      throw new Error('This project needs to be re-synced before its captures can upload.')
+    }
+
+    const fileBuffer = readFileSync(file.storedPath)
+    const mimeType = file.fileRole === 'JPEG'
+      ? 'image/jpeg'
+      : 'application/octet-stream'
+    const formData = new FormData()
+    formData.append('file', new Blob([fileBuffer], { type: mimeType }), file.originalFilename)
+    formData.append('captureKey', capture.captureKey)
+    formData.append('fileRole', file.fileRole)
+    formData.append('fileFormat', file.fileFormat)
+    formData.append('baseFilename', capture.baseFilename)
+    if (capture.capturedAt) formData.append('capturedAt', capture.capturedAt)
+    if (capture.sequence !== null) formData.append('sequence', String(capture.sequence))
+    formData.append('favorite', String(capture.favorite))
+    formData.append('rejected', String(capture.rejected))
+    formData.append('selected', String(capture.selected))
+
+    const url = `${apiUrl.replace(/\/+$/, '')}/api/projects/${project.cloudId}/students/${student.cloudId}/captures`
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        'X-MC-Upload-Id': String(file.id),
+      },
+      body: formData,
+      signal: AbortSignal.timeout(120_000),
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      if (response.status === 401) invalidateDesktopCredentials(true)
+      if (response.status === 429 || response.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`)
+      }
+      throw new Error(`HTTP ${response.status}: ${text}`)
+    }
+
+    let serverFileUrl: string | null = null
+    try {
+      const payload = await response.json() as { file?: { fileUrl?: unknown } }
+      if (typeof payload.file?.fileUrl === 'string') serverFileUrl = toServerFileUrl(payload.file.fileUrl)
+    } catch {
+      console.warn('[Upload] Capture file uploaded but did not return a readable fileUrl')
+    }
+    setCaptureFileStatus(captureId, fileId, 'done', serverFileUrl)
+    console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`)
+  } catch (error) {
+    const retryable = isRetryableUploadFailure(error)
+    if (retryable) markCloudSessionUnavailable()
+    console.error(`[Upload] Capture file ${retryable ? 'waiting for connectivity' : 'failed'}:`, error)
+    setCaptureFileStatus(captureId, fileId, retryable ? 'pending' : 'error', undefined)
+    throw error
+  }
+}
+
+export function uploadCaptureFile(captureId: number, fileId: number): Promise<void> {
+  if (!isCloudSessionVerified()) return Promise.resolve()
+  const existing = activeCaptureFileUploads.get(fileId)
+  if (existing) return existing
+
+  const task = performUploadCaptureFile(captureId, fileId)
+  activeCaptureFileUploads.set(fileId, task)
+  activeUploads.add(task)
+  void task.finally(() => {
+    activeUploads.delete(task)
+    activeCaptureFileUploads.delete(fileId)
+  }).catch(() => {})
+  return task
+}
+
+export async function queueCaptureUploads(captureId: number): Promise<void> {
+  if (!isCloudSessionVerified()) return
+  const db = getDb()
+  const files = db
+    .select()
+    .from(imageFilesTable)
+    .where(eq(imageFilesTable.captureId, captureId))
+    .all()
+    .filter((file) => file.uploadStatus !== 'done')
+  await Promise.allSettled(files.map((file) => uploadCaptureFile(captureId, file.id)))
+}
+
 export function retryPendingUploads(): void {
   if (retryInProgress || !isCloudSessionVerified()) return
   const { apiUrl, connectionToken } = getUploadConfig()
@@ -278,9 +434,32 @@ export function retryPendingUploads(): void {
       ))
       .all()
 
+    const captureFileRows = db
+      .select({ captureId: imageFilesTable.captureId })
+      .from(imageFilesTable)
+      .innerJoin(capturesTable, eq(imageFilesTable.captureId, capturesTable.id))
+      .where(and(
+        or(
+          eq(imageFilesTable.uploadStatus, 'pending'),
+          eq(imageFilesTable.uploadStatus, 'uploading'),
+          isNull(imageFilesTable.uploadStatus),
+        ),
+      ))
+      .all()
+    const captureIds = [...new Set(captureFileRows.map((row) => row.captureId))]
+    await Promise.allSettled(captureIds.map((captureId) => queueCaptureUploads(captureId)))
+
+    const mirroredPhotoIds = new Set(
+      db
+        .select({ photoId: capturesTable.legacyPhotoId })
+        .from(capturesTable)
+        .all()
+        .map((row) => row.photoId)
+        .filter((photoId): photoId is number => photoId !== null),
+    )
     await Promise.allSettled(
       pending
-        .filter((photo) => photo.studentId !== null)
+        .filter((photo) => photo.studentId !== null && !mirroredPhotoIds.has(photo.id))
         .map((photo) => uploadPhoto(
           photo.projectId,
           photo.studentId!,
@@ -335,6 +514,22 @@ export function registerUploadHandlers() {
       return { ok: false, error: 'Upload is waiting for an internet connection and a verified studio session.' }
     }
     try {
+      const capture = db
+        .select()
+        .from(capturesTable)
+        .where(eq(capturesTable.legacyPhotoId, photoId))
+        .get()
+      const jpegFile = capture
+        ? db
+          .select()
+          .from(imageFilesTable)
+          .where(and(eq(imageFilesTable.captureId, capture.id), eq(imageFilesTable.fileRole, 'JPEG')))
+          .get()
+        : undefined
+      if (capture && jpegFile) {
+        await uploadCaptureFile(capture.id, jpegFile.id)
+        return { ok: true }
+      }
       await uploadPhoto(
         photo.projectId,
         photo.studentId,
@@ -346,6 +541,23 @@ export function registerUploadHandlers() {
       return { ok: true }
     } catch (err) {
       return { ok: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('upload:retryFile', async (_e, { fileId }: { fileId: number }) => {
+    const db = getDb()
+    const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, fileId)).get()
+    if (!file) return { ok: false, error: 'Capture file not found' }
+    const capture = db.select().from(capturesTable).where(eq(capturesTable.id, file.captureId)).get()
+    if (!capture?.studentId) return { ok: false, error: 'Capture is not matched to a student' }
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: 'Upload is waiting for an internet connection and a verified studio session.' }
+    }
+    try {
+      await uploadCaptureFile(capture.id, file.id)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: String(error) }
     }
   })
 
@@ -379,6 +591,19 @@ export function registerUploadHandlers() {
       .from(photosTable)
       .where(eq(photosTable.uploadStatus, 'error'))
       .all()
-    return photos.length
+    const captureFiles = db
+      .select({ id: imageFilesTable.id })
+      .from(imageFilesTable)
+      .where(eq(imageFilesTable.uploadStatus, 'error'))
+      .all()
+    const mirroredPhotoIds = new Set(
+      db
+        .select({ photoId: capturesTable.legacyPhotoId })
+        .from(capturesTable)
+        .all()
+        .map((row) => row.photoId)
+        .filter((photoId): photoId is number => photoId !== null),
+    )
+    return photos.filter((photo) => !mirroredPhotoIds.has(photo.id)).length + captureFiles.length
   })
 }

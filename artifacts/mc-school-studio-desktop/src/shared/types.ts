@@ -73,6 +73,10 @@ export interface CaptureReview {
   classId: number | null
   baseFilename: string
   capturedAt: string
+  sequence: number | null
+  favorite: boolean
+  rejected: boolean
+  selected: boolean
   pairingStatus: CapturePairingStatus
   assignmentLocked: boolean
   files: CaptureFileReview[]
@@ -92,6 +96,32 @@ export interface CaptureUpdatedEvent {
   projectId: number
   captureId: number
   studentId: number | null
+}
+
+export type CaptureExportMode =
+  | 'all'
+  | 'paired'
+  | 'jpeg_only'
+  | 'raw_only'
+  | 'selected'
+  | 'favorite'
+  | 'final_selection'
+
+export interface CaptureFileUploadStatusChangedEvent {
+  captureId: number
+  fileId: number
+  studentId: number
+  fileRole: 'JPEG' | 'RAW'
+  status: UploadStatus
+}
+
+export interface CaptureExportResult {
+  ok: boolean
+  outputDir?: string
+  exportedCaptureCount?: number
+  exportedFileCount?: number
+  skippedMissingFiles?: number
+  error?: string
 }
 
 export interface PhotoMatchedEvent {

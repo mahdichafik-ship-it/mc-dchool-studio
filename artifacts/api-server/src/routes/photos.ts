@@ -3,7 +3,12 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { db } from "@workspace/db";
-import { studentsTable, studentPhotosTable } from "@workspace/db";
+import {
+  capturesTable,
+  captureFilesTable,
+  studentsTable,
+  studentPhotosTable,
+} from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
@@ -47,6 +52,32 @@ const upload = multer({
     } else {
       cb(new Error("Only JPEG, PNG and WebP images are accepted"));
     }
+  },
+});
+
+const RAW_EXTENSIONS = new Set([".nef", ".nrw", ".cr2", ".cr3", ".arw", ".raf", ".orf", ".rw2", ".dng"]);
+const JPEG_EXTENSIONS = new Set([".jpg", ".jpeg"]);
+
+function captureFileRole(fileName: string): "JPEG" | "RAW" | null {
+  const extension = path.extname(fileName).toLowerCase();
+  if (JPEG_EXTENSIONS.has(extension)) return "JPEG";
+  if (RAW_EXTENSIONS.has(extension)) return "RAW";
+  return null;
+}
+
+function captureFileFormat(fileName: string): string {
+  return path.extname(fileName).replace(/^\./, "").toUpperCase() || "UNKNOWN";
+}
+
+const captureUpload = multer({
+  storage,
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    if (captureFileRole(file.originalname)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Only JPEG and supported RAW camera files are accepted"));
   },
 });
 
@@ -357,6 +388,25 @@ function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
   };
 }
 
+function captureStatusForFiles(files: Array<{ fileRole: string }>): "jpeg_only" | "raw_only" | "complete" {
+  const hasJpeg = files.some((file) => file.fileRole === "JPEG");
+  const hasRaw = files.some((file) => file.fileRole === "RAW");
+  if (hasJpeg && hasRaw) return "complete";
+  return hasJpeg ? "jpeg_only" : "raw_only";
+}
+
+function captureFileToResponse(file: typeof captureFilesTable.$inferSelect) {
+  return {
+    id: file.id,
+    fileRole: file.fileRole,
+    fileFormat: file.fileFormat,
+    originalFilename: file.originalFilename,
+    fileUrl: file.fileUrl,
+    mimeType: file.mimeType,
+    fileSize: file.fileSize,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -467,6 +517,164 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
   }
 });
 
+// POST /api/projects/:projectId/students/:studentId/captures
+// Desktop app → server: upload one JPEG or RAW member of a capture.
+router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUploadPath, authorizeDesktopUploadTarget, captureUpload.single("file"), async (req, res, next) => {
+  const projectId = parseInt(req.params.projectId as string);
+  const studentId = parseInt(req.params.studentId as string);
+
+  try {
+    const refreshedConnection = await refreshDesktopConnection(getDesktopConnection(req).connectionId);
+    if (!refreshedConnection) {
+      discardUploadedFile(req);
+      res.status(401).json({ error: "Desktop connection was revoked while uploading" });
+      return;
+    }
+    if (!(await canAccessAssignedDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
+      discardUploadedFile(req);
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (!(await verifyStudent(studentId, projectId))) {
+      discardUploadedFile(req);
+      res.status(404).json({ error: "Student not found in this project" });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: "No capture file uploaded (use field name 'file')" });
+      return;
+    }
+    const uploadedFile = req.file;
+
+    const body = req.body as Record<string, string | undefined>;
+    const role = captureFileRole(uploadedFile.originalname);
+    const requestedRole = body.fileRole;
+    const captureKey = body.captureKey?.trim();
+    const clientUploadId = req.get("X-MC-Upload-Id")?.trim() || null;
+    if (!role || (requestedRole && requestedRole !== role)) {
+      discardUploadedFile(req);
+      res.status(400).json({ error: "Capture file role does not match its filename" });
+      return;
+    }
+    if (!captureKey || captureKey.length > 500) {
+      discardUploadedFile(req);
+      res.status(400).json({ error: "A valid captureKey is required" });
+      return;
+    }
+    if (clientUploadId && !/^[a-zA-Z0-9:_-]{1,200}$/.test(clientUploadId)) {
+      discardUploadedFile(req);
+      res.status(400).json({ error: "Invalid desktop upload identifier" });
+      return;
+    }
+
+    const relPath = path
+      .relative(path.resolve(process.cwd(), "uploads"), uploadedFile.path)
+      .replace(/\\/g, "/");
+    const fileUrl = `/uploads/${relPath}`;
+    const connection = getDesktopConnection(req);
+    const capturedAt = body.capturedAt?.trim() || null;
+    const sequence = body.sequence ? Number(body.sequence) : null;
+    const parsedSequence = sequence !== null && Number.isInteger(sequence) ? sequence : null;
+
+    const result = await db.transaction(async (tx) => {
+      if (clientUploadId) {
+        const [existingByClientId] = await tx
+          .select({ file: captureFilesTable, capture: capturesTable })
+          .from(captureFilesTable)
+          .innerJoin(capturesTable, eq(captureFilesTable.captureId, capturesTable.id))
+          .where(and(
+            eq(captureFilesTable.desktopConnectionId, connection.connectionId),
+            eq(captureFilesTable.clientUploadId, clientUploadId),
+          ))
+          .limit(1);
+        if (existingByClientId) {
+          discardUploadedFile(req);
+          return { capture: existingByClientId.capture, file: existingByClientId.file, reused: true };
+        }
+      }
+
+      let [capture] = await tx
+        .select()
+        .from(capturesTable)
+        .where(and(
+          eq(capturesTable.projectId, projectId),
+          eq(capturesTable.captureKey, captureKey),
+        ))
+        .limit(1);
+      if (capture && capture.studentId !== studentId) {
+        throw new Error("Capture key was already assigned to a different student");
+      }
+      if (!capture) {
+        [capture] = await tx
+          .insert(capturesTable)
+          .values({
+            captureKey,
+            projectId,
+            studentId,
+            baseFilename: body.baseFilename?.trim() || path.basename(uploadedFile.originalname, path.extname(uploadedFile.originalname)),
+            capturedAt,
+            sequence: parsedSequence,
+            pairingStatus: role === "JPEG" ? "jpeg_only" : "raw_only",
+            favorite: body.favorite === "true",
+            rejected: body.rejected === "true",
+            selected: body.selected === "true",
+          })
+          .returning();
+      }
+
+      const [existingByRole] = await tx
+        .select()
+        .from(captureFilesTable)
+        .where(and(
+          eq(captureFilesTable.captureId, capture.id),
+          eq(captureFilesTable.fileRole, role),
+        ))
+        .limit(1);
+      if (existingByRole) {
+        discardUploadedFile(req);
+        return { capture, file: existingByRole, reused: true };
+      }
+
+      const [file] = await tx
+        .insert(captureFilesTable)
+        .values({
+          captureId: capture.id,
+          fileRole: role,
+          fileFormat: body.fileFormat?.trim() || captureFileFormat(uploadedFile.originalname),
+          originalFilename: uploadedFile.originalname,
+          fileUrl,
+          mimeType: uploadedFile.mimetype || (role === "JPEG" ? "image/jpeg" : "application/octet-stream"),
+          fileSize: uploadedFile.size,
+          desktopConnectionId: connection.connectionId,
+          clientUploadId,
+        })
+        .returning();
+      const files = await tx
+        .select({ fileRole: captureFilesTable.fileRole })
+        .from(captureFilesTable)
+        .where(eq(captureFilesTable.captureId, capture.id));
+      const pairingStatus = captureStatusForFiles(files);
+      [capture] = await tx
+        .update(capturesTable)
+        .set({ pairingStatus, updatedAt: new Date() })
+        .where(eq(capturesTable.id, capture.id))
+        .returning();
+      return { capture, file, reused: false };
+    });
+
+    res.status(result.reused ? 200 : 201).json({
+      captureId: result.capture.id,
+      captureKey: result.capture.captureKey,
+      pairingStatus: result.capture.pairingStatus,
+      file: captureFileToResponse(result.file),
+      reused: result.reused,
+    });
+  } catch (error) {
+    discardUploadedFile(req);
+    next(error);
+  }
+});
+
 // GET /api/projects/:projectId/students/:studentId/photos
 // Web app: Clerk authenticated + assignment-aware project access.
 router.get("/:studentId/photos", requireAuth, async (req, res) => {
@@ -541,6 +749,44 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
   }
 
   res.setHeader("Content-Type", photo.mimeType || "image/jpeg");
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.sendFile(filePath);
+});
+
+// GET /api/projects/:projectId/students/:studentId/captures/:captureId/files/:fileId/file
+router.get("/:studentId/captures/:captureId/files/:fileId/file", requireAuth, async (req, res) => {
+  const projectId = parseInt(req.params.projectId as string);
+  const studentId = parseInt(req.params.studentId as string);
+  const captureId = parseInt(req.params.captureId as string);
+  const fileId = parseInt(req.params.fileId as string);
+  if ([projectId, studentId, captureId, fileId].some(Number.isNaN)) {
+    res.status(400).json({ error: "Invalid parameters" });
+    return;
+  }
+  if (!(await canAccessProject(getUserId(req), projectId, "view"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [file] = await db
+    .select({ file: captureFilesTable, capture: capturesTable })
+    .from(captureFilesTable)
+    .innerJoin(capturesTable, eq(captureFilesTable.captureId, capturesTable.id))
+    .where(and(
+      eq(captureFilesTable.id, fileId),
+      eq(captureFilesTable.captureId, captureId),
+      eq(capturesTable.projectId, projectId),
+      eq(capturesTable.studentId, studentId),
+    ));
+  if (!file) {
+    res.status(404).json({ error: "Capture file not found" });
+    return;
+  }
+  const filePath = resolveFilePath(file.file.fileUrl);
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ error: "Capture file not found on server" });
+    return;
+  }
+  res.setHeader("Content-Type", file.file.mimeType);
   res.setHeader("Cache-Control", "private, max-age=3600");
   res.sendFile(filePath);
 });

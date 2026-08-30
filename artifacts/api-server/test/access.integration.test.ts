@@ -36,6 +36,7 @@ process.env.CLERK_SECRET_KEY = "";
 
 const suffix = `${process.pid}-${Date.now()}`;
 const ownerUserId = `access-owner-${suffix}`;
+const platformOwnerUserId = `access-platform-owner-${suffix}`;
 const adminUserId = `access-admin-${suffix}`;
 const assistantUserId = `access-assistant-${suffix}`;
 const photographerUserId = `access-photographer-${suffix}`;
@@ -43,14 +44,18 @@ const viewerUserId = `access-viewer-${suffix}`;
 const pendingUserId = `access-pending-${suffix}`;
 const removedUserId = `access-removed-${suffix}`;
 const pendingEmail = `${pendingUserId}@member.local`;
+process.env.PLATFORM_OWNER_USER_ID = platformOwnerUserId;
 
 let server: Server;
 let baseUrl: string;
 let studioId: number;
+let otherStudioId: number;
 let ownerMemberId: number;
+let platformOwnerMemberId: number;
 let adminMemberId: number;
 let assignedProjectId: number;
 let unassignedProjectId: number;
+let crossStudioProjectId: number;
 let assignedStudentId: number;
 let readablePhotoId: number;
 let deletablePhotoId: number;
@@ -101,6 +106,7 @@ before(async () => {
     .insert(studioMembersTable)
     .values([
       { studioId, userId: ownerUserId, email: `${ownerUserId}@member.local`, role: "owner" },
+      { studioId, userId: platformOwnerUserId, email: `${platformOwnerUserId}@member.local`, role: "owner" },
       { studioId, userId: adminUserId, email: `${adminUserId}@member.local`, role: "admin" },
       { studioId, userId: assistantUserId, email: `${assistantUserId}@member.local`, role: "assistant" },
       { studioId, userId: photographerUserId, email: `${photographerUserId}@member.local`, role: "photographer" },
@@ -127,6 +133,21 @@ before(async () => {
     .values({ userId: ownerUserId, studioId, schoolName: `Unassigned School ${suffix}` })
     .returning({ id: projectsTable.id });
   unassignedProjectId = unassignedProject.id;
+
+  const [otherStudio] = await db
+    .insert(studiosTable)
+    .values({ name: `Other access studio ${suffix}`, createdByUserId: `other-owner-${suffix}` })
+    .returning({ id: studiosTable.id });
+  otherStudioId = otherStudio.id;
+  const [crossStudioProject] = await db
+    .insert(projectsTable)
+    .values({
+      userId: `other-owner-${suffix}`,
+      studioId: otherStudioId,
+      schoolName: `Cross-studio School ${suffix}`,
+    })
+    .returning({ id: projectsTable.id });
+  crossStudioProjectId = crossStudioProject.id;
 
   const [studentClass] = await db
     .insert(classesTable)
@@ -163,6 +184,7 @@ before(async () => {
 
   const membersByUserId = new Map(memberRows.map((member) => [member.userId, member.id]));
   ownerMemberId = membersByUserId.get(ownerUserId)!;
+  platformOwnerMemberId = membersByUserId.get(platformOwnerUserId)!;
   adminMemberId = membersByUserId.get(adminUserId)!;
   await db.insert(projectAssignmentsTable).values([
     { projectId: assignedProjectId, memberId: membersByUserId.get(assistantUserId)! },
@@ -179,6 +201,9 @@ before(async () => {
 });
 
 after(async () => {
+  if (otherStudioId) {
+    await db.delete(studiosTable).where(eq(studiosTable.id, otherStudioId));
+  }
   if (studioId) {
     await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
   }
@@ -480,6 +505,49 @@ test("retires a desktop, blocks cloud data, and records its cleanup acknowledgem
   const visibleConnection = team.desktopConnections.find((item) => item.id === connection.id);
   assert.equal(visibleConnection?.status, "retired");
   assert.equal(visibleConnection?.retirementAcknowledgedAt, acknowledged.acknowledgedAt);
+});
+
+test("lets a connected platform owner pull projects from every studio", async () => {
+  const platformCredentials = createDesktopToken();
+  await db.insert(desktopConnectionsTable).values({
+    studioId,
+    memberId: platformOwnerMemberId,
+    deviceName: `Platform owner Mac ${suffix}`,
+    tokenHash: platformCredentials.tokenHash,
+    tokenPrefix: platformCredentials.tokenPrefix,
+  });
+
+  const projectsResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${platformCredentials.token}` },
+  });
+  assert.equal(projectsResponse.status, 200);
+  const projectIds = (await readJson<{ id: number }[]>(projectsResponse)).map((project) => project.id);
+  assert(projectIds.includes(assignedProjectId));
+  assert(projectIds.includes(unassignedProjectId));
+  assert(projectIds.includes(crossStudioProjectId), "the platform owner should see projects owned by another studio");
+
+  const bundleResponse = await fetch(`${baseUrl}/api/desktop/projects/${crossStudioProjectId}/bundle`, {
+    headers: { Authorization: `Bearer ${platformCredentials.token}` },
+  });
+  assert.equal(bundleResponse.status, 200);
+  const bundle = await readJson<{ project: { id: number } }>(bundleResponse);
+  assert.equal(bundle.project.id, crossStudioProjectId);
+
+  const regularOwnerCredentials = createDesktopToken();
+  await db.insert(desktopConnectionsTable).values({
+    studioId,
+    memberId: ownerMemberId,
+    deviceName: `Regular owner Mac ${suffix}`,
+    tokenHash: regularOwnerCredentials.tokenHash,
+    tokenPrefix: regularOwnerCredentials.tokenPrefix,
+  });
+  const regularOwnerProjectsResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${regularOwnerCredentials.token}` },
+  });
+  assert.equal(regularOwnerProjectsResponse.status, 200);
+  const regularOwnerProjectIds = (await readJson<{ id: number }[]>(regularOwnerProjectsResponse))
+    .map((project) => project.id);
+  assert(!regularOwnerProjectIds.includes(crossStudioProjectId), "ordinary studio owners must remain isolated");
 });
 
 test("rejects access to an unassigned or unknown project", async () => {

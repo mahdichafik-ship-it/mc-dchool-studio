@@ -21,6 +21,7 @@ import {
 import { assignedDesktopProjectIds, canAccessAssignedDesktopProject } from "../lib/studioAccess";
 import { getStudioMember } from "../lib/studioAccess";
 import { getUserId, requireAuth } from "../lib/auth";
+import { isPlatformOwner } from "../lib/platformAccess";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
@@ -205,6 +206,29 @@ function memberForAccess(connection: ReturnType<typeof getDesktopConnection>) {
   };
 }
 
+async function desktopProjectIds(connection: ReturnType<typeof getDesktopConnection>) {
+  if (await isPlatformOwner(connection.memberUserId)) {
+    const rows = await db.select({ id: projectsTable.id }).from(projectsTable);
+    return rows.map((row) => row.id);
+  }
+  return assignedDesktopProjectIds(memberForAccess(connection));
+}
+
+async function canAccessDesktopProject(
+  connection: ReturnType<typeof getDesktopConnection>,
+  projectId: number,
+) {
+  if (await isPlatformOwner(connection.memberUserId)) {
+    const [project] = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId))
+      .limit(1);
+    return Boolean(project);
+  }
+  return canAccessAssignedDesktopProject(memberForAccess(connection), projectId);
+}
+
 async function requireStillActiveBeforeDataResponse(
   connection: ReturnType<typeof getDesktopConnection>,
   res: Response,
@@ -217,7 +241,7 @@ async function requireStillActiveBeforeDataResponse(
 router.get("/me", requireDesktopConnectionWithRetirement, async (req, res) => {
   const connection = getDesktopConnection(req);
   const projectIds = connection.status === "active"
-    ? await assignedDesktopProjectIds(memberForAccess(connection))
+    ? await desktopProjectIds(connection)
     : [];
   res.json({
     connectionId: connection.connectionId,
@@ -270,7 +294,7 @@ router.post("/retirement/acknowledge", requireDesktopConnectionWithRetirement, a
 // GET /api/desktop/projects — list only projects assigned to this connection
 router.get("/projects", requireDesktopConnection, async (req, res) => {
   const connection = getDesktopConnection(req);
-  const projectIds = await assignedDesktopProjectIds(memberForAccess(connection));
+  const projectIds = await desktopProjectIds(connection);
   if (!projectIds.length) {
     if (!(await requireStillActiveBeforeDataResponse(connection, res))) return;
     res.json([]);
@@ -327,7 +351,7 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
     return;
   }
 
-  if (!(await canAccessAssignedDesktopProject(memberForAccess(connection), projectId))) {
+  if (!(await canAccessDesktopProject(connection, projectId))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }

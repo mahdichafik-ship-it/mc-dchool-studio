@@ -4,5 +4,6 @@
 - [Desktop SQLite tests](desktop-sqlite-tests.md) — test desktop persistence through an injectable store because the workspace Node runtime lacks the native SQLite binding.
 - [Desktop retirement barrier](desktop-retirement-barrier.md) — persistently fence and drain capture work before erasing local data and acknowledging retirement.
 - [Desktop offline authorization](desktop-offline-authorization.md) — offline local work may use cached identity, but cloud writes require fresh server verification and any authoritative 401 clears eligibility.
+- [Platform-owner desktop scope](platform-owner-desktop-scope.md) — platform-owner desktop connections can pull every studio's projects; ordinary desktop roles remain studio-scoped.
 - [OpenAPI Zod compatibility](openapi-zod-compatibility.md) — avoid OpenAPI email formats until the generated Zod target supports the emitted validator.
 - [Bundled Node test logging](pino-test-transport.md) — disable threaded pretty logging in Node’s bundled ESM test context because `__dirname` is unavailable.

@@ -1,0 +1,346 @@
+UPDATE THE IMAGE STORAGE ARCHITECTURE TO HANDLE JPEG AND RAW SEPARATELY.
+
+LOCAL FILE STRUCTURE
+
+Use:
+
+MC_PhotoSystem/
+│
+├── Jobs/
+│   └── Project_Name/
+│       ├── project.json
+│       ├── database.sqlite
+│       │
+│       ├── Images/
+│       │   ├── JPEG/
+│       │   │   ├── Originals/
+│       │   │   ├── Previews/
+│       │   │   └── Thumbnails/
+│       │   │
+│       │   └── RAW/
+│       │       └── Originals/
+│       │
+│       ├── Exports/
+│       └── Logs/
+│
+├── Spool/
+│   ├── JPEG/
+│   └── RAW/
+│
+├── Cache/
+└── Settings/
+
+TETHERING WORKFLOW
+
+The application must support two watched incoming folders:
+
+MC_PhotoSystem/Spool/JPEG/
+MC_PhotoSystem/Spool/RAW/
+
+External tethering software may write:
+
+JPEG files → Spool/JPEG/
+RAW files → Spool/RAW/
+
+The application must monitor both folders simultaneously.
+
+SUPPORTED RAW TYPES
+
+At minimum support:
+
+* NEF / Nikon RAW
+* NRW
+* CR2
+* CR3
+* ARW
+* RAF
+* ORF
+* RW2
+* DNG
+
+Also support:
+
+* JPG
+* JPEG
+
+JPEG + RAW PAIRING
+
+The camera may be configured to photograph RAW + JPEG simultaneously.
+
+For example:
+
+DSC_8291.JPG
+DSC_8291.NEF
+
+These must be recognized as the SAME CAPTURE.
+
+Create a capture record with:
+
+capture_id
+subject_id
+project_id
+group_id
+base_filename
+capture_timestamp
+jpeg_image_id
+raw_image_id
+
+Example:
+
+capture_id: CAP-000123
+base_filename: DSC_8291
+
+JPEG:
+DSC_8291.JPG
+
+RAW:
+DSC_8291.NEF
+
+Both belong to:
+
+Sara Andersson
+Subject ID: 10452
+Class 7A
+
+The UI should show this as ONE photograph/capture, not two unrelated photographs.
+
+The application should indicate:
+
+JPEG ✓
+RAW ✓
+
+or, if one is still arriving:
+
+JPEG ✓
+RAW waiting...
+
+PAIRING LOGIC
+
+Pair JPEG and RAW using:
+
+1. base filename first
+2. capture timestamp as secondary verification
+3. camera serial/session where available
+
+Example:
+
+DSC_8291.JPG
+DSC_8291.NEF
+
+→ same capture_id
+
+Do not require the two files to arrive at exactly the same time.
+
+One file may arrive several seconds before the other.
+
+Keep a temporary pending-pair record until the matching file arrives.
+
+PERMANENT STORAGE
+
+After verification:
+
+JPEG:
+Jobs/Project_Name/Images/JPEG/Originals/DSC_8291.JPG
+
+RAW:
+Jobs/Project_Name/Images/RAW/Originals/DSC_8291.NEF
+
+Previews and thumbnails should normally be generated from the JPEG because it is faster.
+
+If only RAW exists, generate a preview from the RAW embedded preview when technically possible.
+
+DATABASE
+
+Do not treat JPEG and RAW as duplicate images.
+
+Use a Capture model plus Image/File model.
+
+Recommended structure:
+
+captures
+
+* capture_id
+* project_id
+* group_id
+* subject_id
+* base_filename
+* capture_time
+* sequence
+* favorite
+* rejected
+* selected
+* notes
+
+image_files
+
+* image_file_id
+* capture_id
+* file_role
+* file_format
+* original_filename
+* stored_path
+* file_size
+* checksum
+* import_time
+
+file_role values:
+
+JPEG
+RAW
+
+This means:
+
+ONE CAPTURE
+→ JPEG FILE
+→ RAW FILE
+
+ACTIVE SUBJECT RULE
+
+When a photographer activates or scans a subject, BOTH incoming JPEG and RAW files must automatically inherit that subject.
+
+Example:
+
+ACTIVE SUBJECT:
+
+Sara Andersson
+10452
+Class 7A
+
+Camera shoots RAW + JPEG.
+
+Spool receives:
+
+JPEG/DSC_8291.JPG
+RAW/DSC_8291.NEF
+
+The system assigns BOTH to Sara Andersson and creates one capture.
+
+IMPORTANT RACE-CONDITION PROTECTION
+
+The active subject may change before both files have finished arriving.
+
+Therefore, once the FIRST file of a RAW+JPEG pair is received, immediately lock:
+
+capture_id
+subject_id
+group_id
+project_id
+shoot_session_id
+
+When the matching second file arrives, it MUST inherit the subject associated with that capture.
+
+Do NOT assign it based on whichever subject happens to be active at that later moment.
+
+Example:
+
+12:00:01
+DSC_8291.JPG arrives
+Active subject = Sara
+
+Lock:
+DSC_8291 → Sara
+
+12:00:03
+Photographer scans Ahmed.
+
+12:00:04
+DSC_8291.NEF arrives.
+
+The RAW file MUST still go to Sara, because it belongs to DSC_8291.
+
+This is critical for high-volume photography.
+
+SHOOTING INTERFACE
+
+For each capture thumbnail, indicate file availability.
+
+Example:
+
+[Photo thumbnail]
+
+DSC_8291
+
+JPEG ●
+RAW ●
+
+or:
+
+JPEG ●
+RAW ○
+
+Allow filtering:
+
+* JPEG + RAW complete
+* Missing JPEG
+* Missing RAW
+* JPEG only
+* RAW only
+
+PROJECT DASHBOARD
+
+Add quality-control statistics:
+
+Total captures
+JPEG files
+RAW files
+Complete RAW+JPEG pairs
+Missing JPEG
+Missing RAW
+Unpaired files
+
+Provide a warning before finishing a shoot if files are missing.
+
+EXPORT
+
+Allow separate export options:
+
+* JPEG only
+* RAW only
+* JPEG + RAW
+* selected captures
+* favorites
+* final selections
+
+Maintain pairing when exporting.
+
+Example:
+
+Exports/
+└── Sara_Andersson_10452/
+├── Sara_Andersson_10452_01.JPG
+└── Sara_Andersson_10452_01.NEF
+
+Both files must use the same sequence number.
+
+CRITICAL PRINCIPLE
+
+The application must think in terms of:
+
+SUBJECT
+→ CAPTURE
+→ FILES
+
+not:
+
+SUBJECT
+→ FILE
+
+because one camera shutter press may generate multiple files.
+
+The correct model is:
+
+Sara Andersson
+↓
+Capture 001
+├── JPEG
+└── RAW
+
+Capture 002
+├── JPEG
+└── RAW
+
+Capture 003
+├── JPEG
+└── RAW
+
+Design the architecture around this from the beginning.

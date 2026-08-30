@@ -1,8 +1,8 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { app, ipcMain, BrowserWindow } from 'electron'
 import chokidar, { FSWatcher } from 'chokidar'
-import { copyFileSync, mkdirSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync } from 'fs'
 import { stat as statFile } from 'fs/promises'
-import { basename, extname, join } from 'path'
+import { basename, extname, join, parse, resolve } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema'
@@ -19,7 +19,18 @@ import {
 } from '../lib/photoSequence'
 import type { Photo, Student } from '../../shared/types'
 import { createWatchedPhotoStore, processWatchedPhoto } from '../lib/watchedPhotoProcessor'
-import { mirrorPhotoAsCapture } from '../lib/captureRepository'
+import {
+  hasProcessedCaptureSource,
+  mirrorPhotoAsCapture,
+  recordRawCapture,
+} from '../lib/captureRepository'
+import { getCaptureFileRole } from '../lib/capturePairing'
+import {
+  ensureProjectStorageLayout,
+  getPhotoSystemLayout,
+  getProjectStorageLayout,
+} from '../lib/storageLayout'
+import { resolveWatchFolders } from '../lib/watchFolders'
 
 const FLUSH_DELAY_MS = 500
 
@@ -113,7 +124,11 @@ export function registerWatcherHandlers() {
       throw new Error('No watch folder configured for this project')
     }
 
-    const watcher = chokidar.watch(project.watchFolder, {
+    const watchFolders = resolveWatchFolders(project.watchFolder, existsSync)
+    if (watchFolders.mode === 'dual') {
+      for (const folder of watchFolders.paths) mkdirSync(folder, { recursive: true })
+    }
+    const watcher = chokidar.watch(watchFolders.paths, {
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 },
@@ -130,13 +145,15 @@ export function registerWatcherHandlers() {
     watchers.set(projectId, session)
 
     watcher.on('add', (filePath) => {
-      void enqueuePhoto(projectId, filePath)
+      void enqueueCapture(projectId, filePath)
     })
     watcher.on('error', (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error)
     })
 
-    console.log(`[Watcher] Started watching ${project.watchFolder} for project ${projectId}`)
+    console.log(
+      `[Watcher] Started ${watchFolders.mode} watching for project ${projectId}: ${watchFolders.paths.join(', ')}`,
+    )
   })
 
   ipcMain.handle('watcher:stop', async (_e, { projectId }: { projectId: number }) => {
@@ -155,13 +172,12 @@ export function registerWatcherHandlers() {
   })
 }
 
-async function enqueuePhoto(projectId: number, filePath: string): Promise<void> {
+async function enqueueCapture(projectId: number, filePath: string): Promise<void> {
   if (desktopRetiring) return
   const session = watchers.get(projectId)
   if (!session || session.seenPaths.has(filePath)) return
 
-  const lower = filePath.toLowerCase()
-  if (!lower.endsWith('.jpg') && !lower.endsWith('.jpeg')) return
+  if (!getCaptureFileRole(filePath)) return
 
   try {
     const fileStat = await statFile(filePath)
@@ -207,6 +223,14 @@ async function handleNewPhoto(
 ): Promise<void> {
   if (desktopRetiring) return
   const db = getDb()
+  const role = getCaptureFileRole(capture.fileName)
+  if (!role || hasProcessedCaptureSource(db, capture.filePath)) return
+
+  if (role === 'RAW') {
+    handleNewRaw(projectId, capture, session, db)
+    return
+  }
+
   const win = getMainWindow()
   const qrResult = await readQrFromImage(capture.filePath)
 
@@ -254,9 +278,10 @@ async function handleNewPhoto(
 
     if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
       const result = await processWatchedPhoto(projectId, capture.filePath, {
-        store: createWatchedPhotoStore(db),
+        store: createWatchedPhotoStore(db, capture.filePath),
         photosDir: getPhotosDir(),
         readQr: async () => null,
+        capturedAt: new Date(capture.capturedAtMs).toISOString(),
       })
 
       if (result.kind === 'unmatched') {
@@ -316,9 +341,67 @@ async function handleNewPhoto(
     })
     .returning()
     .get()
-  mirrorPhotoAsCapture(db, photo)
+  mirrorPhotoAsCapture(db, photo, capture.filePath)
 
   finishMatchedPhoto(db, win, photo, student)
+}
+
+function copyToProjectFolder(sourcePath: string, fileName: string, destinationDir: string): string {
+  mkdirSync(destinationDir, { recursive: true })
+  let destinationPath = join(destinationDir, fileName)
+  if (resolve(sourcePath) !== resolve(destinationPath) && existsSync(destinationPath)) {
+    const parsed = parse(fileName)
+    let suffix = 2
+    do {
+      destinationPath = join(destinationDir, `${parsed.name}-${suffix}${parsed.ext}`)
+      suffix++
+    } while (existsSync(destinationPath))
+  }
+  if (resolve(sourcePath) !== resolve(destinationPath)) {
+    copyFileSync(sourcePath, destinationPath)
+  }
+  return destinationPath
+}
+
+function handleNewRaw(
+  projectId: number,
+  capture: CaptureFile,
+  session: WatchSession,
+  db: ReturnType<typeof getDb>,
+): void {
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  if (!project) return
+
+  const studentId = session.sequenceState.activeStudentId
+  const student = studentId === null
+    ? undefined
+    : db.select()
+      .from(studentsTable)
+      .where(and(eq(studentsTable.projectId, projectId), eq(studentsTable.id, studentId)))
+      .get()
+  const storage = ensureProjectStorageLayout(
+    getProjectStorageLayout(
+      getPhotoSystemLayout(app.getPath('home')),
+      projectId,
+      project.schoolName,
+    ),
+  )
+  const storedPath = copyToProjectFolder(capture.filePath, capture.fileName, storage.rawOriginals)
+  const result = recordRawCapture(db, {
+    projectId,
+    studentId: student?.id ?? null,
+    classId: student?.classId ?? null,
+    filePath: capture.filePath,
+    storedPath,
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+  })
+
+  if (result.kind === 'duplicate') return
+  console.log(
+    `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
+      + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
+  )
 }
 
 function finishMatchedPhoto(
@@ -380,7 +463,7 @@ function recordUnmatched(
     })
     .returning()
     .get()
-  mirrorPhotoAsCapture(db, photo)
+  mirrorPhotoAsCapture(db, photo, capture.filePath)
 
   win?.webContents.send('photo:unmatched', {
     filePath: capture.filePath,

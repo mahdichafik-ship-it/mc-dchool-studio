@@ -185,6 +185,7 @@ function ensureCaptureTables(sqlite) {
     CREATE INDEX IF NOT EXISTS idx_captures_pairing ON captures(project_id, base_filename, pairing_status);
     CREATE INDEX IF NOT EXISTS idx_image_files_capture ON image_files(capture_id);
     CREATE INDEX IF NOT EXISTS idx_image_files_checksum ON image_files(checksum);
+    CREATE INDEX IF NOT EXISTS idx_image_files_source ON image_files(source_path);
   `);
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (
@@ -238,6 +239,9 @@ function ensureCaptureTables(sqlite) {
     );
   `);
 }
+function safeFolderName$2(value) {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
+}
 function getPhotoSystemLayout(homeDir, configuredRoot) {
   const root = node_path.join(homeDir, "MC_PhotoSystem");
   return {
@@ -259,6 +263,37 @@ function ensurePhotoSystemLayout(layout) {
     layout.spoolRaw,
     layout.cache,
     layout.settings
+  ]) {
+    node_fs.mkdirSync(directory, { recursive: true });
+  }
+  return layout;
+}
+function getProjectStorageLayout(photoSystem, projectId, projectName) {
+  const folderName = `${safeFolderName$2(projectName)}-${projectId}`;
+  const root = node_path.join(photoSystem.jobs, folderName);
+  return {
+    root,
+    projectJson: node_path.join(root, "project.json"),
+    database: node_path.join(root, "database.sqlite"),
+    images: node_path.join(root, "Images"),
+    jpegOriginals: node_path.join(root, "Images", "JPEG", "Originals"),
+    jpegPreviews: node_path.join(root, "Images", "JPEG", "Previews"),
+    jpegThumbnails: node_path.join(root, "Images", "JPEG", "Thumbnails"),
+    rawOriginals: node_path.join(root, "Images", "RAW", "Originals"),
+    exports: node_path.join(root, "Exports"),
+    logs: node_path.join(root, "Logs")
+  };
+}
+function ensureProjectStorageLayout(layout) {
+  for (const directory of [
+    layout.root,
+    layout.images,
+    layout.jpegOriginals,
+    layout.jpegPreviews,
+    layout.jpegThumbnails,
+    layout.rawOriginals,
+    layout.exports,
+    layout.logs
   ]) {
     node_fs.mkdirSync(directory, { recursive: true });
   }
@@ -41257,7 +41292,100 @@ function getCaptureFileFormat(fileName) {
 function normalizeBaseFilename(fileName) {
   return node_path.parse(fileName).name.trim().normalize("NFKC").toLocaleLowerCase();
 }
-function mirrorPhotoAsCapture(db, photo) {
+const PAIR_TIMESTAMP_TOLERANCE_MS = 12e4;
+function timestampMs(value) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function sameCaptureWindow(capturedAt, candidateAt) {
+  const incoming = timestampMs(capturedAt);
+  const candidate = timestampMs(candidateAt);
+  return incoming === 0 || candidate === 0 || Math.abs(incoming - candidate) <= PAIR_TIMESTAMP_TOLERANCE_MS;
+}
+function getCaptureFiles(db, captureId) {
+  return db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, captureId)).all();
+}
+function findDuplicateFile(db, sourcePath) {
+  return db.select({ captureId: imageFilesTable.captureId }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.sourcePath, sourcePath)).get();
+}
+function findPairCandidate(db, input) {
+  const role = getCaptureFileRole(input.fileName);
+  if (!role) return void 0;
+  return db.select().from(capturesTable).where(drizzleOrm.and(
+    drizzleOrm.eq(capturesTable.projectId, input.projectId),
+    drizzleOrm.eq(capturesTable.baseFilename, normalizeBaseFilename(input.fileName))
+  )).all().map((capture) => ({ capture, files: getCaptureFiles(db, capture.id) })).filter(
+    ({ capture, files }) => sameCaptureWindow(input.capturedAt, capture.capturedAt) && !files.some((file) => file.fileRole === role)
+  ).sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0];
+}
+function statusForFiles(files) {
+  const hasJpeg = files.some((file) => file.fileRole === "JPEG");
+  const hasRaw = files.some((file) => file.fileRole === "RAW");
+  if (hasJpeg && hasRaw) return "complete";
+  if (hasJpeg) return "jpeg_only";
+  if (hasRaw) return "raw_only";
+  return "unpaired";
+}
+function insertImageFile(db, captureId, input) {
+  const fileRole = getCaptureFileRole(input.fileName);
+  if (!fileRole) throw new Error(`Unsupported capture file type: ${input.fileName}`);
+  const fileSize = (() => {
+    try {
+      return node_fs.statSync(input.filePath).size;
+    } catch {
+      return null;
+    }
+  })();
+  db.insert(imageFilesTable).values({
+    captureId,
+    fileRole,
+    fileFormat: getCaptureFileFormat(input.fileName),
+    originalFilename: input.fileName,
+    storedPath: input.storedPath,
+    sourcePath: input.filePath,
+    fileSize,
+    importTime: input.capturedAt,
+    createdAt: input.capturedAt
+  }).run();
+}
+function hasProcessedCaptureSource(db, sourcePath) {
+  return Boolean(findDuplicateFile(db, sourcePath));
+}
+function recordRawCapture(db, input) {
+  const duplicate = findDuplicateFile(db, input.filePath);
+  if (duplicate) return { kind: "duplicate", captureId: duplicate.captureId };
+  const candidate = findPairCandidate(db, input);
+  if (candidate) {
+    insertImageFile(db, candidate.capture.id, input);
+    const files = getCaptureFiles(db, candidate.capture.id);
+    db.update(capturesTable).set({
+      pairingStatus: statusForFiles(files),
+      updatedAt: input.capturedAt
+    }).where(drizzleOrm.eq(capturesTable.id, candidate.capture.id)).run();
+    return { kind: "paired", captureId: candidate.capture.id };
+  }
+  const capture = db.insert(capturesTable).values({
+    captureKey: [
+      "capture",
+      input.projectId,
+      normalizeBaseFilename(input.fileName),
+      input.capturedAt,
+      input.filePath
+    ].map((part) => encodeURIComponent(String(part))).join(":"),
+    projectId: input.projectId,
+    studentId: input.studentId,
+    classId: input.classId,
+    baseFilename: normalizeBaseFilename(input.fileName),
+    capturedAt: input.capturedAt,
+    assignmentLocked: true,
+    pairingStatus: "raw_only",
+    createdAt: input.capturedAt,
+    updatedAt: input.capturedAt
+  }).returning().get();
+  insertImageFile(db, capture.id, input);
+  return { kind: "created", captureId: capture.id };
+}
+function mirrorPhotoAsCapture(db, photo, sourcePath = photo.filePath) {
   const existing = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
   if (existing) return;
   const role = getCaptureFileRole(photo.fileName);
@@ -41271,6 +41399,35 @@ function mirrorPhotoAsCapture(db, photo) {
       return null;
     }
   })();
+  const candidate = findPairCandidate(db, {
+    projectId: photo.projectId,
+    studentId: photo.studentId,
+    classId: classRow?.id ?? null,
+    storedPath: photo.filePath,
+    fileName: photo.fileName,
+    capturedAt: photo.capturedAt
+  });
+  if (candidate) {
+    db.update(capturesTable).set({
+      legacyPhotoId: photo.id,
+      updatedAt: photo.createdAt,
+      pairingStatus: statusForFiles([...candidate.files, { fileRole: "JPEG" }])
+    }).where(drizzleOrm.eq(capturesTable.id, candidate.capture.id)).run();
+    db.insert(imageFilesTable).values({
+      captureId: candidate.capture.id,
+      fileRole: role,
+      fileFormat: getCaptureFileFormat(photo.fileName),
+      originalFilename: photo.fileName,
+      storedPath: photo.filePath,
+      sourcePath,
+      fileSize,
+      importTime: photo.createdAt,
+      uploadStatus: photo.uploadStatus,
+      fileUrl: photo.fileUrl,
+      createdAt: photo.createdAt
+    }).run();
+    return;
+  }
   const capture = db.insert(capturesTable).values({
     captureKey: `legacy-photo:${photo.id}`,
     projectId: photo.projectId,
@@ -41290,7 +41447,7 @@ function mirrorPhotoAsCapture(db, photo) {
     fileFormat: getCaptureFileFormat(photo.fileName),
     originalFilename: photo.fileName,
     storedPath: photo.filePath,
-    sourcePath: photo.filePath,
+    sourcePath,
     fileSize,
     importTime: photo.createdAt,
     uploadStatus: photo.uploadStatus,
@@ -41298,7 +41455,7 @@ function mirrorPhotoAsCapture(db, photo) {
     createdAt: photo.createdAt
   }).run();
 }
-function createWatchedPhotoStore(db) {
+function createWatchedPhotoStore(db, sourcePath) {
   return {
     findProject: (projectId) => db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get(),
     listStudents: (projectId) => db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all(),
@@ -41311,7 +41468,7 @@ function createWatchedPhotoStore(db) {
     findClass: (classId) => db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, classId)).get(),
     insertPhoto: (photo) => {
       const saved = db.insert(photosTable).values(photo).returning().get();
-      mirrorPhotoAsCapture(db, saved);
+      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath);
       return saved;
     }
   };
@@ -41338,7 +41495,7 @@ function saveUnmatchedPhoto(store, projectId, filePath, fileName, reason) {
     reason
   };
 }
-async function processWatchedPhoto(projectId, filePath, { store, photosDir, readQr }) {
+async function processWatchedPhoto(projectId, filePath, { store, photosDir, readQr, capturedAt }) {
   const fileName = node_path.basename(filePath);
   const project = store.findProject(projectId);
   if (!project) throw new Error(`Project ${projectId} not found`);
@@ -41375,10 +41532,19 @@ async function processWatchedPhoto(projectId, filePath, { store, photosDir, read
     studentId: student.id,
     filePath: destPath,
     fileName,
-    capturedAt: now$1(),
+    capturedAt: capturedAt ?? now$1(),
     isMatched: true
   });
   return { kind: "matched", photo, student };
+}
+function resolveWatchFolders(folderPath, folderExists = () => false) {
+  const selected = node_path.resolve(folderPath);
+  const selectedName = node_path.basename(selected).toLowerCase();
+  const root = selectedName === "jpeg" || selectedName === "raw" ? node_path.dirname(selected) : selected;
+  const jpeg2 = node_path.join(root, "JPEG");
+  const raw = node_path.join(root, "RAW");
+  const dual = selectedName === "spool" || selectedName === "jpeg" || selectedName === "raw" || folderExists(jpeg2) || folderExists(raw);
+  return dual ? { mode: "dual", root, paths: [jpeg2, raw] } : { mode: "legacy", root: selected, paths: [selected] };
 }
 const FLUSH_DELAY_MS = 500;
 const watchers = /* @__PURE__ */ new Map();
@@ -41442,7 +41608,11 @@ function registerWatcherHandlers() {
     if (!project?.watchFolder) {
       throw new Error("No watch folder configured for this project");
     }
-    const watcher = chokidar.watch(project.watchFolder, {
+    const watchFolders = resolveWatchFolders(project.watchFolder, require$$0.existsSync);
+    if (watchFolders.mode === "dual") {
+      for (const folder of watchFolders.paths) require$$0.mkdirSync(folder, { recursive: true });
+    }
+    const watcher = chokidar.watch(watchFolders.paths, {
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 }
@@ -41457,12 +41627,14 @@ function registerWatcherHandlers() {
     };
     watchers.set(projectId, session);
     watcher.on("add", (filePath) => {
-      void enqueuePhoto(projectId, filePath);
+      void enqueueCapture(projectId, filePath);
     });
     watcher.on("error", (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error);
     });
-    console.log(`[Watcher] Started watching ${project.watchFolder} for project ${projectId}`);
+    console.log(
+      `[Watcher] Started ${watchFolders.mode} watching for project ${projectId}: ${watchFolders.paths.join(", ")}`
+    );
   });
   electron.ipcMain.handle("watcher:stop", async (_e, { projectId }) => {
     const session = watchers.get(projectId);
@@ -41477,12 +41649,11 @@ function registerWatcherHandlers() {
     return watchers.has(projectId);
   });
 }
-async function enqueuePhoto(projectId, filePath) {
+async function enqueueCapture(projectId, filePath) {
   if (desktopRetiring) return;
   const session = watchers.get(projectId);
   if (!session || session.seenPaths.has(filePath)) return;
-  const lower = filePath.toLowerCase();
-  if (!lower.endsWith(".jpg") && !lower.endsWith(".jpeg")) return;
+  if (!getCaptureFileRole(filePath)) return;
   try {
     const fileStat = await promises.stat(filePath);
     if (!fileStat.isFile()) return;
@@ -41517,6 +41688,12 @@ function scheduleFlush(projectId) {
 async function handleNewPhoto(projectId, capture, session) {
   if (desktopRetiring) return;
   const db = getDb();
+  const role = getCaptureFileRole(capture.fileName);
+  if (!role || hasProcessedCaptureSource(db, capture.filePath)) return;
+  if (role === "RAW") {
+    handleNewRaw(projectId, capture, session, db);
+    return;
+  }
   const win = getMainWindow();
   const qrResult = await readQrFromImage(capture.filePath);
   if (qrResult) {
@@ -41551,9 +41728,10 @@ async function handleNewPhoto(projectId, capture, session) {
     );
     if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
       const result = await processWatchedPhoto(projectId, capture.filePath, {
-        store: createWatchedPhotoStore(db),
+        store: createWatchedPhotoStore(db, capture.filePath),
         photosDir: getPhotosDir(),
-        readQr: async () => null
+        readQr: async () => null,
+        capturedAt: new Date(capture.capturedAtMs).toISOString()
       });
       if (result.kind === "unmatched") {
         win?.webContents.send("photo:unmatched", result);
@@ -41597,8 +41775,51 @@ async function handleNewPhoto(projectId, capture, session) {
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
     isMatched: true
   }).returning().get();
-  mirrorPhotoAsCapture(db, photo);
+  mirrorPhotoAsCapture(db, photo, capture.filePath);
   finishMatchedPhoto(db, win, photo, student);
+}
+function copyToProjectFolder(sourcePath, fileName, destinationDir) {
+  require$$0.mkdirSync(destinationDir, { recursive: true });
+  let destinationPath = path.join(destinationDir, fileName);
+  if (path.resolve(sourcePath) !== path.resolve(destinationPath) && require$$0.existsSync(destinationPath)) {
+    const parsed = path.parse(fileName);
+    let suffix = 2;
+    do {
+      destinationPath = path.join(destinationDir, `${parsed.name}-${suffix}${parsed.ext}`);
+      suffix++;
+    } while (require$$0.existsSync(destinationPath));
+  }
+  if (path.resolve(sourcePath) !== path.resolve(destinationPath)) {
+    require$$0.copyFileSync(sourcePath, destinationPath);
+  }
+  return destinationPath;
+}
+function handleNewRaw(projectId, capture, session, db) {
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project) return;
+  const studentId = session.sequenceState.activeStudentId;
+  const student = studentId === null ? void 0 : db.select().from(studentsTable).where(drizzleOrm.and(drizzleOrm.eq(studentsTable.projectId, projectId), drizzleOrm.eq(studentsTable.id, studentId))).get();
+  const storage = ensureProjectStorageLayout(
+    getProjectStorageLayout(
+      getPhotoSystemLayout(electron.app.getPath("home")),
+      projectId,
+      project.schoolName
+    )
+  );
+  const storedPath = copyToProjectFolder(capture.filePath, capture.fileName, storage.rawOriginals);
+  const result = recordRawCapture(db, {
+    projectId,
+    studentId: student?.id ?? null,
+    classId: student?.classId ?? null,
+    filePath: capture.filePath,
+    storedPath,
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString()
+  });
+  if (result.kind === "duplicate") return;
+  console.log(
+    `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
+  );
 }
 function finishMatchedPhoto(db, win, photo, student) {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`);
@@ -41638,7 +41859,7 @@ function recordUnmatched(db, win, projectId, capture, reason) {
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
     isMatched: false
   }).returning().get();
-  mirrorPhotoAsCapture(db, photo);
+  mirrorPhotoAsCapture(db, photo, capture.filePath);
   win?.webContents.send("photo:unmatched", {
     filePath: capture.filePath,
     fileName: capture.fileName,

@@ -20,7 +20,7 @@ export interface WatchedPhotoStore {
   insertPhoto(photo: typeof photosTable.$inferInsert): PhotoRow
 }
 
-export function createWatchedPhotoStore(db: DesktopDb): WatchedPhotoStore {
+export function createWatchedPhotoStore(db: DesktopDb, sourcePath?: string): WatchedPhotoStore {
   return {
     findProject: (projectId) =>
       db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get(),
@@ -41,7 +41,7 @@ export function createWatchedPhotoStore(db: DesktopDb): WatchedPhotoStore {
       db.select().from(classesTable).where(eq(classesTable.id, classId)).get(),
     insertPhoto: (photo) => {
       const saved = db.insert(photosTable).values(photo).returning().get()
-      mirrorPhotoAsCapture(db, saved)
+      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath)
       return saved
     },
   }
@@ -55,6 +55,7 @@ export interface WatchedPhotoProcessorOptions {
   store: WatchedPhotoStore
   photosDir: string
   readQr: (filePath: string) => Promise<WatchedPhotoQrResult | null>
+  capturedAt?: string
 }
 
 export type WatchedPhotoResult =
@@ -111,7 +112,7 @@ function saveUnmatchedPhoto(
 export async function processWatchedPhoto(
   projectId: number,
   filePath: string,
-  { store, photosDir, readQr }: WatchedPhotoProcessorOptions,
+  { store, photosDir, readQr, capturedAt }: WatchedPhotoProcessorOptions,
 ): Promise<WatchedPhotoResult> {
   const fileName = basename(filePath)
   const project = store.findProject(projectId)
@@ -157,7 +158,7 @@ export async function processWatchedPhoto(
     studentId: student.id,
     filePath: destPath,
     fileName,
-    capturedAt: now(),
+    capturedAt: capturedAt ?? now(),
     isMatched: true,
   })
 

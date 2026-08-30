@@ -82,6 +82,7 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_captures_pairing ON captures(project_id, base_filename, pairing_status);
     CREATE INDEX IF NOT EXISTS idx_image_files_capture ON image_files(capture_id);
     CREATE INDEX IF NOT EXISTS idx_image_files_checksum ON image_files(checksum);
+    CREATE INDEX IF NOT EXISTS idx_image_files_source ON image_files(source_path);
   `)
 
   sqlite.exec(`

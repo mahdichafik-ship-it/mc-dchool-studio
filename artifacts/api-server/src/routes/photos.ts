@@ -9,6 +9,7 @@ import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
 import { canAccessAssignedDesktopProject, canAccessProject } from "../lib/studioAccess";
+import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
 
 const router = Router({ mergeParams: true });
 
@@ -121,6 +122,42 @@ type DiscoveredPhotoDeleteBackup = PhotoDeleteBackup & {
   fileUrl: string;
 };
 
+const PHOTO_DELETE_RECOVERY_ALERT_MARKER = ".photo-delete-recovery-alerted";
+
+function persistPhotoDeleteRecoveryAlert(
+  backupPath: string,
+  originalPath: string | null,
+): boolean {
+  const markerPath = path.join(backupPath, PHOTO_DELETE_RECOVERY_ALERT_MARKER);
+  try {
+    fs.writeFileSync(markerPath, "", { flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return false;
+    }
+
+    logger.warn(
+      { err: error, backupPath, originalPath },
+      "Could not persist a photo deletion recovery alert marker",
+    );
+    return true;
+  }
+}
+
+function alertPhotoDeleteRecoveryRequired(
+  reason: Parameters<typeof logPhotoDeleteRecoveryAlert>[0]["reason"],
+  backupPath: string,
+  originalPath: string | null,
+  error?: unknown,
+  markerDirectory = backupPath,
+): void {
+  if (!persistPhotoDeleteRecoveryAlert(markerDirectory, originalPath)) {
+    return;
+  }
+  logPhotoDeleteRecoveryAlert({ reason, backupPath, originalPath, error });
+}
+
 function createPhotoDeleteBackup(filePath: string): PhotoDeleteBackup {
   if (!fs.existsSync(filePath)) {
     throw new Error("Photo file not found on server; deletion aborted");
@@ -173,22 +210,31 @@ function discoverPhotoDeleteBackups(): DiscoveredPhotoDeleteBackup[] {
         try {
           backupEntries = fs.readdirSync(entryPath, { withFileTypes: true });
         } catch (error) {
-          console.error("Could not inspect a photo deletion backup", {
+          alertPhotoDeleteRecoveryRequired(
+            "backup_directory_inspection_failed",
+            entryPath,
+            null,
             error,
-            backupDirectory: entryPath,
-          });
+          );
           continue;
         }
 
-        const backupFiles = backupEntries.filter((backupEntry) => backupEntry.isFile());
-        if (backupFiles.length !== 1 || backupEntries.length !== 1) {
+        const backupContents = backupEntries.filter(
+          (backupEntry) => backupEntry.name !== PHOTO_DELETE_RECOVERY_ALERT_MARKER,
+        );
+        const backupFiles = backupContents.filter((backupEntry) => backupEntry.isFile());
+        if (backupFiles.length !== 1 || backupContents.length !== 1) {
           // A process may have stopped before the copy completed, or a backup
           // may have been tampered with. There is no safe original path to
           // reconcile in that case, so leave it for manual inspection.
-          if (backupEntries.length > 0) {
-            console.error("Leaving an ambiguous photo deletion backup in place", {
-              backupDirectory: entryPath,
-            });
+          if (backupContents.length > 0) {
+            const possibleOriginalPath =
+              backupFiles.length === 1 ? path.join(directory, backupFiles[0].name) : null;
+            alertPhotoDeleteRecoveryRequired(
+              "backup_contents_ambiguous",
+              entryPath,
+              possibleOriginalPath,
+            );
           } else {
             // Empty temporary directories contain no uploaded bytes and can
             // be removed without making a recovery decision.
@@ -276,11 +322,13 @@ export async function recoverPhotoDeleteBackups(): Promise<void> {
     } catch (error) {
       // Keep the backup when any part of reconciliation is uncertain. It is
       // the durable copy that makes a later retry safe.
-      console.error("Could not reconcile a photo deletion backup", {
+      alertPhotoDeleteRecoveryRequired(
+        "backup_reconciliation_failed",
+        backup.filePath,
+        backup.originalPath,
         error,
-        backupPath: backup.filePath,
-        originalPath: backup.originalPath,
-      });
+        backup.directory,
+      );
     }
   }
 }
@@ -550,11 +598,13 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
         rowDeleted = false;
       } catch (restoreError) {
         preserveBackup = true;
-        console.error("Could not restore a photo after file deletion failed", {
-          error: restoreError,
-          photoId,
-          backupPath: backup.filePath,
-        });
+        alertPhotoDeleteRecoveryRequired(
+          "backup_compensation_failed",
+          backup.filePath,
+          filePath,
+          restoreError,
+          backup.directory,
+        );
       }
       throw error;
     }

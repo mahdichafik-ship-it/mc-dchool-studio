@@ -727,6 +727,36 @@ test("does not overwrite a valid original when an interrupted backup is stale", 
   }
 });
 
+test("alerts once and preserves an ambiguous deletion backup for manual recovery", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("ambiguous-delete.jpg");
+  const backupDirectory = path.join(path.dirname(filePath), ".photo-delete-ambiguous");
+  const backupPath = path.join(backupDirectory, path.basename(filePath));
+  const extraPath = path.join(backupDirectory, "unexpected-extra-file");
+  const alertMarkerPath = path.join(backupDirectory, ".photo-delete-recovery-alerted");
+  await fs.promises.mkdir(backupDirectory, { recursive: true });
+  await fs.promises.copyFile(filePath, backupPath);
+  await fs.promises.writeFile(extraPath, "not a photo backup");
+
+  try {
+    await recoverPhotoDeleteBackups();
+    await recoverPhotoDeleteBackups();
+
+    assert(fs.existsSync(backupPath), "an ambiguous backup must remain available");
+    assert(fs.existsSync(extraPath), "ambiguous backup contents must remain untouched");
+    assert(fs.existsSync(alertMarkerPath), "an unsafe recovery alert must be persisted");
+    assert(fs.existsSync(filePath), "the original must remain untouched for manual recovery");
+    const [storedPhoto] = await db
+      .select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, uploaded.id));
+    assert(storedPhoto, "an ambiguous backup must not change the database row");
+  } finally {
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+    await rm(backupDirectory, { recursive: true, force: true });
+  }
+});
+
 test("cleans an interrupted deletion after its database row is gone", async () => {
   const { uploaded, filePath } = await uploadFailureTestPhoto("committed-delete.jpg");
   const backupDirectory = path.join(path.dirname(filePath), ".photo-delete-committed");

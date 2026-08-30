@@ -20,6 +20,7 @@ const node_crypto = require("node:crypto");
 const electronUpdater = require("electron-updater");
 const projectsTable = sqliteCore.sqliteTable("projects", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  cloudId: sqliteCore.integer("cloud_id"),
   schoolName: sqliteCore.text("school_name").notNull(),
   photoDate: sqliteCore.text("photo_date"),
   address: sqliteCore.text("address"),
@@ -33,6 +34,7 @@ const projectsTable = sqliteCore.sqliteTable("projects", {
 });
 const classesTable = sqliteCore.sqliteTable("classes", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  cloudId: sqliteCore.integer("cloud_id"),
   projectId: sqliteCore.integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
   className: sqliteCore.text("class_name").notNull(),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
@@ -40,6 +42,7 @@ const classesTable = sqliteCore.sqliteTable("classes", {
 });
 const studentsTable = sqliteCore.sqliteTable("students", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  cloudId: sqliteCore.integer("cloud_id"),
   projectId: sqliteCore.integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
   classId: sqliteCore.integer("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
   firstName: sqliteCore.text("first_name").notNull(),
@@ -95,6 +98,7 @@ function initializeSchema(sqlite) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       school_name TEXT NOT NULL,
       photo_date TEXT,
       address TEXT,
@@ -109,6 +113,7 @@ function initializeSchema(sqlite) {
 
     CREATE TABLE IF NOT EXISTS classes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       class_name TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -117,11 +122,14 @@ function initializeSchema(sqlite) {
 
     CREATE TABLE IF NOT EXISTS students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       generated_student_id TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
       simple_qr TEXT,
       json_qr TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -157,6 +165,23 @@ function initializeSchema(sqlite) {
     sqlite.exec(`ALTER TABLE photos ADD COLUMN file_url TEXT`);
   } catch {
   }
+  for (const statement of [
+    `ALTER TABLE projects ADD COLUMN cloud_id INTEGER`,
+    `ALTER TABLE classes ADD COLUMN cloud_id INTEGER`,
+    `ALTER TABLE students ADD COLUMN cloud_id INTEGER`,
+    `ALTER TABLE students ADD COLUMN email TEXT`,
+    `ALTER TABLE students ADD COLUMN phone TEXT`
+  ]) {
+    try {
+      sqlite.exec(statement);
+    } catch {
+    }
+  }
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_projects_cloud_id ON projects(cloud_id);
+    CREATE INDEX IF NOT EXISTS idx_classes_cloud_id ON classes(project_id, cloud_id);
+    CREATE INDEX IF NOT EXISTS idx_students_cloud_id ON students(project_id, cloud_id);
+  `);
 }
 function getPhotosDir() {
   const homeDir = electron.app.getPath("home");
@@ -40845,12 +40870,17 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
   db.update(photosTable).set({ uploadStatus: "uploading", fileUrl: null }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
   notifyUploadStatus(photoId, studentId, "uploading");
   try {
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
+    if (!project?.cloudId || !student?.cloudId) {
+      throw new Error("This project needs to be re-synced before its photos can upload.");
+    }
     const fileBuffer = require$$0.readFileSync(filePath);
     const blob = new Blob([fileBuffer], { type: "image/jpeg" });
     const formData = new FormData();
     formData.append("photo", blob, fileName);
     formData.append("capturedAt", capturedAt);
-    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${projectId}/students/${studentId}/photos`;
+    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/photos`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -40942,12 +40972,15 @@ function registerUploadHandlers() {
         signal: AbortSignal.timeout(5e3)
       });
       if (response.ok) {
+        markCloudSessionVerified();
         return { ok: true };
       }
       if (response.status === 401) invalidateDesktopCredentials(true);
+      else if (response.status >= 500) markCloudSessionUnavailable();
       const body = await response.json().catch(() => ({}));
       return { ok: false, error: body.error ?? `Server returned ${response.status}` };
     } catch (err) {
+      markCloudSessionUnavailable();
       return { ok: false, error: String(err) };
     }
   });
@@ -41451,6 +41484,9 @@ function registerCloudHandlers() {
     if (!connectionToken) {
       return { ok: false, error: "Sign in to MC School Studio before syncing projects." };
     }
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: "Cloud sync needs an internet connection. Local projects remain available offline." };
+    }
     try {
       const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`;
       const res = await fetch(url, {
@@ -41459,12 +41495,15 @@ function registerCloudHandlers() {
       });
       if (!res.ok) {
         if (res.status === 401) invalidateDesktopCredentials(true);
+        else if (res.status >= 500) markCloudSessionUnavailable();
         const body = await res.json().catch(() => ({}));
         return { ok: false, error: body.error ?? `Server returned ${res.status}` };
       }
       const projects = await res.json();
+      markCloudSessionVerified();
       return { ok: true, projects };
     } catch (err) {
+      markCloudSessionUnavailable();
       return { ok: false, error: String(err) };
     }
   });
@@ -41478,6 +41517,9 @@ function registerCloudHandlers() {
       if (!connectionToken) {
         return { ok: false, error: "Sign in to MC School Studio before pulling projects." };
       }
+      if (!isCloudSessionVerified()) {
+        return { ok: false, error: "Cloud sync needs an internet connection. Local projects remain available offline." };
+      }
       const task = cloudImportBarrier.run(async () => {
         try {
           const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProjectId}/bundle`;
@@ -41487,19 +41529,22 @@ function registerCloudHandlers() {
           });
           if (!res.ok) {
             if (res.status === 401) invalidateDesktopCredentials(true);
+            else if (res.status >= 500) markCloudSessionUnavailable();
             const body = await res.json().catch(() => ({}));
             return { ok: false, error: body.error ?? `Server returned ${res.status}` };
           }
           const bundle = await res.json();
+          markCloudSessionVerified();
           if (cloudImportBarrier.isDisabled() || getSetting("desktop_retired") === "1") {
             return { ok: false, error: "Cloud sync stopped because this desktop was retired." };
           }
           const db = getDb();
           const { project: p, classes, students } = bundle;
-          const existing = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.schoolName, p.schoolName)).get();
-          let localProjectId;
-          if (existing) {
-            db.update(projectsTable).set({
+          const imported = db.transaction((tx) => {
+            const localProjects = tx.select().from(projectsTable).all();
+            const existingProject = localProjects.find((project) => project.cloudId === p.id) ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName);
+            const projectValues = {
+              cloudId: p.id,
               schoolName: p.schoolName,
               photoDate: p.photoDate ?? null,
               address: p.address ?? null,
@@ -41508,46 +41553,44 @@ function registerCloudHandlers() {
               contactPhone: p.contactPhone ?? null,
               notes: p.notes ?? null,
               updatedAt: now()
-            }).where(drizzleOrm.eq(projectsTable.id, existing.id)).run();
-            localProjectId = existing.id;
-            db.delete(classesTable).where(drizzleOrm.eq(classesTable.projectId, localProjectId)).run();
-          } else {
-            const result = db.insert(projectsTable).values({
-              schoolName: p.schoolName,
-              photoDate: p.photoDate ?? null,
-              address: p.address ?? null,
-              contactName: p.contactName ?? null,
-              contactEmail: p.contactEmail ?? null,
-              contactPhone: p.contactPhone ?? null,
-              notes: p.notes ?? null
-            }).returning().get();
-            localProjectId = result.id;
-          }
-          const classIdMap = /* @__PURE__ */ new Map();
-          let classesImported = 0;
-          for (const cls of classes) {
-            const [inserted] = db.insert(classesTable).values({ projectId: localProjectId, className: cls.className }).returning().all();
-            classIdMap.set(cls.id, inserted.id);
-            classesImported++;
-          }
-          let studentsImported = 0;
-          for (const s of students) {
-            const localClassId = classIdMap.get(s.classId);
-            if (!localClassId) continue;
-            db.insert(studentsTable).values({
-              projectId: localProjectId,
-              classId: localClassId,
-              firstName: s.firstName,
-              lastName: s.lastName,
-              generatedStudentId: s.generatedStudentId,
-              email: s.email ?? null,
-              phone: s.phone ?? null,
-              simpleQr: s.simpleQr ?? null,
-              jsonQr: s.jsonQr ?? null
-            }).run();
-            studentsImported++;
-          }
-          return { ok: true, classesImported, studentsImported };
+            };
+            const localProject = existingProject ? tx.update(projectsTable).set(projectValues).where(drizzleOrm.eq(projectsTable.id, existingProject.id)).returning().get() : tx.insert(projectsTable).values(projectValues).returning().get();
+            const localClasses = tx.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, localProject.id)).all();
+            const classIdMap = /* @__PURE__ */ new Map();
+            for (const cls of classes) {
+              const existingClass = localClasses.find((row) => row.cloudId === cls.id) ?? localClasses.find((row) => row.cloudId === null && row.className === cls.className);
+              const localClass = existingClass ? tx.update(classesTable).set({ cloudId: cls.id, className: cls.className, updatedAt: now() }).where(drizzleOrm.eq(classesTable.id, existingClass.id)).returning().get() : tx.insert(classesTable).values({ cloudId: cls.id, projectId: localProject.id, className: cls.className }).returning().get();
+              classIdMap.set(cls.id, localClass.id);
+            }
+            const localStudents = tx.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, localProject.id)).all();
+            let studentsImported = 0;
+            for (const student of students) {
+              const localClassId = classIdMap.get(student.classId);
+              if (!localClassId) continue;
+              const existingStudent = localStudents.find((row) => row.cloudId === student.id) ?? localStudents.find((row) => row.cloudId === null && row.generatedStudentId === student.generatedStudentId);
+              const studentValues = {
+                cloudId: student.id,
+                projectId: localProject.id,
+                classId: localClassId,
+                firstName: student.firstName,
+                lastName: student.lastName,
+                generatedStudentId: student.generatedStudentId,
+                email: student.email ?? null,
+                phone: student.phone ?? null,
+                simpleQr: student.simpleQr ?? null,
+                jsonQr: student.jsonQr ?? null,
+                updatedAt: now()
+              };
+              if (existingStudent) {
+                tx.update(studentsTable).set(studentValues).where(drizzleOrm.eq(studentsTable.id, existingStudent.id)).run();
+              } else {
+                tx.insert(studentsTable).values(studentValues).run();
+              }
+              studentsImported++;
+            }
+            return { classesImported: classes.length, studentsImported };
+          });
+          return { ok: true, ...imported };
         } catch (err) {
           return { ok: false, error: String(err) };
         }

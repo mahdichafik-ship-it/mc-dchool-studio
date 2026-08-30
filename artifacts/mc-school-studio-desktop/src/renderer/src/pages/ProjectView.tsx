@@ -30,9 +30,10 @@ import type { Student, Class, Photo, PhotoMatchedEvent, StudentUploadSummary, Pr
 interface Props {
   projectId: number
   onBack: () => void
+  offline?: boolean
 }
 
-export function ProjectView({ projectId, onBack }: Props) {
+export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
   const { data: classes } = useClasses(projectId)
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
@@ -44,6 +45,8 @@ export function ProjectView({ projectId, onBack }: Props) {
   const [settingFolder, setSettingFolder] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const pendingUploadCount = [...uploadStatusMap.values()]
+    .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
 
   // Re-select the student when students refresh (to get updated photoCount)
   useEffect(() => {
@@ -124,6 +127,12 @@ export function ProjectView({ projectId, onBack }: Props) {
           <p className="text-xs text-slate-500">
             {project?.classCount} classes · {project?.studentCount} students · {project?.photoCount} photos taken
           </p>
+           {pendingUploadCount > 0 && (
+             <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+               <Upload className="size-3" />
+               {pendingUploadCount} photo{pendingUploadCount === 1 ? '' : 's'} waiting for upload
+             </p>
+           )}
         </div>
 
         {/* Watch folder controls */}
@@ -257,6 +266,7 @@ export function ProjectView({ projectId, onBack }: Props) {
               projectId={projectId}
               photoStatusMap={photoStatusMap}
               onReassign={() => reloadStudents()}
+               offline={offline}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-center p-8">
@@ -352,15 +362,18 @@ function StudentDetail({
   projectId,
   photoStatusMap,
   onReassign,
+  offline,
 }: {
   student: Student
   projectId: number
   photoStatusMap: Map<number, ProjectUploadStatusRow>
   onReassign: () => void
+  offline: boolean
 }) {
   const { data: photos, reload: reloadPhotos } = usePhotos(student.id)
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignPhoto, setReassignPhoto] = useState<Photo | null>(null)
+  const [retryingPhotoId, setRetryingPhotoId] = useState<number | null>(null)
 
   const handlePhotoMatched = useCallback(
     (data: PhotoMatchedEvent) => {
@@ -380,6 +393,29 @@ function StudentDetail({
 
   async function handleOpenPhoto(filePath: string) {
     await window.api.invoke('photos:openInSystem', { filePath })
+  }
+
+  async function handleRetryPhoto(photoId: number) {
+    if (retryingPhotoId !== null) return
+    setRetryingPhotoId(photoId)
+    try {
+      const result = await window.api.invoke('upload:retry', { photoId }) as { ok: boolean; error?: string }
+      if (result.ok) {
+        addToast({ type: 'success', title: 'Photo upload retried' })
+      } else {
+        addToast({
+          type: 'error',
+          title: offline ? 'Upload still waiting' : 'Photo upload failed',
+          description: result.error,
+        })
+      }
+    } catch (error) {
+      addToast({ type: 'error', title: 'Photo upload failed', description: String(error) })
+    } finally {
+      setRetryingPhotoId(null)
+      reloadPhotos()
+      onReassign()
+    }
   }
 
   return (
@@ -456,6 +492,8 @@ function StudentDetail({
                   uploadStatus={photoStatusMap.get(photo.id)}
                   onOpen={() => handleOpenPhoto(photo.filePath)}
                   onDelete={() => handleDeletePhoto(photo.id)}
+                   onRetry={() => handleRetryPhoto(photo.id)}
+                   retrying={retryingPhotoId === photo.id}
                   onReassign={() => {
                     setReassignPhoto(photo)
                     setReassignOpen(true)
@@ -490,12 +528,16 @@ function PhotoTile({
   onOpen,
   onDelete,
   onReassign,
+  onRetry,
+  retrying,
 }: {
   photo: Photo
   uploadStatus?: ProjectUploadStatusRow
   onOpen: () => void
   onDelete: () => void
   onReassign: () => void
+  onRetry: () => void
+  retrying: boolean
 }) {
   const status = getUploadStatusMeta(uploadStatus?.uploadStatus)
   const StatusIcon = status.icon
@@ -551,6 +593,16 @@ function PhotoTile({
         >
           Delete
         </button>
+        {uploadStatus?.uploadStatus === 'error' && (
+          <button
+            onClick={onRetry}
+            disabled={retrying}
+            className="w-full text-white text-xs bg-red-500/70 hover:bg-red-500 disabled:opacity-60 rounded px-2 py-1 flex items-center justify-center gap-1"
+          >
+            {retrying && <Loader className="size-3 animate-spin" />}
+            {retrying ? 'Retrying…' : 'Retry upload'}
+          </button>
+        )}
         {uploadStatus?.uploadStatus === 'done' && uploadStatus.fileUrl && (
           <a
             href={uploadStatus.fileUrl}
@@ -576,7 +628,7 @@ function getUploadStatusMeta(status: UploadStatus | undefined) {
   switch (status) {
     case 'pending':
       return {
-        label: 'Pending',
+        label: 'Waiting for upload',
         icon: Upload,
         badgeClass: 'bg-amber-50/95 border-amber-200',
         iconClass: 'text-amber-600',

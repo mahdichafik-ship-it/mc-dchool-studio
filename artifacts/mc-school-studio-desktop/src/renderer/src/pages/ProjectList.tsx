@@ -19,9 +19,10 @@ interface CloudProject {
 
 interface Props {
   onOpenProject: (id: number, name: string) => void
+  offline?: boolean
 }
 
-export function ProjectList({ onOpenProject }: Props) {
+export function ProjectList({ onOpenProject, offline = false }: Props) {
   const { data: projects, loading, error, reload } = useProjects()
 
   // Cloud sync modal state
@@ -88,12 +89,19 @@ export function ProjectList({ onOpenProject }: Props) {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Projects</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Pull a project from the cloud to get started
+             {offline
+               ? 'Your synced projects are available locally while offline'
+               : 'Pull a project from the cloud to get started'}
           </p>
         </div>
-        <Button onClick={handleOpenSync} className="bg-teal-600 hover:bg-teal-700">
+         <Button
+           onClick={handleOpenSync}
+           disabled={offline}
+           title={offline ? 'Cloud sync requires an internet connection' : undefined}
+           className="bg-teal-600 hover:bg-teal-700"
+         >
           <Cloud className="size-4" />
-          Sync from Cloud
+           {offline ? 'Cloud unavailable' : 'Sync from Cloud'}
         </Button>
       </div>
 
@@ -116,9 +124,9 @@ export function ProjectList({ onOpenProject }: Props) {
             <p className="text-sm text-slate-500 max-w-xs">
               Create and prepare your project on the web app, then pull it here to start the shoot.
             </p>
-            <Button className="mt-4 bg-teal-600 hover:bg-teal-700" onClick={handleOpenSync}>
+             <Button className="mt-4 bg-teal-600 hover:bg-teal-700" onClick={handleOpenSync} disabled={offline}>
               <Cloud className="size-4" />
-              Sync from Cloud
+               {offline ? 'Connect to sync a project' : 'Sync from Cloud'}
             </Button>
           </div>
         )}

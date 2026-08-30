@@ -52,9 +52,18 @@ export default function App() {
 
   const loadAuth = useCallback(async () => {
     const result = await window.api.invoke('auth:getSession')
-    setAuth(result.signedIn
-      ? { status: 'signed-in', member: result.member, offline: result.offline }
-      : { status: 'signed-out', error: result.error })
+    setAuth((previous) => {
+      if (previous.status === 'signed-in' && previous.offline && result.signedIn && !result.offline) {
+        addToast({
+          type: 'success',
+          title: 'Cloud connection restored',
+          description: 'Waiting photos will upload automatically.',
+        })
+      }
+      return result.signedIn
+        ? { status: 'signed-in', member: result.member, offline: result.offline }
+        : { status: 'signed-out', error: result.error }
+    })
   }, [])
 
   useEffect(() => {
@@ -69,18 +78,34 @@ export default function App() {
       checking = true
       try {
         const result = await window.api.invoke('auth:getSession')
-        setAuth(result.signedIn
-          ? { status: 'signed-in', member: result.member, offline: result.offline }
-          : { status: 'signed-out', error: result.error })
+        setAuth((previous) => {
+          if (previous.status === 'signed-in' && previous.offline && result.signedIn && !result.offline) {
+            addToast({
+              type: 'success',
+              title: 'Cloud connection restored',
+              description: 'Waiting photos will upload automatically.',
+            })
+          }
+          return result.signedIn
+            ? { status: 'signed-in', member: result.member, offline: result.offline }
+            : { status: 'signed-out', error: result.error }
+        })
       } finally {
         checking = false
       }
     }
     const interval = window.setInterval(() => { void refreshSession() }, 15_000)
+    const markOffline = () => {
+      setAuth((previous) => previous.status === 'signed-in'
+        ? { ...previous, offline: true }
+        : previous)
+    }
     window.addEventListener('online', refreshSession)
+    window.addEventListener('offline', markOffline)
     return () => {
       window.clearInterval(interval)
       window.removeEventListener('online', refreshSession)
+      window.removeEventListener('offline', markOffline)
     }
   }, [auth.status])
 
@@ -159,12 +184,13 @@ export default function App() {
       offline={auth.offline}
     >
       {currentPage === 'projects' && (
-        <ProjectList onOpenProject={openProject} />
+        <ProjectList onOpenProject={openProject} offline={auth.offline === true} />
       )}
       {currentPage === 'project-view' && activeProjectId && (
         <ProjectView
           projectId={activeProjectId}
           onBack={() => setCurrentPage('projects')}
+          offline={auth.offline === true}
         />
       )}
       {currentPage === 'settings' && <Settings member={auth.member} onSignedOut={() => setAuth({ status: 'signed-out', error: 'You have signed out of this desktop.' })} />}

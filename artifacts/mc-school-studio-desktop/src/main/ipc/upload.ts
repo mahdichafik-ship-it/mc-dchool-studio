@@ -9,7 +9,7 @@
 import { BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { readFileSync } from 'fs'
 import { getDb } from '../db'
-import { settingsTable, photosTable } from '../db/schema'
+import { settingsTable, photosTable, projectsTable, studentsTable } from '../db/schema'
 import { eq, and, or } from 'drizzle-orm'
 import type { UploadStatus } from '../../shared/types'
 
@@ -173,6 +173,12 @@ async function performUploadPhoto(
   notifyUploadStatus(photoId, studentId, 'uploading')
 
   try {
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    const student = db.select().from(studentsTable).where(eq(studentsTable.id, studentId)).get()
+    if (!project?.cloudId || !student?.cloudId) {
+      throw new Error('This project needs to be re-synced before its photos can upload.')
+    }
+
     const fileBuffer = readFileSync(filePath)
     const blob = new Blob([fileBuffer], { type: 'image/jpeg' })
 
@@ -180,7 +186,7 @@ async function performUploadPhoto(
     formData.append('photo', blob, fileName)
     formData.append('capturedAt', capturedAt)
 
-    const url = `${apiUrl.replace(/\/+$/, '')}/api/projects/${projectId}/students/${studentId}/photos`
+    const url = `${apiUrl.replace(/\/+$/, '')}/api/projects/${project.cloudId}/students/${student.cloudId}/photos`
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -307,12 +313,15 @@ export function registerUploadHandlers() {
         signal: AbortSignal.timeout(5000),
       })
       if (response.ok) {
+        markCloudSessionVerified()
         return { ok: true }
       }
       if (response.status === 401) invalidateDesktopCredentials(true)
+      else if (response.status >= 500) markCloudSessionUnavailable()
       const body = await response.json().catch(() => ({})) as { error?: string }
       return { ok: false, error: body.error ?? `Server returned ${response.status}` }
     } catch (err) {
+      markCloudSessionUnavailable()
       return { ok: false, error: String(err) }
     }
   })

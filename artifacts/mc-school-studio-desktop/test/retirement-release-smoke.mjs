@@ -30,6 +30,7 @@ const debugPort = 9327
 let online = true
 let retired = false
 let acknowledgedAt = null
+let uploadCount = 0
 
 mkdirSync(userDataDir, { recursive: true })
 mkdirSync(storageRoot, { recursive: true })
@@ -126,6 +127,15 @@ const server = createServer((request, response) => {
         simpleQr: null,
         jsonQr: null,
       }],
+    })
+    return
+  }
+  if (request.method === 'POST' && url.pathname === '/api/projects/41/students/61/photos') {
+    assert.match(request.headers['x-mc-upload-id'] ?? '', /^[1-9]\d*$/)
+    request.resume()
+    request.on('end', () => {
+      uploadCount++
+      json(response, 201, { fileUrl: '/uploads/release-smoke.jpg' })
     })
     return
   }
@@ -278,8 +288,9 @@ try {
   })`)
   await cdp.evaluate(`window.api.invoke('watcher:start', { projectId: ${localProjectId} })`)
 
-  // A valid 1×1 JPEG named with the imported student reference exercises the
-  // packaged watcher, image decoder, native SQLite binding, and managed copy.
+  // Capture while disconnected. This exercises cached authorization, local
+  // matching, durable pending state, remote-ID mapping, and reconnect retry.
+  online = false
   writeFileSync(sourcePhoto, Buffer.from(
     '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
     'base64',
@@ -293,10 +304,37 @@ try {
   assert(managedPhoto)
   assert.deepEqual(readFileSync(managedPhoto), readFileSync(sourcePhoto))
 
-  online = false
   const offlineSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
   assert.equal(offlineSession.signedIn, true)
   assert.equal(offlineSession.offline, true, 'the running app must observe the outage')
+  const waitingUploads = await cdp.evaluate(
+    `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
+  )
+  assert.equal(waitingUploads[0].uploadStatus, 'pending')
+
+  online = true
+  const reconnectedSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
+  assert.equal(reconnectedSession.signedIn, true)
+  assert.equal(reconnectedSession.offline, undefined)
+  await waitFor('pending upload retry', async () => {
+    const statuses = await cdp.evaluate(
+      `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
+    )
+    return uploadCount === 1 && statuses[0]?.uploadStatus === 'done'
+  }, 35_000)
+  assert.equal(uploadCount, 1, 'the reconnect retry must upload exactly once')
+
+  // A roster re-sync must reconcile the student in place so captured photos
+  // keep their local student foreign key.
+  const resynced = await cdp.evaluate(`window.api.invoke('cloud:pullProject', { cloudProjectId: 41 })`)
+  assert.equal(resynced.ok, true)
+  const photosAfterResync = await cdp.evaluate(
+    `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
+  )
+  assert.equal(photosAfterResync.length, 1)
+  assert.equal(photosAfterResync[0].uploadStatus, 'done')
+
+  online = false
   retired = true
   const stillOfflineSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
   assert.equal(stillOfflineSession.signedIn, true)

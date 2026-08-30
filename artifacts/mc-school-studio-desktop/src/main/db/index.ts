@@ -34,6 +34,7 @@ function initializeSchema(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       school_name TEXT NOT NULL,
       photo_date TEXT,
       address TEXT,
@@ -48,6 +49,7 @@ function initializeSchema(sqlite: Database.Database) {
 
     CREATE TABLE IF NOT EXISTS classes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       class_name TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -56,11 +58,14 @@ function initializeSchema(sqlite: Database.Database) {
 
     CREATE TABLE IF NOT EXISTS students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       generated_student_id TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
       simple_qr TEXT,
       json_qr TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -102,6 +107,28 @@ function initializeSchema(sqlite: Database.Database) {
   } catch {
     // Column already exists — ignore
   }
+
+  // Preserve the authoritative cloud identifiers separately from local
+  // autoincrement IDs. Upload routes must always use these remote IDs.
+  for (const statement of [
+    `ALTER TABLE projects ADD COLUMN cloud_id INTEGER`,
+    `ALTER TABLE classes ADD COLUMN cloud_id INTEGER`,
+    `ALTER TABLE students ADD COLUMN cloud_id INTEGER`,
+    `ALTER TABLE students ADD COLUMN email TEXT`,
+    `ALTER TABLE students ADD COLUMN phone TEXT`,
+  ]) {
+    try {
+      sqlite.exec(statement)
+    } catch {
+      // Column already exists — ignore
+    }
+  }
+
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_projects_cloud_id ON projects(cloud_id);
+    CREATE INDEX IF NOT EXISTS idx_classes_cloud_id ON classes(project_id, cloud_id);
+    CREATE INDEX IF NOT EXISTS idx_students_cloud_id ON students(project_id, cloud_id);
+  `)
 }
 
 export function getPhotosDir(): string {

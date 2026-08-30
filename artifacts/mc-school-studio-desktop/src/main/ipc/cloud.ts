@@ -8,8 +8,14 @@ import { ipcMain } from 'electron'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
 import { projectsTable, classesTable, studentsTable } from '../db/schema'
-import { getUploadConfig } from './upload'
-import { getSetting, invalidateDesktopCredentials } from './upload'
+import {
+  getUploadConfig,
+  getSetting,
+  invalidateDesktopCredentials,
+  isCloudSessionVerified,
+  markCloudSessionUnavailable,
+  markCloudSessionVerified,
+} from './upload'
 import { WorkBarrier } from '../lib/workBarrier'
 
 function now() {
@@ -44,6 +50,9 @@ export function registerCloudHandlers() {
     if (!apiUrl || !connectionToken) {
        return { ok: false, error: 'Sign in to MC School Studio before syncing projects.' }
     }
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: 'Cloud sync needs an internet connection. Local projects remain available offline.' }
+    }
 
     try {
       const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects`
@@ -54,13 +63,16 @@ export function registerCloudHandlers() {
 
       if (!res.ok) {
         if (res.status === 401) invalidateDesktopCredentials(true)
+        else if (res.status >= 500) markCloudSessionUnavailable()
         const body = await res.json().catch(() => ({})) as { error?: string }
         return { ok: false, error: body.error ?? `Server returned ${res.status}` }
       }
 
       const projects = await res.json() as CloudProject[]
+      markCloudSessionVerified()
       return { ok: true, projects }
     } catch (err) {
+      markCloudSessionUnavailable()
       return { ok: false, error: String(err) }
     }
   })
@@ -81,6 +93,9 @@ export function registerCloudHandlers() {
       if (!apiUrl || !connectionToken) {
          return { ok: false, error: 'Sign in to MC School Studio before pulling projects.' }
       }
+      if (!isCloudSessionVerified()) {
+        return { ok: false, error: 'Cloud sync needs an internet connection. Local projects remain available offline.' }
+      }
 
       const task = cloudImportBarrier.run(async () => {
         try {
@@ -92,6 +107,7 @@ export function registerCloudHandlers() {
 
         if (!res.ok) {
           if (res.status === 401) invalidateDesktopCredentials(true)
+          else if (res.status >= 500) markCloudSessionUnavailable()
           const body = await res.json().catch(() => ({})) as { error?: string }
           return { ok: false, error: body.error ?? `Server returned ${res.status}` }
         }
@@ -109,6 +125,7 @@ export function registerCloudHandlers() {
             simpleQr?: string | null; jsonQr?: string | null
           }[]
         }
+        markCloudSessionVerified()
 
         if (cloudImportBarrier.isDisabled() || getSetting('desktop_retired') === '1') {
           return { ok: false, error: 'Cloud sync stopped because this desktop was retired.' }
@@ -117,83 +134,98 @@ export function registerCloudHandlers() {
         const db = getDb()
         const { project: p, classes, students } = bundle
 
-        // Upsert project by schoolName
-        const existing = db
-          .select()
-          .from(projectsTable)
-          .where(eq(projectsTable.schoolName, p.schoolName))
-          .get()
+        const imported = db.transaction((tx) => {
+          const localProjects = tx.select().from(projectsTable).all()
+          const existingProject = localProjects.find((project) => project.cloudId === p.id)
+            ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName)
 
-        let localProjectId: number
-        if (existing) {
-          db.update(projectsTable)
-            .set({
-              schoolName: p.schoolName,
-              photoDate: p.photoDate ?? null,
-              address: p.address ?? null,
-              contactName: p.contactName ?? null,
-              contactEmail: p.contactEmail ?? null,
-              contactPhone: p.contactPhone ?? null,
-              notes: p.notes ?? null,
-              updatedAt: now(),
-            })
-            .where(eq(projectsTable.id, existing.id))
-            .run()
-          localProjectId = existing.id
-          // Clear classes/students so we get a clean re-import
-          db.delete(classesTable).where(eq(classesTable.projectId, localProjectId)).run()
-        } else {
-          const result = db
-            .insert(projectsTable)
-            .values({
-              schoolName: p.schoolName,
-              photoDate: p.photoDate ?? null,
-              address: p.address ?? null,
-              contactName: p.contactName ?? null,
-              contactEmail: p.contactEmail ?? null,
-              contactPhone: p.contactPhone ?? null,
-              notes: p.notes ?? null,
-            })
-            .returning()
-            .get()
-          localProjectId = result.id
-        }
+          const projectValues = {
+            cloudId: p.id,
+            schoolName: p.schoolName,
+            photoDate: p.photoDate ?? null,
+            address: p.address ?? null,
+            contactName: p.contactName ?? null,
+            contactEmail: p.contactEmail ?? null,
+            contactPhone: p.contactPhone ?? null,
+            notes: p.notes ?? null,
+            updatedAt: now(),
+          }
+          const localProject = existingProject
+            ? tx.update(projectsTable)
+              .set(projectValues)
+              .where(eq(projectsTable.id, existingProject.id))
+              .returning()
+              .get()
+            : tx.insert(projectsTable)
+              .values(projectValues)
+              .returning()
+              .get()
 
-        // Build class id map: cloud id → local id
-        const classIdMap = new Map<number, number>()
-        let classesImported = 0
-        for (const cls of classes) {
-          const [inserted] = db
-            .insert(classesTable)
-            .values({ projectId: localProjectId, className: cls.className })
-            .returning()
+          // Reconcile in place so photos keep their local student foreign keys.
+          // Missing cloud rows are deliberately retained; removing roster rows
+          // here could orphan captures that still need to upload.
+          const localClasses = tx
+            .select()
+            .from(classesTable)
+            .where(eq(classesTable.projectId, localProject.id))
             .all()
-          classIdMap.set(cls.id, inserted.id)
-          classesImported++
-        }
+          const classIdMap = new Map<number, number>()
+          for (const cls of classes) {
+            const existingClass = localClasses.find((row) => row.cloudId === cls.id)
+              ?? localClasses.find((row) => row.cloudId === null && row.className === cls.className)
+            const localClass = existingClass
+              ? tx.update(classesTable)
+                .set({ cloudId: cls.id, className: cls.className, updatedAt: now() })
+                .where(eq(classesTable.id, existingClass.id))
+                .returning()
+                .get()
+              : tx.insert(classesTable)
+                .values({ cloudId: cls.id, projectId: localProject.id, className: cls.className })
+                .returning()
+                .get()
+            classIdMap.set(cls.id, localClass.id)
+          }
 
-        // Insert students
-        let studentsImported = 0
-        for (const s of students) {
-          const localClassId = classIdMap.get(s.classId)
-          if (!localClassId) continue
-          db.insert(studentsTable)
-            .values({
-              projectId: localProjectId,
+          const localStudents = tx
+            .select()
+            .from(studentsTable)
+            .where(eq(studentsTable.projectId, localProject.id))
+            .all()
+          let studentsImported = 0
+          for (const student of students) {
+            const localClassId = classIdMap.get(student.classId)
+            if (!localClassId) continue
+            const existingStudent = localStudents.find((row) => row.cloudId === student.id)
+              ?? localStudents.find((row) =>
+                row.cloudId === null && row.generatedStudentId === student.generatedStudentId)
+            const studentValues = {
+              cloudId: student.id,
+              projectId: localProject.id,
               classId: localClassId,
-              firstName: s.firstName,
-              lastName: s.lastName,
-              generatedStudentId: s.generatedStudentId,
-              email: s.email ?? null,
-              phone: s.phone ?? null,
-              simpleQr: s.simpleQr ?? null,
-              jsonQr: s.jsonQr ?? null,
-            })
-            .run()
-          studentsImported++
-        }
+              firstName: student.firstName,
+              lastName: student.lastName,
+              generatedStudentId: student.generatedStudentId,
+              email: student.email ?? null,
+              phone: student.phone ?? null,
+              simpleQr: student.simpleQr ?? null,
+              jsonQr: student.jsonQr ?? null,
+              updatedAt: now(),
+            }
+            if (existingStudent) {
+              tx.update(studentsTable)
+                .set(studentValues)
+                .where(eq(studentsTable.id, existingStudent.id))
+                .run()
+            } else {
+              tx.insert(studentsTable).values(studentValues).run()
+            }
+            studentsImported++
+          }
 
-        return { ok: true, classesImported, studentsImported }
+          return { classesImported: classes.length, studentsImported }
+        })
+
+        return { ok: true, ...imported }
       } catch (err) {
         return { ok: false, error: String(err) }
       }

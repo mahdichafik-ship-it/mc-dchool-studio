@@ -16172,7 +16172,7 @@ function Toaster() {
     t.id
   )) });
 }
-function ProjectList({ onOpenProject }) {
+function ProjectList({ onOpenProject, offline = false }) {
   const { data: projects, loading, error, reload } = useProjects();
   const [syncOpen, setSyncOpen] = reactExports.useState(false);
   const [cloudProjects, setCloudProjects] = reactExports.useState([]);
@@ -16222,12 +16222,21 @@ function ProjectList({ onOpenProject }) {
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-xl font-bold text-slate-900", children: "Projects" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mt-0.5", children: "Pull a project from the cloud to get started" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mt-0.5", children: offline ? "Your synced projects are available locally while offline" : "Pull a project from the cloud to get started" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: handleOpenSync, className: "bg-teal-600 hover:bg-teal-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-4" }),
-        "Sync from Cloud"
-      ] })
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        Button,
+        {
+          onClick: handleOpenSync,
+          disabled: offline,
+          title: offline ? "Cloud sync requires an internet connection" : void 0,
+          className: "bg-teal-600 hover:bg-teal-700",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-4" }),
+            offline ? "Cloud unavailable" : "Sync from Cloud"
+          ]
+        }
+      )
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 overflow-auto px-8 py-6", children: [
       loading && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-center h-48 text-slate-500 text-sm", children: "Loading…" }),
@@ -16236,9 +16245,9 @@ function ProjectList({ onOpenProject }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(FolderOpen, { className: "size-8 text-slate-400" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-700 mb-1", children: "No local projects yet" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 max-w-xs", children: "Create and prepare your project on the web app, then pull it here to start the shoot." }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { className: "mt-4 bg-teal-600 hover:bg-teal-700", onClick: handleOpenSync, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { className: "mt-4 bg-teal-600 hover:bg-teal-700", onClick: handleOpenSync, disabled: offline, children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "size-4" }),
-          "Sync from Cloud"
+          offline ? "Connect to sync a project" : "Sync from Cloud"
         ] })
       ] }),
       !loading && projects.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 gap-3 max-w-3xl", children: projects.map((p) => /* @__PURE__ */ jsxRuntimeExports.jsx(ProjectCard, { project: p, onClick: () => onOpenProject(p.id, p.schoolName) }, p.id)) })
@@ -16413,7 +16422,7 @@ function Dialog({ open, onClose, title, children, className }) {
     ] })
   ] });
 }
-function ProjectView({ projectId, onBack }) {
+function ProjectView({ projectId, onBack, offline = false }) {
   const { data: project, reload: reloadProject } = useProject(projectId);
   const { data: classes } = useClasses(projectId);
   const [selectedClassId, setSelectedClassId] = reactExports.useState(null);
@@ -16425,6 +16434,7 @@ function ProjectView({ projectId, onBack }) {
   const [settingFolder, setSettingFolder] = reactExports.useState(false);
   const [reassignDialogPhoto, setReassignDialogPhoto] = reactExports.useState(null);
   const [retrying, setRetrying] = reactExports.useState(false);
+  const pendingUploadCount = [...uploadStatusMap.values()].reduce((count, summary) => count + summary.pending + summary.uploading, 0);
   reactExports.useEffect(() => {
     if (selectedStudent) {
       const refreshed = students.find((s) => s.id === selectedStudent.id);
@@ -16494,6 +16504,13 @@ function ProjectView({ projectId, onBack }) {
           " students · ",
           project?.photoCount,
           " photos taken"
+        ] }),
+        pendingUploadCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-amber-700", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3" }),
+          pendingUploadCount,
+          " photo",
+          pendingUploadCount === 1 ? "" : "s",
+          " waiting for upload"
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2 shrink-0", children: project?.watchFolder ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
@@ -16603,7 +16620,8 @@ function ProjectView({ projectId, onBack }) {
           student: selectedStudent,
           projectId,
           photoStatusMap,
-          onReassign: () => reloadStudents()
+          onReassign: () => reloadStudents(),
+          offline
         }
       ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full text-center p-8", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-20 h-20 rounded-2xl bg-slate-200 flex items-center justify-center mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(User, { className: "size-10 text-slate-400" }) }),
@@ -16666,11 +16684,13 @@ function StudentDetail({
   student,
   projectId,
   photoStatusMap,
-  onReassign
+  onReassign,
+  offline
 }) {
   const { data: photos, reload: reloadPhotos } = usePhotos(student.id);
   const [reassignOpen, setReassignOpen] = reactExports.useState(false);
   const [reassignPhoto, setReassignPhoto] = reactExports.useState(null);
+  const [retryingPhotoId, setRetryingPhotoId] = reactExports.useState(null);
   const handlePhotoMatched = reactExports.useCallback(
     (data) => {
       if (data.student.id === student.id) {
@@ -16687,6 +16707,28 @@ function StudentDetail({
   }
   async function handleOpenPhoto(filePath) {
     await window.api.invoke("photos:openInSystem", { filePath });
+  }
+  async function handleRetryPhoto(photoId) {
+    if (retryingPhotoId !== null) return;
+    setRetryingPhotoId(photoId);
+    try {
+      const result = await window.api.invoke("upload:retry", { photoId });
+      if (result.ok) {
+        addToast({ type: "success", title: "Photo upload retried" });
+      } else {
+        addToast({
+          type: "error",
+          title: offline ? "Upload still waiting" : "Photo upload failed",
+          description: result.error
+        });
+      }
+    } catch (error) {
+      addToast({ type: "error", title: "Photo upload failed", description: String(error) });
+    } finally {
+      setRetryingPhotoId(null);
+      reloadPhotos();
+      onReassign();
+    }
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between", children: [
@@ -16749,6 +16791,8 @@ function StudentDetail({
             uploadStatus: photoStatusMap.get(photo.id),
             onOpen: () => handleOpenPhoto(photo.filePath),
             onDelete: () => handleDeletePhoto(photo.id),
+            onRetry: () => handleRetryPhoto(photo.id),
+            retrying: retryingPhotoId === photo.id,
             onReassign: () => {
               setReassignPhoto(photo);
               setReassignOpen(true);
@@ -16778,7 +16822,9 @@ function PhotoTile({
   uploadStatus,
   onOpen,
   onDelete,
-  onReassign
+  onReassign,
+  onRetry,
+  retrying
 }) {
   const status = getUploadStatusMeta(uploadStatus?.uploadStatus);
   const StatusIcon = status.icon;
@@ -16838,6 +16884,18 @@ function PhotoTile({
           children: "Delete"
         }
       ),
+      uploadStatus?.uploadStatus === "error" && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          onClick: onRetry,
+          disabled: retrying,
+          className: "w-full text-white text-xs bg-red-500/70 hover:bg-red-500 disabled:opacity-60 rounded px-2 py-1 flex items-center justify-center gap-1",
+          children: [
+            retrying && /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }),
+            retrying ? "Retrying…" : "Retry upload"
+          ]
+        }
+      ),
       uploadStatus?.uploadStatus === "done" && uploadStatus.fileUrl && /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "a",
         {
@@ -16861,7 +16919,7 @@ function getUploadStatusMeta(status) {
   switch (status) {
     case "pending":
       return {
-        label: "Pending",
+        label: "Waiting for upload",
         icon: Upload,
         badgeClass: "bg-amber-50/95 border-amber-200",
         iconClass: "text-amber-600",
@@ -17143,7 +17201,16 @@ function App() {
   const [authBusy, setAuthBusy] = reactExports.useState(false);
   const loadAuth = reactExports.useCallback(async () => {
     const result = await window.api.invoke("auth:getSession");
-    setAuth(result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error });
+    setAuth((previous) => {
+      if (previous.status === "signed-in" && previous.offline && result.signedIn && !result.offline) {
+        addToast({
+          type: "success",
+          title: "Cloud connection restored",
+          description: "Waiting photos will upload automatically."
+        });
+      }
+      return result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error };
+    });
   }, []);
   reactExports.useEffect(() => {
     loadAuth().catch(() => setAuth({ status: "signed-out", error: "Could not check your desktop session." }));
@@ -17156,7 +17223,16 @@ function App() {
       checking = true;
       try {
         const result = await window.api.invoke("auth:getSession");
-        setAuth(result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error });
+        setAuth((previous) => {
+          if (previous.status === "signed-in" && previous.offline && result.signedIn && !result.offline) {
+            addToast({
+              type: "success",
+              title: "Cloud connection restored",
+              description: "Waiting photos will upload automatically."
+            });
+          }
+          return result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error };
+        });
       } finally {
         checking = false;
       }
@@ -17164,10 +17240,15 @@ function App() {
     const interval = window.setInterval(() => {
       void refreshSession();
     }, 15e3);
+    const markOffline = () => {
+      setAuth((previous) => previous.status === "signed-in" ? { ...previous, offline: true } : previous);
+    };
     window.addEventListener("online", refreshSession);
+    window.addEventListener("offline", markOffline);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("online", refreshSession);
+      window.removeEventListener("offline", markOffline);
     };
   }, [auth.status]);
   reactExports.useEffect(() => window.api.on("auth:retired", (session) => {
@@ -17232,12 +17313,13 @@ function App() {
       projectName: activeProjectName,
       offline: auth.offline,
       children: [
-        currentPage === "projects" && /* @__PURE__ */ jsxRuntimeExports.jsx(ProjectList, { onOpenProject: openProject }),
+        currentPage === "projects" && /* @__PURE__ */ jsxRuntimeExports.jsx(ProjectList, { onOpenProject: openProject, offline: auth.offline === true }),
         currentPage === "project-view" && activeProjectId && /* @__PURE__ */ jsxRuntimeExports.jsx(
           ProjectView,
           {
             projectId: activeProjectId,
-            onBack: () => setCurrentPage("projects")
+            onBack: () => setCurrentPage("projects"),
+            offline: auth.offline === true
           }
         ),
         currentPage === "settings" && /* @__PURE__ */ jsxRuntimeExports.jsx(Settings, { member: auth.member, onSignedOut: () => setAuth({ status: "signed-out", error: "You have signed out of this desktop." }) }),

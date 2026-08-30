@@ -25,6 +25,7 @@ export * from './platformInvitePublic';
 export * from './platformInvitePublicStatus';
 export * from './platformInviteStatus';
 export * from './platformOverview';
+export * from './platformProject';
 export * from './platformStudio';
 export * from './platformStudioOwner';
 export * from './project';

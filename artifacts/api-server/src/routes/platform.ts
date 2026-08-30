@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
-import { and, asc, count, eq } from "drizzle-orm";
-import { db, platformInvitesTable, projectsTable, studioMembersTable, studiosTable } from "@workspace/db";
+import { and, asc, count, desc, eq } from "drizzle-orm";
+import { db, classesTable, platformInvitesTable, projectsTable, studentsTable, studioMembersTable, studiosTable } from "@workspace/db";
 import { getUserId, requireAuth } from "../lib/auth";
 import { getUserEmail } from "../lib/studioAccess";
 import { platformOwnerIsConfigured, requirePlatformOwner } from "../lib/platformAccess";
@@ -14,10 +14,27 @@ function inviteCode() {
 }
 
 router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<void> => {
-  const [studios, members, projectCounts, invites] = await Promise.all([
+  const [studios, members, projectCounts, projectRows, invites] = await Promise.all([
     db.select().from(studiosTable).orderBy(asc(studiosTable.createdAt)),
     db.select().from(studioMembersTable).where(eq(studioMembersTable.status, "active")),
     db.select({ studioId: projectsTable.studioId, count: count() }).from(projectsTable).groupBy(projectsTable.studioId),
+    db.select({
+      id: projectsTable.id,
+      studioId: projectsTable.studioId,
+      studioName: studiosTable.name,
+      schoolName: projectsTable.schoolName,
+      photoDate: projectsTable.photoDate,
+      address: projectsTable.address,
+      contactName: projectsTable.contactName,
+      contactEmail: projectsTable.contactEmail,
+      contactPhone: projectsTable.contactPhone,
+      notes: projectsTable.notes,
+      createdAt: projectsTable.createdAt,
+      updatedAt: projectsTable.updatedAt,
+    })
+      .from(projectsTable)
+      .leftJoin(studiosTable, eq(projectsTable.studioId, studiosTable.id))
+      .orderBy(desc(projectsTable.updatedAt)),
     db.select().from(platformInvitesTable).orderBy(asc(platformInvitesTable.createdAt)),
   ]);
 
@@ -27,6 +44,25 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
       .map((member) => [member.studioId, member]),
   );
   const projectCountByStudio = new Map(projectCounts.map((row) => [row.studioId, Number(row.count)]));
+  const projects = await Promise.all(
+    projectRows.map(async (project) => {
+      const [{ classCount }] = await db
+        .select({ classCount: count() })
+        .from(classesTable)
+        .where(eq(classesTable.projectId, project.id));
+      const [{ studentCount }] = await db
+        .select({ studentCount: count() })
+        .from(studentsTable)
+        .where(eq(studentsTable.projectId, project.id));
+      return {
+        ...project,
+        classCount,
+        studentCount,
+        createdAt: project.createdAt.toISOString(),
+        updatedAt: project.updatedAt.toISOString(),
+      };
+    }),
+  );
 
   res.json({
     configured: platformOwnerIsConfigured(),
@@ -42,6 +78,7 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
         }
         : null,
     })),
+    projects,
     invites,
   });
 });

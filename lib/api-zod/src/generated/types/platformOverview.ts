@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PlatformInvite } from './platformInvite';
+import type { PlatformProject } from './platformProject';
 import type { PlatformStudio } from './platformStudio';
 
 export interface PlatformOverview {
   configured: boolean;
   studios: PlatformStudio[];
+  projects: PlatformProject[];
   invites: PlatformInvite[];
 }

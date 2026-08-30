@@ -275,9 +275,17 @@ export type PlatformStudio = Studio & {
   owner: PlatformStudioOwner;
 };
 
+export type PlatformProject = Project & ({
+  /** @nullable */
+  studioId: number | null;
+  /** @nullable */
+  studioName: string | null;
+});
+
 export interface PlatformOverview {
   configured: boolean;
   studios: PlatformStudio[];
+  projects: PlatformProject[];
   invites: PlatformInvite[];
 }
 

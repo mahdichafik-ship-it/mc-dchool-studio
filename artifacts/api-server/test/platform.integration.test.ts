@@ -16,11 +16,12 @@ import platformRouter from "../src/routes/platform";
 import projectsRouter from "../src/routes/projects";
 
 process.env.CLERK_SECRET_KEY = "";
-process.env.PLATFORM_OWNER_USER_ID = `platform-owner-${process.pid}-${Date.now()}`;
+const suffix = `${process.pid}-${Date.now()}`;
+process.env.PLATFORM_OWNER_USER_ID = `platform-owner-${suffix}`;
 
 const platformOwnerId = process.env.PLATFORM_OWNER_USER_ID;
-const inviteeId = `studio-owner-${process.pid}-${Date.now()}`;
-const otherUserId = `other-user-${process.pid}-${Date.now()}`;
+const inviteeId = `studio-owner-${suffix}`;
+const otherUserId = `other-user-${suffix}`;
 const inviteeEmail = `${inviteeId}@member.local`;
 
 let server: Server;
@@ -74,9 +75,10 @@ test("only the configured platform owner can view the platform workspace", async
 
   const allowed = await request(platformOwnerId, "/api/platform");
   assert.equal(allowed.status, 200);
-  const body = await allowed.json() as { configured: boolean; studios: unknown[]; invites: unknown[] };
+  const body = await allowed.json() as { configured: boolean; studios: unknown[]; projects: unknown[]; invites: unknown[] };
   assert.equal(body.configured, true);
   assert.ok(Array.isArray(body.studios));
+  assert.ok(Array.isArray(body.projects));
   assert.ok(Array.isArray(body.invites));
 });
 
@@ -134,7 +136,7 @@ test("rejects email mismatches and keeps studios isolated", async () => {
 
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: "different-owner@member.local" }),
+    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
@@ -149,7 +151,7 @@ test("rejects email mismatches and keeps studios isolated", async () => {
 
   const cancelledCreated = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: "cancelled-owner@member.local" }),
+    body: JSON.stringify({ email: `cancelled-owner-${suffix}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(cancelledCreated.status, 201);
@@ -189,6 +191,24 @@ test("rejects email mismatches and keeps studios isolated", async () => {
   const platformProjects = await request(platformOwnerId, "/api/projects");
   assert.equal(platformProjects.status, 200);
   assert.ok((await platformProjects.json() as { id: number }[]).some((item) => item.id === isolatedProjectId));
+
+  const platformOverview = await request(platformOwnerId, "/api/platform");
+  assert.equal(platformOverview.status, 200);
+  const overviewBody = await platformOverview.json() as {
+    projects: { id: number; studioId: number | null; studioName: string | null }[];
+  };
+  const overviewProjects = overviewBody.projects;
+  assert.ok(overviewProjects.some((item) => item.id === isolatedProjectId && item.studioId === isolatedStudioId && item.studioName === "Separate Existing Studio"));
+
+  const platformProject = await request(platformOwnerId, `/api/projects/${isolatedProjectId}`);
+  assert.equal(platformProject.status, 200);
+  const platformUpdate = await request(platformOwnerId, `/api/projects/${isolatedProjectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ notes: "Managed by the platform owner" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(platformUpdate.status, 200);
+  assert.equal((await platformUpdate.json() as { notes: string }).notes, "Managed by the platform owner");
 
   const otherProjects = await request(otherUserId, "/api/projects");
   assert.equal(otherProjects.status, 200);

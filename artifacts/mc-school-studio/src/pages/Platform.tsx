@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Copy, Link2, ShieldCheck, UserPlus, X } from "lucide-react";
+import { Building2, Calendar, ChevronRight, Copy, FolderKanban, Layers, Link2, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useUser } from "@clerk/react";
 import type { PlatformInvite, PlatformOverview } from "@workspace/api-client-react";
+import { Link } from "wouter";
+import { format } from "date-fns";
 
 type PlatformData = PlatformOverview;
 
@@ -124,6 +126,42 @@ export default function Platform() {
               {studio.description && <p className="mt-4 line-clamp-2 text-sm text-slate-600">{studio.description}</p>}
             </article>)}
           </div>}
+        </section>
+
+        <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b px-6 py-4">
+            <div>
+              <h2 className="font-semibold text-slate-900">All school projects</h2>
+              <p className="mt-1 text-sm text-slate-500">Open any project to manage its students, classes, photos, imports, and exports.</p>
+            </div>
+            <span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-semibold text-teal-700">{data.projects.length}</span>
+          </div>
+          {data.projects.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-500">
+              <FolderKanban className="mx-auto mb-3 h-8 w-8 text-slate-300" />
+              No school projects have been created yet.
+            </div>
+          ) : (
+            <div className="divide-y">
+              {data.projects.map((project) => (
+                <Link key={project.id} href={`/projects/${project.id}`} className="flex flex-col gap-4 px-6 py-5 transition-colors hover:bg-slate-50 md:flex-row md:items-center md:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="rounded-lg bg-teal-50 p-2 text-teal-700"><FolderKanban className="h-5 w-5" /></div>
+                    <div className="min-w-0">
+                      <h3 className="truncate font-semibold text-slate-900">{project.schoolName}</h3>
+                      <p className="mt-1 text-sm text-slate-500">{project.studioName ?? "No studio assigned"}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                        <span className="inline-flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{project.photoDate ? format(new Date(project.photoDate), "MMM d, yyyy") : "No photo date"}</span>
+                        <span className="inline-flex items-center gap-1"><Layers className="h-3.5 w-3.5" />{project.classCount} classes</span>
+                        <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />{project.studentCount} students</span>
+                      </div>
+                    </div>
+                  </div>
+                  <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-teal-700">Manage project <ChevronRight className="h-4 w-4" /></span>
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </div>

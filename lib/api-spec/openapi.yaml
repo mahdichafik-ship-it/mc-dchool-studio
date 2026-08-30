@@ -1065,9 +1065,20 @@ components:
                       type: ["string", "null"]
                 - type: "null"
 
+    PlatformProject:
+      allOf:
+        - $ref: "#/components/schemas/Project"
+        - type: object
+          required: [studioId, studioName]
+          properties:
+            studioId:
+              type: ["integer", "null"]
+            studioName:
+              type: ["string", "null"]
+
     PlatformOverview:
       type: object
-      required: [configured, studios, invites]
+      required: [configured, studios, projects, invites]
       properties:
         configured:
           type: boolean
@@ -1075,6 +1086,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PlatformStudio"
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformProject"
         invites:
           type: array
           items:

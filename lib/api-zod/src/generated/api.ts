@@ -461,6 +461,23 @@ export const GetPlatformOverviewResponse = zod.object({
   "displayName": zod.string().nullish()
 }),zod.null()])
 }))),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "schoolName": zod.string(),
+  "photoDate": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "contactName": zod.string().nullish(),
+  "contactEmail": zod.string().nullish(),
+  "contactPhone": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "classCount": zod.number(),
+  "studentCount": zod.number(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).and(zod.object({
+  "studioId": zod.number().nullable(),
+  "studioName": zod.string().nullable()
+}))),
   "invites": zod.array(zod.object({
   "id": zod.number(),
   "email": zod.string(),

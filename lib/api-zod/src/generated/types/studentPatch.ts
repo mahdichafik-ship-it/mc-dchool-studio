@@ -14,4 +14,8 @@ export interface StudentPatch {
   /** @nullable */
   generatedStudentId?: string | null;
   classId?: number;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  phone?: string | null;
 }

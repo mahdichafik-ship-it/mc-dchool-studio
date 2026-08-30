@@ -33,12 +33,18 @@ import type {
   ImportFileForm,
   ImportResult,
   ParseResult,
+  PlatformInvite,
+  PlatformInviteInput,
+  PlatformInvitePublic,
+  PlatformOverview,
   Project,
   ProjectInput,
   ProjectPatch,
   Student,
   StudentInput,
-  StudentPatch
+  StudentPatch,
+  Studio,
+  StudioOnboardingInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1630,4 +1636,372 @@ export function useExportPdf<TData = Awaited<ReturnType<typeof exportPdf>>, TErr
 
 
 
+
+export const getGetPlatformOverviewUrl = () => {
+
+
+
+
+  return `/api/platform`
+}
+
+/**
+ * @summary Get the platform-owner workspace
+ */
+export const getPlatformOverview = async ( options?: RequestInit): Promise<PlatformOverview> => {
+
+  return customFetch<PlatformOverview>(getGetPlatformOverviewUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPlatformOverviewQueryKey = () => {
+    return [
+    `/api/platform`
+    ] as const;
+    }
+
+
+export const getGetPlatformOverviewQueryOptions = <TData = Awaited<ReturnType<typeof getPlatformOverview>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPlatformOverview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPlatformOverviewQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPlatformOverview>>> = ({ signal }) => getPlatformOverview({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPlatformOverview>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPlatformOverviewQueryResult = NonNullable<Awaited<ReturnType<typeof getPlatformOverview>>>
+export type GetPlatformOverviewQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get the platform-owner workspace
+ */
+
+export function useGetPlatformOverview<TData = Awaited<ReturnType<typeof getPlatformOverview>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPlatformOverview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPlatformOverviewQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePlatformInviteUrl = () => {
+
+
+
+
+  return `/api/platform/invites`
+}
+
+/**
+ * @summary Create a studio-owner invitation
+ */
+export const createPlatformInvite = async (platformInviteInput: PlatformInviteInput, options?: RequestInit): Promise<PlatformInvite> => {
+
+  return customFetch<PlatformInvite>(getCreatePlatformInviteUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(platformInviteInput)
+  }
+);}
+
+
+
+
+
+export const getCreatePlatformInviteMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPlatformInvite>>, TError,{data: BodyType<PlatformInviteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPlatformInvite>>, TError,{data: BodyType<PlatformInviteInput>}, TContext> => {
+
+const mutationKey = ['createPlatformInvite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPlatformInvite>>, {data: BodyType<PlatformInviteInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPlatformInvite(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePlatformInviteMutationResult = NonNullable<Awaited<ReturnType<typeof createPlatformInvite>>>
+    export type CreatePlatformInviteMutationBody = BodyType<PlatformInviteInput>
+    export type CreatePlatformInviteMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a studio-owner invitation
+ */
+export const useCreatePlatformInvite = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPlatformInvite>>, TError,{data: BodyType<PlatformInviteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createPlatformInvite>>,
+        TError,
+        {data: BodyType<PlatformInviteInput>},
+        TContext
+      > => {
+      return useMutation(getCreatePlatformInviteMutationOptions(options));
+    }
+
+export const getCancelPlatformInviteUrl = (inviteId: number,) => {
+
+
+
+
+  return `/api/platform/invites/${inviteId}`
+}
+
+/**
+ * @summary Cancel a pending studio-owner invitation
+ */
+export const cancelPlatformInvite = async (inviteId: number, options?: RequestInit): Promise<PlatformInvite> => {
+
+  return customFetch<PlatformInvite>(getCancelPlatformInviteUrl(inviteId),
+  {
+    ...options,
+    method: 'PATCH'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelPlatformInviteMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelPlatformInvite>>, TError,{inviteId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelPlatformInvite>>, TError,{inviteId: number}, TContext> => {
+
+const mutationKey = ['cancelPlatformInvite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelPlatformInvite>>, {inviteId: number}> = (props) => {
+          const {inviteId} = props ?? {};
+
+          return  cancelPlatformInvite(inviteId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelPlatformInviteMutationResult = NonNullable<Awaited<ReturnType<typeof cancelPlatformInvite>>>
+
+    export type CancelPlatformInviteMutationError = ErrorType<void>
+
+    /**
+ * @summary Cancel a pending studio-owner invitation
+ */
+export const useCancelPlatformInvite = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelPlatformInvite>>, TError,{inviteId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelPlatformInvite>>,
+        TError,
+        {inviteId: number},
+        TContext
+      > => {
+      return useMutation(getCancelPlatformInviteMutationOptions(options));
+    }
+
+export const getGetPlatformInviteUrl = (code: string,) => {
+
+
+
+
+  return `/api/platform/invites/${code}`
+}
+
+/**
+ * @summary Get public details for a studio-owner invitation
+ */
+export const getPlatformInvite = async (code: string, options?: RequestInit): Promise<PlatformInvitePublic> => {
+
+  return customFetch<PlatformInvitePublic>(getGetPlatformInviteUrl(code),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPlatformInviteQueryKey = (code: string,) => {
+    return [
+    `/api/platform/invites/${code}`
+    ] as const;
+    }
+
+
+export const getGetPlatformInviteQueryOptions = <TData = Awaited<ReturnType<typeof getPlatformInvite>>, TError = ErrorType<void>>(code: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPlatformInvite>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPlatformInviteQueryKey(code);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPlatformInvite>>> = ({ signal }) => getPlatformInvite(code, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: code !== null && code !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPlatformInvite>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPlatformInviteQueryResult = NonNullable<Awaited<ReturnType<typeof getPlatformInvite>>>
+export type GetPlatformInviteQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get public details for a studio-owner invitation
+ */
+
+export function useGetPlatformInvite<TData = Awaited<ReturnType<typeof getPlatformInvite>>, TError = ErrorType<void>>(
+ code: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPlatformInvite>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPlatformInviteQueryOptions(code,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCompletePlatformInviteUrl = (code: string,) => {
+
+
+
+
+  return `/api/platform/invites/${code}/complete`
+}
+
+/**
+ * @summary Accept an invitation and create the studio owner's studio
+ */
+export const completePlatformInvite = async (code: string,
+    studioOnboardingInput: StudioOnboardingInput, options?: RequestInit): Promise<Studio> => {
+
+  return customFetch<Studio>(getCompletePlatformInviteUrl(code),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(studioOnboardingInput)
+  }
+);}
+
+
+
+
+
+export const getCompletePlatformInviteMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePlatformInvite>>, TError,{code: string;data: BodyType<StudioOnboardingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof completePlatformInvite>>, TError,{code: string;data: BodyType<StudioOnboardingInput>}, TContext> => {
+
+const mutationKey = ['completePlatformInvite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof completePlatformInvite>>, {code: string;data: BodyType<StudioOnboardingInput>}> = (props) => {
+          const {code,data} = props ?? {};
+
+          return  completePlatformInvite(code,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CompletePlatformInviteMutationResult = NonNullable<Awaited<ReturnType<typeof completePlatformInvite>>>
+    export type CompletePlatformInviteMutationBody = BodyType<StudioOnboardingInput>
+    export type CompletePlatformInviteMutationError = ErrorType<void>
+
+    /**
+ * @summary Accept an invitation and create the studio owner's studio
+ */
+export const useCompletePlatformInvite = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePlatformInvite>>, TError,{code: string;data: BodyType<StudioOnboardingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof completePlatformInvite>>,
+        TError,
+        {code: string;data: BodyType<StudioOnboardingInput>},
+        TContext
+      > => {
+      return useMutation(getCompletePlatformInviteMutationOptions(options));
+    }
 

@@ -1,12 +1,26 @@
 import React from 'react';
-import { Camera, LayoutDashboard, FolderKanban, LogOut, Users } from 'lucide-react';
+import { Camera, LayoutDashboard, FolderKanban, LogOut, Users, ShieldCheck } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { signOut } = useClerk();
   const { user } = useUser();
   const [location] = useLocation();
+  const [isPlatformOwner, setIsPlatformOwner] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/platform')
+      .then((response) => {
+        if (active) setIsPlatformOwner(response.ok);
+      })
+      .catch(() => {
+        if (active) setIsPlatformOwner(false);
+      });
+    return () => { active = false; };
+  }, [user?.id]);
 
   const handleSignOut = () => {
     signOut({ redirectUrl: import.meta.env.BASE_URL.replace(/\/$/, '') || '/' });
@@ -16,6 +30,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
     { label: 'Projects', icon: FolderKanban, href: '/dashboard' }, // We just link to dashboard for projects list, or we could have a separate route. Let's just use dashboard for both.
     { label: 'Team', icon: Users, href: '/team' },
+    ...(isPlatformOwner ? [{ label: 'Platform', icon: ShieldCheck, href: '/platform' }] : []),
   ];
 
   return (

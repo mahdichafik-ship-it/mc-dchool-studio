@@ -13,6 +13,10 @@ export interface SheetMapping {
   lastNameColumn: string;
   /** @nullable */
   studentIdColumn?: string | null;
+  /** @nullable */
+  emailColumn?: string | null;
+  /** @nullable */
+  phoneColumn?: string | null;
   rows: string[][];
   headers?: string[];
 }

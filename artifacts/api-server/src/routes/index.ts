@@ -9,6 +9,7 @@ import exportRouter from "./export";
 import photosRouter from "./photos";
 import desktopRouter from "./desktop";
 import teamRouter from "./team";
+import platformRouter from "./platform";
 
 const router = Router();
 
@@ -24,5 +25,6 @@ router.use("/projects/:projectId/students", photosRouter);
 // Desktop app sync and browser-based sign-in
 router.use("/desktop", desktopRouter);
 router.use("/team", teamRouter);
+router.use("/platform", platformRouter);
 
 export default router;

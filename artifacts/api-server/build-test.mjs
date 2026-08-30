@@ -8,6 +8,7 @@ await build({
   entryPoints: [
     path.resolve(artifactDir, "test/photos.integration.test.ts"),
     path.resolve(artifactDir, "test/access.integration.test.ts"),
+    path.resolve(artifactDir, "test/platform.integration.test.ts"),
   ],
   outdir: path.resolve(artifactDir, "test"),
   entryNames: "[name]",

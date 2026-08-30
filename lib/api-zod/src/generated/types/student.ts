@@ -15,6 +15,10 @@ export interface Student {
   lastName: string;
   generatedStudentId: string;
   /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
   simpleQr?: string | null;
   /** @nullable */
   jsonQr?: string | null;

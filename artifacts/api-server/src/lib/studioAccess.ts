@@ -7,7 +7,7 @@ type AccessMember = Pick<typeof studioMembersTable.$inferSelect, "id" | "studioI
   status?: "active" | "removed";
 };
 
-async function clerkEmail(userId: string): Promise<string> {
+export async function getUserEmail(userId: string): Promise<string> {
   const key = process.env.CLERK_SECRET_KEY;
   if (!key) return `${userId}@member.local`;
   const response = await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(userId)}`, {
@@ -23,7 +23,7 @@ async function clerkEmail(userId: string): Promise<string> {
 export async function ensureStudioForUser(userId: string) {
   const existing = await db.select().from(studioMembersTable).where(eq(studioMembersTable.userId, userId)).limit(1);
   if (existing[0]) return existing[0];
-  const email = (await clerkEmail(userId)).toLowerCase();
+  const email = (await getUserEmail(userId)).toLowerCase();
   const invite = await db.select().from(studioInvitesTable).where(and(eq(studioInvitesTable.email, email), eq(studioInvitesTable.status, "pending"))).limit(1);
   if (invite[0]) {
     const [member] = await db.insert(studioMembersTable).values({ studioId: invite[0].studioId, userId, email, role: invite[0].role }).returning();
@@ -41,6 +41,8 @@ export async function getStudioMember(userId: string) {
 }
 
 export async function canAccessProject(userId: string, projectId: number, action: ProjectAction = "view") {
+  const { isPlatformOwner } = await import("./platformAccess");
+  if (await isPlatformOwner(userId)) return true;
   const member = await ensureStudioForUser(userId);
   return canAccessProjectForMember(member, projectId, action);
 }
@@ -62,6 +64,11 @@ export async function canAccessProjectForMember(
 }
 
 export async function accessibleProjectIds(userId: string) {
+  const { isPlatformOwner } = await import("./platformAccess");
+  if (await isPlatformOwner(userId)) {
+    const rows = await db.select({ id: projectsTable.id }).from(projectsTable);
+    return rows.map((row) => row.id);
+  }
   const member = await ensureStudioForUser(userId);
   return accessibleProjectIdsForMember(member);
 }

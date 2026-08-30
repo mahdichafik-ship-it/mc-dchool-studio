@@ -14,6 +14,8 @@ import ProjectImport from "./pages/ProjectImport";
 import ProjectQrPreview from "./pages/ProjectQrPreview";
 import Team from "./pages/Team";
 import DesktopConnect from "./pages/DesktopConnect";
+import Platform from "./pages/Platform";
+import StudioInvite from "./pages/StudioInvite";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -163,6 +165,7 @@ function Router() {
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
       <Route path="/desktop/connect" component={DesktopConnect} />
+      <Route path="/studio-invite/:code" component={StudioInvite} />
       
       <Route path="/dashboard" component={() => <AuthenticatedRoute component={Dashboard} />} />
       <Route path="/projects/new" component={() => <AuthenticatedRoute component={ProjectNew} />} />
@@ -170,6 +173,7 @@ function Router() {
       <Route path="/projects/:projectId/import" component={() => <AuthenticatedRoute component={ProjectImport} />} />
       <Route path="/projects/:projectId/qr-preview" component={() => <AuthenticatedRoute component={ProjectQrPreview} />} />
       <Route path="/team" component={() => <AuthenticatedRoute component={Team} />} />
+      <Route path="/platform" component={() => <AuthenticatedRoute component={Platform} />} />
       
       <Route>
         <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">

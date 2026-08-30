@@ -196,3 +196,88 @@ export interface ImportFileForm {
   csvClassName?: string;
 }
 
+export interface Studio {
+  id: number;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  website?: string | null;
+  /** @nullable */
+  contactEmail?: string | null;
+  createdByUserId: string;
+  createdAt: string;
+}
+
+export interface StudioOnboardingInput {
+  /**
+     * @minLength 2
+     * @maxLength 120
+     */
+  name: string;
+  /** @maxLength 500 */
+  description?: string;
+  /** @maxLength 200 */
+  website?: string;
+}
+
+export type PlatformInviteStatus = typeof PlatformInviteStatus[keyof typeof PlatformInviteStatus];
+
+
+export const PlatformInviteStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  cancelled: 'cancelled',
+} as const;
+
+export interface PlatformInvite {
+  id: number;
+  email: string;
+  code: string;
+  invitedByUserId: string;
+  status: PlatformInviteStatus;
+  /** @nullable */
+  acceptedByUserId?: string | null;
+  createdAt: string;
+  /** @nullable */
+  acceptedAt?: string | null;
+}
+
+export interface PlatformInviteInput {
+  email: string;
+}
+
+export type PlatformInvitePublicStatus = typeof PlatformInvitePublicStatus[keyof typeof PlatformInvitePublicStatus];
+
+
+export const PlatformInvitePublicStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  cancelled: 'cancelled',
+} as const;
+
+export interface PlatformInvitePublic {
+  email: string;
+  status: PlatformInvitePublicStatus;
+  createdAt: string;
+}
+
+export type PlatformStudioOwner = {
+  userId: string;
+  email: string;
+  /** @nullable */
+  displayName?: string | null;
+} | null;
+
+export type PlatformStudio = Studio & {
+  memberCount: number;
+  projectCount: number;
+  owner: PlatformStudioOwner;
+};
+
+export interface PlatformOverview {
+  configured: boolean;
+  studios: PlatformStudio[];
+  invites: PlatformInvite[];
+}
+

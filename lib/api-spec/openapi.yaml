@@ -22,6 +22,8 @@ tags:
     description: Student list import operations
   - name: export
     description: QR code export operations
+  - name: platform
+    description: Global platform-owner and studio-owner onboarding operations
 
 paths:
   /healthz:
@@ -527,6 +529,131 @@ paths:
         "404":
           description: Not found
 
+  /platform:
+    get:
+      operationId: getPlatformOverview
+      tags: [platform]
+      summary: Get the platform-owner workspace
+      responses:
+        "200":
+          description: Platform overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOverview"
+        "401":
+          description: Unauthorized
+        "403":
+          description: Platform owner access required
+
+  /platform/invites:
+    post:
+      operationId: createPlatformInvite
+      tags: [platform]
+      summary: Create a studio-owner invitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlatformInviteInput"
+      responses:
+        "201":
+          description: Created invitation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformInvite"
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+        "403":
+          description: Platform owner access required
+        "409":
+          description: A pending invitation already exists
+
+  /platform/invites/{inviteId}:
+    patch:
+      operationId: cancelPlatformInvite
+      tags: [platform]
+      summary: Cancel a pending studio-owner invitation
+      parameters:
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cancelled invitation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformInvite"
+        "401":
+          description: Unauthorized
+        "403":
+          description: Platform owner access required
+        "404":
+          description: Pending invitation not found
+
+  /platform/invites/{code}:
+    get:
+      operationId: getPlatformInvite
+      tags: [platform]
+      summary: Get public details for a studio-owner invitation
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invitation details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformInvitePublic"
+        "404":
+          description: Invitation not found
+
+  /platform/invites/{code}/complete:
+    post:
+      operationId: completePlatformInvite
+      tags: [platform]
+      summary: Accept an invitation and create the studio owner's studio
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudioOnboardingInput"
+      responses:
+        "201":
+          description: Created or completed studio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Studio"
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+        "403":
+          description: The signed-in email does not match the invitation
+        "404":
+          description: Invitation not found
+        "409":
+          description: Invitation is no longer pending or the account belongs to another studio
+
 components:
   schemas:
     HealthStatus:
@@ -669,6 +796,10 @@ components:
           type: string
         generatedStudentId:
           type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
         simpleQr:
           type: ["string", "null"]
         jsonQr:
@@ -692,6 +823,10 @@ components:
           minLength: 1
         generatedStudentId:
           type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
 
     StudentPatch:
       type: object
@@ -706,6 +841,10 @@ components:
           type: ["string", "null"]
         classId:
           type: integer
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
 
     BulkStudentIds:
       type: object
@@ -788,6 +927,10 @@ components:
           type: string
         studentIdColumn:
           type: ["string", "null"]
+        emailColumn:
+          type: ["string", "null"]
+        phoneColumn:
+          type: ["string", "null"]
         rows:
           type: array
           items:
@@ -819,3 +962,120 @@ components:
         csvClassName:
           type: string
           description: Required only for CSV files — the class name to assign
+
+    Studio:
+      type: object
+      required: [id, name, createdByUserId, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        website:
+          type: ["string", "null"]
+        contactEmail:
+          type: ["string", "null"]
+        createdByUserId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    StudioOnboardingInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        website:
+          type: string
+          maxLength: 200
+
+    PlatformInvite:
+      type: object
+      required: [id, email, code, invitedByUserId, status, createdAt]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        code:
+          type: string
+        invitedByUserId:
+          type: string
+        status:
+          type: string
+          enum: [pending, accepted, cancelled]
+        acceptedByUserId:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: ["string", "null"]
+          format: date-time
+
+    PlatformInviteInput:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+
+    PlatformInvitePublic:
+      type: object
+      required: [email, status, createdAt]
+      properties:
+        email:
+          type: string
+        status:
+          type: string
+          enum: [pending, accepted, cancelled]
+        createdAt:
+          type: string
+          format: date-time
+
+    PlatformStudio:
+      allOf:
+        - $ref: "#/components/schemas/Studio"
+        - type: object
+          required: [memberCount, projectCount, owner]
+          properties:
+            memberCount:
+              type: integer
+            projectCount:
+              type: integer
+            owner:
+              oneOf:
+                - type: object
+                  required: [userId, email]
+                  properties:
+                    userId:
+                      type: string
+                    email:
+                      type: string
+                    displayName:
+                      type: ["string", "null"]
+                - type: "null"
+
+    PlatformOverview:
+      type: object
+      required: [configured, studios, invites]
+      properties:
+        configured:
+          type: boolean
+        studios:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformStudio"
+        invites:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformInvite"

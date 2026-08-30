@@ -3,6 +3,9 @@ import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-
 export const studiosTable = pgTable("studios", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  description: text("description"),
+  website: text("website"),
+  contactEmail: text("contact_email"),
   createdByUserId: text("created_by_user_id").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -26,6 +29,17 @@ export const studioInvitesTable = pgTable("studio_invites", {
   code: text("code").notNull().unique(),
   status: text("status", { enum: ["pending", "accepted", "cancelled"] }).notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const platformInvitesTable = pgTable("platform_invites", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  code: text("code").notNull().unique(),
+  invitedByUserId: text("invited_by_user_id").notNull(),
+  status: text("status", { enum: ["pending", "accepted", "cancelled"] }).notNull().default("pending"),
+  acceptedByUserId: text("accepted_by_user_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
 });
 
 export const projectAssignmentsTable = pgTable("project_assignments", {

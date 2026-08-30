@@ -24,5 +24,8 @@ timeoutMs = 20000
 [userenv.development]
 PHOTO_UPLOAD_KEY = "Where do I get the value for PHOTO_UPLOAD_KEY? Which service is this key for?\""
 
+[userenv.shared]
+PLATFORM_OWNER_USER_ID = "user_3Ge4DiJPRJjUvoMhPndYHElcq7L"
+
 [nix]
 channel = "stable-25_05"

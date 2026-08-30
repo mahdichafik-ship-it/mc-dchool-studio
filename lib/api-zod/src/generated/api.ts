@@ -243,6 +243,8 @@ export const ListStudentsResponseItem = zod.object({
   "firstName": zod.string(),
   "lastName": zod.string(),
   "generatedStudentId": zod.string(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -266,7 +268,9 @@ export const CreateStudentBody = zod.object({
   "classId": zod.number(),
   "firstName": zod.string().min(1),
   "lastName": zod.string().min(1),
-  "generatedStudentId": zod.string().nullish()
+  "generatedStudentId": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish()
 })
 
 export const CreateStudentResponse = zod.object({
@@ -277,6 +281,8 @@ export const CreateStudentResponse = zod.object({
   "firstName": zod.string(),
   "lastName": zod.string(),
   "generatedStudentId": zod.string(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -300,7 +306,9 @@ export const UpdateStudentBody = zod.object({
   "firstName": zod.string().min(1).optional(),
   "lastName": zod.string().min(1).optional(),
   "generatedStudentId": zod.string().nullish(),
-  "classId": zod.number().optional()
+  "classId": zod.number().optional(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish()
 })
 
 export const UpdateStudentResponse = zod.object({
@@ -311,6 +319,8 @@ export const UpdateStudentResponse = zod.object({
   "firstName": zod.string(),
   "lastName": zod.string(),
   "generatedStudentId": zod.string(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -396,6 +406,8 @@ export const ConfirmImportBody = zod.object({
   "firstNameColumn": zod.string(),
   "lastNameColumn": zod.string(),
   "studentIdColumn": zod.string().nullish(),
+  "emailColumn": zod.string().nullish(),
+  "phoneColumn": zod.string().nullish(),
   "rows": zod.array(zod.array(zod.string())),
   "headers": zod.array(zod.string()).optional()
 }))
@@ -425,5 +437,125 @@ export const ExportPdfParams = zod.object({
 })
 
 export const ExportPdfResponse = zod.unknown()
+
+
+/**
+ * @summary Get the platform-owner workspace
+ */
+export const GetPlatformOverviewResponse = zod.object({
+  "configured": zod.boolean(),
+  "studios": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "website": zod.string().nullish(),
+  "contactEmail": zod.string().nullish(),
+  "createdByUserId": zod.string(),
+  "createdAt": zod.coerce.date()
+}).and(zod.object({
+  "memberCount": zod.number(),
+  "projectCount": zod.number(),
+  "owner": zod.union([zod.object({
+  "userId": zod.string(),
+  "email": zod.string(),
+  "displayName": zod.string().nullish()
+}),zod.null()])
+}))),
+  "invites": zod.array(zod.object({
+  "id": zod.number(),
+  "email": zod.string(),
+  "code": zod.string(),
+  "invitedByUserId": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'cancelled']),
+  "acceptedByUserId": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "acceptedAt": zod.coerce.date().nullish()
+}))
+})
+
+
+/**
+ * @summary Create a studio-owner invitation
+ */
+export const CreatePlatformInviteBody = zod.object({
+  "email": zod.string()
+})
+
+export const CreatePlatformInviteResponse = zod.object({
+  "id": zod.number(),
+  "email": zod.string(),
+  "code": zod.string(),
+  "invitedByUserId": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'cancelled']),
+  "acceptedByUserId": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "acceptedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Cancel a pending studio-owner invitation
+ */
+export const CancelPlatformInviteParams = zod.object({
+  "inviteId": zod.coerce.number()
+})
+
+export const CancelPlatformInviteResponse = zod.object({
+  "id": zod.number(),
+  "email": zod.string(),
+  "code": zod.string(),
+  "invitedByUserId": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'cancelled']),
+  "acceptedByUserId": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "acceptedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Get public details for a studio-owner invitation
+ */
+export const GetPlatformInviteParams = zod.object({
+  "code": zod.coerce.string()
+})
+
+export const GetPlatformInviteResponse = zod.object({
+  "email": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'cancelled']),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Accept an invitation and create the studio owner's studio
+ */
+export const CompletePlatformInviteParams = zod.object({
+  "code": zod.coerce.string()
+})
+
+export const completePlatformInviteBodyNameMin = 2;
+export const completePlatformInviteBodyNameMax = 120;
+
+export const completePlatformInviteBodyDescriptionMax = 500;
+
+export const completePlatformInviteBodyWebsiteMax = 200;
+
+
+
+export const CompletePlatformInviteBody = zod.object({
+  "name": zod.string().min(completePlatformInviteBodyNameMin).max(completePlatformInviteBodyNameMax),
+  "description": zod.string().max(completePlatformInviteBodyDescriptionMax).optional(),
+  "website": zod.string().max(completePlatformInviteBodyWebsiteMax).optional()
+})
+
+export const CompletePlatformInviteResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "website": zod.string().nullish(),
+  "contactEmail": zod.string().nullish(),
+  "createdByUserId": zod.string(),
+  "createdAt": zod.coerce.date()
+})
 
 

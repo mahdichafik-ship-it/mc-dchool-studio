@@ -12,6 +12,7 @@ A professional school photography day preparation tool. Photography studios log 
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
 - Required env: `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY` — Clerk auth (auto-provisioned)
+- Required platform env: `PLATFORM_OWNER_USER_ID` — comma-separated Clerk user ID allowlist for global platform-owner access
 
 ## Stack
 
@@ -20,6 +21,7 @@ A professional school photography day preparation tool. Photography studios log 
 - API: Express 5 + Clerk auth middleware
 - DB: PostgreSQL + Drizzle ORM
 - Auth: Clerk (Replit-managed)
+- Platform ownership: global owner access is configured by `PLATFORM_OWNER_USER_ID`; it is separate from `studio_members` and is never claimable through the UI
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - File parsing: xlsx (Excel/CSV)

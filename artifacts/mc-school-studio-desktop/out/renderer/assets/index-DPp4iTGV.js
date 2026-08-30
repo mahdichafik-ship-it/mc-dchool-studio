@@ -15803,7 +15803,7 @@ const Button = reactExports.forwardRef(
   )
 );
 Button.displayName = "Button";
-function AppLayout({ children, currentPage, onNavigate, projectName, offline = false }) {
+function AppLayout({ children, currentPage, onNavigate, projectName, offline = false, version }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-screen bg-slate-50 overflow-hidden", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "w-60 flex-shrink-0 bg-[#0f172a] flex flex-col", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "h-16 flex items-center px-5 border-b border-white/10", style: { paddingTop: "env(titlebar-area-height, 0)" }, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
@@ -15845,7 +15845,10 @@ function AppLayout({ children, currentPage, onNavigate, projectName, offline = f
             ]
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-3 px-2", children: "MC School Studio v1.0.11" })
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-500 mt-3 px-2", children: [
+          "MC School Studio v",
+          version || "—"
+        ] })
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "flex-1 overflow-hidden flex flex-col", children: [
@@ -17199,6 +17202,7 @@ function App() {
   const [activeProjectName, setActiveProjectName] = reactExports.useState("");
   const [auth, setAuth] = reactExports.useState({ status: "loading" });
   const [authBusy, setAuthBusy] = reactExports.useState(false);
+  const [appVersion, setAppVersion] = reactExports.useState("");
   const loadAuth = reactExports.useCallback(async () => {
     const result = await window.api.invoke("auth:getSession");
     setAuth((previous) => {
@@ -17215,6 +17219,9 @@ function App() {
   reactExports.useEffect(() => {
     loadAuth().catch(() => setAuth({ status: "signed-out", error: "Could not check your desktop session." }));
   }, [loadAuth]);
+  reactExports.useEffect(() => {
+    window.api.invoke("app:getVersion").then(setAppVersion);
+  }, []);
   reactExports.useEffect(() => {
     if (auth.status !== "signed-in") return;
     let checking = false;
@@ -17312,6 +17319,7 @@ function App() {
       onNavigate: navigate,
       projectName: activeProjectName,
       offline: auth.offline,
+      version: appVersion,
       children: [
         currentPage === "projects" && /* @__PURE__ */ jsxRuntimeExports.jsx(ProjectList, { onOpenProject: openProject, offline: auth.offline === true }),
         currentPage === "project-view" && activeProjectId && /* @__PURE__ */ jsxRuntimeExports.jsx(

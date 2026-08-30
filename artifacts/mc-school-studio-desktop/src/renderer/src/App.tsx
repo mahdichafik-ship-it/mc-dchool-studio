@@ -49,6 +49,7 @@ export default function App() {
   const [activeProjectName, setActiveProjectName] = useState<string>('')
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' })
   const [authBusy, setAuthBusy] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
 
   const loadAuth = useCallback(async () => {
     const result = await window.api.invoke('auth:getSession')
@@ -69,6 +70,10 @@ export default function App() {
   useEffect(() => {
     loadAuth().catch(() => setAuth({ status: 'signed-out', error: 'Could not check your desktop session.' }))
   }, [loadAuth])
+
+  useEffect(() => {
+    window.api.invoke('app:getVersion').then(setAppVersion)
+  }, [])
 
   useEffect(() => {
     if (auth.status !== 'signed-in') return
@@ -182,6 +187,7 @@ export default function App() {
       onNavigate={navigate}
       projectName={activeProjectName}
       offline={auth.offline}
+      version={appVersion}
     >
       {currentPage === 'projects' && (
         <ProjectList onOpenProject={openProject} offline={auth.offline === true} />

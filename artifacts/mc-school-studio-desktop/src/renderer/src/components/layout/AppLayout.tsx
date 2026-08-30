@@ -11,9 +11,10 @@ interface AppLayoutProps {
   onNavigate: (page: Page) => void
   projectName?: string
   offline?: boolean
+  version: string
 }
 
-export function AppLayout({ children, currentPage, onNavigate, projectName, offline = false }: AppLayoutProps) {
+export function AppLayout({ children, currentPage, onNavigate, projectName, offline = false, version }: AppLayoutProps) {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
       {/* Sidebar */}
@@ -59,7 +60,7 @@ export function AppLayout({ children, currentPage, onNavigate, projectName, offl
             <Settings className="size-4" />
             Settings
           </Button>
-          <p className="text-xs text-slate-500 mt-3 px-2">MC School Studio v1.0.11</p>
+          <p className="text-xs text-slate-500 mt-3 px-2">MC School Studio v{version || '—'}</p>
         </div>
       </aside>
 

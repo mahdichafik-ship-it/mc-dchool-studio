@@ -41440,6 +41440,7 @@ function registerDialogHandlers() {
   electron.ipcMain.handle("app:getPhotosDir", () => {
     return getPhotosDir();
   });
+  electron.ipcMain.handle("app:getVersion", () => electron.app.getVersion());
   electron.ipcMain.handle("app:setPhotosDir", (_e, { dir }) => {
     setPhotosDir(dir);
     return getPhotosDir();

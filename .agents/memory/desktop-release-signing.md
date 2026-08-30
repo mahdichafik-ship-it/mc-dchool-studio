@@ -21,14 +21,26 @@ Verify both installer and updater payload signatures before staging, reject
 missing or unexpected assets, and keep the GitHub Release in draft state until
 the complete uploaded asset set has been checked.
 
-For macOS update metadata, treat ZIPs—not DMGs—as the electron-builder update
-payloads. Validate each metadata SHA-512 against the corresponding ZIP and
-require each ZIP's sibling blockmap before staging.
+For macOS update metadata, accept that electron-builder may list both ZIP and
+DMG payloads. Validate every listed payload's SHA-512, require both architectures,
+and require each installer's sibling blockmap before staging. The preferred
+top-level update path must still be a ZIP.
 
-**Why:** The pinned builder emits architecture-specific ZIP entries in
-`latest-mac.yml`; DMGs are separate release artifacts and do not belong in that
-metadata file.
+**Why:** The pinned builder emitted architecture-specific ZIP and DMG entries in
+`latest-mac.yml` during the signed release. Assuming ZIP-only metadata rejected
+valid, signed output after packaging had already succeeded.
 
-**How to apply:** Keep DMG checks in the complete release-asset verification,
-while updater metadata validation checks ZIP names, versions, preferred path,
-checksums, and adjacent ZIP blockmaps against generated output.
+**How to apply:** Check generated metadata against the produced installers rather
+than a ZIP-only fixture. Keep strict name, version, checksum, preferred-path, and
+blockmap validation for the complete release set.
+
+Replit's GitHub OAuth connection may have repository access without permission
+to modify workflow files. When that occurs, use a user-provided GitHub token with
+`repo` and `workflow` scopes through Replit Secrets, never through chat.
+
+**Why:** Ordinary source writes succeeded while `.github/workflows` writes were
+blocked, even after reconnecting a healthy OAuth connection.
+
+**How to apply:** Request the token through the secure Secrets form and use a
+temporary ask-pass helper for Git pushes so the token is never printed, embedded
+in a remote URL, or committed.

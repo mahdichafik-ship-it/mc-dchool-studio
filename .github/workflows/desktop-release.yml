@@ -149,6 +149,7 @@ jobs:
 
       - name: Verify Team retirement status and limitation copy
         run: |
+          pnpm run typecheck:libs
           pnpm --filter @workspace/mc-school-studio run typecheck
           pnpm --filter @workspace/mc-school-studio-desktop run test:retirement-copy
 

@@ -221,6 +221,24 @@ export interface StudioOnboardingInput {
   website?: string;
 }
 
+export interface StudioUpdate {
+  /**
+     * @maxLength 500
+     * @nullable
+     */
+  description?: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  website?: string | null;
+  /**
+     * @maxLength 254
+     * @nullable
+     */
+  contactEmail?: string | null;
+}
+
 export type PlatformInviteStatus = typeof PlatformInviteStatus[keyof typeof PlatformInviteStatus];
 
 

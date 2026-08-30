@@ -38,3 +38,4 @@ export * from './studentInput';
 export * from './studentPatch';
 export * from './studio';
 export * from './studioOnboardingInput';
+export * from './studioUpdate';

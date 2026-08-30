@@ -546,6 +546,39 @@ paths:
         "403":
           description: Platform owner access required
 
+  /platform/studios/{studioId}:
+    patch:
+      operationId: updatePlatformStudio
+      tags: [platform]
+      summary: Update studio details from the platform workspace
+      parameters:
+        - name: studioId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudioUpdate"
+      responses:
+        "200":
+          description: Updated studio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Studio"
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+        "403":
+          description: Platform owner access required
+        "404":
+          description: Studio not found
+
   /platform/invites:
     post:
       operationId: createPlatformInvite
@@ -997,6 +1030,19 @@ components:
         website:
           type: string
           maxLength: 200
+
+    StudioUpdate:
+      type: object
+      properties:
+        description:
+          type: ["string", "null"]
+          maxLength: 500
+        website:
+          type: ["string", "null"]
+          maxLength: 200
+        contactEmail:
+          type: ["string", "null"]
+          maxLength: 254
 
     PlatformInvite:
       type: object

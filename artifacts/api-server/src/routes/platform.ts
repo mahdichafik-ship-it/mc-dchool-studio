@@ -13,6 +13,50 @@ function inviteCode() {
   return randomBytes(32).toString("base64url");
 }
 
+function parseStudioUpdate(body: unknown): {
+  description?: string | null;
+  website?: string | null;
+  contactEmail?: string | null;
+} | { error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: "Studio details must be an object" };
+  }
+
+  const input = body as Record<string, unknown>;
+  const result: {
+    description?: string | null;
+    website?: string | null;
+    contactEmail?: string | null;
+  } = {};
+
+  for (const [field, maxLength] of [["description", 500], ["website", 200], ["contactEmail", 254]] as const) {
+    if (!(field in input)) continue;
+    const value = input[field];
+    if (value !== null && typeof value !== "string") {
+      return { error: `${field} must be a string or null` };
+    }
+    const trimmed = typeof value === "string" ? value.trim() : null;
+    if (trimmed !== null && trimmed.length > maxLength) {
+      return { error: `${field} must be ${maxLength} characters or fewer` };
+    }
+    result[field] = trimmed || null;
+  }
+
+  if (result.contactEmail && !emailPattern.test(result.contactEmail)) {
+    return { error: "Contact email must be a valid email address" };
+  }
+  if (result.website) {
+    try {
+      const url = new URL(result.website);
+      if (!["http:", "https:"].includes(url.protocol)) throw new Error("unsupported protocol");
+    } catch {
+      return { error: "Website must be a valid http(s) URL" };
+    }
+  }
+
+  return result;
+}
+
 router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<void> => {
   const [studios, members, projectCounts, projectRows, invites] = await Promise.all([
     db.select().from(studiosTable).orderBy(asc(studiosTable.createdAt)),
@@ -81,6 +125,36 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
     projects,
     invites,
   });
+});
+
+router.patch("/studios/:studioId", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
+  const studioId = Number(req.params.studioId);
+  if (!Number.isInteger(studioId) || studioId < 1) {
+    res.status(400).json({ error: "A valid studio ID is required" });
+    return;
+  }
+
+  const update = parseStudioUpdate(req.body);
+  if ("error" in update) {
+    res.status(400).json({ error: update.error });
+    return;
+  }
+  if (Object.keys(update).length === 0) {
+    res.status(400).json({ error: "At least one studio detail is required" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(studiosTable)
+    .set(update)
+    .where(eq(studiosTable.id, studioId))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Studio not found" });
+    return;
+  }
+
+  res.json(updated);
 });
 
 router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {

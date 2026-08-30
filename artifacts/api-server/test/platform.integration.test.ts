@@ -126,6 +126,52 @@ test("creates one-time owner invites and onboards the invited account", async ()
   });
   assert.equal(repeated.status, 409);
 
+  const forbiddenUpdate = await request(inviteeId, `/api/platform/studios/${onboardedStudioId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ description: "Should remain unchanged" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(forbiddenUpdate.status, 403);
+
+  const invalidUpdate = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ contactEmail: "not-an-email" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(invalidUpdate.status, 400);
+
+  const invalidWebsite = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ website: "ftp://north-star.example" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(invalidWebsite.status, 400);
+
+  const updated = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      description: "Updated studio description.",
+      website: "https://north-star-school.example",
+      contactEmail: "hello@north-star.example",
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(updated.status, 200);
+  const updatedStudio = await updated.json() as {
+    name: string;
+    description: string | null;
+    website: string | null;
+    contactEmail: string | null;
+  };
+  assert.deepEqual(
+    [updatedStudio.name, updatedStudio.description, updatedStudio.website, updatedStudio.contactEmail],
+    ["North Star School Photography", "Updated studio description.", "https://north-star-school.example", "hello@north-star.example"],
+  );
+
+  const [persistedStudio] = await db.select().from(studiosTable).where(eq(studiosTable.id, onboardedStudioId));
+  assert.equal(persistedStudio.contactEmail, "hello@north-star.example");
+  assert.equal(persistedStudio.website, "https://north-star-school.example");
+
   const members = await db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, onboardedStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);
 });

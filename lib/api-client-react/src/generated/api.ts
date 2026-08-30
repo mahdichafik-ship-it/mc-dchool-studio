@@ -44,7 +44,8 @@ import type {
   StudentInput,
   StudentPatch,
   Studio,
-  StudioOnboardingInput
+  StudioOnboardingInput,
+  StudioUpdate
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1713,6 +1714,78 @@ export function useGetPlatformOverview<TData = Awaited<ReturnType<typeof getPlat
 
 
 
+
+export const getUpdatePlatformStudioUrl = (studioId: number,) => {
+
+
+
+
+  return `/api/platform/studios/${studioId}`
+}
+
+/**
+ * @summary Update studio details from the platform workspace
+ */
+export const updatePlatformStudio = async (studioId: number,
+    studioUpdate: StudioUpdate, options?: RequestInit): Promise<Studio> => {
+
+  return customFetch<Studio>(getUpdatePlatformStudioUrl(studioId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(studioUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdatePlatformStudioMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlatformStudio>>, TError,{studioId: number;data: BodyType<StudioUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePlatformStudio>>, TError,{studioId: number;data: BodyType<StudioUpdate>}, TContext> => {
+
+const mutationKey = ['updatePlatformStudio'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePlatformStudio>>, {studioId: number;data: BodyType<StudioUpdate>}> = (props) => {
+          const {studioId,data} = props ?? {};
+
+          return  updatePlatformStudio(studioId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePlatformStudioMutationResult = NonNullable<Awaited<ReturnType<typeof updatePlatformStudio>>>
+    export type UpdatePlatformStudioMutationBody = BodyType<StudioUpdate>
+    export type UpdatePlatformStudioMutationError = ErrorType<void>
+
+    /**
+ * @summary Update studio details from the platform workspace
+ */
+export const useUpdatePlatformStudio = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlatformStudio>>, TError,{studioId: number;data: BodyType<StudioUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updatePlatformStudio>>,
+        TError,
+        {studioId: number;data: BodyType<StudioUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdatePlatformStudioMutationOptions(options));
+    }
 
 export const getCreatePlatformInviteUrl = () => {
 

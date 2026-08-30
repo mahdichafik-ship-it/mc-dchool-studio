@@ -492,6 +492,38 @@ export const GetPlatformOverviewResponse = zod.object({
 
 
 /**
+ * @summary Update studio details from the platform workspace
+ */
+export const UpdatePlatformStudioParams = zod.object({
+  "studioId": zod.coerce.number()
+})
+
+export const updatePlatformStudioBodyDescriptionMax = 500;
+
+export const updatePlatformStudioBodyWebsiteMax = 200;
+
+export const updatePlatformStudioBodyContactEmailMax = 254;
+
+
+
+export const UpdatePlatformStudioBody = zod.object({
+  "description": zod.string().max(updatePlatformStudioBodyDescriptionMax).nullish(),
+  "website": zod.string().max(updatePlatformStudioBodyWebsiteMax).nullish(),
+  "contactEmail": zod.string().max(updatePlatformStudioBodyContactEmailMax).nullish()
+})
+
+export const UpdatePlatformStudioResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "website": zod.string().nullish(),
+  "contactEmail": zod.string().nullish(),
+  "createdByUserId": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Create a studio-owner invitation
  */
 export const CreatePlatformInviteBody = zod.object({

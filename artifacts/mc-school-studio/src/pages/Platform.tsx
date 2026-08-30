@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Calendar, ChevronRight, Copy, FolderKanban, Layers, Link2, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { Building2, Calendar, Check, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useUser } from "@clerk/react";
 import type { PlatformInvite, PlatformOverview } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
 
 type PlatformData = PlatformOverview;
 
@@ -16,6 +20,11 @@ export default function Platform() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [editingStudio, setEditingStudio] = useState<PlatformData["studios"][number] | null>(null);
+  const [studioForm, setStudioForm] = useState({ description: "", website: "", contactEmail: "" });
+  const [studioSaving, setStudioSaving] = useState(false);
+  const [studioError, setStudioError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   async function load() {
     const response = await fetch("/api/platform");
@@ -73,6 +82,47 @@ export default function Platform() {
     window.setTimeout(() => setCopiedId((current) => current === invite.id ? null : current), 1800);
   }
 
+  function openStudioEditor(studio: PlatformData["studios"][number]) {
+    setEditingStudio(studio);
+    setStudioForm({
+      description: studio.description ?? "",
+      website: studio.website ?? "",
+      contactEmail: studio.contactEmail ?? "",
+    });
+    setStudioError(null);
+  }
+
+  async function updateStudio(event: React.FormEvent) {
+    event.preventDefault();
+    if (!editingStudio) return;
+    setStudioSaving(true);
+    setStudioError(null);
+    try {
+      const response = await fetch(`/api/platform/studios/${editingStudio.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(studioForm),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string } & Partial<PlatformData["studios"][number]>;
+      if (!response.ok) {
+        setStudioError(body.error ?? "Could not update the studio details.");
+        return;
+      }
+
+      setData((current) => current ? {
+        ...current,
+        studios: current.studios.map((studio) => studio.id === editingStudio.id ? { ...studio, ...body } : studio),
+      } : current);
+      setEditingStudio(null);
+      toast({
+        title: "Studio details updated",
+        description: `${editingStudio.name} is now up to date.`,
+      });
+    } finally {
+      setStudioSaving(false);
+    }
+  }
+
   if (error && !data) {
     return <div className="flex-1 overflow-auto bg-slate-50 p-8"><div className="mx-auto max-w-5xl rounded-xl border border-red-200 bg-red-50 p-6 text-red-800">{error}</div></div>;
   }
@@ -121,9 +171,13 @@ export default function Platform() {
           <div className="border-b px-6 py-4"><h2 className="font-semibold text-slate-900">Studios</h2></div>
           {data.studios.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No studios have been created yet.</div> : <div className="grid gap-4 p-6 md:grid-cols-2">
             {data.studios.map((studio) => <article key={studio.id} className="rounded-xl border border-slate-200 p-5">
-              <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="rounded-lg bg-slate-100 p-2 text-slate-600"><Building2 className="h-5 w-5" /></div><div><h3 className="font-semibold text-slate-900">{studio.name}</h3><p className="text-sm text-slate-500">{studio.owner?.displayName || studio.owner?.email || "Owner not completed"}</p></div></div><Link2 className="h-4 w-4 text-slate-400" /></div>
+              <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="rounded-lg bg-slate-100 p-2 text-slate-600"><Building2 className="h-5 w-5" /></div><div><h3 className="font-semibold text-slate-900">{studio.name}</h3><p className="text-sm text-slate-500">{studio.owner?.displayName || studio.owner?.email || "Owner not completed"}</p></div></div><button type="button" onClick={() => openStudioEditor(studio)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50" aria-label={`Edit details for ${studio.name}`}><Pencil className="h-3.5 w-3.5" />Edit</button></div>
               <div className="mt-4 grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-500">Members</p><p className="mt-1 font-semibold text-slate-900">{studio.memberCount}</p></div><div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-500">Projects</p><p className="mt-1 font-semibold text-slate-900">{studio.projectCount}</p></div></div>
               {studio.description && <p className="mt-4 line-clamp-2 text-sm text-slate-600">{studio.description}</p>}
+              <div className="mt-4 space-y-1 text-xs text-slate-500">
+                {studio.website ? <p className="inline-flex max-w-full items-center gap-1.5 truncate"><Link2 className="h-3.5 w-3.5 shrink-0" />{studio.website}</p> : <p className="text-slate-400">No website added</p>}
+                {studio.contactEmail ? <p className="inline-flex max-w-full items-center gap-1.5 truncate"><Mail className="h-3.5 w-3.5 shrink-0" />{studio.contactEmail}</p> : <p className="text-slate-400">No contact email added</p>}
+              </div>
             </article>)}
           </div>}
         </section>
@@ -164,6 +218,35 @@ export default function Platform() {
           )}
         </section>
       </div>
+
+      <Dialog open={Boolean(editingStudio)} onOpenChange={(open) => { if (!open && !studioSaving) setEditingStudio(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit studio details</DialogTitle>
+            <DialogDescription>Update the public profile details for {editingStudio?.name}.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={(event) => void updateStudio(event)} className="space-y-4">
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium text-slate-700">Description <span className="font-normal text-slate-400">(optional)</span></span>
+              <Textarea maxLength={500} value={studioForm.description} onChange={(event) => setStudioForm((current) => ({ ...current, description: event.target.value }))} placeholder="School portraits with a calm, organized workflow." />
+              <span className="text-xs text-slate-400">{studioForm.description.length}/500</span>
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium text-slate-700">Website <span className="font-normal text-slate-400">(optional)</span></span>
+              <Input type="url" maxLength={200} value={studioForm.website} onChange={(event) => setStudioForm((current) => ({ ...current, website: event.target.value }))} placeholder="https://yourstudio.com" />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium text-slate-700">Contact email <span className="font-normal text-slate-400">(optional)</span></span>
+              <Input type="email" maxLength={254} value={studioForm.contactEmail} onChange={(event) => setStudioForm((current) => ({ ...current, contactEmail: event.target.value }))} placeholder="hello@yourstudio.com" />
+            </label>
+            {studioError && <p role="alert" className="text-sm text-red-700">{studioError}</p>}
+            <DialogFooter>
+              <button type="button" disabled={studioSaving} onClick={() => setEditingStudio(null)} className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">Cancel</button>
+              <button type="submit" disabled={studioSaving} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60">{studioSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving…</> : <><Check className="h-4 w-4" />Save changes</>}</button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

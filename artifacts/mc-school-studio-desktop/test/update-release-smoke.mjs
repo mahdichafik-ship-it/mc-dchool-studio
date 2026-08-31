@@ -333,5 +333,10 @@ try {
   } catch {
     // The app may already have exited after a failed or completed smoke.
   }
-  rmSync(root, { recursive: true, force: true })
+  rmSync(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 500,
+  })
 }

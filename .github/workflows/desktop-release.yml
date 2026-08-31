@@ -374,7 +374,7 @@ jobs:
   # ---------------------------------------------------------------------------
   update-smoke-intel:
     needs: publish-release
-    runs-on: macos-13
+    runs-on: macos-15-intel
     timeout-minutes: 20
     permissions:
       contents: read

@@ -114,6 +114,12 @@ export interface CaptureUpdatedEvent {
   studentId: number | null
 }
 
+export interface ActiveCaptureTargetEvent {
+  projectId: number
+  studentId: number | null
+  source: 'manual' | 'qr' | 'none'
+}
+
 export type CaptureExportMode =
   | 'all'
   | 'paired'
@@ -143,6 +149,7 @@ export interface CaptureExportResult {
 export interface PhotoMatchedEvent {
   photo: Photo
   student: Student
+  captureId?: number
 }
 
 export interface PhotoMarkerEvent {

@@ -10,6 +10,7 @@ import type {
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
   CaptureFileUploadStatusChangedEvent,
+  CaptureFileReview,
   CaptureExportMode,
   CaptureExportResult,
   PhotoMatchedEvent,
@@ -20,6 +21,7 @@ import type {
   UploadStatus,
   UploadStatusChangedEvent,
   ProjectUploadStatusRow,
+  ActiveCaptureTargetEvent,
 } from '../../../shared/types'
 
 // Re-export types for convenience
@@ -34,6 +36,7 @@ export type {
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
   CaptureFileUploadStatusChangedEvent,
+  CaptureFileReview,
   CaptureExportMode,
   CaptureExportResult,
   PhotoMatchedEvent,
@@ -44,6 +47,7 @@ export type {
   UploadStatus,
   UploadStatusChangedEvent,
   ProjectUploadStatusRow,
+  ActiveCaptureTargetEvent,
 }
 
 const api = window.api
@@ -285,7 +289,49 @@ export function useCaptures(studentId: number | null) {
       if (event.studentId === studentId) void load()
     })
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
-      if (event.student.id === studentId) void load()
+      if (event.student.id !== studentId) return
+
+      // Show the locally persisted JPEG immediately from the watcher event.
+      // The database reload below reconciles pairing status and the eventual
+      // RAW partner, but cloud upload is not part of this display path.
+      setData((current) => {
+        if (current.captures.some((capture) => capture.legacyPhoto?.id === event.photo.id)) {
+          return current
+        }
+
+        const jpegFile: CaptureFileReview = {
+          id: -event.photo.id,
+          fileRole: 'JPEG',
+          fileFormat: event.photo.fileName.split('.').pop()?.toUpperCase() ?? 'JPEG',
+          originalFilename: event.photo.fileName,
+          storedPath: event.photo.filePath,
+          fileSize: null,
+          uploadStatus: null,
+          fileUrl: null,
+        }
+        const optimisticCapture: CaptureReview = {
+          id: event.captureId ?? -event.photo.id,
+          projectId: event.photo.projectId,
+          studentId: event.photo.studentId,
+          classId: event.student.classId,
+          baseFilename: event.photo.fileName.replace(/\.[^.]+$/, ''),
+          capturedAt: event.photo.capturedAt,
+          sequence: null,
+          favorite: false,
+          rejected: false,
+          selected: false,
+          pairingStatus: 'jpeg_only',
+          assignmentLocked: true,
+          files: [jpegFile],
+          thumbnailData: event.photo.thumbnailData,
+          legacyPhoto: event.photo,
+        }
+        return {
+          ...current,
+          captures: [...current.captures, optimisticCapture],
+        }
+      })
+      void load()
     })
     const unsubMarker = api.on('photo:marker', (event: PhotoMarkerEvent) => {
       if (event.student.id === studentId) void load()
@@ -367,6 +413,45 @@ export function useWatcherStatus(projectId: number | null) {
   }, [projectId])
 
   return { isRunning, start, stop, refresh: check }
+}
+
+export function useActiveCaptureTarget(projectId: number | null) {
+  const [studentId, setStudentId] = useState<number | null>(null)
+  const [source, setSource] = useState<ActiveCaptureTargetEvent['source']>('none')
+
+  const load = useCallback(async () => {
+    if (!projectId) {
+      setStudentId(null)
+      setSource('none')
+      return
+    }
+    const result = await api.invoke('watcher:getActiveStudent', { projectId }) as number | null
+    setStudentId(result)
+    setSource(result === null ? 'none' : 'manual')
+  }, [projectId])
+
+  useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (!projectId) return
+    return api.on('watcher:activeStudentChanged', (event: ActiveCaptureTargetEvent) => {
+      if (event.projectId !== projectId) return
+      setStudentId(event.studentId)
+      setSource(event.source)
+    })
+  }, [projectId])
+
+  const setTarget = useCallback(async (nextStudentId: number | null) => {
+    if (!projectId) return
+    const result = await api.invoke('watcher:setActiveStudent', {
+      projectId,
+      studentId: nextStudentId,
+    }) as number | null
+    setStudentId(result)
+    setSource(result === null ? 'none' : 'manual')
+  }, [projectId])
+
+  return { studentId, source, setTarget, reload: load }
 }
 
 // Toast notifications for photo events

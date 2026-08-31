@@ -2,10 +2,17 @@ export interface CaptureFile {
   filePath: string
   fileName: string
   capturedAtMs: number
+  /**
+   * The explicit student target at the moment the watcher saw the file.
+   * `undefined` is kept for callers that do not participate in the watcher
+   * queue; `null` means there was intentionally no manual target.
+   */
+  selectedStudentId?: number | null
 }
 
 export interface SequenceState {
   activeStudentId: number | null
+  manualStudentId: number | null
 }
 
 export type SequenceCapture =
@@ -17,8 +24,21 @@ export type SequenceDecision =
   | { kind: 'matched'; studentId: number }
   | { kind: 'review'; reason: string }
 
-export function createSequenceState(): SequenceState {
-  return { activeStudentId: null }
+export function createSequenceState(manualStudentId: number | null = null): SequenceState {
+  return {
+    activeStudentId: manualStudentId,
+    manualStudentId,
+  }
+}
+
+export function setManualStudent(state: SequenceState, studentId: number): void {
+  state.manualStudentId = studentId
+  state.activeStudentId = studentId
+}
+
+export function clearManualStudent(state: SequenceState): void {
+  state.manualStudentId = null
+  state.activeStudentId = null
 }
 
 export function registerCapturePath(seenPaths: Set<string>, filePath: string): boolean {
@@ -46,6 +66,25 @@ export function advanceSequence(
   capture: SequenceCapture,
 ): SequenceDecision {
   if (capture.kind === 'marker') {
+    if (
+      state.manualStudentId !== null
+      && capture.studentId !== null
+      && capture.studentId !== state.manualStudentId
+    ) {
+      return {
+        kind: 'review',
+        reason: `QR marker "${capture.reference}" conflicts with the selected student`,
+      }
+    }
+    if (state.manualStudentId !== null && capture.studentId === null) {
+      return {
+        kind: 'review',
+        reason: `QR marker "${capture.reference}" does not match the selected student`,
+      }
+    }
+    if (state.manualStudentId !== null) {
+      return { kind: 'marker', studentId: state.manualStudentId }
+    }
     state.activeStudentId = capture.studentId
     if (capture.studentId === null) {
       return {

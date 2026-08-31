@@ -348,7 +348,11 @@ try {
   const waitingUploads = await cdp.evaluate(
     `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
   )
-  assert.equal(waitingUploads[0].uploadStatus, 'pending')
+  assert.equal(
+    waitingUploads[0].uploadStatus,
+    null,
+    'local capture must remain neutral until an explicit upload begins',
+  )
 
   online = true
   const reconnectedSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
@@ -359,7 +363,7 @@ try {
     `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
   )
   assert.equal(uploadCount, 0, 'reconnecting must not start a background upload')
-  assert.equal(stillPendingAfterReconnect[0]?.uploadStatus, 'pending')
+  assert.equal(stillPendingAfterReconnect[0]?.uploadStatus, null)
 
   const retryResult = await cdp.evaluate(
     `window.api.invoke('upload:retry', { photoId: ${waitingUploads[0].id} })`,

@@ -114,6 +114,12 @@ export interface CaptureUpdatedEvent {
   studentId: number | null
 }
 
+export interface ActiveCaptureTargetEvent {
+  projectId: number
+  studentId: number | null
+  source: 'manual' | 'qr' | 'none'
+}
+
 export type CaptureExportMode =
   | 'all'
   | 'paired'

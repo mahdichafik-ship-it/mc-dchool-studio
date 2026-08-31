@@ -18,6 +18,7 @@ import type {
   StudentCaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
+  ActiveCaptureTargetEvent,
   CaptureExportMode,
   CaptureExportResult,
   CaptureFileUploadStatusChangedEvent,
@@ -100,6 +101,8 @@ interface ElectronAPI {
   invoke(channel: 'watcher:start', args: { projectId: number }): Promise<void>
   invoke(channel: 'watcher:stop', args: { projectId: number }): Promise<void>
   invoke(channel: 'watcher:isRunning', args: { projectId: number }): Promise<boolean>
+  invoke(channel: 'watcher:getActiveStudent', args: { projectId: number }): Promise<number | null>
+  invoke(channel: 'watcher:setActiveStudent', args: { projectId: number; studentId: number | null }): Promise<number | null>
   invoke(channel: 'dialog:openFile', args?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>
@@ -139,6 +142,7 @@ interface ElectronAPI {
   on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
   on(channel: 'auth:sessionInvalidated', listener: (session: AuthSession) => void): () => void
   on(channel: 'capture:updated', listener: (event: CaptureUpdatedEvent) => void): () => void
+  on(channel: 'watcher:activeStudentChanged', listener: (event: ActiveCaptureTargetEvent) => void): () => void
   on(channel: 'capture:fileUploadStatusChanged', listener: (event: CaptureFileUploadStatusChangedEvent) => void): () => void
 }
 

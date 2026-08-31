@@ -1,0 +1,67 @@
+Task #53 is implemented and committed.
+
+### Profiling result
+
+The largest current bottleneck was **main-process Jimp thumbnail generation**:
+
+| Strategy | JPEG avg | JPEG p50 | JPEG p95 |
+|---|---:|---:|---:|
+| Base64 thumbnail | 429 ms | 400 ms | 575 ms |
+| Thumbnail written to disk | 400 ms | 397 ms | 428 ms |
+| Direct local JPEG URL | **77 ms** | **77 ms** | **77 ms** |
+
+For a 50-file burst:
+
+- Base64 path: last preview at **16.3 s**, p50 **8.6 s**
+- Direct local JPEG path: last preview at **134 ms**, p50 **110 ms**
+
+### Implemented
+
+- Structured end-to-end pipeline diagnostics:
+  - filesystem event
+  - file stability
+  - student lookup and assignment
+  - preview preparation
+  - IPC delivery
+  - frontend event receipt
+  - React state commit
+  - image decode start/completion
+  - actual pixels painted
+  - file organization
+  - database persistence
+  - RAW pairing
+  - cloud-sync deferral
+- Actual paint measurement uses image decode plus two `requestAnimationFrame` cycles before reporting pixels painted.
+- Replaced live base64 thumbnail IPC with a short-lived secure `mc-preview://` local protocol URL.
+- Preserved stable preview-key reconciliation so the persisted capture replaces the temporary preview without duplicates.
+- Added direct-local, memory-thumbnail, disk-thumbnail, and 50-file burst benchmarks.
+
+Enable packaged-app diagnostics with:
+
+```bash
+MC_IMAGE_PIPELINE_DIAGNOSTICS=1
+```
+
+The Node benchmark measures preview readiness; the packaged renderer now logs the true file-to-painted-pixels report separately.
+
+### Verification
+
+Passed:
+
+- Desktop typecheck
+- Production Electron build
+- Watcher tests
+- Capture pairing tests
+- QR and filename tests
+- Offline capture flow
+- Database migration tests
+- Retirement tests
+- Updater metadata tests
+- Final benchmark and burst benchmark
+
+Commits:
+
+- `fb2124c` — profile and accelerate Watch Folder previews
+- `24ec7b6` — document local preview transport constraint
+
+The task-completion callback was rejected because Task #53 was never registered as an active main-session task, but the requested implementation is committed and complete. I also recorded the secure local-preview transport decision in project memory.

@@ -31,6 +31,7 @@ import {
   useStudents,
   useCaptures,
   useCaptureSummary,
+  useUnmatchedPhotos,
   useWatcherStatus,
   useUploadStatus,
 } from '@/hooks/useApi'
@@ -68,6 +69,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: classes } = useClasses(projectId)
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
+  const {
+    data: unmatchedPhotos,
+    loading: unmatchedLoading,
+    reload: reloadUnmatchedPhotos,
+  } = useUnmatchedPhotos(projectId)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId)
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
@@ -357,6 +363,13 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               onReassign={() => reloadStudents()}
                offline={offline}
             />
+          ) : unmatchedPhotos.length > 0 ? (
+            <UnmatchedPhotosPanel
+              photos={unmatchedPhotos}
+              loading={unmatchedLoading}
+              onOpen={(filePath) => window.api.invoke('photos:openInSystem', { filePath })}
+              onReassign={setReassignDialogPhoto}
+            />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-center p-8">
               <div className="w-20 h-20 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">
@@ -370,6 +383,89 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           )}
         </div>
       </div>
+
+      {reassignDialogPhoto && (
+        <ReassignDialog
+          photo={reassignDialogPhoto}
+          projectId={projectId}
+          onClose={() => setReassignDialogPhoto(null)}
+          onDone={() => {
+            setReassignDialogPhoto(null)
+            void reloadUnmatchedPhotos()
+            void reloadStudents()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function UnmatchedPhotosPanel({
+  photos,
+  loading,
+  onOpen,
+  onReassign,
+}: {
+  photos: Photo[]
+  loading: boolean
+  onOpen: (filePath: string) => void | Promise<unknown>
+  onReassign: (photo: Photo) => void
+}) {
+  return (
+    <div className="p-8">
+      <div className="mb-5">
+        <h2 className="text-lg font-bold text-slate-900">Photos needing assignment</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          These captures were saved, but no student QR or filename match was found. Assign them manually or photograph the student QR before the next portraits.
+        </p>
+      </div>
+      {loading ? (
+        <div className="flex h-40 items-center justify-center text-sm text-slate-400">
+          <Loader className="mr-2 size-4 animate-spin" /> Loading captures…
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-3">
+          {photos.map((photo) => (
+            <div key={photo.id} className="overflow-hidden rounded-lg border border-amber-200 bg-white">
+              <div className="aspect-square bg-slate-100">
+                {photo.thumbnailData ? (
+                  <img
+                    src={photo.thumbnailData}
+                    alt={photo.fileName}
+                    className="h-full w-full object-cover"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <Image className="size-8 text-slate-400" />
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2 p-2">
+                <p className="truncate text-[11px] text-slate-600" title={photo.fileName}>
+                  {photo.fileName}
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void onOpen(photo.filePath)}
+                    className="rounded bg-slate-100 px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-200"
+                  >
+                    Open
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onReassign(photo)}
+                    className="rounded bg-teal-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-teal-700"
+                  >
+                    Assign
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

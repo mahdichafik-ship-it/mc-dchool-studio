@@ -136,6 +136,35 @@ test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fall
   }
 })
 
+test('matches a barcode-renamed JPEG when Smart Shooter changes ID casing', async () => {
+  const fixture = createFixture('ZAKI_Dina_class_school-ab12_596.JPG', 'jpeg-source')
+  try {
+    let qrRead = false
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store: createStore({
+        students: [{
+          id: 4,
+          projectId: 1,
+          classId: 10,
+          generatedStudentId: 'AB12',
+          firstName: 'Dina',
+          lastName: 'Zaki',
+        }],
+      }),
+      photosDir: fixture.photosDir,
+      readQr: async () => {
+        qrRead = true
+        return null
+      },
+    })
+
+    assert.equal(result.kind, 'matched')
+    assert.equal(qrRead, false)
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true })
+  }
+})
+
 test('leaves an ID belonging to another project unmatched', async () => {
   const fixture = createFixture('Smith_John_class_school-009999.jpg')
   const { store, photos } = createStore()

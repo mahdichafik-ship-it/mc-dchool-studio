@@ -342,7 +342,10 @@ async function handleNewPhoto(
       })
 
       if (result.kind === 'unmatched') {
-        win?.webContents.send('photo:unmatched', result)
+        win?.webContents.send('photo:unmatched', {
+          ...result,
+          projectId,
+        })
         console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
         return
       }
@@ -576,6 +579,8 @@ function recordUnmatched(
   mirrorPhotoAsCapture(db, photo, capture.filePath)
 
   win?.webContents.send('photo:unmatched', {
+    projectId,
+    photoId: photo.id,
     filePath: capture.filePath,
     fileName: capture.fileName,
     reason,

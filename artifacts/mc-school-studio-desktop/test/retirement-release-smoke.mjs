@@ -326,7 +326,8 @@ try {
   await cdp.evaluate(`window.api.invoke('watcher:start', { projectId: ${localProjectId} })`)
 
   // Capture while disconnected. This exercises cached authorization, local
-  // matching, durable pending state, remote-ID mapping, and reconnect retry.
+  // matching, durable pending state, and remote-ID mapping. Reconnecting must
+  // not silently upload; the photographer explicitly retries the pending file.
   online = false
   writeFileSync(sourcePhoto, Buffer.from(
     '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
@@ -353,13 +354,24 @@ try {
   const reconnectedSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
   assert.equal(reconnectedSession.signedIn, true)
   assert.equal(reconnectedSession.offline, undefined)
-  await waitFor('pending upload retry', async () => {
+  await wait(1_000)
+  const stillPendingAfterReconnect = await cdp.evaluate(
+    `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
+  )
+  assert.equal(uploadCount, 0, 'reconnecting must not start a background upload')
+  assert.equal(stillPendingAfterReconnect[0]?.uploadStatus, 'pending')
+
+  const retryResult = await cdp.evaluate(
+    `window.api.invoke('upload:retry', { photoId: ${waitingUploads[0].id} })`,
+  )
+  assert.equal(retryResult.ok, true)
+  await waitFor('explicit pending upload retry', async () => {
     const statuses = await cdp.evaluate(
       `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
     )
     return uploadCount === 1 && statuses[0]?.uploadStatus === 'done'
   }, 35_000)
-  assert.equal(uploadCount, 1, 'the reconnect retry must upload exactly once')
+  assert.equal(uploadCount, 1, 'the explicit retry must upload exactly once')
 
   // A roster re-sync must reconcile the student in place so captured photos
   // keep their local student foreign key.

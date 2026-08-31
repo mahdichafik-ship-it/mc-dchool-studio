@@ -29,6 +29,7 @@ const projectsTable = sqliteCore.sqliteTable("projects", {
   contactPhone: sqliteCore.text("contact_phone"),
   notes: sqliteCore.text("notes"),
   watchFolder: sqliteCore.text("watch_folder"),
+  finishedAt: sqliteCore.text("finished_at"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
   updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
@@ -144,7 +145,8 @@ function ensureLegacyColumns(sqlite) {
     ["classes", "cloud_id", "INTEGER"],
     ["students", "cloud_id", "INTEGER"],
     ["students", "email", "TEXT"],
-    ["students", "phone", "TEXT"]
+    ["students", "phone", "TEXT"],
+    ["projects", "finished_at", "TEXT"]
   ]) {
     ensureColumn(sqlite, ...migration);
   }
@@ -351,6 +353,7 @@ function initializeSchema(sqlite) {
       contact_phone TEXT,
       notes TEXT,
       watch_folder TEXT,
+      finished_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -467,6 +470,7 @@ function enrichProject(p, classCount, studentCount, photoCount) {
     contactPhone: p.contactPhone,
     notes: p.notes,
     watchFolder: p.watchFolder,
+    finishedAt: p.finishedAt,
     classCount,
     studentCount,
     photoCount,
@@ -41243,7 +41247,6 @@ let cloudSessionVerified = false;
 const activeUploads = /* @__PURE__ */ new Set();
 const activePhotoUploads = /* @__PURE__ */ new Map();
 const activeCaptureFileUploads = /* @__PURE__ */ new Map();
-let retryInProgress = false;
 const cloudIdentityRepairs = /* @__PURE__ */ new Map();
 class RetryableUploadError extends Error {
 }
@@ -41254,7 +41257,6 @@ function disableCloudSyncForRetirement() {
 function enableCloudSyncAfterSignIn() {
   cloudSyncDisabledForRetirement = false;
   cloudSessionVerified = true;
-  retryPendingUploads();
 }
 function markCloudSessionUnavailable() {
   cloudSessionVerified = false;
@@ -41262,7 +41264,6 @@ function markCloudSessionUnavailable() {
 function markCloudSessionVerified() {
   if (cloudSyncDisabledForRetirement) return;
   cloudSessionVerified = true;
-  retryPendingUploads();
 }
 function isCloudSessionVerified() {
   return cloudSessionVerified && !cloudSyncDisabledForRetirement;
@@ -41370,8 +41371,7 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
   const db = getDb();
   const { apiUrl, connectionToken } = getUploadConfig$1();
   if (!connectionToken) {
-    console.log("[Upload] Cloud upload not configured, skipping.");
-    return;
+    throw new Error("Cloud upload is not configured.");
   }
   db.update(photosTable).set({ uploadStatus: "uploading", fileUrl: null }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
   notifyUploadStatus(photoId, studentId, "uploading");
@@ -41462,9 +41462,11 @@ async function performUploadCaptureFile(captureId, fileId) {
   const db = getDb();
   const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
   const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
-  if (!capture || !file || file.captureId !== captureId || capture.studentId === null) return;
+  if (!capture) throw new Error(`Capture ${captureId} was not found.`);
+  if (!file || file.captureId !== captureId) throw new Error(`Capture file ${fileId} was not found.`);
+  if (capture.studentId === null) throw new Error("Capture is not matched to a student.");
   const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken) return;
+  if (!connectionToken) throw new Error("Cloud upload is not configured.");
   setCaptureFileStatus(captureId, fileId, "uploading", null);
   try {
     await ensureCloudIdentity(capture.projectId, capture.studentId, apiUrl, connectionToken);
@@ -41535,49 +41537,69 @@ function uploadCaptureFile(captureId, fileId) {
   });
   return task;
 }
-async function queueCaptureUploads(captureId) {
-  if (!isCloudSessionVerified()) return;
+function getProjectSyncJobs(projectId) {
   const db = getDb();
-  const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, captureId)).all().filter((file) => file.uploadStatus !== "done");
-  await Promise.allSettled(files.map((file) => uploadCaptureFile(captureId, file.id)));
+  const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
+  const jobs = [];
+  const mirroredPhotoIds = /* @__PURE__ */ new Set();
+  for (const capture of captures) {
+    if (capture.legacyPhotoId !== null) mirroredPhotoIds.add(capture.legacyPhotoId);
+    if (capture.studentId === null) continue;
+    const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
+    for (const file of files) {
+      if (file.uploadStatus !== "done") {
+        jobs.push({ kind: "capture-file", captureId: capture.id, fileId: file.id });
+      }
+    }
+  }
+  const legacyPhotos = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.projectId, projectId)).all();
+  for (const photo of legacyPhotos) {
+    if (!photo.isMatched || photo.studentId === null || mirroredPhotoIds.has(photo.id) || photo.uploadStatus === "done") continue;
+    jobs.push({
+      kind: "legacy-photo",
+      projectId,
+      studentId: photo.studentId,
+      photoId: photo.id,
+      filePath: photo.filePath,
+      fileName: photo.fileName,
+      capturedAt: photo.capturedAt
+    });
+  }
+  return jobs;
 }
-function retryPendingUploads() {
-  if (retryInProgress || !isCloudSessionVerified()) return;
-  const { connectionToken } = getUploadConfig$1();
-  if (!connectionToken) return;
-  retryInProgress = true;
-  void (async () => {
-    const db = getDb();
-    const pending = db.select().from(photosTable).where(drizzleOrm.or(
-      drizzleOrm.eq(photosTable.uploadStatus, "pending"),
-      drizzleOrm.eq(photosTable.uploadStatus, "uploading")
-    )).all();
-    const captureFileRows = db.select({ captureId: imageFilesTable.captureId }).from(imageFilesTable).innerJoin(capturesTable, drizzleOrm.eq(imageFilesTable.captureId, capturesTable.id)).where(drizzleOrm.and(
-      drizzleOrm.or(
-        drizzleOrm.eq(imageFilesTable.uploadStatus, "pending"),
-        drizzleOrm.eq(imageFilesTable.uploadStatus, "uploading"),
-        drizzleOrm.isNull(imageFilesTable.uploadStatus)
-      )
-    )).all();
-    const captureIds = [...new Set(captureFileRows.map((row) => row.captureId))];
-    await Promise.allSettled(captureIds.map((captureId) => queueCaptureUploads(captureId)));
-    const mirroredPhotoIds = new Set(
-      db.select({ photoId: capturesTable.legacyPhotoId }).from(capturesTable).all().map((row) => row.photoId).filter((photoId) => photoId !== null)
-    );
-    await Promise.allSettled(
-      pending.filter((photo) => photo.studentId !== null && !mirroredPhotoIds.has(photo.id)).map((photo) => uploadPhoto(
-        photo.projectId,
-        photo.studentId,
-        photo.id,
-        photo.filePath,
-        photo.fileName,
-        photo.capturedAt
-      ))
-    );
-  })().finally(() => {
-    retryInProgress = false;
-  }).catch(() => {
-  });
+async function syncProjectUploads(projectId, onProgress) {
+  const jobs = getProjectSyncJobs(projectId);
+  let completed = 0;
+  let failed = 0;
+  let firstError;
+  const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError });
+  report();
+  for (const job of jobs) {
+    try {
+      if (!isCloudSessionVerified()) {
+        throw new Error("Cloud sync is unavailable. Local captures are safe; reconnect and try again.");
+      }
+      if (job.kind === "capture-file") {
+        await uploadCaptureFile(job.captureId, job.fileId);
+      } else {
+        await uploadPhoto(
+          job.projectId,
+          job.studentId,
+          job.photoId,
+          job.filePath,
+          job.fileName,
+          job.capturedAt
+        );
+      }
+    } catch (error) {
+      failed++;
+      firstError ??= String(error);
+    } finally {
+      completed++;
+      report();
+    }
+  }
+  return { completed, total: jobs.length, failed, error: firstError };
 }
 function registerUploadHandlers() {
   electron.ipcMain.handle("upload:testConnection", async () => {
@@ -41717,12 +41739,6 @@ function sortCaptureFiles(files) {
 }
 function advanceSequence(state, capture) {
   if (capture.kind === "marker") {
-    if (state.manualStudentId !== null && capture.studentId !== null && capture.studentId !== state.manualStudentId) {
-      return {
-        kind: "review",
-        reason: `QR marker "${capture.reference}" conflicts with the selected student`
-      };
-    }
     if (state.manualStudentId !== null && capture.studentId === null) {
       return {
         kind: "review",
@@ -41730,7 +41746,9 @@ function advanceSequence(state, capture) {
       };
     }
     if (state.manualStudentId !== null) {
-      return { kind: "marker", studentId: state.manualStudentId };
+      state.manualStudentId = null;
+      state.activeStudentId = capture.studentId;
+      return { kind: "marker", studentId: capture.studentId };
     }
     state.activeStudentId = capture.studentId;
     if (capture.studentId === null) {
@@ -42131,6 +42149,9 @@ function registerWatcherHandlers() {
     if (!project?.watchFolder) {
       throw new Error("No watch folder configured for this project");
     }
+    if (project.finishedAt) {
+      throw new Error("This project is finished. Reopen it as a new local project before capturing more photos.");
+    }
     const watchFolders = resolveWatchFolders(project.watchFolder, require$$0.existsSync);
     if (watchFolders.mode === "dual") {
       for (const folder of watchFolders.paths) require$$0.mkdirSync(folder, { recursive: true });
@@ -42177,15 +42198,7 @@ function registerWatcherHandlers() {
     );
   });
   electron.ipcMain.handle("watcher:stop", async (_e, { projectId }) => {
-    const session = watchers.get(projectId);
-    if (session) {
-      if (session.flushTimer) clearTimeout(session.flushTimer);
-      session.pendingFiles = [];
-      await session.watcher.close();
-      watchers.delete(projectId);
-    }
-    pendingManualTargets.delete(projectId);
-    emitActiveStudentChanged(projectId, null, "none");
+    await stopProjectWatcher(projectId, { drain: true, clearTarget: true });
     console.log(`[Watcher] Stopped watching for project ${projectId}`);
   });
   electron.ipcMain.handle("watcher:isRunning", (_e, { projectId }) => {
@@ -42217,6 +42230,38 @@ function registerWatcherHandlers() {
     }
   );
 }
+async function stopProjectWatcher(projectId, options = {}) {
+  const { drain = true, clearTarget = true } = options;
+  const session = watchers.get(projectId);
+  if (!session) {
+    if (clearTarget) {
+      pendingManualTargets.delete(projectId);
+      emitActiveStudentChanged(projectId, null, "none");
+    }
+    return;
+  }
+  watchers.delete(projectId);
+  if (session.flushTimer) clearTimeout(session.flushTimer);
+  session.flushTimer = null;
+  const pending = sortCaptureFiles(session.pendingFiles.splice(0));
+  await session.watcher.close();
+  if (drain && pending.length > 0) {
+    session.processing = session.processing.then(async () => {
+      for (const capture of pending) {
+        try {
+          await handleNewPhoto(projectId, capture, session);
+        } catch (error) {
+          console.error(`[Watcher] Could not drain ${capture.filePath} while stopping`, error);
+        }
+      }
+    });
+  }
+  await session.processing;
+  if (clearTarget) {
+    pendingManualTargets.delete(projectId);
+    emitActiveStudentChanged(projectId, null, "none");
+  }
+}
 async function enqueueCapture(projectId, filePath) {
   if (desktopRetiring) return;
   const session = watchers.get(projectId);
@@ -42230,10 +42275,11 @@ async function enqueueCapture(projectId, filePath) {
       filePath,
       fileName: path.basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
-      // Capture the explicit target at arrival time. Processing can be
+      // Capture the effective target at arrival time. Processing can be
       // delayed by image copies or a burst of filesystem events, and a
-      // photographer may select another student during that delay.
-      selectedStudentId: session.sequenceState.manualStudentId
+      // photographer may select another student or scan another QR during
+      // that delay.
+      selectedStudentId: session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId
     });
     scheduleFlush(projectId);
   } catch (error) {
@@ -42301,16 +42347,6 @@ async function handleNewPhoto(projectId, capture, session) {
   if (qrResult) {
     const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase();
     const student2 = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all().find((candidate) => candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId);
-    if (manualStudentId !== null && (!student2 || student2.id !== manualStudentId)) {
-      recordUnmatched(
-        db,
-        win,
-        projectId,
-        capture,
-        student2 ? `QR marker for ${student2.firstName} ${student2.lastName} conflicts with the selected student` : `QR marker "${qrResult.studentId}" does not match the selected student`
-      );
-      return;
-    }
     const decision2 = advanceSequence(session.sequenceState, {
       kind: "marker",
       studentId: student2?.id ?? null,
@@ -42341,7 +42377,7 @@ async function handleNewPhoto(projectId, capture, session) {
     emitActiveStudentChanged(
       projectId,
       student2.id,
-      manualStudentId === null ? "qr" : "manual"
+      "qr"
     );
     console.log(`[Watcher] QR marker ${capture.fileName} → ${student2.firstName} ${student2.lastName}`);
     return;
@@ -42500,8 +42536,6 @@ function handleNewRaw(projectId, capture, session, db) {
       reason: conflictReason
     });
   }
-  void queueCaptureUploads(result.captureId).catch(() => {
-  });
   console.log(
     `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
   );
@@ -42532,22 +42566,6 @@ async function finishMatchedPhoto(db, win, photo, student) {
       captureId: capture.id,
       studentId: photo.studentId
     });
-  }
-  db.update(photosTable).set({ uploadStatus: "pending" }).where(drizzleOrm.eq(photosTable.id, photo.id)).run();
-  win?.webContents.send("upload:statusChanged", {
-    photoId: photo.id,
-    studentId: student.id,
-    status: "pending"
-  });
-  if (capture) {
-    void queueCaptureUploads(capture.id).catch(() => {
-    });
-  } else {
-    const { connectionToken } = getUploadConfig$1();
-    if (connectionToken) {
-      uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt).catch(() => {
-      });
-    }
   }
 }
 function recordUnmatched(db, win, projectId, capture, reason) {
@@ -42668,6 +42686,89 @@ function registerCaptureExportHandlers() {
         };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+}
+const activeSyncs = /* @__PURE__ */ new Map();
+function emitProgress(event) {
+  const win = electron.BrowserWindow.getAllWindows()[0];
+  win?.webContents.send("project:syncProgress", event);
+}
+function registerProjectSyncHandlers() {
+  electron.ipcMain.handle(
+    "project:uploadAndFinish",
+    async (_event, { projectId }) => {
+      const existing = activeSyncs.get(projectId);
+      if (existing) return existing;
+      const task = (async () => {
+        const db = getDb();
+        const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+        if (!project) {
+          return { ok: false, completed: 0, total: 0, failed: 0, error: "Project not found." };
+        }
+        if (project.finishedAt) {
+          return {
+            ok: true,
+            completed: 0,
+            total: 0,
+            failed: 0,
+            finishedAt: project.finishedAt
+          };
+        }
+        const { connectionToken } = getUploadConfig$1();
+        if (!connectionToken || !isCloudSessionVerified()) {
+          return {
+            ok: false,
+            completed: 0,
+            total: 0,
+            failed: 0,
+            error: "Connect to MC School Studio before finishing this project. Local captures remain safe."
+          };
+        }
+        await stopProjectWatcher(projectId, { drain: true, clearTarget: true });
+        emitProgress({
+          projectId,
+          phase: "syncing",
+          completed: 0,
+          total: 0,
+          failed: 0
+        });
+        const progress = await syncProjectUploads(projectId, (current) => {
+          emitProgress({
+            projectId,
+            phase: "syncing",
+            ...current
+          });
+        });
+        if (progress.failed > 0) {
+          const result2 = {
+            ok: false,
+            ...progress,
+            error: progress.error ?? "One or more local files could not be uploaded."
+          };
+          emitProgress({
+            projectId,
+            phase: "error",
+            ...result2
+          });
+          return result2;
+        }
+        const finishedAt = (/* @__PURE__ */ new Date()).toISOString();
+        db.update(projectsTable).set({ finishedAt, updatedAt: finishedAt }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
+        const result = { ok: true, ...progress, finishedAt };
+        emitProgress({
+          projectId,
+          phase: "finished",
+          ...progress
+        });
+        return result;
+      })();
+      activeSyncs.set(projectId, task);
+      try {
+        return await task;
+      } finally {
+        activeSyncs.delete(projectId);
       }
     }
   );
@@ -43280,6 +43381,7 @@ electron.app.whenReady().then(() => {
   registerDialogHandlers();
   registerUploadHandlers();
   registerCaptureExportHandlers();
+  registerProjectSyncHandlers();
   registerAuthHandlers();
   registerCloudHandlers();
   const mainWindow2 = createWindow();

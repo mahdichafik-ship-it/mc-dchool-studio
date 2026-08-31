@@ -16645,7 +16645,19 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [retrying, setRetrying] = reactExports.useState(false);
   const [exportMode, setExportMode] = reactExports.useState("all");
   const [exporting, setExporting] = reactExports.useState(false);
+  const [finishing, setFinishing] = reactExports.useState(false);
+  const [syncProgress, setSyncProgress] = reactExports.useState(null);
   const pendingUploadCount = [...uploadStatusMap.values()].reduce((count, summary) => count + summary.pending + summary.uploading, 0);
+  reactExports.useEffect(() => {
+    return window.api.on("project:syncProgress", (event) => {
+      if (event.projectId === projectId) setSyncProgress(event);
+    });
+  }, [projectId]);
+  reactExports.useEffect(() => {
+    return () => {
+      void stopWatcher();
+    };
+  }, [stopWatcher]);
   reactExports.useEffect(() => {
     if (selectedStudent) {
       const refreshed = students.find((s) => s.id === selectedStudent.id);
@@ -16751,6 +16763,39 @@ function ProjectView({ projectId, onBack, offline = false }) {
       setExporting(false);
     }
   }
+  async function handleUploadAndFinish() {
+    if (!project || project.finishedAt || finishing) return;
+    setFinishing(true);
+    setSyncProgress({
+      projectId,
+      phase: "syncing",
+      completed: 0,
+      total: 0,
+      failed: 0
+    });
+    try {
+      const result = await window.api.invoke("project:uploadAndFinish", { projectId });
+      await reloadProject();
+      await reloadUploadStatus();
+      if (result.ok) {
+        addToast({
+          type: "success",
+          title: "Project uploaded and finished",
+          description: `${result.completed} local file${result.completed === 1 ? "" : "s"} synchronized successfully`
+        });
+      } else {
+        addToast({
+          type: "error",
+          title: "Project remains unfinished",
+          description: result.error ?? "Some local files could not be synchronized."
+        });
+      }
+    } catch (error) {
+      addToast({ type: "error", title: "Could not finish project", description: String(error) });
+    } finally {
+      setFinishing(false);
+    }
+  }
   const filteredStudents = students.filter((s) => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -16782,9 +16827,40 @@ function ProjectView({ projectId, onBack, offline = false }) {
           " photo",
           pendingUploadCount === 1 ? "" : "s",
           " waiting for upload"
+        ] }),
+        project?.finishedAt ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-green-700", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3" }),
+          "Project finished · local capture is closed"
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-slate-500", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Folder, { className: "size-3" }),
+          "Local capture is live · upload starts only when you finish the project"
+        ] }),
+        syncProgress?.phase === "error" && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-red-700", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-3" }),
+          syncProgress.failed,
+          " file",
+          syncProgress.failed === 1 ? "" : "s",
+          " failed · local project remains unfinished"
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 shrink-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          Button,
+          {
+            size: "sm",
+            onClick: () => void handleUploadAndFinish(),
+            disabled: finishing || Boolean(project?.finishedAt) || captureSummary.total === 0,
+            className: cn(
+              "gap-1.5",
+              project?.finishedAt ? "bg-green-600 hover:bg-green-600" : "bg-teal-600 hover:bg-teal-700"
+            ),
+            title: project?.finishedAt ? "This project has already been finished" : "Stop local capture, upload the local project, and finish it",
+            children: [
+              finishing ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : project?.finishedAt ? /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3.5" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(CloudUpload, { className: "size-3.5" }),
+              finishing ? syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : "Preparing…" : project?.finishedAt ? "Project finished" : syncProgress?.phase === "error" ? "Retry Upload & Finish" : "Upload & Finish Project"
+            ]
+          }
+        ),
         captureSummary.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "select",

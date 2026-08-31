@@ -112,9 +112,13 @@ function initializeSchema(sqlite: Database.Database) {
 export function getPhotosDir(): string {
   const homeDir = app.getPath('home')
   const configured = _db?.select().from(schema.settingsTable).where(eq(schema.settingsTable.key, 'storage_root')).get()?.value
-  const dir = configured || join(homeDir, 'MC School Studio', 'photos')
+  const dir = configured || getPhotoSystemLayout(homeDir).photos
   mkdirSync(dir, { recursive: true })
   return dir
+}
+
+export function getSpoolDir(): string {
+  return ensurePhotoSystemLayout(getPhotoSystemLayout(app.getPath('home'))).spool
 }
 
 export function setPhotosDir(dir: string): void {

@@ -26,13 +26,13 @@ interface SettingsProps {
 
 export function Settings({ member, onSignedOut }: SettingsProps) {
   const [photosDir, setPhotosDir] = useState<string>('')
+  const [spoolDir, setSpoolDir] = useState<string>('')
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'unsupported' })
   const { count: globalErrorCount } = useGlobalErrorCount()
 
   useEffect(() => {
-    window.api.invoke('app:getPhotosDir').then((dir) => {
-      setPhotosDir(dir as string)
-    })
+    window.api.invoke('app:getPhotosDir').then(setPhotosDir)
+    window.api.invoke('app:getSpoolDir').then(setSpoolDir)
 
     window.api.invoke('update:getState').then(setUpdateState)
     return window.api.on('update:status', setUpdateState)
@@ -49,6 +49,12 @@ export function Settings({ member, onSignedOut }: SettingsProps) {
     if (!selected) return
     const saved = await window.api.invoke('app:setPhotosDir', { dir: selected }) as string
     setPhotosDir(saved)
+  }
+
+  async function handleOpenSpoolDir() {
+    if (spoolDir) {
+      await window.api.invoke('app:openFile', { filePath: spoolDir })
+    }
   }
 
   async function handleSignOut() {
@@ -98,28 +104,50 @@ export function Settings({ member, onSignedOut }: SettingsProps) {
       <div className="flex-1 overflow-auto px-8 py-6">
         <div className="max-w-lg space-y-6">
 
-          {/* Photos directory */}
+          {/* Photo folders */}
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="flex items-center gap-3 mb-3">
               <FolderOpen className="size-5 text-teal-600" />
-              <h3 className="font-semibold text-slate-900">Photos storage location</h3>
+              <h3 className="font-semibold text-slate-900">Photo folders</h3>
             </div>
             <p className="text-sm text-slate-500 mb-3">
-               Matched photos are copied here and organised by project, class, and student. Smart Shooter’s original files are never moved.
+              Matched photos are copied to PHOTOS and organised by project, class, and student. Smart Shooter’s original files are never moved.
             </p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate">
-                {photosDir || 'Loading…'}
-              </code>
-              <button
-                onClick={handleOpenPhotosDir}
-                className="shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium"
-              >
-                Open
-              </button>
-              <button onClick={handleChoosePhotosDir} className="shrink-0 text-sm text-slate-600 hover:text-slate-900 font-medium">
-                Change
-              </button>
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">Managed photos</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 min-w-0 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate">
+                    {photosDir || 'Loading…'}
+                  </code>
+                  <button
+                    onClick={handleOpenPhotosDir}
+                    className="shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium"
+                  >
+                    Open
+                  </button>
+                  <button onClick={handleChoosePhotosDir} className="shrink-0 text-sm text-slate-600 hover:text-slate-900 font-medium">
+                    Change
+                  </button>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">Smart Shooter spool</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 min-w-0 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate">
+                    {spoolDir || 'Loading…'}
+                  </code>
+                  <button
+                    onClick={handleOpenSpoolDir}
+                    className="shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium"
+                  >
+                    Open
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  JPEG and RAW output folders are created inside this Spool folder.
+                </p>
+              </div>
             </div>
           </div>
 

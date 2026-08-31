@@ -16096,7 +16096,44 @@ function useCaptures(studentId) {
       if (event.studentId === studentId) void load();
     });
     const unsubMatched = api.on("photo:matched", (event) => {
-      if (event.student.id === studentId) void load();
+      if (event.student.id !== studentId) return;
+      setData((current) => {
+        if (current.captures.some((capture) => capture.legacyPhoto?.id === event.photo.id)) {
+          return current;
+        }
+        const jpegFile = {
+          id: -event.photo.id,
+          fileRole: "JPEG",
+          fileFormat: event.photo.fileName.split(".").pop()?.toUpperCase() ?? "JPEG",
+          originalFilename: event.photo.fileName,
+          storedPath: event.photo.filePath,
+          fileSize: null,
+          uploadStatus: null,
+          fileUrl: null
+        };
+        const optimisticCapture = {
+          id: event.captureId ?? -event.photo.id,
+          projectId: event.photo.projectId,
+          studentId: event.photo.studentId,
+          classId: event.student.classId,
+          baseFilename: event.photo.fileName.replace(/\.[^.]+$/, ""),
+          capturedAt: event.photo.capturedAt,
+          sequence: null,
+          favorite: false,
+          rejected: false,
+          selected: false,
+          pairingStatus: "jpeg_only",
+          assignmentLocked: true,
+          files: [jpegFile],
+          thumbnailData: event.photo.thumbnailData,
+          legacyPhoto: event.photo
+        };
+        return {
+          ...current,
+          captures: [...current.captures, optimisticCapture]
+        };
+      });
+      void load();
     });
     const unsubMarker = api.on("photo:marker", (event) => {
       if (event.student.id === studentId) void load();

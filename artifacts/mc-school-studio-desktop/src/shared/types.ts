@@ -149,6 +149,7 @@ export interface CaptureExportResult {
 export interface PhotoMatchedEvent {
   photo: Photo
   student: Student
+  captureId?: number
 }
 
 export interface PhotoMarkerEvent {

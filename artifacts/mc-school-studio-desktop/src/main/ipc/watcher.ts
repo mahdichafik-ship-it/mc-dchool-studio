@@ -15,7 +15,7 @@ import {
 } from '../db/schema'
 import { getSetting, getUploadConfig, queueCaptureUploads, uploadPhoto } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
-import { readQrFromImage } from '../lib/qrReader'
+import { generateThumbnail, readQrFromImage } from '../lib/qrReader'
 import {
   advanceSequence,
   clearManualStudent,
@@ -311,6 +311,10 @@ async function enqueueCapture(projectId: number, filePath: string): Promise<void
       filePath,
       fileName: basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
+      // Capture the explicit target at arrival time. Processing can be
+      // delayed by image copies or a burst of filesystem events, and a
+      // photographer may select another student during that delay.
+      selectedStudentId: session.sequenceState.manualStudentId,
     })
     scheduleFlush(projectId)
   } catch (error) {
@@ -370,7 +374,9 @@ async function handleNewPhoto(
   }
 
   const win = getMainWindow()
-  const manualStudentId = session.sequenceState.manualStudentId
+  const manualStudentId = capture.selectedStudentId !== undefined
+    ? capture.selectedStudentId
+    : session.sequenceState.manualStudentId
   const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
   const filenameReference = extractStudentReference(
     capture.fileName,
@@ -395,7 +401,7 @@ async function handleNewPhoto(
       return
     }
 
-    finishMatchedPhoto(db, win, result.photo, result.student)
+    await finishMatchedPhoto(db, win, result.photo, result.student)
     return
   }
 
@@ -480,7 +486,7 @@ async function handleNewPhoto(
       return
     }
 
-    finishMatchedPhoto(db, win, result.photo, result.student)
+    await finishMatchedPhoto(db, win, result.photo, result.student)
     return
   }
 
@@ -502,7 +508,7 @@ async function handleNewPhoto(
         return
       }
 
-      finishMatchedPhoto(db, win, result.photo, result.student)
+      await finishMatchedPhoto(db, win, result.photo, result.student)
       return
     }
   }
@@ -555,7 +561,7 @@ async function handleNewPhoto(
     .get()
   mirrorPhotoAsCapture(db, photo, capture.filePath)
 
-  finishMatchedPhoto(db, win, photo, student)
+  await finishMatchedPhoto(db, win, photo, student)
 }
 
 function copyToProjectFolder(sourcePath: string, fileName: string, destinationDir: string): string {
@@ -616,7 +622,9 @@ function handleNewRaw(
     knownStudents.map((student) => student.generatedStudentId),
   )
   const filenameStudent = findStudentByFilename(db, projectId, capture.fileName)
-  const manualStudentId = session.sequenceState.manualStudentId
+  const manualStudentId = capture.selectedStudentId !== undefined
+    ? capture.selectedStudentId
+    : session.sequenceState.manualStudentId
   const manualStudent = manualStudentId === null
     ? undefined
     : findProjectStudent(db, projectId, manualStudentId)
@@ -679,13 +687,21 @@ function handleNewRaw(
   )
 }
 
-function finishMatchedPhoto(
+async function finishMatchedPhoto(
   db: ReturnType<typeof getDb>,
   win: BrowserWindow | null,
   photo: typeof photosTable.$inferSelect,
   student: typeof studentsTable.$inferSelect,
-): void {
+): Promise<void> {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`)
+  // Generate the preview from the managed local copy before announcing the
+  // capture. The renderer never needs the cloud URL to display a portrait.
+  const thumbnailData = await generateThumbnail(photo.filePath)
+  const capture = db
+    .select()
+    .from(capturesTable)
+    .where(eq(capturesTable.legacyPhotoId, photo.id))
+    .get()
   const photoForEvent: Photo = {
     id: photo.id,
     projectId: photo.projectId,
@@ -694,19 +710,15 @@ function finishMatchedPhoto(
     fileName: photo.fileName,
     capturedAt: photo.capturedAt,
     isMatched: true,
-    thumbnailData: null,
+    thumbnailData,
     createdAt: photo.createdAt,
   }
 
   win?.webContents.send('photo:matched', {
     photo: photoForEvent,
     student: toStudentEvent(db, student),
+    captureId: capture?.id,
   })
-  const capture = db
-    .select()
-    .from(capturesTable)
-    .where(eq(capturesTable.legacyPhotoId, photo.id))
-    .get()
   if (capture) {
     win?.webContents.send('capture:updated', {
       projectId: photo.projectId,

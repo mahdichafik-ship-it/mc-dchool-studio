@@ -2,6 +2,12 @@ export interface CaptureFile {
   filePath: string
   fileName: string
   capturedAtMs: number
+  /**
+   * The explicit student target at the moment the watcher saw the file.
+   * `undefined` is kept for callers that do not participate in the watcher
+   * queue; `null` means there was intentionally no manual target.
+   */
+  selectedStudentId?: number | null
 }
 
 export interface SequenceState {

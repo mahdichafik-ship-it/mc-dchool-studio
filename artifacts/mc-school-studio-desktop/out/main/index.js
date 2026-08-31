@@ -42229,7 +42229,11 @@ async function enqueueCapture(projectId, filePath) {
     session.pendingFiles.push({
       filePath,
       fileName: path.basename(filePath),
-      capturedAtMs: captureTimestamp(fileStat)
+      capturedAtMs: captureTimestamp(fileStat),
+      // Capture the explicit target at arrival time. Processing can be
+      // delayed by image copies or a burst of filesystem events, and a
+      // photographer may select another student during that delay.
+      selectedStudentId: session.sequenceState.manualStudentId
     });
     scheduleFlush(projectId);
   } catch (error) {
@@ -42271,7 +42275,7 @@ async function handleNewPhoto(projectId, capture, session) {
     return;
   }
   const win = getMainWindow();
-  const manualStudentId = session.sequenceState.manualStudentId;
+  const manualStudentId = capture.selectedStudentId !== void 0 ? capture.selectedStudentId : session.sequenceState.manualStudentId;
   const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
   const filenameReference = extractStudentReference(
     capture.fileName,
@@ -42290,7 +42294,7 @@ async function handleNewPhoto(projectId, capture, session) {
       console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
       return;
     }
-    finishMatchedPhoto(db, win, result.photo, result.student);
+    await finishMatchedPhoto(db, win, result.photo, result.student);
     return;
   }
   const qrResult = await readQrFromImage(capture.filePath);
@@ -42355,7 +42359,7 @@ async function handleNewPhoto(projectId, capture, session) {
       console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
       return;
     }
-    finishMatchedPhoto(db, win, result.photo, result.student);
+    await finishMatchedPhoto(db, win, result.photo, result.student);
     return;
   }
   if (session.sequenceState.activeStudentId === null) {
@@ -42371,7 +42375,7 @@ async function handleNewPhoto(projectId, capture, session) {
         console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
         return;
       }
-      finishMatchedPhoto(db, win, result.photo, result.student);
+      await finishMatchedPhoto(db, win, result.photo, result.student);
       return;
     }
   }
@@ -42409,7 +42413,7 @@ async function handleNewPhoto(projectId, capture, session) {
     isMatched: true
   }).returning().get();
   mirrorPhotoAsCapture(db, photo, capture.filePath);
-  finishMatchedPhoto(db, win, photo, student);
+  await finishMatchedPhoto(db, win, photo, student);
 }
 function copyToProjectFolder(sourcePath, fileName, destinationDir) {
   require$$0.mkdirSync(destinationDir, { recursive: true });
@@ -42455,7 +42459,7 @@ function handleNewRaw(projectId, capture, session, db) {
     knownStudents.map((student2) => student2.generatedStudentId)
   );
   const filenameStudent = findStudentByFilename(db, projectId, capture.fileName);
-  const manualStudentId = session.sequenceState.manualStudentId;
+  const manualStudentId = capture.selectedStudentId !== void 0 ? capture.selectedStudentId : session.sequenceState.manualStudentId;
   const manualStudent = manualStudentId === null ? void 0 : findProjectStudent(db, projectId, manualStudentId);
   const sequenceStudentId = session.sequenceState.activeStudentId;
   const sequenceStudent = sequenceStudentId === null ? void 0 : findProjectStudent(db, projectId, sequenceStudentId);
@@ -42502,8 +42506,10 @@ function handleNewRaw(projectId, capture, session, db) {
     `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
   );
 }
-function finishMatchedPhoto(db, win, photo, student) {
+async function finishMatchedPhoto(db, win, photo, student) {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`);
+  const thumbnailData = await generateThumbnail(photo.filePath);
+  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
   const photoForEvent = {
     id: photo.id,
     projectId: photo.projectId,
@@ -42512,14 +42518,14 @@ function finishMatchedPhoto(db, win, photo, student) {
     fileName: photo.fileName,
     capturedAt: photo.capturedAt,
     isMatched: true,
-    thumbnailData: null,
+    thumbnailData,
     createdAt: photo.createdAt
   };
   win?.webContents.send("photo:matched", {
     photo: photoForEvent,
-    student: toStudentEvent(db, student)
+    student: toStudentEvent(db, student),
+    captureId: capture?.id
   });
-  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
   if (capture) {
     win?.webContents.send("capture:updated", {
       projectId: photo.projectId,

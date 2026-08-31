@@ -77,12 +77,25 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       UNIQUE(capture_id, file_role)
     );
 
+    CREATE TABLE IF NOT EXISTS qr_markers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      source_path TEXT NOT NULL UNIQUE,
+      captured_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_captures_project ON captures(project_id);
     CREATE INDEX IF NOT EXISTS idx_captures_student ON captures(student_id);
     CREATE INDEX IF NOT EXISTS idx_captures_pairing ON captures(project_id, base_filename, pairing_status);
     CREATE INDEX IF NOT EXISTS idx_image_files_capture ON image_files(capture_id);
     CREATE INDEX IF NOT EXISTS idx_image_files_checksum ON image_files(checksum);
     CREATE INDEX IF NOT EXISTS idx_image_files_source ON image_files(source_path);
+    CREATE INDEX IF NOT EXISTS idx_qr_markers_student ON qr_markers(student_id, captured_at);
+    CREATE INDEX IF NOT EXISTS idx_qr_markers_project ON qr_markers(project_id);
   `)
 
   sqlite.exec(`

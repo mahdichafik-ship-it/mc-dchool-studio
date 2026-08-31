@@ -5,7 +5,14 @@ import { stat as statFile } from 'fs/promises'
 import { basename, extname, join, parse, resolve } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { capturesTable, classesTable, photosTable, projectsTable, studentsTable } from '../db/schema'
+import {
+  capturesTable,
+  classesTable,
+  photosTable,
+  projectsTable,
+  qrMarkersTable,
+  studentsTable,
+} from '../db/schema'
 import { getSetting, getUploadConfig, queueCaptureUploads, uploadPhoto } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
 import { readQrFromImage } from '../lib/qrReader'
@@ -21,7 +28,9 @@ import type { Photo, Student } from '../../shared/types'
 import { createWatchedPhotoStore, processWatchedPhoto } from '../lib/watchedPhotoProcessor'
 import {
   hasProcessedCaptureSource,
+  hasProcessedQrMarkerSource,
   mirrorPhotoAsCapture,
+  recordQrMarker,
   recordRawCapture,
 } from '../lib/captureRepository'
 import { getCaptureFileRole } from '../lib/capturePairing'
@@ -240,7 +249,11 @@ async function handleNewPhoto(
   if (desktopRetiring) return
   const db = getDb()
   const role = getCaptureFileRole(capture.fileName)
-  if (!role || hasProcessedCaptureSource(db, capture.filePath)) return
+  if (
+    !role
+    || hasProcessedCaptureSource(db, capture.filePath)
+    || hasProcessedQrMarkerSource(db, capture.filePath)
+  ) return
 
   if (role === 'RAW') {
     handleNewRaw(projectId, capture, session, db)
@@ -248,6 +261,10 @@ async function handleNewPhoto(
   }
 
   const win = getMainWindow()
+  // A QR marker may itself receive Smart Shooter's barcode-based filename.
+  // Detect the marker first so it selects the student without appearing as a
+  // portrait in the gallery. The following non-QR portrait is then matched by
+  // the same filename reference, including its numeric frame suffix.
   const qrResult = await readQrFromImage(capture.filePath)
 
   if (qrResult) {
@@ -273,7 +290,9 @@ async function handleNewPhoto(
       return
     }
 
+    const marker = persistQrMarker(db, projectId, student!, capture)
     win?.webContents.send('photo:marker', {
+      markerId: marker.id,
       fileName: capture.fileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       student: toStudentEvent(db, student!),
@@ -377,6 +396,32 @@ function copyToProjectFolder(sourcePath: string, fileName: string, destinationDi
     copyFileSync(sourcePath, destinationPath)
   }
   return destinationPath
+}
+
+function persistQrMarker(
+  db: ReturnType<typeof getDb>,
+  projectId: number,
+  student: typeof studentsTable.$inferSelect,
+  capture: CaptureFile,
+): typeof qrMarkersTable.$inferSelect {
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  const classRow = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).get()
+  if (!project) throw new Error(`Project ${projectId} not found`)
+
+  const projectFolder = safeFolderName(project.schoolName)
+  const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
+  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
+  const markerDir = join(getPhotosDir(), projectFolder, classFolder, studentFolder, 'QR Markers')
+  const storedPath = copyToProjectFolder(capture.filePath, capture.fileName, markerDir)
+  const result = recordQrMarker(db, {
+    projectId,
+    studentId: student.id,
+    filePath: storedPath,
+    fileName: capture.fileName,
+    sourcePath: capture.filePath,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+  })
+  return result.marker
 }
 
 function handleNewRaw(

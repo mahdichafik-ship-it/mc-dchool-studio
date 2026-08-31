@@ -84,6 +84,22 @@ export interface CaptureReview {
   legacyPhoto: Photo | null
 }
 
+export interface QrMarkerReview {
+  id: number
+  projectId: number
+  studentId: number
+  filePath: string
+  fileName: string
+  capturedAt: string
+  thumbnailData: string | null
+  createdAt: string
+}
+
+export interface StudentCaptureReview {
+  captures: CaptureReview[]
+  qrMarkers: QrMarkerReview[]
+}
+
 export interface CaptureCompletenessSummary {
   total: number
   complete: number
@@ -130,6 +146,7 @@ export interface PhotoMatchedEvent {
 }
 
 export interface PhotoMarkerEvent {
+  markerId: number
   fileName: string
   capturedAt: string
   student: Student

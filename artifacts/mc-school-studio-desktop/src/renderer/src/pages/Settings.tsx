@@ -226,7 +226,7 @@ export function Settings({ member, onSignedOut }: SettingsProps) {
               <li>Select a student to display their QR code on screen</li>
                <li>Photograph the QR code first — this marks the start of that student’s capture sequence</li>
                <li>Photograph the student; every following portrait is assigned to that student until the next QR marker</li>
-               <li>QR marker images stay in the spool folder but are not added to student galleries</li>
+               <li>QR marker images stay in the spool folder, with a local-only reference shown in the student review</li>
                <li>When signed in, matched portraits are uploaded to the web app automatically</li>
             </ol>
           </div>

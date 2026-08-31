@@ -1,7 +1,14 @@
 import { statSync } from 'node:fs'
 import { and, eq } from 'drizzle-orm'
 import type { getDb } from '../db'
-import { capturesTable, classesTable, imageFilesTable, photosTable, studentsTable } from '../db/schema.ts'
+import {
+  capturesTable,
+  classesTable,
+  imageFilesTable,
+  photosTable,
+  qrMarkersTable,
+  studentsTable,
+} from '../db/schema.ts'
 import { getCaptureFileFormat, getCaptureFileRole, normalizeBaseFilename } from './capturePairing.ts'
 
 type DesktopDb = ReturnType<typeof getDb>
@@ -100,6 +107,43 @@ function insertImageFile(db: DesktopDb, captureId: number, input: CaptureFileInp
  */
 export function hasProcessedCaptureSource(db: DesktopDb, sourcePath: string): boolean {
   return Boolean(findDuplicateFile(db, sourcePath))
+}
+
+export interface QrMarkerInput {
+  projectId: number
+  studentId: number
+  filePath: string
+  fileName: string
+  sourcePath: string
+  capturedAt: string
+}
+
+export function hasProcessedQrMarkerSource(db: DesktopDb, sourcePath: string): boolean {
+  return Boolean(
+    db
+      .select({ id: qrMarkersTable.id })
+      .from(qrMarkersTable)
+      .where(eq(qrMarkersTable.sourcePath, sourcePath))
+      .get(),
+  )
+}
+
+export function recordQrMarker(
+  db: DesktopDb,
+  input: QrMarkerInput,
+): { kind: 'created' | 'duplicate'; marker: typeof qrMarkersTable.$inferSelect } {
+  const existing = db
+    .select()
+    .from(qrMarkersTable)
+    .where(eq(qrMarkersTable.sourcePath, input.sourcePath))
+    .get()
+  if (existing) return { kind: 'duplicate', marker: existing }
+
+  const marker = db.insert(qrMarkersTable).values({
+    ...input,
+    createdAt: input.capturedAt,
+  }).returning().get()
+  return { kind: 'created', marker }
 }
 
 /**

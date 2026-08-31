@@ -459,7 +459,9 @@ function StudentDetail({
   onReassign: () => void
   offline: boolean
 }) {
-  const { data: captures, reload: reloadCaptures } = useCaptures(student.id)
+  const { data: review, reload: reloadCaptures } = useCaptures(student.id)
+  const captures = review.captures
+  const qrMarkers = review.qrMarkers
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignPhoto, setReassignPhoto] = useState<Photo | null>(null)
   const [retryingPhotoId, setRetryingPhotoId] = useState<number | null>(null)
@@ -561,8 +563,11 @@ function StudentDetail({
           </div>
         </div>
         <div className="flex items-center gap-2">
-           {captures.length > 0 ? (
-             <Badge variant="success">{captures.length} capture{captures.length !== 1 ? 's' : ''} recorded</Badge>
+            {captures.length > 0 || qrMarkers.length > 0 ? (
+              <Badge variant="success">
+                {captures.length} capture{captures.length !== 1 ? 's' : ''} recorded
+                {qrMarkers.length > 0 && ` · ${qrMarkers.length} QR marker${qrMarkers.length !== 1 ? 's' : ''}`}
+              </Badge>
           ) : (
             <Badge variant="warning">Not yet photographed</Badge>
           )}
@@ -599,7 +604,7 @@ function StudentDetail({
         {/* Photo gallery */}
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
-            Capture review ({filteredCaptures.length})
+             Capture review ({filteredCaptures.length + qrMarkers.length})
           </p>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {captureFilterOptions.map((option) => (
@@ -619,7 +624,7 @@ function StudentDetail({
             ))}
           </div>
 
-          {captures.length === 0 ? (
+          {captures.length === 0 && qrMarkers.length === 0 ? (
             <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
               <Image className="size-8 text-slate-300 mb-2" />
               <p className="text-sm text-slate-400">No captures yet</p>
@@ -627,13 +632,20 @@ function StudentDetail({
                 JPEG and RAW files will appear here automatically when captured
               </p>
             </div>
-          ) : filteredCaptures.length === 0 ? (
+          ) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? (
             <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
               <AlertCircle className="size-8 text-slate-300 mb-2" />
               <p className="text-sm text-slate-400">No captures match this filter</p>
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-3">
+              {qrMarkers.map((marker) => (
+                <QrMarkerTile
+                  key={marker.id}
+                  marker={marker}
+                  onOpen={() => handleOpenPhoto(marker.filePath)}
+                />
+              ))}
               {filteredCaptures.map((capture) => (
                 <CaptureTile
                   key={capture.id}
@@ -771,6 +783,53 @@ function PhotoTile({
 
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5">
         <p className="text-white text-[10px] truncate">{photo.fileName}</p>
+      </div>
+    </div>
+  )
+}
+
+function QrMarkerTile({
+  marker,
+  onOpen,
+}: {
+  marker: {
+    fileName: string
+    filePath: string
+    thumbnailData: string | null
+  }
+  onOpen: () => void
+}) {
+  return (
+    <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
+      {marker.thumbnailData ? (
+        <img
+          src={marker.thumbnailData}
+          alt={`QR marker ${marker.fileName}`}
+          className="w-full h-full object-cover"
+          draggable={false}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <Image className="size-8 text-slate-400" />
+        </div>
+      )}
+
+      <div className="absolute top-1.5 left-1.5 rounded-full bg-teal-700/90 px-2 py-1 text-[10px] font-semibold text-white shadow-sm">
+        QR MARKER
+      </div>
+
+      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-3">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1 flex items-center justify-center gap-1"
+        >
+          <ExternalLink className="size-3" /> Open marker
+        </button>
+      </div>
+
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
+        <p className="text-white text-[10px] truncate">{marker.fileName}</p>
       </div>
     </div>
   )

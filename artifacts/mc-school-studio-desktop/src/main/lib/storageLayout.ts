@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 export interface PhotoSystemLayout {
   root: string
+  photos: string
   jobs: string
   spool: string
   spoolJpeg: string
@@ -33,9 +34,10 @@ function safeFolderName(value: string): string {
 }
 
 export function getPhotoSystemLayout(homeDir: string, configuredRoot?: string | null): PhotoSystemLayout {
-  const root = configuredRoot?.trim() || join(homeDir, 'MC_PhotoSystem')
+  const root = configuredRoot?.trim() || join(homeDir, 'MC School Studio')
   return {
     root,
+    photos: join(root, 'PHOTOS'),
     jobs: join(root, 'Jobs'),
     spool: join(root, 'Spool'),
     spoolJpeg: join(root, 'Spool', 'JPEG'),
@@ -48,6 +50,7 @@ export function getPhotoSystemLayout(homeDir: string, configuredRoot?: string | 
 export function ensurePhotoSystemLayout(layout: PhotoSystemLayout): PhotoSystemLayout {
   for (const directory of [
     layout.root,
+    layout.photos,
     layout.jobs,
     layout.spool,
     layout.spoolJpeg,

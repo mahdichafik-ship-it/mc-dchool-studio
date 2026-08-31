@@ -103,6 +103,7 @@ interface ElectronAPI {
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>
   invoke(channel: 'app:getPhotosDir'): Promise<string>
+  invoke(channel: 'app:getSpoolDir'): Promise<string>
   invoke(channel: 'app:getVersion'): Promise<string>
   invoke(channel: 'app:setPhotosDir', args: { dir: string }): Promise<string>
   // Cloud upload

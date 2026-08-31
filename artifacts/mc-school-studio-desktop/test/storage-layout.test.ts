@@ -10,16 +10,34 @@ import {
   getProjectStorageLayout,
 } from '../src/main/lib/storageLayout.ts'
 
-test('creates the MC_PhotoSystem root and spool directories', () => {
+test('creates the MC School Studio root, PHOTOS folder, and spool directories', () => {
   const root = mkdtempSync(join(tmpdir(), 'mc-school-studio-storage-'))
 
   try {
     const layout = ensurePhotoSystemLayout(getPhotoSystemLayout(root))
-    assert.equal(layout.root, join(root, 'MC_PhotoSystem'))
+    assert.equal(layout.root, join(root, 'MC School Studio'))
+    assert.equal(layout.photos, join(root, 'MC School Studio', 'PHOTOS'))
+    assert.equal(existsSync(layout.photos), true)
     assert.equal(existsSync(layout.spoolJpeg), true)
     assert.equal(existsSync(layout.spoolRaw), true)
     assert.equal(existsSync(layout.cache), true)
     assert.equal(existsSync(layout.settings), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('keeps an explicitly configured legacy photo-system root unchanged', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mc-school-studio-legacy-'))
+
+  try {
+    const legacyRoot = join(root, 'MC_PhotoSystem')
+    const layout = ensurePhotoSystemLayout(getPhotoSystemLayout(root, legacyRoot))
+
+    assert.equal(layout.root, legacyRoot)
+    assert.equal(layout.photos, join(legacyRoot, 'PHOTOS'))
+    assert.equal(existsSync(layout.spoolJpeg), true)
+    assert.equal(existsSync(layout.spoolRaw), true)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

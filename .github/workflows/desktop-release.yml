@@ -43,7 +43,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
       - name: Test electron-updater metadata contract
         run: pnpm --filter @workspace/mc-school-studio-desktop run test:updater

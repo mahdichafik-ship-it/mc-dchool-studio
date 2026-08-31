@@ -1,0 +1,50 @@
+These performance results are acceptable for this release candidate.
+
+Before publishing, please perform one final RELEASE GATE verification only. Do not make further performance changes unless one of these tests fails.
+
+I need explicit PASS/FAIL confirmation for:
+
+1. Wrong student assignments: 0
+    Run burst shooting while switching between students and confirm no image is assigned across the wrong student boundary.
+2. Lost captures: 0
+    Confirm every filesystem capture is represented in persistence.
+3. Duplicate captures: 0
+    Confirm newest-image-wins preview superseding does not create duplicate capture/gallery/database records.
+4. JPEG + RAW pairing
+    Test JPEG + NEF capture during rapid shooting and student switching.
+    Confirm matching JPEG/RAW files always stay with the same student and same capture.
+5. QR switching
+    QR Student A → shoot → QR Student B → shoot → QR Student C → shoot.
+    Confirm every boundary is correct.
+6. Manual student switching
+    Student A → burst → immediately Student B → burst → Student C → burst.
+    Confirm zero cross-assignment.
+7. Offline operation
+    Confirm the complete Watch Folder, student selection, QR, preview, persistence and pairing workflow functions with network access disabled.
+8. Restart persistence
+    Shoot captures → close app → reopen project.
+    Confirm every image remains under the correct student and no temporary live-preview records remain duplicated.
+9. Original file integrity
+    Confirm the newest-image-wins optimization only skips obsolete DISPLAY work.
+    It must never skip, resize, recompress, overwrite or discard an original JPEG/RAW capture.
+10. RAW accounting
+    The current report says 61/61 JPEG records. If the test included RAW captures, report the corresponding RAW count and pairing result explicitly.
+11. macOS release verification
+    Since the earlier production validation was performed with the production Electron bundle under Linux, confirm that the final macOS packaged build is generated successfully and that there are no known macOS-specific issues with the mc-preview:// protocol, Watch Folder permissions or local-file access.
+
+Then give me only:
+
+FINAL RELEASE STATUS: GO / NO-GO
+
+Wrong assignments: PASS/FAIL
+Lost captures: PASS/FAIL
+Duplicates: PASS/FAIL
+JPEG/RAW pairing: PASS/FAIL
+QR switching: PASS/FAIL
+Manual switching: PASS/FAIL
+Offline: PASS/FAIL
+Restart persistence: PASS/FAIL
+Original files: PASS/FAIL
+macOS production build: PASS/FAIL
+
+Do not publish automatically. Wait for my approval after this report.

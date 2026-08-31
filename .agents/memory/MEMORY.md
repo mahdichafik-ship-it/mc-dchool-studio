@@ -13,3 +13,4 @@
 - [Explicit project sync boundary](explicit-project-sync-boundary.md) — capture-time ingestion is local-only; cloud upload begins only from an explicit finish or retry action.
 - [Local preview pipeline](local-preview-pipeline.md) — emit a source-local JPEG preview before managed copy and persistence, then reconcile it by a stable preview key.
 - [Burst preview release gate](burst-preview-release-gate.md) — judge newest-image responsiveness by final paint delay and capture preservation; gallery work must not block the live path.
+- [macOS packaging validation](macos-packaging-validation.md) — Linux can generate unsigned macOS ZIPs, but the configured DMG target requires the locked dmg-license dependency.

@@ -5,6 +5,7 @@ import { and, eq, count, or } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable } from '../db/schema'
 import { generateThumbnail } from '../lib/qrReader'
+import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import type {
   CaptureCompletenessSummary,
   CaptureReview,
@@ -21,7 +22,11 @@ function now() {
   return new Date().toISOString()
 }
 
-function rowToPhoto(row: typeof photosTable.$inferSelect, thumbnailData: string | null = null): Photo {
+function rowToPhoto(
+  row: typeof photosTable.$inferSelect,
+  thumbnailData: string | null = null,
+  previewUrl?: string,
+): Photo {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -32,6 +37,7 @@ function rowToPhoto(row: typeof photosTable.$inferSelect, thumbnailData: string 
     isMatched: row.isMatched,
     thumbnailData,
     createdAt: row.createdAt,
+    previewUrl,
   }
 }
 
@@ -103,7 +109,10 @@ export function registerPhotoHandlers() {
           .where(eq(imageFilesTable.captureId, capture.id))
           .all()
         const jpegFile = files.find((file) => file.fileRole === 'JPEG')
-        const thumbnailData = jpegFile ? await generateThumbnail(jpegFile.storedPath) : null
+        const previewPath = jpegFile?.storedPath ?? photo?.filePath
+        const previewUrl = previewPath
+          ? createLocalPreviewUrl(previewPath, `gallery-capture-${capture.id}`)
+          : undefined
         result.push({
           id: capture.id,
           projectId: capture.projectId,
@@ -118,8 +127,8 @@ export function registerPhotoHandlers() {
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
           files: files.map(rowToCaptureFile),
-          thumbnailData,
-          legacyPhoto: photo ? rowToPhoto(photo, thumbnailData) : null,
+          thumbnailData: null,
+          legacyPhoto: photo ? rowToPhoto(photo, null, previewUrl) : null,
         })
       }
       const markerRows = db
@@ -135,7 +144,8 @@ export function registerPhotoHandlers() {
         filePath: marker.filePath,
         fileName: marker.fileName,
         capturedAt: marker.capturedAt,
-        thumbnailData: await generateThumbnail(marker.filePath),
+        thumbnailData: null,
+        previewUrl: createLocalPreviewUrl(marker.filePath, `gallery-marker-${marker.id}`),
         createdAt: marker.createdAt,
       })))
 

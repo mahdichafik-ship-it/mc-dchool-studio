@@ -29,6 +29,7 @@ const REPORT_STAGE_ORDER: ImagePipelineStage[] = [
   'React state update committed',
   'image decode started',
   'image decode complete',
+  'image preview superseded',
   'image pixels painted',
   'file move started',
   'file move complete',
@@ -110,7 +111,7 @@ export function markImagePipelineRendererStage(event: ImagePipelineRendererStage
     `[ImagePipeline] ${event.traceId} ${event.stage} +${elapsedMs.toFixed(1)}ms`
       + formatDetails(event.details),
   )
-  if (event.stage === 'image pixels painted') {
+  if (event.stage === 'image pixels painted' || event.stage === 'image preview superseded') {
     reportAndDeleteTrace(event.traceId)
   }
 }

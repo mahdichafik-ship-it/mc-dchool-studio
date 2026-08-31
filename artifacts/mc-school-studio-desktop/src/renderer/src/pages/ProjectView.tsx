@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   ArrowLeft,
   Folder,
@@ -37,6 +37,11 @@ import {
   useUploadStatus,
 } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
+import {
+  decodeResizedPreview,
+  previewScheduler,
+  waitForPaintFrames,
+} from '@/lib/previewScheduler'
 import type {
   Student,
   Class,
@@ -717,7 +722,7 @@ function StudentDetail({
   onClearCaptureTarget: () => void
   offline: boolean
 }) {
-  const { data: review, reload: reloadCaptures } = useCaptures(student.id)
+  const { data: review, reload: reloadCaptures, livePreview } = useCaptures(student.id)
   const captures = review.captures
   const qrMarkers = review.qrMarkers
   const [reassignOpen, setReassignOpen] = useState(false)
@@ -878,6 +883,12 @@ function StudentDetail({
 
         {/* Photo gallery */}
         <div className="flex-1 min-w-0">
+          {livePreview?.photo.previewUrl && (
+            <LivePreview
+              photo={livePreview.photo}
+              traceId={livePreview.pipeline?.traceId}
+            />
+          )}
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
              Capture review ({filteredCaptures.length + qrMarkers.length})
           </p>
@@ -961,41 +972,24 @@ function StudentDetail({
   )
 }
 
-function PhotoTile({
+function LivePreview({
   photo,
-  previewPipeline,
-  uploadStatus,
-  onOpen,
-  onDelete,
-  onReassign,
-  onRetry,
-  retrying,
+  traceId,
 }: {
   photo: Photo
-  previewPipeline?: CaptureReview['previewPipeline']
-  uploadStatus?: ProjectUploadStatusRow
-  onOpen: () => void
-  onDelete: () => void
-  onReassign: () => void
-  onRetry: () => void
-  retrying: boolean
+  traceId?: string
 }) {
-  const status = getUploadStatusMeta(uploadStatus?.uploadStatus)
-  const StatusIcon = status.icon
-  const imageRef = useRef<HTMLImageElement>(null)
-  const reportedTraceRef = useRef<string | null>(null)
-  const imageSource = photo.previewUrl ?? photo.thumbnailData
+  const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  useLayoutEffect(() => {
-    const traceId = previewPipeline?.traceId
-    if (!traceId || !imageSource || reportedTraceRef.current === traceId) return
-    reportedTraceRef.current = traceId
-
+  useEffect(() => {
+    if (!photo.previewUrl || !traceId) return
+    let mounted = true
     const report = (
       stage:
         | 'React state update committed'
         | 'image decode started'
         | 'image decode complete'
+        | 'image preview superseded'
         | 'image pixels painted',
       details?: string,
     ) => {
@@ -1010,36 +1004,154 @@ function PhotoTile({
     }
 
     report('React state update committed')
-    const image = imageRef.current
-    if (!image) return
-    report('image decode started', `source=${photo.previewUrl ? 'local-url' : 'data-url'}`)
-    let completed = false
-    const finishDecode = () => {
-      if (completed) return
-      completed = true
-      report('image decode complete')
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => report('image pixels painted', `original=${photo.filePath}`))
-      })
+    const cancel = previewScheduler.enqueue({
+      id: traceId,
+      priority: 'live',
+      execute: async (signal) => {
+        report('image decode started', 'source=resized-local-url')
+        const bitmap = await decodeResizedPreview(photo.previewUrl!, 900, signal)
+        if (!bitmap || signal.aborted || !mounted) {
+          bitmap?.close()
+          return
+        }
+
+        report('image decode complete', `size=${bitmap.width}x${bitmap.height}`)
+        const canvas = canvasRef.current
+        const context = canvas?.getContext('2d')
+        if (!canvas || !context || signal.aborted || !mounted) {
+          bitmap.close()
+          return
+        }
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+        context.clearRect(0, 0, canvas.width, canvas.height)
+        context.drawImage(bitmap, 0, 0)
+        bitmap.close()
+
+        await waitForPaintFrames()
+        if (!mounted || signal.aborted) return
+        report('image pixels painted', `original=${photo.filePath}`)
+      },
+      onCancelled: () => {
+        report('image preview superseded', 'newer capture prioritized')
+      },
+    })
+
+    return () => {
+      mounted = false
+      cancel()
     }
-    image.addEventListener('load', finishDecode, { once: true })
-    void image.decode()
-      .then(finishDecode)
-      .catch(() => {
-        if (image.complete && image.naturalWidth > 0) finishDecode()
-      })
-    return () => image.removeEventListener('load', finishDecode)
-  }, [imageSource, photo.filePath, photo.previewUrl, previewPipeline?.traceId])
+  }, [photo.filePath, photo.previewUrl, traceId])
+
+  return (
+    <div className="mb-4 overflow-hidden rounded-xl border border-blue-200 bg-slate-950 shadow-sm">
+      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-200">
+          Live preview · latest capture
+        </p>
+        <span className="text-[10px] text-slate-400">Prioritizing newest image</span>
+      </div>
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label={`Latest capture ${photo.fileName}`}
+        className="block max-h-96 w-full object-contain"
+      />
+    </div>
+  )
+}
+
+function GalleryThumbnail({
+  source,
+  fallback,
+  alt,
+}: {
+  source?: string
+  fallback?: string | null
+  alt: string
+}) {
+  const [generatedSource, setGeneratedSource] = useState<string | null>(null)
+
+  useEffect(() => {
+    setGeneratedSource(null)
+    if (fallback || !source) return
+    let mounted = true
+    let objectUrl: string | null = null
+    const cancel = previewScheduler.enqueue({
+      id: `gallery-${source}`,
+      priority: 'gallery',
+      execute: async (signal) => {
+        const bitmap = await decodeResizedPreview(source, 320, signal)
+        if (!bitmap || signal.aborted || !mounted) {
+          bitmap?.close()
+          return
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+        canvas.getContext('2d')?.drawImage(bitmap, 0, 0)
+        bitmap.close()
+        const blob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob(resolve, 'image/jpeg', 0.82)
+        })
+        if (!blob || !mounted || signal.aborted) return
+        objectUrl = URL.createObjectURL(blob)
+        setGeneratedSource(objectUrl)
+      },
+    })
+
+    return () => {
+      mounted = false
+      cancel()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [fallback, source])
+
+  const imageSource = fallback ?? generatedSource
+  if (!imageSource) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <Image className="size-8 text-slate-400" />
+      </div>
+    )
+  }
+  return (
+    <img
+      src={imageSource}
+      alt={alt}
+      className="h-full w-full object-cover"
+      draggable={false}
+    />
+  )
+}
+
+function PhotoTile({
+  photo,
+  uploadStatus,
+  onOpen,
+  onDelete,
+  onReassign,
+  onRetry,
+  retrying,
+}: {
+  photo: Photo
+  uploadStatus?: ProjectUploadStatusRow
+  onOpen: () => void
+  onDelete: () => void
+  onReassign: () => void
+  onRetry: () => void
+  retrying: boolean
+}) {
+  const status = getUploadStatusMeta(uploadStatus?.uploadStatus)
+  const StatusIcon = status.icon
 
   return (
     <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
-      {imageSource ? (
-        <img
-          ref={imageRef}
-          src={imageSource}
+      {photo.thumbnailData || photo.previewUrl ? (
+        <GalleryThumbnail
+          source={photo.previewUrl}
+          fallback={photo.thumbnailData}
           alt={photo.fileName}
-          className="w-full h-full object-cover"
-          draggable={false}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
@@ -1122,18 +1234,18 @@ function QrMarkerTile({
     fileName: string
     filePath: string
     thumbnailData: string | null
+    previewUrl?: string
   }
   onOpen: () => void
 }) {
   return (
     <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
-      {marker.thumbnailData ? (
-        <img
-          src={marker.thumbnailData}
-          alt={`QR marker ${marker.fileName}`}
-          className="w-full h-full object-cover"
-          draggable={false}
-        />
+        {marker.thumbnailData || marker.previewUrl ? (
+          <GalleryThumbnail
+            source={marker.previewUrl}
+            fallback={marker.thumbnailData}
+            alt={`QR marker ${marker.fileName}`}
+          />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <Image className="size-8 text-slate-400" />
@@ -1191,7 +1303,6 @@ function CaptureTile({
       <div className="group relative">
         <PhotoTile
           photo={photo}
-          previewPipeline={capture.previewPipeline}
           uploadStatus={uploadStatus}
           onOpen={onOpen}
           onDelete={onDelete!}

@@ -14,9 +14,9 @@ const require$$1 = require("stream");
 const require$$1$1 = require("zlib");
 const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
+const node_url = require("node:url");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
-const node_url = require("node:url");
 const fs = require("node:fs/promises");
 const node_perf_hooks = require("node:perf_hooks");
 const node_crypto = require("node:crypto");
@@ -40963,6 +40963,37 @@ async function generateThumbnail(filePath, size = 300) {
     return null;
   }
 }
+const previewFiles = /* @__PURE__ */ new Map();
+const PREVIEW_TTL_MS = 5 * 6e4;
+function registerLocalPreviewScheme() {
+  electron.protocol.registerSchemesAsPrivileged([{
+    scheme: "mc-preview",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }]);
+}
+function registerLocalPreviewProtocol() {
+  electron.protocol.handle("mc-preview", async (request) => {
+    const key = decodeURIComponent(new URL(request.url).hostname);
+    const filePath = previewFiles.get(key);
+    if (!filePath) return new Response("Preview not found", { status: 404 });
+    try {
+      return await electron.net.fetch(node_url.pathToFileURL(filePath).toString());
+    } catch {
+      return new Response("Preview unavailable", { status: 404 });
+    }
+  });
+}
+function createLocalPreviewUrl(filePath, traceId) {
+  previewFiles.set(traceId, filePath);
+  const cleanup = setTimeout(() => previewFiles.delete(traceId), PREVIEW_TTL_MS);
+  cleanup.unref();
+  return `mc-preview://${encodeURIComponent(traceId)}`;
+}
 function getMainWindow$1() {
   const wins = electron.BrowserWindow.getAllWindows();
   return wins.length > 0 ? wins[0] : null;
@@ -40970,7 +41001,7 @@ function getMainWindow$1() {
 function now$2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
-function rowToPhoto(row, thumbnailData = null) {
+function rowToPhoto(row, thumbnailData = null, previewUrl) {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -40980,7 +41011,8 @@ function rowToPhoto(row, thumbnailData = null) {
     capturedAt: row.capturedAt,
     isMatched: row.isMatched,
     thumbnailData,
-    createdAt: row.createdAt
+    createdAt: row.createdAt,
+    previewUrl
   };
 }
 function rowToCaptureFile(row) {
@@ -41030,7 +41062,8 @@ function registerPhotoHandlers() {
       for (const { capture, photo } of rows) {
         const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
         const jpegFile = files.find((file) => file.fileRole === "JPEG");
-        const thumbnailData = jpegFile ? await generateThumbnail(jpegFile.storedPath) : null;
+        const previewPath = jpegFile?.storedPath ?? photo?.filePath;
+        const previewUrl = previewPath ? createLocalPreviewUrl(previewPath, `gallery-capture-${capture.id}`) : void 0;
         result.push({
           id: capture.id,
           projectId: capture.projectId,
@@ -41045,8 +41078,8 @@ function registerPhotoHandlers() {
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
           files: files.map(rowToCaptureFile),
-          thumbnailData,
-          legacyPhoto: photo ? rowToPhoto(photo, thumbnailData) : null
+          thumbnailData: null,
+          legacyPhoto: photo ? rowToPhoto(photo, null, previewUrl) : null
         });
       }
       const markerRows = db.select().from(qrMarkersTable).where(drizzleOrm.eq(qrMarkersTable.studentId, studentId)).orderBy(qrMarkersTable.capturedAt).all();
@@ -41057,7 +41090,8 @@ function registerPhotoHandlers() {
         filePath: marker.filePath,
         fileName: marker.fileName,
         capturedAt: marker.capturedAt,
-        thumbnailData: await generateThumbnail(marker.filePath),
+        thumbnailData: null,
+        previewUrl: createLocalPreviewUrl(marker.filePath, `gallery-marker-${marker.id}`),
         createdAt: marker.createdAt
       })));
       return { captures: result, qrMarkers };
@@ -41709,37 +41743,6 @@ function extractStudentReference(fileName, studentIds) {
   });
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
-const previewFiles = /* @__PURE__ */ new Map();
-const PREVIEW_TTL_MS = 5 * 6e4;
-function registerLocalPreviewScheme() {
-  electron.protocol.registerSchemesAsPrivileged([{
-    scheme: "mc-preview",
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true
-    }
-  }]);
-}
-function registerLocalPreviewProtocol() {
-  electron.protocol.handle("mc-preview", async (request) => {
-    const key = decodeURIComponent(new URL(request.url).hostname);
-    const filePath = previewFiles.get(key);
-    if (!filePath) return new Response("Preview not found", { status: 404 });
-    try {
-      return await electron.net.fetch(node_url.pathToFileURL(filePath).toString());
-    } catch {
-      return new Response("Preview unavailable", { status: 404 });
-    }
-  });
-}
-function createLocalPreviewUrl(filePath, traceId) {
-  previewFiles.set(traceId, filePath);
-  const cleanup = setTimeout(() => previewFiles.delete(traceId), PREVIEW_TTL_MS);
-  cleanup.unref();
-  return `mc-preview://${encodeURIComponent(traceId)}`;
-}
 const FILE_STABILITY_DELAY_MS = 75;
 const FILE_STABILITY_ATTEMPTS = 20;
 function wait(delayMs) {
@@ -41782,6 +41785,7 @@ const REPORT_STAGE_ORDER = [
   "React state update committed",
   "image decode started",
   "image decode complete",
+  "image preview superseded",
   "image pixels painted",
   "file move started",
   "file move complete",
@@ -41849,7 +41853,7 @@ function markImagePipelineRendererStage(event) {
   console.info(
     `[ImagePipeline] ${event.traceId} ${event.stage} +${elapsedMs.toFixed(1)}ms` + formatDetails(event.details)
   );
-  if (event.stage === "image pixels painted") {
+  if (event.stage === "image pixels painted" || event.stage === "image preview superseded") {
     reportAndDeleteTrace(event.traceId);
   }
 }

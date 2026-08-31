@@ -69,6 +69,7 @@ export type ImagePipelineStage =
   | 'React state update committed'
   | 'image decode started'
   | 'image decode complete'
+  | 'image preview superseded'
   | 'image pixels painted'
   | 'database write started'
   | 'database write complete'
@@ -90,6 +91,7 @@ export interface ImagePipelineRendererStage {
     | 'React state update committed'
     | 'image decode started'
     | 'image decode complete'
+    | 'image preview superseded'
     | 'image pixels painted'
   >
   atEpochMs: number
@@ -136,6 +138,7 @@ export interface QrMarkerReview {
   fileName: string
   capturedAt: string
   thumbnailData: string | null
+  previewUrl?: string
   createdAt: string
 }
 

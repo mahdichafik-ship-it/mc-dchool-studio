@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type {
   Project,
   Class,
@@ -290,7 +290,9 @@ export function useUnmatchedPhotos(projectId: number | null) {
 
 export function useCaptures(studentId: number | null) {
   const [data, setData] = useState<StudentCaptureReview>({ captures: [], qrMarkers: [] })
+  const [livePreview, setLivePreview] = useState<PhotoMatchedEvent | null>(null)
   const [loading, setLoading] = useState(false)
+  const liveTraceRef = useRef<PhotoMatchedEvent['pipeline']>(undefined)
 
   const load = useCallback(async () => {
     if (!studentId) return
@@ -306,13 +308,39 @@ export function useCaptures(studentId: number | null) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
+    if (liveTraceRef.current) {
+      reportImagePipelineStage(
+        liveTraceRef.current,
+        'image preview superseded',
+        'capture target changed',
+      )
+      liveTraceRef.current = undefined
+    }
+    setLivePreview(null)
+  }, [studentId])
+
+  useEffect(() => {
     if (!studentId) return
     const unsubCapture = api.on('capture:updated', (event: CaptureUpdatedEvent) => {
       if (event.studentId === studentId) void load()
     })
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.id !== studentId) return
-      if (event.preview) reportImagePipelineStage(event.pipeline, 'frontend event received')
+      if (event.preview) {
+        reportImagePipelineStage(event.pipeline, 'frontend event received')
+        if (
+          liveTraceRef.current
+          && liveTraceRef.current.traceId !== event.pipeline?.traceId
+        ) {
+          reportImagePipelineStage(
+            liveTraceRef.current,
+            'image preview superseded',
+            'newer capture prioritized',
+          )
+        }
+        liveTraceRef.current = event.pipeline
+        setLivePreview(event)
+      }
 
       // A preview event is emitted before the managed copy and SQLite work.
       // The persisted event replaces that temporary row, while the database
@@ -347,6 +375,12 @@ export function useCaptures(studentId: number | null) {
           uploadStatus: null,
           fileUrl: null,
         }
+        const galleryPhoto: Photo = {
+          ...event.photo,
+          previewUrl: undefined,
+          previewKey: undefined,
+          thumbnailData: null,
+        }
         const optimisticCapture: CaptureReview = {
           id: event.captureId ?? -event.photo.id,
           projectId: event.photo.projectId,
@@ -361,9 +395,8 @@ export function useCaptures(studentId: number | null) {
           pairingStatus: 'jpeg_only',
           assignmentLocked: true,
           files: [jpegFile],
-          thumbnailData: event.photo.thumbnailData,
-          legacyPhoto: event.photo,
-          previewPipeline: event.pipeline,
+          thumbnailData: null,
+          legacyPhoto: galleryPhoto,
         }
         return {
           ...current,
@@ -386,7 +419,7 @@ export function useCaptures(studentId: number | null) {
     }
   }, [studentId, load])
 
-  return { data, loading, reload: load }
+  return { data, loading, reload: load, livePreview }
 }
 
 export function useCaptureSummary(projectId: number | null) {

@@ -16088,7 +16088,9 @@ function useUnmatchedPhotos(projectId) {
 }
 function useCaptures(studentId) {
   const [data, setData] = reactExports.useState({ captures: [], qrMarkers: [] });
+  const [livePreview, setLivePreview] = reactExports.useState(null);
   const [loading, setLoading] = reactExports.useState(false);
+  const liveTraceRef = reactExports.useRef(void 0);
   const load = reactExports.useCallback(async () => {
     if (!studentId) return;
     setLoading(true);
@@ -16103,13 +16105,35 @@ function useCaptures(studentId) {
     load();
   }, [load]);
   reactExports.useEffect(() => {
+    if (liveTraceRef.current) {
+      reportImagePipelineStage(
+        liveTraceRef.current,
+        "image preview superseded",
+        "capture target changed"
+      );
+      liveTraceRef.current = void 0;
+    }
+    setLivePreview(null);
+  }, [studentId]);
+  reactExports.useEffect(() => {
     if (!studentId) return;
     const unsubCapture = api.on("capture:updated", (event) => {
       if (event.studentId === studentId) void load();
     });
     const unsubMatched = api.on("photo:matched", (event) => {
       if (event.student.id !== studentId) return;
-      if (event.preview) reportImagePipelineStage(event.pipeline, "frontend event received");
+      if (event.preview) {
+        reportImagePipelineStage(event.pipeline, "frontend event received");
+        if (liveTraceRef.current && liveTraceRef.current.traceId !== event.pipeline?.traceId) {
+          reportImagePipelineStage(
+            liveTraceRef.current,
+            "image preview superseded",
+            "newer capture prioritized"
+          );
+        }
+        liveTraceRef.current = event.pipeline;
+        setLivePreview(event);
+      }
       setData((current) => {
         const existingIndex = current.captures.findIndex((capture) => event.previewKey && capture.legacyPhoto?.previewKey === event.previewKey || capture.legacyPhoto?.id === event.photo.id);
         if (existingIndex >= 0 && !event.preview) {
@@ -16137,6 +16161,12 @@ function useCaptures(studentId) {
           uploadStatus: null,
           fileUrl: null
         };
+        const galleryPhoto = {
+          ...event.photo,
+          previewUrl: void 0,
+          previewKey: void 0,
+          thumbnailData: null
+        };
         const optimisticCapture = {
           id: event.captureId ?? -event.photo.id,
           projectId: event.photo.projectId,
@@ -16151,9 +16181,8 @@ function useCaptures(studentId) {
           pairingStatus: "jpeg_only",
           assignmentLocked: true,
           files: [jpegFile],
-          thumbnailData: event.photo.thumbnailData,
-          legacyPhoto: event.photo,
-          previewPipeline: event.pipeline
+          thumbnailData: null,
+          legacyPhoto: galleryPhoto
         };
         return {
           ...current,
@@ -16175,7 +16204,7 @@ function useCaptures(studentId) {
       unsubFileUpload();
     };
   }, [studentId, load]);
-  return { data, loading, reload: load };
+  return { data, loading, reload: load, livePreview };
 }
 function useCaptureSummary(projectId) {
   const [data, setData] = reactExports.useState({
@@ -16639,6 +16668,92 @@ function Dialog({ open, onClose, title, children, className }) {
       children
     ] })
   ] });
+}
+class PreviewScheduler {
+  constructor() {
+    this.active = null;
+    this.pendingLive = null;
+    this.galleryQueue = [];
+  }
+  enqueue(job) {
+    const queued = { ...job, cancelled: false };
+    if (job.priority === "live") {
+      this.cancelPendingLive();
+      this.pendingLive = queued;
+      if (this.active) this.cancel(this.active.job);
+    } else {
+      this.galleryQueue.push(queued);
+    }
+    void this.pump();
+    return () => this.cancel(queued);
+  }
+  cancelPendingLive() {
+    if (!this.pendingLive) return;
+    this.cancel(this.pendingLive);
+    this.pendingLive = null;
+  }
+  cancel(job) {
+    if (job.cancelled) return;
+    job.cancelled = true;
+    if (this.active?.job === job) this.active.controller.abort();
+    job.onCancelled?.();
+  }
+  nextJob() {
+    while (this.pendingLive?.cancelled) this.pendingLive = null;
+    if (this.pendingLive) {
+      const job = this.pendingLive;
+      this.pendingLive = null;
+      return job;
+    }
+    while (this.galleryQueue.length > 0) {
+      const job = this.galleryQueue.shift();
+      if (!job.cancelled) return job;
+    }
+    return null;
+  }
+  async pump() {
+    if (this.active) return;
+    const job = this.nextJob();
+    if (!job) return;
+    const active = {
+      job,
+      controller: new AbortController()
+    };
+    this.active = active;
+    try {
+      if (!job.cancelled) await job.execute(active.controller.signal);
+    } catch {
+    } finally {
+      if (this.active === active) this.active = null;
+      void this.pump();
+    }
+  }
+}
+const previewScheduler = new PreviewScheduler();
+async function decodeResizedPreview(source, maxEdge, signal) {
+  const response = await fetch(source, { signal });
+  if (!response.ok) throw new Error(`Preview request failed: ${response.status}`);
+  const bitmap = await createImageBitmap(await response.blob(), {
+    resizeWidth: maxEdge,
+    resizeQuality: "high"
+  });
+  if (signal.aborted) {
+    bitmap.close();
+    return null;
+  }
+  return bitmap;
+}
+function waitForPaintFrames(frameCount = 2) {
+  return new Promise((resolve) => {
+    const wait = (remaining) => {
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(() => wait(remaining - 1));
+    };
+    wait(frameCount);
+  });
 }
 const captureFilterOptions = [
   { value: "all", label: "All" },
@@ -17172,7 +17287,7 @@ function StudentDetail({
   onClearCaptureTarget,
   offline
 }) {
-  const { data: review, reload: reloadCaptures } = useCaptures(student.id);
+  const { data: review, reload: reloadCaptures, livePreview } = useCaptures(student.id);
   const captures = review.captures;
   const qrMarkers = review.qrMarkers;
   const [reassignOpen, setReassignOpen] = reactExports.useState(false);
@@ -17308,6 +17423,13 @@ function StudentDetail({
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+        livePreview?.photo.previewUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          LivePreview,
+          {
+            photo: livePreview.photo,
+            traceId: livePreview.pipeline?.traceId
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs font-medium text-slate-500 uppercase tracking-wider mb-3", children: [
           "Capture review (",
           filteredCaptures.length + qrMarkers.length,
@@ -17384,25 +17506,14 @@ function StudentDetail({
     )
   ] });
 }
-function PhotoTile({
+function LivePreview({
   photo,
-  previewPipeline,
-  uploadStatus,
-  onOpen,
-  onDelete,
-  onReassign,
-  onRetry,
-  retrying
+  traceId
 }) {
-  const status = getUploadStatusMeta(uploadStatus?.uploadStatus);
-  const StatusIcon = status.icon;
-  const imageRef = reactExports.useRef(null);
-  const reportedTraceRef = reactExports.useRef(null);
-  const imageSource = photo.previewUrl ?? photo.thumbnailData;
-  reactExports.useLayoutEffect(() => {
-    const traceId = previewPipeline?.traceId;
-    if (!traceId || !imageSource || reportedTraceRef.current === traceId) return;
-    reportedTraceRef.current = traceId;
+  const canvasRef = reactExports.useRef(null);
+  reactExports.useEffect(() => {
+    if (!photo.previewUrl || !traceId) return;
+    let mounted = true;
     const report = (stage, details) => {
       void window.api.invoke("imagePipeline:rendererStage", {
         traceId,
@@ -17413,33 +17524,128 @@ function PhotoTile({
       });
     };
     report("React state update committed");
-    const image = imageRef.current;
-    if (!image) return;
-    report("image decode started", `source=${photo.previewUrl ? "local-url" : "data-url"}`);
-    let completed = false;
-    const finishDecode = () => {
-      if (completed) return;
-      completed = true;
-      report("image decode complete");
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => report("image pixels painted", `original=${photo.filePath}`));
-      });
-    };
-    image.addEventListener("load", finishDecode, { once: true });
-    void image.decode().then(finishDecode).catch(() => {
-      if (image.complete && image.naturalWidth > 0) finishDecode();
+    const cancel = previewScheduler.enqueue({
+      id: traceId,
+      priority: "live",
+      execute: async (signal) => {
+        report("image decode started", "source=resized-local-url");
+        const bitmap = await decodeResizedPreview(photo.previewUrl, 900, signal);
+        if (!bitmap || signal.aborted || !mounted) {
+          bitmap?.close();
+          return;
+        }
+        report("image decode complete", `size=${bitmap.width}x${bitmap.height}`);
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context || signal.aborted || !mounted) {
+          bitmap.close();
+          return;
+        }
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        await waitForPaintFrames();
+        if (!mounted || signal.aborted) return;
+        report("image pixels painted", `original=${photo.filePath}`);
+      },
+      onCancelled: () => {
+        report("image preview superseded", "newer capture prioritized");
+      }
     });
-    return () => image.removeEventListener("load", finishDecode);
-  }, [imageSource, photo.filePath, photo.previewUrl, previewPipeline?.traceId]);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
-    imageSource ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "img",
+    return () => {
+      mounted = false;
+      cancel();
+    };
+  }, [photo.filePath, photo.previewUrl, traceId]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 overflow-hidden rounded-xl border border-blue-200 bg-slate-950 shadow-sm", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between border-b border-white/10 px-3 py-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] font-semibold uppercase tracking-wider text-blue-200", children: "Live preview · latest capture" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-slate-400", children: "Prioritizing newest image" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "canvas",
       {
-        ref: imageRef,
-        src: imageSource,
-        alt: photo.fileName,
-        className: "w-full h-full object-cover",
-        draggable: false
+        ref: canvasRef,
+        role: "img",
+        "aria-label": `Latest capture ${photo.fileName}`,
+        className: "block max-h-96 w-full object-contain"
+      }
+    )
+  ] });
+}
+function GalleryThumbnail({
+  source,
+  fallback,
+  alt
+}) {
+  const [generatedSource, setGeneratedSource] = reactExports.useState(null);
+  reactExports.useEffect(() => {
+    setGeneratedSource(null);
+    if (fallback || !source) return;
+    let mounted = true;
+    let objectUrl = null;
+    const cancel = previewScheduler.enqueue({
+      id: `gallery-${source}`,
+      priority: "gallery",
+      execute: async (signal) => {
+        const bitmap = await decodeResizedPreview(source, 320, signal);
+        if (!bitmap || signal.aborted || !mounted) {
+          bitmap?.close();
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        const blob = await new Promise((resolve) => {
+          canvas.toBlob(resolve, "image/jpeg", 0.82);
+        });
+        if (!blob || !mounted || signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setGeneratedSource(objectUrl);
+      }
+    });
+    return () => {
+      mounted = false;
+      cancel();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [fallback, source]);
+  const imageSource = fallback ?? generatedSource;
+  if (!imageSource) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-full w-full items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "img",
+    {
+      src: imageSource,
+      alt,
+      className: "h-full w-full object-cover",
+      draggable: false
+    }
+  );
+}
+function PhotoTile({
+  photo,
+  uploadStatus,
+  onOpen,
+  onDelete,
+  onReassign,
+  onRetry,
+  retrying
+}) {
+  const status = getUploadStatusMeta(uploadStatus?.uploadStatus);
+  const StatusIcon = status.icon;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
+    photo.thumbnailData || photo.previewUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+      GalleryThumbnail,
+      {
+        source: photo.previewUrl,
+        fallback: photo.thumbnailData,
+        alt: photo.fileName
       }
     ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -17524,13 +17730,12 @@ function QrMarkerTile({
   onOpen
 }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
-    marker.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "img",
+    marker.thumbnailData || marker.previewUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+      GalleryThumbnail,
       {
-        src: marker.thumbnailData,
-        alt: `QR marker ${marker.fileName}`,
-        className: "w-full h-full object-cover",
-        draggable: false
+        source: marker.previewUrl,
+        fallback: marker.thumbnailData,
+        alt: `QR marker ${marker.fileName}`
       }
     ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-1.5 left-1.5 rounded-full bg-teal-700/90 px-2 py-1 text-[10px] font-semibold text-white shadow-sm", children: "QR MARKER" }),
@@ -17569,7 +17774,6 @@ function CaptureTile({
         PhotoTile,
         {
           photo,
-          previewPipeline: capture.previewPipeline,
           uploadStatus,
           onOpen,
           onDelete,

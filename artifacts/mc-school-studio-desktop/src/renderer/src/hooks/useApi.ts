@@ -108,6 +108,7 @@ export function useProject(projectId: number | null) {
 
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.projectId !== projectId) return
+      if (event.preview) return
       scheduleReload()
     })
 
@@ -187,6 +188,7 @@ export function useStudents(projectId: number | null, classId?: number) {
 
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.projectId !== projectId) return
+      if (event.preview) return
       scheduleReload()
     })
 
@@ -293,11 +295,25 @@ export function useCaptures(studentId: number | null) {
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.id !== studentId) return
 
-      // Show the locally persisted JPEG immediately from the watcher event.
-      // The database reload below reconciles pairing status and the eventual
-      // RAW partner, but cloud upload is not part of this display path.
+      // A preview event is emitted before the managed copy and SQLite work.
+      // The persisted event replaces that temporary row, while the database
+      // reload below reconciles pairing status and the eventual RAW partner.
       setData((current) => {
-        if (current.captures.some((capture) => capture.legacyPhoto?.id === event.photo.id)) {
+        const existingIndex = current.captures.findIndex((capture) =>
+          (event.previewKey && capture.legacyPhoto?.previewKey === event.previewKey)
+          || capture.legacyPhoto?.id === event.photo.id)
+        if (existingIndex >= 0 && !event.preview) {
+          const captures = [...current.captures]
+          captures[existingIndex] = {
+            ...captures[existingIndex],
+            id: event.captureId ?? captures[existingIndex].id,
+            thumbnailData: event.photo.thumbnailData,
+            legacyPhoto: event.photo,
+          }
+          return { ...current, captures }
+        }
+        if (existingIndex >= 0) return current
+        if (!event.preview && current.captures.some((capture) => capture.legacyPhoto?.id === event.photo.id)) {
           return current
         }
 
@@ -333,7 +349,7 @@ export function useCaptures(studentId: number | null) {
           captures: [...current.captures, optimisticCapture],
         }
       })
-      void load()
+      if (!event.preview) void load()
     })
     const unsubMarker = api.on('photo:marker', (event: PhotoMarkerEvent) => {
       if (event.student.id === studentId) void load()
@@ -376,7 +392,7 @@ export function useCaptureSummary(projectId: number | null) {
     }
     const unsubCapture = api.on('capture:updated', refresh)
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
-      if (event.student.projectId === projectId) void load()
+      if (event.student.projectId === projectId && !event.preview) void load()
     })
     const unsubUnmatched = api.on('photo:unmatched', (event: PhotoUnmatchedEvent) => {
       if (event.projectId === projectId) void load()

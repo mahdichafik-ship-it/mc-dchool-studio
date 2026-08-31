@@ -15952,6 +15952,7 @@ function useProject(projectId) {
     };
     const unsubMatched = api.on("photo:matched", (event) => {
       if (event.student.projectId !== projectId) return;
+      if (event.preview) return;
       scheduleReload();
     });
     const unsubUnmatched = api.on("photo:unmatched", (event) => {
@@ -16020,6 +16021,7 @@ function useStudents(projectId, classId) {
     };
     const unsubMatched = api.on("photo:matched", (event) => {
       if (event.student.projectId !== projectId) return;
+      if (event.preview) return;
       scheduleReload();
     });
     const unsubDeleted = api.on("photo:deleted", (event) => {
@@ -16098,7 +16100,19 @@ function useCaptures(studentId) {
     const unsubMatched = api.on("photo:matched", (event) => {
       if (event.student.id !== studentId) return;
       setData((current) => {
-        if (current.captures.some((capture) => capture.legacyPhoto?.id === event.photo.id)) {
+        const existingIndex = current.captures.findIndex((capture) => event.previewKey && capture.legacyPhoto?.previewKey === event.previewKey || capture.legacyPhoto?.id === event.photo.id);
+        if (existingIndex >= 0 && !event.preview) {
+          const captures = [...current.captures];
+          captures[existingIndex] = {
+            ...captures[existingIndex],
+            id: event.captureId ?? captures[existingIndex].id,
+            thumbnailData: event.photo.thumbnailData,
+            legacyPhoto: event.photo
+          };
+          return { ...current, captures };
+        }
+        if (existingIndex >= 0) return current;
+        if (!event.preview && current.captures.some((capture) => capture.legacyPhoto?.id === event.photo.id)) {
           return current;
         }
         const jpegFile = {
@@ -16133,7 +16147,7 @@ function useCaptures(studentId) {
           captures: [...current.captures, optimisticCapture]
         };
       });
-      void load();
+      if (!event.preview) void load();
     });
     const unsubMarker = api.on("photo:marker", (event) => {
       if (event.student.id === studentId) void load();
@@ -16173,7 +16187,7 @@ function useCaptureSummary(projectId) {
     };
     const unsubCapture = api.on("capture:updated", refresh);
     const unsubMatched = api.on("photo:matched", (event) => {
-      if (event.student.projectId === projectId) void load();
+      if (event.student.projectId === projectId && !event.preview) void load();
     });
     const unsubUnmatched = api.on("photo:unmatched", (event) => {
       if (event.projectId === projectId) void load();
@@ -17368,6 +17382,12 @@ function PhotoTile({
 }) {
   const status = getUploadStatusMeta(uploadStatus?.uploadStatus);
   const StatusIcon = status.icon;
+  const reportPreviewRendered = () => {
+    if (photo.id >= 0 || !photo.previewKey) return;
+    console.info(
+      `[ImagePipeline] ${photo.previewKey} T10 image rendered · preview source=local://thumbnail/${photo.previewKey} · original=${photo.filePath}`
+    );
+  };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
     photo.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       "img",
@@ -17375,7 +17395,8 @@ function PhotoTile({
         src: photo.thumbnailData,
         alt: photo.fileName,
         className: "w-full h-full object-cover",
-        draggable: false
+        draggable: false,
+        onLoad: reportPreviewRendered
       }
     ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -17972,7 +17993,7 @@ function App() {
         addToast({
           type: "success",
           title: "Cloud connection restored",
-          description: "Waiting photos will upload automatically."
+          description: "Local captures remain safe. Use Upload & Finish Project or retry when ready."
         });
       }
       return result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error };
@@ -17997,7 +18018,7 @@ function App() {
             addToast({
               type: "success",
               title: "Cloud connection restored",
-              description: "Waiting photos will upload automatically."
+              description: "Local captures remain safe. Use Upload & Finish Project or retry when ready."
             });
           }
           return result.signedIn ? { status: "signed-in", member: result.member, offline: result.offline } : { status: "signed-out", error: result.error };
@@ -18039,6 +18060,7 @@ function App() {
     }
   }, []);
   const handleMatched = reactExports.useCallback((data) => {
+    if (data.preview) return;
     addToast({
       type: "success",
       title: `Photo matched: ${data.student.firstName} ${data.student.lastName}`,

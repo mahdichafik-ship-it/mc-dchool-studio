@@ -16,6 +16,8 @@ const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
+const fs = require("node:fs/promises");
+const node_perf_hooks = require("node:perf_hooks");
 const node_crypto = require("node:crypto");
 const electronUpdater = require("electron-updater");
 const projectsTable = sqliteCore.sqliteTable("projects", {
@@ -10400,11 +10402,11 @@ var jsQR$1 = { exports: {} };
             var middleValue = towardsEnd.shift() + awayFromEnd.shift() - 1;
             return (_a = awayFromEnd.concat(middleValue)).concat.apply(_a, towardsEnd);
           }
-          function scoreBlackWhiteRun(sequence, ratios) {
-            var averageSize = sum(sequence) / sum(ratios);
+          function scoreBlackWhiteRun(sequence2, ratios) {
+            var averageSize = sum(sequence2) / sum(ratios);
             var error = 0;
             ratios.forEach(function(ratio, i) {
-              error += Math.pow(sequence[i] - ratio * averageSize, 2);
+              error += Math.pow(sequence2[i] - ratio * averageSize, 2);
             });
             return { averageSize, error };
           }
@@ -16122,7 +16124,7 @@ function requireGifutil() {
   if (hasRequiredGifutil) return gifutil;
   hasRequiredGifutil = 1;
   (function(exports2) {
-    const fs = require$$0;
+    const fs2 = require$$0;
     const ImageQ = imageQ;
     const BitmapImage3 = bitmapimage;
     const { GifFrame: GifFrame3 } = gifframe;
@@ -16318,7 +16320,7 @@ function requireGifutil() {
     }
     function _readBinary(path2) {
       return new Promise((resolve, reject) => {
-        fs.readFile(path2, (err, buffer) => {
+        fs2.readFile(path2, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -16328,7 +16330,7 @@ function requireGifutil() {
     }
     function _writeBinary(path2, buffer) {
       return new Promise((resolve, reject) => {
-        fs.writeFile(path2, buffer, (err) => {
+        fs2.writeFile(path2, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -41706,6 +41708,57 @@ function extractStudentReference(fileName, studentIds) {
   });
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
+const FILE_STABILITY_DELAY_MS = 75;
+const FILE_STABILITY_ATTEMPTS = 20;
+function wait(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+async function readableFile(filePath) {
+  try {
+    const handle = await fs.open(filePath, "r");
+    await handle.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function waitForStableFile(filePath, statFile, delayMs = FILE_STABILITY_DELAY_MS, attempts = FILE_STABILITY_ATTEMPTS) {
+  let previous = await statFile(filePath);
+  if (!previous.isFile()) throw new Error(`Capture path is not a file: ${filePath}`);
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await wait(delayMs);
+    const current = await statFile(filePath);
+    if (current.isFile() && current.size === previous.size && current.size > 0 && await readableFile(filePath)) {
+      return current;
+    }
+    previous = current;
+  }
+  throw new Error(`Capture file did not become stable: ${filePath}`);
+}
+const traces = /* @__PURE__ */ new Map();
+let sequence = 0;
+function diagnosticsEnabled() {
+  return process.env.MC_IMAGE_PIPELINE_DIAGNOSTICS === "1";
+}
+function formatDetails(details) {
+  return details ? ` · ${details}` : "";
+}
+function startImagePipelineTrace(filePath) {
+  const traceId = `capture-${Date.now()}-${sequence++}`;
+  traces.set(traceId, { startedAt: node_perf_hooks.performance.now(), filePath });
+  markImagePipeline(traceId, "T0 filesystem event received", `source=${filePath}`);
+  return traceId;
+}
+function markImagePipeline(traceId, stage, details) {
+  if (!traceId || !diagnosticsEnabled()) return;
+  const trace = traces.get(traceId);
+  if (!trace) return;
+  const elapsedMs = (node_perf_hooks.performance.now() - trace.startedAt).toFixed(1);
+  console.info(`[ImagePipeline] ${traceId} ${stage} +${elapsedMs}ms${formatDetails(details)}`);
+}
+function finishImagePipelineTrace(traceId) {
+  if (traceId) traces.delete(traceId);
+}
 function createSequenceState(manualStudentId = null) {
   return {
     activeStudentId: manualStudentId,
@@ -41993,7 +42046,15 @@ function saveUnmatchedPhoto(store, projectId, filePath, fileName, reason) {
     reason
   };
 }
-async function processWatchedPhoto(projectId, filePath, { store, photosDir, readQr, targetStudentId = null, capturedAt }) {
+async function processWatchedPhoto(projectId, filePath, {
+  store,
+  photosDir,
+  readQr,
+  targetStudentId = null,
+  capturedAt,
+  diagnosticId,
+  onPreviewReady
+}) {
   const fileName = node_path.basename(filePath);
   const project = store.findProject(projectId);
   if (!project) throw new Error(`Project ${projectId} not found`);
@@ -42026,6 +42087,18 @@ async function processWatchedPhoto(projectId, filePath, { store, photosDir, read
       `Filename student ID "${reference}" conflicts with the selected student`
     );
   }
+  const effectiveCapturedAt = capturedAt ?? now$1();
+  markImagePipeline(
+    diagnosticId,
+    "T2 active student identified",
+    `student=${student.id} file=${fileName}`
+  );
+  const thumbnailData = await onPreviewReady?.({
+    filePath,
+    fileName,
+    capturedAt: effectiveCapturedAt,
+    student
+  });
   const classRow = store.findClass(student.classId);
   const projectFolder = safeFolderName$1(project.schoolName);
   const classFolder = safeFolderName$1(classRow?.className ?? "Unassigned Class");
@@ -42033,16 +42106,18 @@ async function processWatchedPhoto(projectId, filePath, { store, photosDir, read
   const destDir = node_path.join(photosDir, projectFolder, classFolder, studentFolder);
   node_fs.mkdirSync(destDir, { recursive: true });
   const destPath = node_path.join(destDir, fileName);
+  markImagePipeline(diagnosticId, "T3 local copy starts", `destination=${destPath}`);
   node_fs.copyFileSync(filePath, destPath);
   const photo = store.insertPhoto({
     projectId,
     studentId: student.id,
     filePath: destPath,
     fileName,
-    capturedAt: capturedAt ?? now$1(),
+    capturedAt: effectiveCapturedAt,
     isMatched: true
   });
-  return { kind: "matched", photo, student };
+  markImagePipeline(diagnosticId, "T11 database persistence completed", `photo=${photo.id}`);
+  return { kind: "matched", photo, student, thumbnailData };
 }
 function resolveWatchFolders(folderPath, folderExists = () => false) {
   const selected = node_path.resolve(folderPath);
@@ -42053,7 +42128,8 @@ function resolveWatchFolders(folderPath, folderExists = () => false) {
   const dual = selectedName === "spool" || selectedName === "jpeg" || selectedName === "raw" || folderExists(jpeg2) || folderExists(raw);
   return dual ? { mode: "dual", root, paths: [jpeg2, raw] } : { mode: "legacy", root: selected, paths: [selected] };
 }
-const FLUSH_DELAY_MS = 500;
+const FLUSH_DELAY_MS = 50;
+const LIVE_PREVIEW_EDGE = 900;
 const watchers = /* @__PURE__ */ new Map();
 const pendingManualTargets = /* @__PURE__ */ new Map();
 let desktopRetiring = false;
@@ -42138,6 +42214,42 @@ function sendUnmatchedResult(win, projectId, result) {
     projectId
   });
 }
+let nextPreviewId = -1;
+async function emitLocalPreview(win, projectId, capture, student, context) {
+  const diagnosticId = capture.diagnosticId;
+  markImagePipeline(diagnosticId, "T7 thumbnail creation starts", `edge=${LIVE_PREVIEW_EDGE}`);
+  const thumbnailData = await generateThumbnail(context.filePath, LIVE_PREVIEW_EDGE);
+  markImagePipeline(
+    diagnosticId,
+    "T8 thumbnail ready",
+    thumbnailData ? `bytes=${thumbnailData.length}` : "thumbnail unavailable"
+  );
+  if (!thumbnailData) return null;
+  const preview = {
+    id: nextPreviewId--,
+    projectId,
+    studentId: student.id,
+    filePath: context.filePath,
+    fileName: context.fileName,
+    capturedAt: context.capturedAt,
+    isMatched: true,
+    thumbnailData,
+    createdAt: context.capturedAt,
+    previewKey: diagnosticId
+  };
+  win?.webContents.send("photo:matched", {
+    photo: preview,
+    student: toStudentEvent(getDb(), student),
+    preview: true,
+    previewKey: diagnosticId
+  });
+  markImagePipeline(
+    diagnosticId,
+    "T9 UI event sent",
+    `preview source=local://thumbnail/${diagnosticId ?? context.fileName}`
+  );
+  return thumbnailData;
+}
 function registerWatcherHandlers() {
   const db = getDb();
   electron.ipcMain.handle("watcher:start", async (_e, { projectId }) => {
@@ -42161,8 +42273,7 @@ function registerWatcherHandlers() {
       // Process files that were already written before the photographer
       // opened the project. The database/source-path checks below make this
       // safe across restarts and prevent duplicate imports.
-      ignoreInitial: false,
-      awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 }
+      ignoreInitial: false
     });
     const session = {
       watcher,
@@ -42174,7 +42285,8 @@ function registerWatcherHandlers() {
     };
     watchers.set(projectId, session);
     watcher.on("add", (filePath) => {
-      void enqueueCapture(projectId, filePath);
+      const diagnosticId = startImagePipelineTrace(filePath);
+      void enqueueCapture(projectId, filePath, diagnosticId);
     });
     watcher.on("error", (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error);
@@ -42252,6 +42364,8 @@ async function stopProjectWatcher(projectId, options = {}) {
           await handleNewPhoto(projectId, capture, session);
         } catch (error) {
           console.error(`[Watcher] Could not drain ${capture.filePath} while stopping`, error);
+        } finally {
+          finishImagePipelineTrace(capture.diagnosticId);
         }
       }
     });
@@ -42262,19 +42376,20 @@ async function stopProjectWatcher(projectId, options = {}) {
     emitActiveStudentChanged(projectId, null, "none");
   }
 }
-async function enqueueCapture(projectId, filePath) {
+async function enqueueCapture(projectId, filePath, diagnosticId) {
   if (desktopRetiring) return;
   const session = watchers.get(projectId);
   if (!session || session.seenPaths.has(filePath)) return;
   if (!getCaptureFileRole(filePath)) return;
   try {
-    const fileStat = await promises.stat(filePath);
-    if (!fileStat.isFile()) return;
+    const fileStat = await waitForStableFile(filePath, promises.stat);
+    markImagePipeline(diagnosticId, "T1 local file finished writing", `bytes=${fileStat.size}`);
     if (!registerCapturePath(session.seenPaths, filePath)) return;
     session.pendingFiles.push({
       filePath,
       fileName: path.basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
+      diagnosticId,
       // Capture the effective target at arrival time. Processing can be
       // delayed by image copies or a burst of filesystem events, and a
       // photographer may select another student or scan another QR during
@@ -42284,6 +42399,7 @@ async function enqueueCapture(projectId, filePath) {
     scheduleFlush(projectId);
   } catch (error) {
     console.error(`[Watcher] Could not inspect ${filePath}`, error);
+    finishImagePipelineTrace(diagnosticId);
   }
 }
 function scheduleFlush(projectId) {
@@ -42304,6 +42420,8 @@ function scheduleFlush(projectId) {
             `[Watcher] Could not process ${capture.filePath}; it will be retried`,
             error
           );
+        } finally {
+          finishImagePipelineTrace(capture.diagnosticId);
         }
       }
     }).catch((error) => {
@@ -42313,6 +42431,10 @@ function scheduleFlush(projectId) {
 }
 async function handleNewPhoto(projectId, capture, session) {
   if (desktopRetiring) return;
+  markImagePipeline(capture.diagnosticId, "T4 API request starts", "not used in live preview path");
+  markImagePipeline(capture.diagnosticId, "T5 upload starts", "not used in live preview path");
+  markImagePipeline(capture.diagnosticId, "T6 upload completes", "deferred until explicit project sync");
+  markImagePipeline(capture.diagnosticId, "T12 cloud synchronization completed", "deferred until explicit project sync");
   const db = getDb();
   const role = getCaptureFileRole(capture.fileName);
   if (!role || hasProcessedCaptureSource(db, capture.filePath) || hasProcessedQrMarkerSource(db, capture.filePath)) return;
@@ -42328,19 +42450,21 @@ async function handleNewPhoto(projectId, capture, session) {
     knownStudents.map((student2) => student2.generatedStudentId)
   );
   if (filenameReference) {
-    const result = await processWatchedPhoto(projectId, capture.filePath, {
+    const result2 = await processWatchedPhoto(projectId, capture.filePath, {
       store: createWatchedPhotoStore(db, capture.filePath),
       photosDir: getPhotosDir(),
       readQr: async () => null,
       targetStudentId: manualStudentId,
-      capturedAt: new Date(capture.capturedAtMs).toISOString()
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      diagnosticId: capture.diagnosticId,
+      onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context)
     });
-    if (result.kind === "unmatched") {
-      sendUnmatchedResult(win, projectId, result);
-      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
+    if (result2.kind === "unmatched") {
+      sendUnmatchedResult(win, projectId, result2);
+      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result2.reason}`);
       return;
     }
-    await finishMatchedPhoto(db, win, result.photo, result.student);
+    await finishMatchedPhoto(db, win, result2.photo, result2.student, capture.diagnosticId, result2.thumbnailData);
     return;
   }
   const qrResult = await readQrFromImage(capture.filePath);
@@ -42383,35 +42507,39 @@ async function handleNewPhoto(projectId, capture, session) {
     return;
   }
   if (manualStudentId !== null) {
-    const result = await processWatchedPhoto(projectId, capture.filePath, {
+    const result2 = await processWatchedPhoto(projectId, capture.filePath, {
       store: createWatchedPhotoStore(db, capture.filePath),
       photosDir: getPhotosDir(),
       readQr: async () => null,
       targetStudentId: manualStudentId,
-      capturedAt: new Date(capture.capturedAtMs).toISOString()
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      diagnosticId: capture.diagnosticId,
+      onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context)
     });
-    if (result.kind === "unmatched") {
-      sendUnmatchedResult(win, projectId, result);
-      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
+    if (result2.kind === "unmatched") {
+      sendUnmatchedResult(win, projectId, result2);
+      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result2.reason}`);
       return;
     }
-    await finishMatchedPhoto(db, win, result.photo, result.student);
+    await finishMatchedPhoto(db, win, result2.photo, result2.student, capture.diagnosticId, result2.thumbnailData);
     return;
   }
   if (session.sequenceState.activeStudentId === null) {
     if (looksLikeSmartShooterName(capture.fileName)) {
-      const result = await processWatchedPhoto(projectId, capture.filePath, {
+      const result2 = await processWatchedPhoto(projectId, capture.filePath, {
         store: createWatchedPhotoStore(db, capture.filePath),
         photosDir: getPhotosDir(),
         readQr: async () => null,
-        capturedAt: new Date(capture.capturedAtMs).toISOString()
+        capturedAt: new Date(capture.capturedAtMs).toISOString(),
+        diagnosticId: capture.diagnosticId,
+        onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context)
       });
-      if (result.kind === "unmatched") {
-        sendUnmatchedResult(win, projectId, result);
-        console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
+      if (result2.kind === "unmatched") {
+        sendUnmatchedResult(win, projectId, result2);
+        console.log(`[Watcher] Unmatched ${capture.fileName}: ${result2.reason}`);
         return;
       }
-      await finishMatchedPhoto(db, win, result.photo, result.student);
+      await finishMatchedPhoto(db, win, result2.photo, result2.student, capture.diagnosticId, result2.thumbnailData);
       return;
     }
   }
@@ -42431,25 +42559,20 @@ async function handleNewPhoto(projectId, capture, session) {
     recordUnmatched(db, win, projectId, capture, "The active student is no longer in this project roster");
     return;
   }
-  const [classRow] = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).all();
-  const [project] = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).all();
-  const projectFolder = safeFolderName(project?.schoolName ?? `Project ${projectId}`);
-  const classFolder = safeFolderName(classRow?.className ?? "Unassigned Class");
-  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`);
-  const destDir = path.join(getPhotosDir(), projectFolder, classFolder, studentFolder);
-  require$$0.mkdirSync(destDir, { recursive: true });
-  const destPath = path.join(destDir, capture.fileName);
-  require$$0.copyFileSync(capture.filePath, destPath);
-  const photo = db.insert(photosTable).values({
-    projectId,
-    studentId: student.id,
-    filePath: destPath,
-    fileName: capture.fileName,
+  const result = await processWatchedPhoto(projectId, capture.filePath, {
+    store: createWatchedPhotoStore(db, capture.filePath),
+    photosDir: getPhotosDir(),
+    readQr: async () => null,
+    targetStudentId: student.id,
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
-    isMatched: true
-  }).returning().get();
-  mirrorPhotoAsCapture(db, photo, capture.filePath);
-  await finishMatchedPhoto(db, win, photo, student);
+    diagnosticId: capture.diagnosticId,
+    onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context)
+  });
+  if (result.kind === "unmatched") {
+    sendUnmatchedResult(win, projectId, result);
+    return;
+  }
+  await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData);
 }
 function copyToProjectFolder(sourcePath, fileName, destinationDir) {
   require$$0.mkdirSync(destinationDir, { recursive: true });
@@ -42501,6 +42624,11 @@ function handleNewRaw(projectId, capture, session, db) {
   const sequenceStudent = sequenceStudentId === null ? void 0 : findProjectStudent(db, projectId, sequenceStudentId);
   const conflictReason = manualStudentId !== null && filenameReference && (!filenameStudent || filenameStudent.id !== manualStudentId) ? filenameStudent ? `RAW filename for ${filenameStudent.firstName} ${filenameStudent.lastName} conflicts with the selected student` : `RAW filename student ID "${filenameReference}" conflicts with the selected student` : null;
   const student = conflictReason ? void 0 : manualStudent ?? filenameStudent ?? sequenceStudent;
+  markImagePipeline(
+    capture.diagnosticId,
+    "T2 active student identified",
+    student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`
+  );
   const storage = ensureProjectStorageLayout(
     getProjectStorageLayout(
       getPhotoSystemLayout(electron.app.getPath("home")),
@@ -42508,6 +42636,7 @@ function handleNewRaw(projectId, capture, session, db) {
       project.schoolName
     )
   );
+  markImagePipeline(capture.diagnosticId, "T3 local copy starts", `destination=${student ? "student folder" : "RAW originals"}`);
   const storedPath = copyToProjectFolder(
     capture.filePath,
     capture.fileName,
@@ -42523,12 +42652,14 @@ function handleNewRaw(projectId, capture, session, db) {
     capturedAt: new Date(capture.capturedAtMs).toISOString()
   });
   if (result.kind === "duplicate") return;
+  markImagePipeline(capture.diagnosticId, "T11 database persistence completed", `capture=${result.captureId}`);
   const savedCapture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, result.captureId)).get();
   getMainWindow()?.webContents.send("capture:updated", {
     projectId,
     captureId: result.captureId,
     studentId: savedCapture?.studentId ?? null
   });
+  markImagePipeline(capture.diagnosticId, "T9 UI event sent", "RAW capture update");
   if (conflictReason) {
     sendUnmatchedResult(getMainWindow(), projectId, {
       filePath: capture.filePath,
@@ -42540,9 +42671,9 @@ function handleNewRaw(projectId, capture, session, db) {
     `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
   );
 }
-async function finishMatchedPhoto(db, win, photo, student) {
+async function finishMatchedPhoto(db, win, photo, student, diagnosticId, previewThumbnailData) {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`);
-  const thumbnailData = await generateThumbnail(photo.filePath);
+  const thumbnailData = previewThumbnailData === void 0 || previewThumbnailData === null ? await generateThumbnail(photo.filePath, LIVE_PREVIEW_EDGE) : previewThumbnailData;
   const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
   const photoForEvent = {
     id: photo.id,
@@ -42553,13 +42684,16 @@ async function finishMatchedPhoto(db, win, photo, student) {
     capturedAt: photo.capturedAt,
     isMatched: true,
     thumbnailData,
-    createdAt: photo.createdAt
+    createdAt: photo.createdAt,
+    previewKey: diagnosticId
   };
   win?.webContents.send("photo:matched", {
     photo: photoForEvent,
     student: toStudentEvent(db, student),
-    captureId: capture?.id
+    captureId: capture?.id,
+    previewKey: diagnosticId
   });
+  markImagePipeline(diagnosticId, "T9 UI event sent", "persisted local capture");
   if (capture) {
     win?.webContents.send("capture:updated", {
       projectId: photo.projectId,
@@ -42578,6 +42712,7 @@ function recordUnmatched(db, win, projectId, capture, reason) {
     isMatched: false
   }).returning().get();
   mirrorPhotoAsCapture(db, photo, capture.filePath);
+  markImagePipeline(capture.diagnosticId, "T11 database persistence completed", `photo=${photo.id}`);
   win?.webContents.send("photo:unmatched", {
     projectId,
     photoId: photo.id,
@@ -42585,6 +42720,7 @@ function recordUnmatched(db, win, projectId, capture, reason) {
     fileName: capture.fileName,
     reason
   });
+  markImagePipeline(capture.diagnosticId, "T9 UI event sent", "unmatched local capture");
 }
 function registerDialogHandlers() {
   electron.ipcMain.handle(
@@ -42662,8 +42798,8 @@ function registerCaptureExportHandlers() {
         let skippedMissingFiles = 0;
         for (const capture of captures) {
           const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
-          const sequence = String(capture.sequence ?? capture.id).padStart(6, "0");
-          const captureDir = path.join(outputDir, `${sequence}_${safeName(capture.baseFilename)}`);
+          const sequence2 = String(capture.sequence ?? capture.id).padStart(6, "0");
+          const captureDir = path.join(outputDir, `${sequence2}_${safeName(capture.baseFilename)}`);
           let captureExported = false;
           for (const file of files) {
             if (!require$$0.existsSync(file.storedPath)) {

@@ -58,7 +58,7 @@ export default function App() {
         addToast({
           type: 'success',
           title: 'Cloud connection restored',
-          description: 'Waiting photos will upload automatically.',
+          description: 'Local captures remain safe. Use Upload & Finish Project or retry when ready.',
         })
       }
       return result.signedIn
@@ -88,7 +88,7 @@ export default function App() {
             addToast({
               type: 'success',
               title: 'Cloud connection restored',
-              description: 'Waiting photos will upload automatically.',
+              description: 'Local captures remain safe. Use Upload & Finish Project or retry when ready.',
             })
           }
           return result.signedIn
@@ -138,6 +138,7 @@ export default function App() {
   }, [])
 
   const handleMatched = useCallback((data: PhotoMatchedEvent) => {
+    if (data.preview) return
     addToast({
       type: 'success',
       title: `Photo matched: ${data.student.firstName} ${data.student.lastName}`,

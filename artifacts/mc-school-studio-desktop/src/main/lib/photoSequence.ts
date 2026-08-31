@@ -2,6 +2,7 @@ export interface CaptureFile {
   filePath: string
   fileName: string
   capturedAtMs: number
+  diagnosticId?: string
   /**
    * The effective student target at the moment the watcher saw the file,
    * whether it came from manual selection or a QR sequence.

@@ -2,6 +2,14 @@
 
 macOS Electron desktop app for use on photo day. Works alongside the MC School Studio web app.
 
+## Image pipeline diagnostics
+
+Set `MC_IMAGE_PIPELINE_DIAGNOSTICS=1` while running the desktop app to emit
+T0–T12 timing markers from the main process. The renderer logs T10 when the
+temporary local thumbnail is painted and includes the original local path plus
+the `local://thumbnail/...` preview source. Upload and cloud synchronization
+are intentionally reported as deferred until the explicit project sync action.
+
 ## What it does
 
 - Imports school projects from the web app (via JSON export)

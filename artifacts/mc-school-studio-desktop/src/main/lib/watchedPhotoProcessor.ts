@@ -5,6 +5,7 @@ import type { getDb } from '../db'
 import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema.ts'
 import { extractStudentReference } from './photoFileNaming.ts'
 import { mirrorPhotoAsCapture } from './captureRepository.ts'
+import { markImagePipeline } from './imagePipelineDiagnostics.ts'
 
 type DesktopDb = ReturnType<typeof getDb>
 type ProjectRow = typeof projectsTable.$inferSelect
@@ -55,6 +56,13 @@ export interface WatchedPhotoProcessorOptions {
   readQr: (filePath: string) => Promise<WatchedPhotoQrResult | null>
   targetStudentId?: number | null
   capturedAt?: string
+  diagnosticId?: string
+  onPreviewReady?: (context: {
+    filePath: string
+    fileName: string
+    capturedAt: string
+    student: StudentRow
+  }) => Promise<string | null> | string | null
 }
 
 export type WatchedPhotoResult =
@@ -62,6 +70,7 @@ export type WatchedPhotoResult =
       kind: 'matched'
       photo: typeof photosTable.$inferSelect
       student: typeof studentsTable.$inferSelect
+      thumbnailData?: string | null
     }
   | {
       kind: 'unmatched'
@@ -111,7 +120,15 @@ function saveUnmatchedPhoto(
 export async function processWatchedPhoto(
   projectId: number,
   filePath: string,
-  { store, photosDir, readQr, targetStudentId = null, capturedAt }: WatchedPhotoProcessorOptions,
+  {
+    store,
+    photosDir,
+    readQr,
+    targetStudentId = null,
+    capturedAt,
+    diagnosticId,
+    onPreviewReady,
+  }: WatchedPhotoProcessorOptions,
 ): Promise<WatchedPhotoResult> {
   const fileName = basename(filePath)
   const project = store.findProject(projectId)
@@ -157,6 +174,19 @@ export async function processWatchedPhoto(
     )
   }
 
+  const effectiveCapturedAt = capturedAt ?? now()
+  markImagePipeline(
+    diagnosticId,
+    'T2 active student identified',
+    `student=${student.id} file=${fileName}`,
+  )
+  const thumbnailData = await onPreviewReady?.({
+    filePath,
+    fileName,
+    capturedAt: effectiveCapturedAt,
+    student,
+  })
+
   const classRow = store.findClass(student.classId)
   const projectFolder = safeFolderName(project.schoolName)
   const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
@@ -164,6 +194,7 @@ export async function processWatchedPhoto(
   const destDir = join(photosDir, projectFolder, classFolder, studentFolder)
   mkdirSync(destDir, { recursive: true })
   const destPath = join(destDir, fileName)
+  markImagePipeline(diagnosticId, 'T3 local copy starts', `destination=${destPath}`)
   copyFileSync(filePath, destPath)
 
   const photo = store.insertPhoto({
@@ -171,9 +202,10 @@ export async function processWatchedPhoto(
     studentId: student.id,
     filePath: destPath,
     fileName,
-    capturedAt: capturedAt ?? now(),
+    capturedAt: effectiveCapturedAt,
     isMatched: true,
   })
+  markImagePipeline(diagnosticId, 'T11 database persistence completed', `photo=${photo.id}`)
 
-  return { kind: 'matched', photo, student }
+  return { kind: 'matched', photo, student, thumbnailData }
 }

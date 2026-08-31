@@ -21,6 +21,7 @@ function createStore() {
   const students = [
     { id: 1, projectId: 1, classId: 1, firstName: 'John', lastName: 'Smith', generatedStudentId: '001234', email: null, phone: null, simpleQr: null, jsonQr: null, createdAt: timestamp, updatedAt: timestamp },
     { id: 2, projectId: 2, classId: 2, firstName: 'Other', lastName: 'Student', generatedStudentId: '009999', email: null, phone: null, simpleQr: null, jsonQr: null, createdAt: timestamp, updatedAt: timestamp },
+    { id: 3, projectId: 1, classId: 1, firstName: 'Dina', lastName: 'Zaki', generatedStudentId: 'AB12', email: null, phone: null, simpleQr: null, jsonQr: null, createdAt: timestamp, updatedAt: timestamp },
   ]
   const photos: ReturnType<WatchedPhotoStore['insertPhoto']>[] = []
 
@@ -95,6 +96,65 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
     assert.equal(photos[0]?.filePath, destination)
   } finally {
     cleanup(fixture.root)
+  }
+})
+
+test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fallback', async () => {
+  const fixture = createFixture('Smith_John_class_school_001234_595.JPG')
+  const { store, photos } = createStore()
+  let qrReadAttempted = false
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => {
+        qrReadAttempted = true
+        return { studentId: '009999' }
+      },
+    })
+
+    assert.equal(result.kind, 'matched')
+    assert.equal(qrReadAttempted, false)
+    if (result.kind !== 'matched') return
+    assert.equal(result.student.id, 1)
+
+    const destination = join(
+      fixture.photosDir,
+      'Example School',
+      'Class 3',
+      '001234_Smith_John',
+      'Smith_John_class_school_001234_595.JPG',
+    )
+    assert.equal(existsSync(destination), true)
+    assert.equal(existsSync(fixture.sourcePath), true)
+    assert.deepEqual(readFileSync(destination), jpegBytes)
+    assert.deepEqual(readFileSync(fixture.sourcePath), jpegBytes)
+    assert.equal(photos[0]?.studentId, 1)
+    assert.equal(photos[0]?.filePath, destination)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
+test('matches a barcode-renamed JPEG when Smart Shooter changes ID casing', async () => {
+  const fixture = createFixture('ZAKI_Dina_class_school-ab12_596.JPG')
+  const { store } = createStore()
+  try {
+    let qrRead = false
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => {
+        qrRead = true
+        return null
+      },
+    })
+
+    assert.equal(result.kind, 'matched')
+    assert.equal(qrRead, false)
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true })
   }
 })
 

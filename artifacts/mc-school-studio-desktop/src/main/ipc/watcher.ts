@@ -139,7 +139,10 @@ export function registerWatcherHandlers() {
     }
     const watcher = chokidar.watch(watchFolders.paths, {
       persistent: true,
-      ignoreInitial: true,
+      // Process files that were already written before the photographer
+      // opened the project. The database/source-path checks below make this
+      // safe across restarts and prevent duplicate imports.
+      ignoreInitial: false,
       awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 },
     })
 
@@ -232,7 +235,17 @@ function scheduleFlush(projectId: number): void {
     session.processing = session.processing
       .then(async () => {
         for (const capture of batch) {
-          await handleNewPhoto(projectId, capture, session)
+          try {
+            await handleNewPhoto(projectId, capture, session)
+          } catch (error) {
+            // Do not permanently lose a capture because a removable drive,
+            // network folder, or image decoder was temporarily unavailable.
+            session.seenPaths.delete(capture.filePath)
+            console.error(
+              `[Watcher] Could not process ${capture.filePath}; it will be retried`,
+              error,
+            )
+          }
         }
       })
       .catch((error) => {
@@ -268,16 +281,14 @@ async function handleNewPhoto(
   const qrResult = await readQrFromImage(capture.filePath)
 
   if (qrResult) {
+    const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
     const student = db
       .select()
       .from(studentsTable)
-      .where(
-        and(
-          eq(studentsTable.projectId, projectId),
-          eq(studentsTable.generatedStudentId, qrResult.studentId),
-        ),
-      )
-      .get()
+      .where(eq(studentsTable.projectId, projectId))
+      .all()
+      .find((candidate) =>
+        candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
 
     const decision = advanceSequence(session.sequenceState, {
       kind: 'marker',
@@ -290,7 +301,18 @@ async function handleNewPhoto(
       return
     }
 
-    const marker = persistQrMarker(db, projectId, student!, capture)
+    if (!student) {
+      recordUnmatched(
+        db,
+        win,
+        projectId,
+        capture,
+        `QR marker "${qrResult.studentId}" does not match a student in this project`,
+      )
+      return
+    }
+
+    const marker = persistQrMarker(db, projectId, student, capture)
     win?.webContents.send('photo:marker', {
       markerId: marker.id,
       fileName: capture.fileName,
@@ -320,7 +342,10 @@ async function handleNewPhoto(
       })
 
       if (result.kind === 'unmatched') {
-        win?.webContents.send('photo:unmatched', result)
+        win?.webContents.send('photo:unmatched', {
+          ...result,
+          projectId,
+        })
         console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
         return
       }
@@ -554,6 +579,8 @@ function recordUnmatched(
   mirrorPhotoAsCapture(db, photo, capture.filePath)
 
   win?.webContents.send('photo:unmatched', {
+    projectId,
+    photoId: photo.id,
     filePath: capture.filePath,
     fileName: capture.fileName,
     reason,

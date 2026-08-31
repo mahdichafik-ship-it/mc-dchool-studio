@@ -30,13 +30,11 @@ export function createWatchedPhotoStore(db: DesktopDb, sourcePath?: string): Wat
       db
         .select()
         .from(studentsTable)
-        .where(
-          and(
-            eq(studentsTable.projectId, projectId),
-            eq(studentsTable.generatedStudentId, generatedStudentId),
-          ),
-        )
-        .get(),
+        .where(eq(studentsTable.projectId, projectId))
+        .all()
+        .find((student) =>
+          student.generatedStudentId.trim().toLocaleLowerCase()
+            === generatedStudentId.trim().toLocaleLowerCase()),
     findClass: (classId) =>
       db.select().from(classesTable).where(eq(classesTable.id, classId)).get(),
     insertPhoto: (photo) => {

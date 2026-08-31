@@ -153,6 +153,8 @@ export interface PhotoMarkerEvent {
 }
 
 export interface PhotoUnmatchedEvent {
+  projectId: number
+  photoId?: number
   filePath: string
   fileName: string
   reason: string

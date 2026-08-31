@@ -1,0 +1,164 @@
+Do NOT publish.
+
+The performance work is accepted. Do not change the Watch Folder performance architecture, newest-image-wins scheduler, assignment logic, QR workflow, or JPEG/RAW pairing unless one of the remaining failures directly requires it.
+
+We now have only TWO release blockers:
+
+1. Restart persistence: FAIL
+2. macOS production build: FAIL
+
+Please treat these as isolated release-blocker bugs.
+
+1. RESTART PERSISTENCE — FIND THE EXACT FAILURE
+
+First reproduce the restart test and tell me exactly what fails after restarting.
+
+I need to know whether:
+
+* captures disappear completely
+* captures remain in the database but do not render
+* student assignments are lost
+* local file paths are incorrect
+* preview URLs are no longer valid after restart
+* temporary live-preview entries remain but persisted captures do not reconcile
+* gallery thumbnails are missing
+* the application is depending on temporary mc-preview:// URLs that only exist during the live session
+* project reopening does not hydrate persisted capture records correctly
+* file paths are stored incorrectly or relatively
+* temporary capture IDs are not being replaced with persistent IDs
+* the low-priority persistence queue is not fully committed before shutdown
+
+Do not guess. Trace one capture through:
+
+capture
+→ temporary live preview
+→ persistent database record
+→ local JPEG/RAW path
+→ gallery record
+→ application close
+→ application reopen
+→ project hydration
+→ student gallery reconstruction
+→ displayed image
+
+Give me the exact point where persistence breaks.
+
+Required restart behavior
+
+After a capture becomes visible live:
+
+* the original image must be persisted
+* its student ID must be persisted
+* its capture ID must be persisted
+* its JPEG/RAW relationship must be persisted
+* a restart-safe local image/thumbnail reference must be persisted
+
+The short-lived mc-preview:// live URL must NEVER be treated as the permanent gallery reference.
+
+After restart, the gallery should reconstruct from persistent local paths/database records and generate/use the normal persisted preview path.
+
+Important shutdown test
+
+Also test this:
+
+1. Shoot a burst.
+2. Immediately close the application while background persistence/gallery work may still be running.
+3. Reopen the application.
+
+Confirm whether background jobs were lost.
+
+If necessary, implement a safe shutdown/flush mechanism for CRITICAL persistence work.
+
+Do NOT make the user wait for low-priority thumbnail hydration or cloud synchronization.
+
+But capture records, student assignment, file paths and RAW/JPEG pairing must be committed before shutdown completes.
+
+Then repeat:
+
+* normal restart
+* immediate restart after single capture
+* immediate restart after 10-file burst
+* restart while offline
+
+Expected:
+
+Lost captures: 0
+Wrong assignments: 0
+Duplicate records: 0
+Missing gallery images: 0
+
+⸻
+
+2. macOS PRODUCTION BUILD — IDENTIFY THE EXACT FAILURE
+
+Do not just report “macOS production build failed.”
+
+Give me the exact macOS build failure:
+
+* command executed
+* failing stage
+* relevant error message
+* whether failure is compile, packaging, signing, notarization, entitlement, architecture, dependency, or installer generation
+
+Separate these clearly:
+
+A. Source/typecheck
+B. Electron production compile
+C. macOS .app packaging
+D. code signing
+E. notarization
+F. DMG/installer generation
+
+I need to know which stage actually fails.
+
+If the failure is only because Replit is running Linux and cannot perform Apple signing/notarization locally, say that explicitly.
+
+That is different from the macOS APPLICATION BUILD being broken.
+
+Do not modify package dependencies or project architecture simply to make Linux pretend to produce a signed macOS application.
+
+Use the existing macOS CI/GitHub build/signing pipeline if that is how this project normally produces macOS releases.
+
+Specifically verify
+
+Because we introduced mc-preview://, inspect the macOS configuration and confirm that:
+
+* the custom protocol is registered correctly
+* local files are accessible through the protocol
+* CSP permits the secure protocol
+* hardened runtime does not block it
+* entitlements are compatible
+* packaged resources do not change local path resolution
+* Watch Folder permissions remain available
+* Intel/Apple Silicon architecture settings are unchanged unless intentionally configured
+
+⸻
+
+RELEASE RULE
+
+Do not publish until restart persistence passes.
+
+For macOS, distinguish:
+
+actual application/code failure
+from
+Replit Linux cannot perform Apple signing/notarization.
+
+If the application builds correctly through our normal macOS build pipeline but Replit simply cannot sign it locally, that should be reported separately and should not be treated as an application-code failure.
+
+After fixing/verifying both blockers, give me:
+
+FINAL RELEASE STATUS: GO / NO-GO
+
+Restart after normal capture: PASS/FAIL
+Restart immediately after capture: PASS/FAIL
+Restart after 10-file burst: PASS/FAIL
+Restart offline: PASS/FAIL
+Persistent student assignments: PASS/FAIL
+Persistent JPEG/RAW pairing: PASS/FAIL
+No duplicate gallery entries: PASS/FAIL
+macOS source/build: PASS/FAIL
+macOS packaging: PASS/FAIL
+macOS signing/notarization: PASS/FAIL or ENVIRONMENT LIMITATION
+
+Do not make any additional performance optimization in this pass.

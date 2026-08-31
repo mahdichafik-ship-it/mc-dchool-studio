@@ -6,6 +6,7 @@ import type {
   Photo,
   ImportResult,
   CaptureReview,
+  StudentCaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
   CaptureFileUploadStatusChangedEvent,
@@ -29,6 +30,7 @@ export type {
   Photo,
   ImportResult,
   CaptureReview,
+  StudentCaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
   CaptureFileUploadStatusChangedEvent,
@@ -227,7 +229,7 @@ export function usePhotos(studentId: number | null) {
 }
 
 export function useCaptures(studentId: number | null) {
-  const [data, setData] = useState<CaptureReview[]>([])
+  const [data, setData] = useState<StudentCaptureReview>({ captures: [], qrMarkers: [] })
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(async () => {
@@ -235,7 +237,7 @@ export function useCaptures(studentId: number | null) {
     setLoading(true)
     try {
       const result = await api.invoke('captures:list', { studentId })
-      setData(result as CaptureReview[])
+      setData(result as StudentCaptureReview)
     } finally {
       setLoading(false)
     }
@@ -251,12 +253,16 @@ export function useCaptures(studentId: number | null) {
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.id === studentId) void load()
     })
+    const unsubMarker = api.on('photo:marker', (event: PhotoMarkerEvent) => {
+      if (event.student.id === studentId) void load()
+    })
     const unsubFileUpload = api.on('capture:fileUploadStatusChanged', (event: CaptureFileUploadStatusChangedEvent) => {
       if (event.studentId === studentId) void load()
     })
     return () => {
       unsubCapture()
       unsubMatched()
+      unsubMarker()
       unsubFileUpload()
     }
   }, [studentId, load])

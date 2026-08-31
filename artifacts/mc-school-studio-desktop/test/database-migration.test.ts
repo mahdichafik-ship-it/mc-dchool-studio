@@ -54,6 +54,8 @@ test('capture migration is repeatable and keeps legacy rows as the compatibility
   assert.equal(statements.length, 4)
   assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS captures/)
   assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS image_files/)
+  assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS qr_markers/)
+  assert.match(statements[0] ?? '', /source_path TEXT NOT NULL UNIQUE/)
   assert.match(statements[1] ?? '', /INSERT OR IGNORE INTO captures/)
   assert.match(statements[1] ?? '', /FROM photos p/)
   assert.match(statements[1] ?? '', /INSERT OR IGNORE INTO image_files/)

@@ -112,6 +112,21 @@ export const imageFilesTable = sqliteTable('image_files', {
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
 })
 
+export const qrMarkersTable = sqliteTable('qr_markers', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  projectId: integer('project_id')
+    .notNull()
+    .references(() => projectsTable.id, { onDelete: 'cascade' }),
+  studentId: integer('student_id')
+    .notNull()
+    .references(() => studentsTable.id, { onDelete: 'cascade' }),
+  filePath: text('file_path').notNull(),
+  fileName: text('file_name').notNull(),
+  sourcePath: text('source_path').notNull().unique(),
+  capturedAt: text('captured_at').notNull(),
+  createdAt: text('created_at').notNull().default(new Date().toISOString()),
+})
+
 export const settingsTable = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),

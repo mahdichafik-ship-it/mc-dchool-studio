@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test:naming": "node --experimental-strip-types --test test/photo-file-naming.test.ts",
+    "test:qr-marker": "node --experimental-strip-types --test test/qr-marker.test.ts",
     "test:qr": "node --experimental-strip-types --test test/qr-reader.test.ts",
     "test:sequence": "node --experimental-strip-types --test test/photo-sequence.test.ts",
     "test:watcher": "node --experimental-strip-types --test test/watcher-photo-processing.test.ts",

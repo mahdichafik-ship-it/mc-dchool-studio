@@ -15,6 +15,7 @@ import type {
   UploadStatusChangedEvent,
   ProjectUploadStatusRow,
   CaptureReview,
+  StudentCaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
   CaptureExportMode,
@@ -83,7 +84,7 @@ interface ElectronAPI {
   invoke(channel: 'classes:list', args: { projectId: number }): Promise<Class[]>
   invoke(channel: 'students:list', args: { projectId: number; classId?: number }): Promise<Student[]>
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
-  invoke(channel: 'captures:list', args: { studentId: number }): Promise<CaptureReview[]>
+  invoke(channel: 'captures:list', args: { studentId: number }): Promise<StudentCaptureReview>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>
   invoke(channel: 'captures:updateReview', args: {
     captureId: number

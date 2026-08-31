@@ -3,11 +3,12 @@ import { copyFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { and, eq, count, or } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { capturesTable, imageFilesTable, photosTable, studentsTable } from '../db/schema'
+import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable } from '../db/schema'
 import { generateThumbnail } from '../lib/qrReader'
 import type {
   CaptureCompletenessSummary,
   CaptureReview,
+  StudentCaptureReview,
   Photo,
 } from '../../shared/types'
 
@@ -82,7 +83,7 @@ export function registerPhotoHandlers() {
 
   ipcMain.handle(
     'captures:list',
-    async (_e, { studentId }: { studentId: number }): Promise<CaptureReview[]> => {
+    async (_e, { studentId }: { studentId: number }): Promise<StudentCaptureReview> => {
       const rows = db
         .select({ capture: capturesTable, photo: photosTable })
         .from(capturesTable)
@@ -121,7 +122,24 @@ export function registerPhotoHandlers() {
           legacyPhoto: photo ? rowToPhoto(photo, thumbnailData) : null,
         })
       }
-      return result
+      const markerRows = db
+        .select()
+        .from(qrMarkersTable)
+        .where(eq(qrMarkersTable.studentId, studentId))
+        .orderBy(qrMarkersTable.capturedAt)
+        .all()
+      const qrMarkers = await Promise.all(markerRows.map(async (marker) => ({
+        id: marker.id,
+        projectId: marker.projectId,
+        studentId: marker.studentId,
+        filePath: marker.filePath,
+        fileName: marker.fileName,
+        capturedAt: marker.capturedAt,
+        thumbnailData: await generateThumbnail(marker.filePath),
+        createdAt: marker.createdAt,
+      })))
+
+      return { captures: result, qrMarkers }
     },
   )
 

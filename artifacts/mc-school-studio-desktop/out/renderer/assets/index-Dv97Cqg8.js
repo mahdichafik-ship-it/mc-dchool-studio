@@ -16040,7 +16040,7 @@ function useStudents(projectId, classId) {
   return { data, loading, reload: load };
 }
 function useCaptures(studentId) {
-  const [data, setData] = reactExports.useState([]);
+  const [data, setData] = reactExports.useState({ captures: [], qrMarkers: [] });
   const [loading, setLoading] = reactExports.useState(false);
   const load = reactExports.useCallback(async () => {
     if (!studentId) return;
@@ -16063,12 +16063,16 @@ function useCaptures(studentId) {
     const unsubMatched = api.on("photo:matched", (event) => {
       if (event.student.id === studentId) void load();
     });
+    const unsubMarker = api.on("photo:marker", (event) => {
+      if (event.student.id === studentId) void load();
+    });
     const unsubFileUpload = api.on("capture:fileUploadStatusChanged", (event) => {
       if (event.studentId === studentId) void load();
     });
     return () => {
       unsubCapture();
       unsubMatched();
+      unsubMarker();
       unsubFileUpload();
     };
   }, [studentId, load]);
@@ -16833,7 +16837,9 @@ function StudentDetail({
   onReassign,
   offline
 }) {
-  const { data: captures, reload: reloadCaptures } = useCaptures(student.id);
+  const { data: review, reload: reloadCaptures } = useCaptures(student.id);
+  const captures = review.captures;
+  const qrMarkers = review.qrMarkers;
   const [reassignOpen, setReassignOpen] = reactExports.useState(false);
   const [reassignPhoto, setReassignPhoto] = reactExports.useState(null);
   const [retryingPhotoId, setRetryingPhotoId] = reactExports.useState(null);
@@ -16920,11 +16926,12 @@ function StudentDetail({
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-500", children: student.className })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2", children: captures.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2", children: captures.length > 0 || qrMarkers.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", children: [
         captures.length,
         " capture",
         captures.length !== 1 ? "s" : "",
-        " recorded"
+        " recorded",
+        qrMarkers.length > 0 && ` · ${qrMarkers.length} QR marker${qrMarkers.length !== 1 ? "s" : ""}`
       ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "warning", children: "Not yet photographed" }) })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-8 p-8", children: [
@@ -16954,7 +16961,7 @@ function StudentDetail({
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs font-medium text-slate-500 uppercase tracking-wider mb-3", children: [
           "Capture review (",
-          filteredCaptures.length,
+          filteredCaptures.length + qrMarkers.length,
           ")"
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1.5 mb-3", children: captureFilterOptions.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -16975,32 +16982,42 @@ function StudentDetail({
           },
           option.value
         )) }),
-        captures.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
+        captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300 mb-2" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No captures yet" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-0.5", children: "JPEG and RAW files will appear here automatically when captured" })
-        ] }) : filteredCaptures.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
+        ] }) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-8 text-slate-300 mb-2" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No captures match this filter" })
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-3 gap-3", children: filteredCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-          CaptureTile,
-          {
-            capture,
-            uploadStatus: capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : void 0,
-            onOpen: () => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? ""),
-            onDelete: capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto.id) : void 0,
-            onRetry: capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto.id) : void 0,
-            retrying: capture.legacyPhoto?.id === retryingPhotoId,
-            onRetryFile: handleRetryFile,
-            retryingFileId,
-            onUpdateReview: handleUpdateCaptureReview,
-            onReassign: capture.legacyPhoto ? () => {
-              setReassignPhoto(capture.legacyPhoto);
-              setReassignOpen(true);
-            } : void 0
-          },
-          capture.id
-        )) })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-3 gap-3", children: [
+          qrMarkers.map((marker) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+            QrMarkerTile,
+            {
+              marker,
+              onOpen: () => handleOpenPhoto(marker.filePath)
+            },
+            marker.id
+          )),
+          filteredCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+            CaptureTile,
+            {
+              capture,
+              uploadStatus: capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : void 0,
+              onOpen: () => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? ""),
+              onDelete: capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto.id) : void 0,
+              onRetry: capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto.id) : void 0,
+              retrying: capture.legacyPhoto?.id === retryingPhotoId,
+              onRetryFile: handleRetryFile,
+              retryingFileId,
+              onUpdateReview: handleUpdateCaptureReview,
+              onReassign: capture.legacyPhoto ? () => {
+                setReassignPhoto(capture.legacyPhoto);
+                setReassignOpen(true);
+              } : void 0
+            },
+            capture.id
+          ))
+        ] })
       ] })
     ] }),
     reassignOpen && reassignPhoto && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -17114,6 +17131,36 @@ function PhotoTile({
       )
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: photo.fileName }) })
+  ] });
+}
+function QrMarkerTile({
+  marker,
+  onOpen
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
+    marker.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "img",
+      {
+        src: marker.thumbnailData,
+        alt: `QR marker ${marker.fileName}`,
+        className: "w-full h-full object-cover",
+        draggable: false
+      }
+    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-1.5 left-1.5 rounded-full bg-teal-700/90 px-2 py-1 text-[10px] font-semibold text-white shadow-sm", children: "QR MARKER" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        onClick: onOpen,
+        className: "w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1 flex items-center justify-center gap-1",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
+          " Open marker"
+        ]
+      }
+    ) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: marker.fileName }) })
   ] });
 }
 function CaptureTile({
@@ -17394,12 +17441,12 @@ function ReassignDialog({
 }
 function Settings({ member, onSignedOut }) {
   const [photosDir, setPhotosDir] = reactExports.useState("");
+  const [spoolDir, setSpoolDir] = reactExports.useState("");
   const [updateState, setUpdateState] = reactExports.useState({ status: "unsupported" });
   const { count: globalErrorCount } = useGlobalErrorCount();
   reactExports.useEffect(() => {
-    window.api.invoke("app:getPhotosDir").then((dir) => {
-      setPhotosDir(dir);
-    });
+    window.api.invoke("app:getPhotosDir").then(setPhotosDir);
+    window.api.invoke("app:getSpoolDir").then(setSpoolDir);
     window.api.invoke("update:getState").then(setUpdateState);
     return window.api.on("update:status", setUpdateState);
   }, []);
@@ -17413,6 +17460,11 @@ function Settings({ member, onSignedOut }) {
     if (!selected) return;
     const saved = await window.api.invoke("app:setPhotosDir", { dir: selected });
     setPhotosDir(saved);
+  }
+  async function handleOpenSpoolDir() {
+    if (spoolDir) {
+      await window.api.invoke("app:openFile", { filePath: spoolDir });
+    }
   }
   async function handleSignOut() {
     await window.api.invoke("auth:signOut");
@@ -17454,20 +17506,40 @@ function Settings({ member, onSignedOut }) {
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(FolderOpen, { className: "size-5 text-teal-600" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Photos storage location" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Photo folders" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-3", children: "Matched photos are copied here and organised by project, class, and student. Smart Shooter’s original files are never moved." }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "flex-1 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate", children: photosDir || "Loading…" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              onClick: handleOpenPhotosDir,
-              className: "shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium",
-              children: "Open"
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: handleChoosePhotosDir, className: "shrink-0 text-sm text-slate-600 hover:text-slate-900 font-medium", children: "Change" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-3", children: "Matched photos are copied to PHOTOS and organised by project, class, and student. Smart Shooter’s original files are never moved." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-medium text-slate-500 mb-1", children: "Managed photos" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "flex-1 min-w-0 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate", children: photosDir || "Loading…" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  onClick: handleOpenPhotosDir,
+                  className: "shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium",
+                  children: "Open"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: handleChoosePhotosDir, className: "shrink-0 text-sm text-slate-600 hover:text-slate-900 font-medium", children: "Change" })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-medium text-slate-500 mb-1", children: "Smart Shooter spool" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "flex-1 min-w-0 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 truncate", children: spoolDir || "Loading…" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  onClick: handleOpenSpoolDir,
+                  className: "shrink-0 text-sm text-teal-600 hover:text-teal-700 font-medium",
+                  children: "Open"
+                }
+              )
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500 mt-1", children: "JPEG and RAW output folders are created inside this Spool folder." })
+          ] })
         ] })
       ] }),
       globalErrorCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3", children: [
@@ -17539,7 +17611,7 @@ function Settings({ member, onSignedOut }) {
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Select a student to display their QR code on screen" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the QR code first — this marks the start of that student’s capture sequence" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the student; every following portrait is assigned to that student until the next QR marker" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "QR marker images stay in the spool folder but are not added to student galleries" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "QR marker images stay in the spool folder, with a local-only reference shown in the student review" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "When signed in, matched portraits are uploaded to the web app automatically" })
         ] })
       ] })

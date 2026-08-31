@@ -106,6 +106,16 @@ const imageFilesTable = sqliteCore.sqliteTable("image_files", {
   fileUrl: sqliteCore.text("file_url"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
+const qrMarkersTable = sqliteCore.sqliteTable("qr_markers", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  projectId: sqliteCore.integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  studentId: sqliteCore.integer("student_id").notNull().references(() => studentsTable.id, { onDelete: "cascade" }),
+  filePath: sqliteCore.text("file_path").notNull(),
+  fileName: sqliteCore.text("file_name").notNull(),
+  sourcePath: sqliteCore.text("source_path").notNull().unique(),
+  capturedAt: sqliteCore.text("captured_at").notNull(),
+  createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
 const settingsTable = sqliteCore.sqliteTable("settings", {
   key: sqliteCore.text("key").primaryKey(),
   value: sqliteCore.text("value").notNull()
@@ -117,6 +127,7 @@ const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   imageFilesTable,
   photosTable,
   projectsTable,
+  qrMarkersTable,
   settingsTable,
   studentsTable
 }, Symbol.toStringTag, { value: "Module" }));
@@ -180,12 +191,25 @@ function ensureCaptureTables(sqlite) {
       UNIQUE(capture_id, file_role)
     );
 
+    CREATE TABLE IF NOT EXISTS qr_markers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      source_path TEXT NOT NULL UNIQUE,
+      captured_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_captures_project ON captures(project_id);
     CREATE INDEX IF NOT EXISTS idx_captures_student ON captures(student_id);
     CREATE INDEX IF NOT EXISTS idx_captures_pairing ON captures(project_id, base_filename, pairing_status);
     CREATE INDEX IF NOT EXISTS idx_image_files_capture ON image_files(capture_id);
     CREATE INDEX IF NOT EXISTS idx_image_files_checksum ON image_files(checksum);
     CREATE INDEX IF NOT EXISTS idx_image_files_source ON image_files(source_path);
+    CREATE INDEX IF NOT EXISTS idx_qr_markers_student ON qr_markers(student_id, captured_at);
+    CREATE INDEX IF NOT EXISTS idx_qr_markers_project ON qr_markers(project_id);
   `);
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (
@@ -243,9 +267,10 @@ function safeFolderName$2(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
 function getPhotoSystemLayout(homeDir, configuredRoot) {
-  const root = node_path.join(homeDir, "MC_PhotoSystem");
+  const root = node_path.join(homeDir, "MC School Studio");
   return {
     root,
+    photos: node_path.join(root, "PHOTOS"),
     jobs: node_path.join(root, "Jobs"),
     spool: node_path.join(root, "Spool"),
     spoolJpeg: node_path.join(root, "Spool", "JPEG"),
@@ -257,6 +282,7 @@ function getPhotoSystemLayout(homeDir, configuredRoot) {
 function ensurePhotoSystemLayout(layout) {
   for (const directory of [
     layout.root,
+    layout.photos,
     layout.jobs,
     layout.spool,
     layout.spoolJpeg,
@@ -387,9 +413,12 @@ function initializeSchema(sqlite) {
 function getPhotosDir() {
   const homeDir = electron.app.getPath("home");
   const configured = _db?.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, "storage_root")).get()?.value;
-  const dir = configured || path.join(homeDir, "MC School Studio", "photos");
+  const dir = configured || getPhotoSystemLayout(homeDir).photos;
   require$$0.mkdirSync(dir, { recursive: true });
   return dir;
+}
+function getSpoolDir() {
+  return ensurePhotoSystemLayout(getPhotoSystemLayout(electron.app.getPath("home"))).spool;
 }
 function setPhotosDir(dir) {
   const clean = dir.trim();
@@ -40827,26 +40856,61 @@ const Jimp = createJimp({
   formats: defaultFormats,
   plugins: defaultPlugins
 });
+const MAX_QR_SCAN_EDGE = 2e3;
+function decodeBitmap(image) {
+  const { data, width, height } = image.bitmap;
+  const uint8Data = new Uint8ClampedArray(
+    data.buffer,
+    data.byteOffset,
+    data.byteLength
+  );
+  const normal = jsQR(uint8Data, width, height, {
+    inversionAttempts: "dontInvert"
+  });
+  if (normal) return parseQrData(normal.data);
+  const inverted = jsQR(uint8Data, width, height, {
+    inversionAttempts: "invertFirst"
+  });
+  return inverted ? parseQrData(inverted.data) : null;
+}
+function normalizedScanImage(image) {
+  const { width, height } = image.bitmap;
+  const longestEdge = Math.max(width, height);
+  if (longestEdge <= MAX_QR_SCAN_EDGE) return image.clone();
+  const scale = MAX_QR_SCAN_EDGE / longestEdge;
+  return image.clone().resize({
+    w: Math.max(1, Math.round(width * scale)),
+    h: Math.max(1, Math.round(height * scale))
+  });
+}
+function qrScanVariants(image) {
+  const normalized = normalizedScanImage(image);
+  const variants = [normalized];
+  variants.push(normalized.clone().greyscale().contrast(0.35));
+  const { width, height } = normalized.bitmap;
+  if (width >= 240 && height >= 240) {
+    const cropWidth = Math.max(1, Math.round(width * 0.8));
+    const cropHeight = Math.max(1, Math.round(height * 0.8));
+    variants.push(normalized.clone().crop({
+      x: Math.round((width - cropWidth) / 2),
+      y: Math.round((height - cropHeight) / 2),
+      w: cropWidth,
+      h: cropHeight
+    }).greyscale().contrast(0.35));
+  }
+  if (normalized.bitmap.width !== image.bitmap.width || normalized.bitmap.height !== image.bitmap.height) {
+    variants.push(image.clone());
+  }
+  return variants;
+}
 async function readQrFromImage(filePath) {
   try {
     const image = await Jimp.read(filePath);
-    const { data, width, height } = image.bitmap;
-    const uint8Data = new Uint8ClampedArray(
-      data.buffer,
-      data.byteOffset,
-      data.byteLength
-    );
-    const code = jsQR(uint8Data, width, height, {
-      inversionAttempts: "dontInvert"
-    });
-    if (!code) {
-      const code2 = jsQR(uint8Data, width, height, {
-        inversionAttempts: "invertFirst"
-      });
-      if (!code2) return null;
-      return parseQrData(code2.data);
+    for (const candidate of qrScanVariants(image)) {
+      const result = decodeBitmap(candidate);
+      if (result) return result;
     }
-    return parseQrData(code.data);
+    return null;
   } catch (err) {
     console.error("QR read error for", filePath, err);
     return null;
@@ -40974,7 +41038,18 @@ function registerPhotoHandlers() {
           legacyPhoto: photo ? rowToPhoto(photo, thumbnailData) : null
         });
       }
-      return result;
+      const markerRows = db.select().from(qrMarkersTable).where(drizzleOrm.eq(qrMarkersTable.studentId, studentId)).orderBy(qrMarkersTable.capturedAt).all();
+      const qrMarkers = await Promise.all(markerRows.map(async (marker) => ({
+        id: marker.id,
+        projectId: marker.projectId,
+        studentId: marker.studentId,
+        filePath: marker.filePath,
+        fileName: marker.fileName,
+        capturedAt: marker.capturedAt,
+        thumbnailData: await generateThumbnail(marker.filePath),
+        createdAt: marker.createdAt
+      })));
+      return { captures: result, qrMarkers };
     }
   );
   electron.ipcMain.handle(
@@ -41518,7 +41593,7 @@ function extractStudentReference(fileName, studentIds) {
   const stem = node_path.basename(fileName, node_path.extname(fileName));
   const matches = studentIds.filter((id) => {
     if (!id) return false;
-    return new RegExp(`(?:^|[-_])${escapeRegExp(id)}$`).test(stem);
+    return new RegExp(`(?:^|[-_])${escapeRegExp(id)}(?:[-_]\\d+)?$`, "i").test(stem);
   });
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
@@ -41633,6 +41708,20 @@ function insertImageFile(db, captureId, input) {
 }
 function hasProcessedCaptureSource(db, sourcePath) {
   return Boolean(findDuplicateFile(db, sourcePath));
+}
+function hasProcessedQrMarkerSource(db, sourcePath) {
+  return Boolean(
+    db.select({ id: qrMarkersTable.id }).from(qrMarkersTable).where(drizzleOrm.eq(qrMarkersTable.sourcePath, sourcePath)).get()
+  );
+}
+function recordQrMarker(db, input) {
+  const existing = db.select().from(qrMarkersTable).where(drizzleOrm.eq(qrMarkersTable.sourcePath, input.sourcePath)).get();
+  if (existing) return { kind: "duplicate", marker: existing };
+  const marker = db.insert(qrMarkersTable).values({
+    ...input,
+    createdAt: input.capturedAt
+  }).returning().get();
+  return { kind: "created", marker };
 }
 function recordRawCapture(db, input) {
   const duplicate = findDuplicateFile(db, input.filePath);
@@ -41897,7 +41986,10 @@ function registerWatcherHandlers() {
     }
     const watcher = chokidar.watch(watchFolders.paths, {
       persistent: true,
-      ignoreInitial: true,
+      // Process files that were already written before the photographer
+      // opened the project. The database/source-path checks below make this
+      // safe across restarts and prevent duplicate imports.
+      ignoreInitial: false,
       awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 }
     });
     const session = {
@@ -41975,7 +42067,15 @@ function scheduleFlush(projectId) {
     if (batch.length === 0) return;
     session.processing = session.processing.then(async () => {
       for (const capture of batch) {
-        await handleNewPhoto(projectId, capture, session);
+        try {
+          await handleNewPhoto(projectId, capture, session);
+        } catch (error) {
+          session.seenPaths.delete(capture.filePath);
+          console.error(
+            `[Watcher] Could not process ${capture.filePath}; it will be retried`,
+            error
+          );
+        }
       }
     }).catch((error) => {
       console.error(`[Watcher] Could not process project ${projectId} capture batch`, error);
@@ -41986,7 +42086,7 @@ async function handleNewPhoto(projectId, capture, session) {
   if (desktopRetiring) return;
   const db = getDb();
   const role = getCaptureFileRole(capture.fileName);
-  if (!role || hasProcessedCaptureSource(db, capture.filePath)) return;
+  if (!role || hasProcessedCaptureSource(db, capture.filePath) || hasProcessedQrMarkerSource(db, capture.filePath)) return;
   if (role === "RAW") {
     handleNewRaw(projectId, capture, session, db);
     return;
@@ -41994,12 +42094,8 @@ async function handleNewPhoto(projectId, capture, session) {
   const win = getMainWindow();
   const qrResult = await readQrFromImage(capture.filePath);
   if (qrResult) {
-    const student2 = db.select().from(studentsTable).where(
-      drizzleOrm.and(
-        drizzleOrm.eq(studentsTable.projectId, projectId),
-        drizzleOrm.eq(studentsTable.generatedStudentId, qrResult.studentId)
-      )
-    ).get();
+    const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase();
+    const student2 = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all().find((candidate) => candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId);
     const decision2 = advanceSequence(session.sequenceState, {
       kind: "marker",
       studentId: student2?.id ?? null,
@@ -42009,7 +42105,19 @@ async function handleNewPhoto(projectId, capture, session) {
       recordUnmatched(db, win, projectId, capture, decision2.reason);
       return;
     }
+    if (!student2) {
+      recordUnmatched(
+        db,
+        win,
+        projectId,
+        capture,
+        `QR marker "${qrResult.studentId}" does not match a student in this project`
+      );
+      return;
+    }
+    const marker = persistQrMarker(db, projectId, student2, capture);
     win?.webContents.send("photo:marker", {
+      markerId: marker.id,
       fileName: capture.fileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       student: toStudentEvent(db, student2)
@@ -42090,6 +42198,25 @@ function copyToProjectFolder(sourcePath, fileName, destinationDir) {
     require$$0.copyFileSync(sourcePath, destinationPath);
   }
   return destinationPath;
+}
+function persistQrMarker(db, projectId, student, capture) {
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const classRow = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
+  if (!project) throw new Error(`Project ${projectId} not found`);
+  const projectFolder = safeFolderName(project.schoolName);
+  const classFolder = safeFolderName(classRow?.className ?? "Unassigned Class");
+  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`);
+  const markerDir = path.join(getPhotosDir(), projectFolder, classFolder, studentFolder, "QR Markers");
+  const storedPath = copyToProjectFolder(capture.filePath, capture.fileName, markerDir);
+  const result = recordQrMarker(db, {
+    projectId,
+    studentId: student.id,
+    filePath: storedPath,
+    fileName: capture.fileName,
+    sourcePath: capture.filePath,
+    capturedAt: new Date(capture.capturedAtMs).toISOString()
+  });
+  return result.marker;
 }
 function handleNewRaw(projectId, capture, session, db) {
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
@@ -42206,6 +42333,9 @@ function registerDialogHandlers() {
   });
   electron.ipcMain.handle("app:getPhotosDir", () => {
     return getPhotosDir();
+  });
+  electron.ipcMain.handle("app:getSpoolDir", () => {
+    return getSpoolDir();
   });
   electron.ipcMain.handle("app:getVersion", () => electron.app.getVersion());
   electron.ipcMain.handle("app:setPhotosDir", (_e, { dir }) => {

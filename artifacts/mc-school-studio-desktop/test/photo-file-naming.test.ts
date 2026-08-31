@@ -33,6 +33,13 @@ test('supports a numeric Smart Shooter frame counter after the student reference
   )
 })
 
+test('matches case-insensitively while returning the roster ID', () => {
+  assert.equal(
+    extractStudentReference('Smith_John_class_school-ab12-595.JPG', studentIds),
+    'AB12',
+  )
+})
+
 test('does not match an ID embedded in the middle of a filename', () => {
   assert.equal(
     extractStudentReference('001234_backup_Smith.jpg', studentIds),

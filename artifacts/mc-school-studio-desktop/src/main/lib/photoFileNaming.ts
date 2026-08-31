@@ -20,7 +20,7 @@ export function extractStudentReference(fileName: string, studentIds: string[]):
     // Smart Shooter can append its numeric frame counter after the barcode
     // value (for example: Student_AB12_595.JPG). Only accept that known,
     // numeric suffix so arbitrary trailing text cannot turn into a match.
-    return new RegExp(`(?:^|[-_])${escapeRegExp(id)}(?:[-_]\\d+)?$`).test(stem)
+    return new RegExp(`(?:^|[-_])${escapeRegExp(id)}(?:[-_]\\d+)?$`, 'i').test(stem)
   })
   return matches.sort((a, b) => b.length - a.length)[0] ?? null
 }

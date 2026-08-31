@@ -90,6 +90,18 @@ export async function stopAllWatchersForRetirement(): Promise<void> {
   await Promise.allSettled(sessions.map((session) => session.processing))
 }
 
+export async function stopAllWatchersForShutdown(): Promise<void> {
+  const projectIds = [...watchers.keys()]
+  const results = await Promise.allSettled(projectIds.map((projectId) =>
+    stopProjectWatcher(projectId, { drain: true, clearTarget: true })))
+  const failures = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason)
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'One or more Watch Folder sessions failed to drain')
+  }
+}
+
 export function enableWatchersAfterSignIn(): void {
   desktopRetiring = false
 }

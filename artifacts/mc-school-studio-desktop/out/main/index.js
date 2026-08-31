@@ -42286,6 +42286,14 @@ async function stopAllWatchersForRetirement() {
   await Promise.allSettled(sessions.map((session) => session.watcher.close()));
   await Promise.allSettled(sessions.map((session) => session.processing));
 }
+async function stopAllWatchersForShutdown() {
+  const projectIds = [...watchers.keys()];
+  const results = await Promise.allSettled(projectIds.map((projectId) => stopProjectWatcher(projectId, { drain: true, clearTarget: true })));
+  const failures = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "One or more Watch Folder sessions failed to drain");
+  }
+}
 function enableWatchersAfterSignIn() {
   desktopRetiring = false;
 }
@@ -43622,8 +43630,30 @@ function scheduleUpdateCheck() {
     void checkForUpdates();
   }, 1500);
 }
+function createShutdownCoordinator({
+  drain,
+  quit,
+  onError = () => {
+  }
+}) {
+  let shutdownRequested = false;
+  return (event) => {
+    if (shutdownRequested) return;
+    shutdownRequested = true;
+    event.preventDefault();
+    void drain().catch((error) => {
+      onError(error);
+    }).finally(quit);
+  };
+}
 const isDev = !electron.app.isPackaged;
+const handleBeforeQuit = createShutdownCoordinator({
+  drain: stopAllWatchersForShutdown,
+  quit: () => electron.app.quit(),
+  onError: (error) => console.error("Failed to drain Watch Folder captures before shutdown:", error)
+});
 registerLocalPreviewScheme();
+electron.app.on("before-quit", handleBeforeQuit);
 const smokeUserDataDir = process.env.CI === "true" ? process.env.MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR?.trim() : void 0;
 if (smokeUserDataDir) electron.app.setPath("userData", smokeUserDataDir);
 function createWindow() {

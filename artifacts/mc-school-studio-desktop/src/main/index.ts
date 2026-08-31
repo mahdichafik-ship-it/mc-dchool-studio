@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
 import { registerProjectHandlers } from './ipc/projects'
 import { registerPhotoHandlers } from './ipc/photos'
-import { registerWatcherHandlers } from './ipc/watcher'
+import { registerWatcherHandlers, stopAllWatchersForShutdown } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
 import { registerUploadHandlers } from './ipc/upload'
 import { registerCaptureExportHandlers } from './ipc/captureExport'
@@ -12,10 +12,17 @@ import { registerCloudHandlers } from './ipc/cloud'
 import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
 import { getDb } from './db'
 import { registerLocalPreviewProtocol, registerLocalPreviewScheme } from './lib/localPreviewProtocol'
+import { createShutdownCoordinator } from './lib/shutdownCoordinator'
 
 const isDev = !app.isPackaged
+const handleBeforeQuit = createShutdownCoordinator({
+  drain: stopAllWatchersForShutdown,
+  quit: () => app.quit(),
+  onError: (error) => console.error('Failed to drain Watch Folder captures before shutdown:', error),
+})
 
 registerLocalPreviewScheme()
+app.on('before-quit', handleBeforeQuit)
 
 const smokeUserDataDir = process.env.CI === 'true'
   ? process.env.MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR?.trim()

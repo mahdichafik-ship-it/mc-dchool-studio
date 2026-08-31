@@ -11,6 +11,7 @@ import { readFileSync } from 'fs'
 import { getDb } from '../db'
 import {
   capturesTable,
+  classesTable,
   imageFilesTable,
   settingsTable,
   photosTable,
@@ -122,8 +123,20 @@ const activeUploads = new Set<Promise<void>>()
 const activePhotoUploads = new Map<number, Promise<void>>()
 const activeCaptureFileUploads = new Map<number, Promise<void>>()
 let retryInProgress = false
+const cloudIdentityRepairs = new Map<string, Promise<void>>()
 
 class RetryableUploadError extends Error {}
+
+type DesktopProjectSummary = {
+  id: number
+  schoolName: string
+}
+
+type DesktopProjectBundle = {
+  project: { id: number }
+  classes: Array<{ id: number; className: string }>
+  students: Array<{ id: number; classId: number; generatedStudentId: string }>
+}
 
 export function disableCloudSyncForRetirement(): void {
   cloudSyncDisabledForRetirement = true
@@ -148,6 +161,126 @@ export function markCloudSessionVerified(): void {
 
 export function isCloudSessionVerified(): boolean {
   return cloudSessionVerified && !cloudSyncDisabledForRetirement
+}
+
+async function repairCloudIdentity(
+  projectId: number,
+  studentId: number,
+  apiUrl: string,
+  connectionToken: string,
+): Promise<void> {
+  const db = getDb()
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  const student = db.select().from(studentsTable).where(eq(studentsTable.id, studentId)).get()
+  if (!project || !student) throw new Error('The local project or student no longer exists.')
+  if (project.cloudId !== null && student.cloudId !== null) return
+
+  const normalizedName = project.schoolName.trim().toLocaleLowerCase()
+  const projectsResponse = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${connectionToken}` },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!projectsResponse.ok) {
+    const text = await projectsResponse.text()
+    if (projectsResponse.status === 401) invalidateDesktopCredentials(true)
+    if (projectsResponse.status === 429 || projectsResponse.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${projectsResponse.status}: ${text}`)
+    }
+    throw new Error(`Could not refresh project identity (HTTP ${projectsResponse.status}: ${text})`)
+  }
+  const cloudProjects = await projectsResponse.json() as DesktopProjectSummary[]
+  const cloudProject = project.cloudId !== null
+    ? cloudProjects.find((candidate) => candidate.id === project.cloudId)
+    : (() => {
+      const matches = cloudProjects.filter((candidate) =>
+        candidate.schoolName.trim().toLocaleLowerCase() === normalizedName)
+      if (matches.length > 1) {
+        throw new Error(`Several cloud projects match "${project.schoolName}". Sync this project again before uploading.`)
+      }
+      return matches[0]
+    })()
+  if (!cloudProject) {
+    throw new Error(`The cloud project "${project.schoolName}" is not assigned to this desktop.`)
+  }
+
+  const bundleResponse = await fetch(
+    `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProject.id}/bundle`,
+    {
+      headers: { Authorization: `Bearer ${connectionToken}` },
+      signal: AbortSignal.timeout(30000),
+    },
+  )
+  if (!bundleResponse.ok) {
+    const text = await bundleResponse.text()
+    if (bundleResponse.status === 401) invalidateDesktopCredentials(true)
+    if (bundleResponse.status === 429 || bundleResponse.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${bundleResponse.status}: ${text}`)
+    }
+    throw new Error(`Could not refresh student identity (HTTP ${bundleResponse.status}: ${text})`)
+  }
+  const bundle = await bundleResponse.json() as DesktopProjectBundle
+  const cloudStudent = bundle.students.find((candidate) =>
+    candidate.generatedStudentId.trim().toLocaleLowerCase()
+      === student.generatedStudentId.trim().toLocaleLowerCase())
+  if (!cloudStudent) {
+    throw new Error(`Student "${student.generatedStudentId}" was not found in the cloud project.`)
+  }
+
+  db.transaction((tx) => {
+    tx.update(projectsTable)
+      .set({ cloudId: bundle.project.id })
+      .where(eq(projectsTable.id, projectId))
+      .run()
+
+    const localClasses = tx
+      .select()
+      .from(classesTable)
+      .where(eq(classesTable.projectId, projectId))
+      .all()
+    for (const cloudClass of bundle.classes) {
+      const localClass = localClasses.find((candidate) =>
+        candidate.className.trim().toLocaleLowerCase() === cloudClass.className.trim().toLocaleLowerCase())
+      if (localClass) {
+        tx.update(classesTable)
+          .set({ cloudId: cloudClass.id })
+          .where(eq(classesTable.id, localClass.id))
+          .run()
+      }
+    }
+
+    const localStudent = tx
+      .select()
+      .from(studentsTable)
+      .where(eq(studentsTable.id, studentId))
+      .get()
+    if (localStudent) {
+      tx.update(studentsTable)
+        .set({ cloudId: cloudStudent.id })
+        .where(eq(studentsTable.id, studentId))
+        .run()
+    }
+  })
+}
+
+async function ensureCloudIdentity(
+  projectId: number,
+  studentId: number,
+  apiUrl: string,
+  connectionToken: string,
+): Promise<void> {
+  const repairKey = `${projectId}:${studentId}`
+  const existing = cloudIdentityRepairs.get(repairKey)
+  if (existing) {
+    await existing
+    return
+  }
+  const repair = repairCloudIdentity(projectId, studentId, apiUrl, connectionToken)
+  cloudIdentityRepairs.set(repairKey, repair)
+  try {
+    await repair
+  } finally {
+    cloudIdentityRepairs.delete(repairKey)
+  }
 }
 
 export function invalidateDesktopCredentials(notifyRenderer = false): void {
@@ -198,6 +331,7 @@ async function performUploadPhoto(
   notifyUploadStatus(photoId, studentId, 'uploading')
 
   try {
+    await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken)
     const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
     const student = db.select().from(studentsTable).where(eq(studentsTable.id, studentId)).get()
     if (!project?.cloudId || !student?.cloudId) {
@@ -330,6 +464,7 @@ async function performUploadCaptureFile(captureId: number, fileId: number): Prom
   setCaptureFileStatus(captureId, fileId, 'uploading', null)
 
   try {
+    await ensureCloudIdentity(capture.projectId, capture.studentId, apiUrl, connectionToken)
     const project = db.select().from(projectsTable).where(eq(projectsTable.id, capture.projectId)).get()
     const student = db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get()
     if (!project?.cloudId || !student?.cloudId) {

@@ -91,8 +91,6 @@ export function useProject(projectId: number | null) {
   // Re-fetch project aggregates (classCount, studentCount, photoCount) whenever
   // a photo is matched, unmatched, deleted, or reassigned so the header stays
   // live during an active shoot. Debounced at 300 ms to coalesce burst events.
-  // Note: PhotoUnmatchedEvent has no projectId, but the watcher is per-project
-  // so any unmatched event is from the active project's watcher.
   useEffect(() => {
     if (!projectId) return
     let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -107,10 +105,8 @@ export function useProject(projectId: number | null) {
       scheduleReload()
     })
 
-    // Unmatched photos still increment the project-level photoCount, and
-    // PhotoUnmatchedEvent carries no projectId, so reload on every event.
-    const unsubUnmatched = api.on('photo:unmatched', (_event: PhotoUnmatchedEvent) => {
-      scheduleReload()
+    const unsubUnmatched = api.on('photo:unmatched', (event: PhotoUnmatchedEvent) => {
+      if (event.projectId === projectId) scheduleReload()
     })
 
     const unsubDeleted = api.on('photo:deleted', (event: PhotoDeletedEvent) => {
@@ -228,6 +224,44 @@ export function usePhotos(studentId: number | null) {
   return { data, loading, reload: load }
 }
 
+export function useUnmatchedPhotos(projectId: number | null) {
+  const [data, setData] = useState<Photo[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!projectId) return
+    setLoading(true)
+    try {
+      const result = await api.invoke('photos:unmatched', { projectId })
+      setData(result as Photo[])
+    } finally {
+      setLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (!projectId) return
+    const unsubUnmatched = api.on('photo:unmatched', (event: PhotoUnmatchedEvent) => {
+      if (event.projectId === projectId) void load()
+    })
+    const unsubReassigned = api.on('photo:reassigned', (event: PhotoReassignedEvent) => {
+      if (event.projectId === projectId) void load()
+    })
+    const unsubDeleted = api.on('photo:deleted', (event: PhotoDeletedEvent) => {
+      if (event.projectId === projectId) void load()
+    })
+    return () => {
+      unsubUnmatched()
+      unsubReassigned()
+      unsubDeleted()
+    }
+  }, [projectId, load])
+
+  return { data, loading, reload: load }
+}
+
 export function useCaptures(studentId: number | null) {
   const [data, setData] = useState<StudentCaptureReview>({ captures: [], qrMarkers: [] })
   const [loading, setLoading] = useState(false)
@@ -296,7 +330,9 @@ export function useCaptureSummary(projectId: number | null) {
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.projectId === projectId) void load()
     })
-    const unsubUnmatched = api.on('photo:unmatched', () => void load())
+    const unsubUnmatched = api.on('photo:unmatched', (event: PhotoUnmatchedEvent) => {
+      if (event.projectId === projectId) void load()
+    })
     return () => {
       unsubCapture()
       unsubMatched()

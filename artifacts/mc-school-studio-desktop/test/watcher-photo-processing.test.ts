@@ -21,6 +21,7 @@ function createStore() {
   const students = [
     { id: 1, projectId: 1, classId: 1, firstName: 'John', lastName: 'Smith', generatedStudentId: '001234', email: null, phone: null, simpleQr: null, jsonQr: null, createdAt: timestamp, updatedAt: timestamp },
     { id: 2, projectId: 2, classId: 2, firstName: 'Other', lastName: 'Student', generatedStudentId: '009999', email: null, phone: null, simpleQr: null, jsonQr: null, createdAt: timestamp, updatedAt: timestamp },
+    { id: 3, projectId: 1, classId: 1, firstName: 'Dina', lastName: 'Zaki', generatedStudentId: 'AB12', email: null, phone: null, simpleQr: null, jsonQr: null, createdAt: timestamp, updatedAt: timestamp },
   ]
   const photos: ReturnType<WatchedPhotoStore['insertPhoto']>[] = []
 
@@ -137,20 +138,12 @@ test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fall
 })
 
 test('matches a barcode-renamed JPEG when Smart Shooter changes ID casing', async () => {
-  const fixture = createFixture('ZAKI_Dina_class_school-ab12_596.JPG', 'jpeg-source')
+  const fixture = createFixture('ZAKI_Dina_class_school-ab12_596.JPG')
+  const { store } = createStore()
   try {
     let qrRead = false
     const result = await processWatchedPhoto(1, fixture.sourcePath, {
-      store: createStore({
-        students: [{
-          id: 4,
-          projectId: 1,
-          classId: 10,
-          generatedStudentId: 'AB12',
-          firstName: 'Dina',
-          lastName: 'Zaki',
-        }],
-      }),
+      store,
       photosDir: fixture.photosDir,
       readQr: async () => {
         qrRead = true

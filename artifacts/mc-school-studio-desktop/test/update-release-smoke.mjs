@@ -305,11 +305,11 @@ try {
   assert.equal(installResult, 'install-scheduled')
 
   const sourcePid = appProcess.pid
-  await waitFor('older app to exit after restart request', () => !processIsRunning(appProcess.pid))
   cdp.close()
   cdp = undefined
   mainCdp.close()
   mainCdp = undefined
+  await waitFor('older app to exit after restart request', () => !processIsRunning(appProcess.pid))
   await waitFor('updated app bundle', () => {
     try {
       return bundleVersion(appPath) === targetVersion

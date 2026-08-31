@@ -13,7 +13,7 @@ import {
   qrMarkersTable,
   studentsTable,
 } from '../db/schema'
-import { getSetting, getUploadConfig, queueCaptureUploads, uploadPhoto } from './upload'
+import { getSetting } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
 import { generateThumbnail, readQrFromImage } from '../lib/qrReader'
 import {
@@ -198,6 +198,9 @@ export function registerWatcherHandlers() {
     if (!project?.watchFolder) {
       throw new Error('No watch folder configured for this project')
     }
+    if (project.finishedAt) {
+      throw new Error('This project is finished. Reopen it as a new local project before capturing more photos.')
+    }
 
     const watchFolders = resolveWatchFolders(project.watchFolder, existsSync)
     if (watchFolders.mode === 'dual') {
@@ -251,15 +254,7 @@ export function registerWatcherHandlers() {
   })
 
   ipcMain.handle('watcher:stop', async (_e, { projectId }: { projectId: number }) => {
-    const session = watchers.get(projectId)
-    if (session) {
-      if (session.flushTimer) clearTimeout(session.flushTimer)
-      session.pendingFiles = []
-      await session.watcher.close()
-      watchers.delete(projectId)
-    }
-    pendingManualTargets.delete(projectId)
-    emitActiveStudentChanged(projectId, null, 'none')
+    await stopProjectWatcher(projectId, { drain: true, clearTarget: true })
     console.log(`[Watcher] Stopped watching for project ${projectId}`)
   })
 
@@ -296,6 +291,47 @@ export function registerWatcherHandlers() {
   )
 }
 
+export async function stopProjectWatcher(
+  projectId: number,
+  options: { drain?: boolean; clearTarget?: boolean } = {},
+): Promise<void> {
+  const { drain = true, clearTarget = true } = options
+  const session = watchers.get(projectId)
+  if (!session) {
+    if (clearTarget) {
+      pendingManualTargets.delete(projectId)
+      emitActiveStudentChanged(projectId, null, 'none')
+    }
+    return
+  }
+
+  // Remove the session before closing chokidar so late filesystem callbacks
+  // cannot enqueue new work after the finish operation has begun.
+  watchers.delete(projectId)
+  if (session.flushTimer) clearTimeout(session.flushTimer)
+  session.flushTimer = null
+  const pending = sortCaptureFiles(session.pendingFiles.splice(0))
+  await session.watcher.close()
+
+  if (drain && pending.length > 0) {
+    session.processing = session.processing.then(async () => {
+      for (const capture of pending) {
+        try {
+          await handleNewPhoto(projectId, capture, session)
+        } catch (error) {
+          console.error(`[Watcher] Could not drain ${capture.filePath} while stopping`, error)
+        }
+      }
+    })
+  }
+  await session.processing
+
+  if (clearTarget) {
+    pendingManualTargets.delete(projectId)
+    emitActiveStudentChanged(projectId, null, 'none')
+  }
+}
+
 async function enqueueCapture(projectId: number, filePath: string): Promise<void> {
   if (desktopRetiring) return
   const session = watchers.get(projectId)
@@ -311,10 +347,12 @@ async function enqueueCapture(projectId: number, filePath: string): Promise<void
       filePath,
       fileName: basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
-      // Capture the explicit target at arrival time. Processing can be
+      // Capture the effective target at arrival time. Processing can be
       // delayed by image copies or a burst of filesystem events, and a
-      // photographer may select another student during that delay.
-      selectedStudentId: session.sequenceState.manualStudentId,
+      // photographer may select another student or scan another QR during
+      // that delay.
+      selectedStudentId: session.sequenceState.manualStudentId
+        ?? session.sequenceState.activeStudentId,
     })
     scheduleFlush(projectId)
   } catch (error) {
@@ -419,19 +457,6 @@ async function handleNewPhoto(
       .find((candidate) =>
         candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
 
-    if (manualStudentId !== null && (!student || student.id !== manualStudentId)) {
-      recordUnmatched(
-        db,
-        win,
-        projectId,
-        capture,
-        student
-          ? `QR marker for ${student.firstName} ${student.lastName} conflicts with the selected student`
-          : `QR marker "${qrResult.studentId}" does not match the selected student`,
-      )
-      return
-    }
-
     const decision = advanceSequence(session.sequenceState, {
       kind: 'marker',
       studentId: student?.id ?? null,
@@ -465,7 +490,7 @@ async function handleNewPhoto(
     emitActiveStudentChanged(
       projectId,
       student.id,
-      manualStudentId === null ? 'qr' : 'manual',
+      'qr',
     )
     console.log(`[Watcher] QR marker ${capture.fileName} → ${student!.firstName} ${student!.lastName}`)
     return
@@ -680,7 +705,6 @@ function handleNewRaw(
       reason: conflictReason,
     })
   }
-  void queueCaptureUploads(result.captureId).catch(() => {})
   console.log(
     `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
       + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
@@ -727,25 +751,6 @@ async function finishMatchedPhoto(
     })
   }
 
-  db.update(photosTable)
-    .set({ uploadStatus: 'pending' })
-    .where(eq(photosTable.id, photo.id))
-    .run()
-  win?.webContents.send('upload:statusChanged', {
-    photoId: photo.id,
-    studentId: student.id,
-    status: 'pending',
-  })
-
-  if (capture) {
-    void queueCaptureUploads(capture.id).catch(() => {})
-  } else {
-    const { apiUrl, connectionToken } = getUploadConfig()
-    if (apiUrl && connectionToken) {
-      uploadPhoto(photo.projectId, student.id, photo.id, photo.filePath, photo.fileName, photo.capturedAt)
-        .catch(() => {})
-    }
-  }
 }
 
 function recordUnmatched(

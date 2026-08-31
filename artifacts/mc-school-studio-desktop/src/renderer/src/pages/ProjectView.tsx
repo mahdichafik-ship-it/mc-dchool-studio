@@ -33,6 +33,7 @@ import {
   useCaptureSummary,
   useUnmatchedPhotos,
   useWatcherStatus,
+  useActiveCaptureTarget,
   useUploadStatus,
 } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
@@ -45,6 +46,7 @@ import type {
   ProjectUploadStatusRow,
   UploadStatus,
   CaptureExportMode,
+  ProjectSyncProgressEvent,
 } from '@/hooks/useApi'
 
 interface Props {
@@ -76,6 +78,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   } = useUnmatchedPhotos(projectId)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId)
+  const {
+    studentId: activeStudentId,
+    source: activeStudentSource,
+    setTarget: setActiveCaptureTarget,
+  } = useActiveCaptureTarget(projectId)
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
   const [search, setSearch] = useState('')
   const [settingFolder, setSettingFolder] = useState(false)
@@ -83,8 +90,24 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
   const [exporting, setExporting] = useState(false)
+  const [finishing, setFinishing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
   const pendingUploadCount = [...uploadStatusMap.values()]
     .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
+
+  useEffect(() => {
+    return window.api.on('project:syncProgress', (event) => {
+      if (event.projectId === projectId) setSyncProgress(event)
+    })
+  }, [projectId])
+
+  // Closing the project ends the capture session. The native stop handler
+  // drains any queued files before clearing the active student target.
+  useEffect(() => {
+    return () => {
+      void stopWatcher()
+    }
+  }, [stopWatcher])
 
   // Re-select the student when students refresh (to get updated photoCount)
   useEffect(() => {
@@ -93,6 +116,37 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       if (refreshed) setSelectedStudent(refreshed)
     }
   }, [students])
+
+  useEffect(() => {
+    if (activeStudentId === null) return
+    const activeStudent = students.find((student) => student.id === activeStudentId)
+    if (activeStudent) setSelectedStudent(activeStudent)
+  }, [activeStudentId, students])
+
+  async function handleSelectCaptureStudent(student: Student) {
+    setSelectedStudent(student)
+    try {
+      await setActiveCaptureTarget(student.id)
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not select capture student',
+        description: String(error),
+      })
+    }
+  }
+
+  async function handleClearCaptureStudent() {
+    try {
+      await setActiveCaptureTarget(null)
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not clear capture student',
+        description: String(error),
+      })
+    }
+  }
 
   async function handleSetWatchFolder() {
     const folder = await window.api.invoke('dialog:openFolder') as string | null
@@ -169,6 +223,40 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
+  async function handleUploadAndFinish() {
+    if (!project || project.finishedAt || finishing) return
+    setFinishing(true)
+    setSyncProgress({
+      projectId,
+      phase: 'syncing',
+      completed: 0,
+      total: 0,
+      failed: 0,
+    })
+    try {
+      const result = await window.api.invoke('project:uploadAndFinish', { projectId })
+      await reloadProject()
+      await reloadUploadStatus()
+      if (result.ok) {
+        addToast({
+          type: 'success',
+          title: 'Project uploaded and finished',
+          description: `${result.completed} local file${result.completed === 1 ? '' : 's'} synchronized successfully`,
+        })
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Project remains unfinished',
+          description: result.error ?? 'Some local files could not be synchronized.',
+        })
+      }
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not finish project', description: String(error) })
+    } finally {
+      setFinishing(false)
+    }
+  }
+
   const filteredStudents = students.filter((s) => {
     if (!search) return true
     const q = search.toLowerCase()
@@ -206,10 +294,60 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                {pendingUploadCount} photo{pendingUploadCount === 1 ? '' : 's'} waiting for upload
              </p>
            )}
+            {project?.finishedAt ? (
+              <p className="mt-1 flex items-center gap-1 text-xs text-green-700">
+                <CheckCircle className="size-3" />
+                Project finished · local capture is closed
+              </p>
+            ) : (
+              <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                <Folder className="size-3" />
+                Local capture is live · upload starts only when you finish the project
+              </p>
+            )}
+            {syncProgress?.phase === 'error' && (
+              <p className="mt-1 flex items-center gap-1 text-xs text-red-700">
+                <AlertCircle className="size-3" />
+                {syncProgress.failed} file{syncProgress.failed === 1 ? '' : 's'} failed · local project remains unfinished
+              </p>
+            )}
         </div>
 
         {/* Watch folder controls */}
         <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={() => void handleUploadAndFinish()}
+              disabled={finishing || Boolean(project?.finishedAt) || captureSummary.total === 0}
+              className={cn(
+                'gap-1.5',
+                project?.finishedAt
+                  ? 'bg-green-600 hover:bg-green-600'
+                  : 'bg-teal-600 hover:bg-teal-700',
+              )}
+              title={
+                project?.finishedAt
+                  ? 'This project has already been finished'
+                  : 'Stop local capture, upload the local project, and finish it'
+              }
+            >
+              {finishing ? (
+                <Loader className="size-3.5 animate-spin" />
+              ) : project?.finishedAt ? (
+                <CheckCircle className="size-3.5" />
+              ) : (
+                <CloudUpload className="size-3.5" />
+              )}
+              {finishing
+                ? syncProgress && syncProgress.total > 0
+                  ? `Uploading ${syncProgress.completed}/${syncProgress.total}`
+                  : 'Preparing…'
+                : project?.finishedAt
+                  ? 'Project finished'
+                  : syncProgress?.phase === 'error'
+                    ? 'Retry Upload & Finish'
+                    : 'Upload & Finish Project'}
+            </Button>
            {captureSummary.total > 0 && (
              <div className="flex items-center gap-1.5">
                <select
@@ -343,7 +481,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 key={s.id}
                 student={s}
                 isSelected={selectedStudent?.id === s.id}
-                onClick={() => setSelectedStudent(s)}
+                isActive={activeStudentId === s.id}
+                onClick={() => void handleSelectCaptureStudent(s)}
                 uploadSummary={uploadStatusMap.get(s.id)}
               />
             ))}
@@ -361,7 +500,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               projectId={projectId}
               photoStatusMap={photoStatusMap}
               onReassign={() => reloadStudents()}
-               offline={offline}
+              isActiveCaptureTarget={activeStudentId === selectedStudent.id}
+              activeStudentSource={activeStudentSource}
+              onClearCaptureTarget={() => void handleClearCaptureStudent()}
+              offline={offline}
             />
           ) : unmatchedPhotos.length > 0 ? (
             <UnmatchedPhotosPanel
@@ -505,11 +647,13 @@ function UploadBadge({ summary }: { summary: StudentUploadSummary }) {
 function StudentRow({
   student: s,
   isSelected,
+  isActive,
   onClick,
   uploadSummary,
 }: {
   student: Student
   isSelected: boolean
+  isActive: boolean
   onClick: () => void
   uploadSummary?: StudentUploadSummary
 }) {
@@ -518,18 +662,30 @@ function StudentRow({
       onClick={onClick}
       className={cn(
         'w-full px-3 py-2.5 text-left flex items-center gap-2 transition-colors border-b border-slate-50',
-        isSelected
-          ? 'bg-teal-50 border-l-2 border-l-teal-500'
+        isActive
+          ? 'bg-blue-100 border-l-4 border-l-blue-600 ring-1 ring-inset ring-blue-200'
+          : isSelected
+            ? 'bg-slate-100 border-l-2 border-l-slate-400'
           : 'hover:bg-slate-50',
       )}
+      aria-pressed={isActive}
+      title={isActive ? 'Active capture student' : 'Select as active capture student'}
     >
       <div className="flex-1 min-w-0">
-        <p className={cn('text-sm font-medium truncate', isSelected ? 'text-teal-700' : 'text-slate-800')}>
+        <p className={cn('text-sm font-medium truncate', isActive ? 'text-blue-800' : 'text-slate-800')}>
           {s.lastName}, {s.firstName}
         </p>
-        <p className="text-xs text-slate-400 font-mono">{s.generatedStudentId}</p>
+        <p className={cn('text-xs font-mono', isActive ? 'text-blue-600' : 'text-slate-400')}>
+          {s.generatedStudentId}
+        </p>
       </div>
       <div className="flex items-center gap-1 shrink-0">
+        {isActive && (
+          <Badge className="border-blue-200 bg-blue-600 text-[9px] text-white">
+            <Camera className="mr-0.5 size-2.5" />
+            ACTIVE
+          </Badge>
+        )}
         {uploadSummary && <UploadBadge summary={uploadSummary} />}
         {s.photoCount > 0 ? (
           <Badge variant="success" className="text-[10px] px-1.5 py-0">
@@ -547,12 +703,18 @@ function StudentDetail({
   projectId,
   photoStatusMap,
   onReassign,
+  isActiveCaptureTarget,
+  activeStudentSource,
+  onClearCaptureTarget,
   offline,
 }: {
   student: Student
   projectId: number
   photoStatusMap: Map<number, ProjectUploadStatusRow>
   onReassign: () => void
+  isActiveCaptureTarget: boolean
+  activeStudentSource: 'manual' | 'qr' | 'none'
+  onClearCaptureTarget: () => void
   offline: boolean
 }) {
   const { data: review, reload: reloadCaptures } = useCaptures(student.id)
@@ -657,8 +819,25 @@ function StudentDetail({
             </span>
             <span className="text-xs text-slate-500">{student.className}</span>
           </div>
+          {isActiveCaptureTarget && (
+            <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-blue-700">
+              <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1">
+                <Camera className="size-3.5" />
+                Active capture student{activeStudentSource === 'qr' ? ' · selected by QR' : ''}
+              </span>
+              <span className="font-normal text-blue-600">
+                New JPEG and RAW captures will be assigned here
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {isActiveCaptureTarget && (
+            <Button variant="outline" size="sm" onClick={onClearCaptureTarget}>
+              <XCircle className="size-3.5" />
+              Clear target
+            </Button>
+          )}
             {captures.length > 0 || qrMarkers.length > 0 ? (
               <Badge variant="success">
                 {captures.length} capture{captures.length !== 1 ? 's' : ''} recorded

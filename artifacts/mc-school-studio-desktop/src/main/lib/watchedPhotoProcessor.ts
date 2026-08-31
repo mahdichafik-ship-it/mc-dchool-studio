@@ -53,6 +53,7 @@ export interface WatchedPhotoProcessorOptions {
   store: WatchedPhotoStore
   photosDir: string
   readQr: (filePath: string) => Promise<WatchedPhotoQrResult | null>
+  targetStudentId?: number | null
   capturedAt?: string
 }
 
@@ -110,7 +111,7 @@ function saveUnmatchedPhoto(
 export async function processWatchedPhoto(
   projectId: number,
   filePath: string,
-  { store, photosDir, readQr, capturedAt }: WatchedPhotoProcessorOptions,
+  { store, photosDir, readQr, targetStudentId = null, capturedAt }: WatchedPhotoProcessorOptions,
 ): Promise<WatchedPhotoResult> {
   const fileName = basename(filePath)
   const project = store.findProject(projectId)
@@ -124,13 +125,15 @@ export async function processWatchedPhoto(
   const qrResult = filenameReference ? null : await readQr(filePath)
   const reference = filenameReference ?? qrResult?.studentId
 
-  if (!reference) {
+  if (!reference && targetStudentId === null) {
     return saveUnmatchedPhoto(store, projectId, filePath, fileName, 'No QR code detected')
   }
 
   // The ID lookup is scoped to this project so an ID from another project
   // cannot accidentally assign a photo to the wrong student.
-  const student = store.findStudent(projectId, reference)
+  const student = reference
+    ? store.findStudent(projectId, reference)
+    : store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId)
 
   if (!student) {
     return saveUnmatchedPhoto(
@@ -138,7 +141,19 @@ export async function processWatchedPhoto(
       projectId,
       filePath,
       fileName,
-      `Student ID "${reference}" not found in this project`,
+      reference
+        ? `Student ID "${reference}" not found in this project`
+        : `Selected student "${targetStudentId}" was not found in this project`,
+    )
+  }
+
+  if (targetStudentId !== null && reference && student.id !== targetStudentId) {
+    return saveUnmatchedPhoto(
+      store,
+      projectId,
+      filePath,
+      fileName,
+      `Filename student ID "${reference}" conflicts with the selected student`,
     )
   }
 

@@ -2,8 +2,10 @@ import { strict as assert } from 'node:assert'
 import test from 'node:test'
 import {
   advanceSequence,
+  clearManualStudent,
   createSequenceState,
   registerCapturePath,
+  setManualStudent,
   sortCaptureFiles,
 } from '../src/main/lib/photoSequence.ts'
 
@@ -67,6 +69,73 @@ test('starts a fresh sequence after the watcher restarts', () => {
     kind: 'review',
     reason: 'Portrait was captured before a valid student QR marker',
   })
+})
+
+test('routes portraits to a manually selected student and supports target changes', () => {
+  const state = createSequenceState()
+  setManualStudent(state, 10)
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'matched',
+    studentId: 10,
+  })
+
+  setManualStudent(state, 20)
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'matched',
+    studentId: 20,
+  })
+
+  clearManualStudent(state)
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'review',
+    reason: 'Portrait was captured before a valid student QR marker',
+  })
+})
+
+test('lets a valid QR marker replace the previous manual target', () => {
+  const state = createSequenceState(10)
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: 20, reference: 'STU-20' }),
+    {
+      kind: 'marker',
+      studentId: 20,
+    },
+  )
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'matched',
+    studentId: 20,
+  })
+})
+
+test('keeps the exact offline A/B/QR-C capture sequence assigned without auto-advancing', () => {
+  const state = createSequenceState()
+  const assigned: number[] = []
+
+  setManualStudent(state, 101)
+  for (let index = 0; index < 3; index++) {
+    const decision = advanceSequence(state, { kind: 'portrait' })
+    assert.equal(decision.kind, 'matched')
+    if (decision.kind === 'matched') assigned.push(decision.studentId)
+  }
+
+  setManualStudent(state, 202)
+  for (let index = 0; index < 2; index++) {
+    const decision = advanceSequence(state, { kind: 'portrait' })
+    assert.equal(decision.kind, 'matched')
+    if (decision.kind === 'matched') assigned.push(decision.studentId)
+  }
+
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: 303, reference: 'STU-303' }),
+    { kind: 'marker', studentId: 303 },
+  )
+  for (let index = 0; index < 4; index++) {
+    const decision = advanceSequence(state, { kind: 'portrait' })
+    assert.equal(decision.kind, 'matched')
+    if (decision.kind === 'matched') assigned.push(decision.studentId)
+  }
+
+  assert.deepEqual(assigned, [101, 101, 101, 202, 202, 303, 303, 303, 303])
 })
 
 test('ignores duplicate file events within the same watcher session', () => {

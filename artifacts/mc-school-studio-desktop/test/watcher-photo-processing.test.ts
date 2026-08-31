@@ -198,3 +198,72 @@ test('leaves malformed Smart Shooter filenames unmatched instead of guessing a s
     cleanup(fixture.root)
   }
 })
+
+test('routes a JPEG without a filename or QR identity to the selected student', async () => {
+  const fixture = createFixture('DSC_8291.jpg')
+  const { store, photos } = createStore()
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => null,
+      targetStudentId: 3,
+    })
+
+    assert.equal(result.kind, 'matched')
+    if (result.kind !== 'matched') return
+    assert.equal(result.student.id, 3)
+    assert.equal(photos[0]?.studentId, 3)
+    assert.equal(
+      photos[0]?.filePath,
+      join(fixture.photosDir, 'Example School', 'Class 3', 'AB12_Zaki_Dina', 'DSC_8291.jpg'),
+    )
+    assert.equal(existsSync(fixture.sourcePath), true)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
+test('leaves a known filename conflict unmatched instead of overriding the selected student', async () => {
+  const fixture = createFixture('Smith_John_class_school-001234.jpg')
+  const { store, photos } = createStore()
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => null,
+      targetStudentId: 3,
+    })
+
+    assert.equal(result.kind, 'unmatched')
+    if (result.kind !== 'unmatched') return
+    assert.match(result.reason, /conflicts with the selected student/)
+    assert.equal(photos[0]?.studentId, null)
+    assert.equal(existsSync(fixture.sourcePath), true)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
+test('rejects a selected student from another project', async () => {
+  const fixture = createFixture('DSC_8292.jpg')
+  const { store, photos } = createStore()
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => null,
+      targetStudentId: 2,
+    })
+
+    assert.equal(result.kind, 'unmatched')
+    if (result.kind !== 'unmatched') return
+    assert.match(result.reason, /was not found in this project/)
+    assert.equal(photos[0]?.studentId, null)
+  } finally {
+    cleanup(fixture.root)
+  }
+})

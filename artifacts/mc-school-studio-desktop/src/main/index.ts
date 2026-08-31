@@ -6,6 +6,7 @@ import { registerWatcherHandlers } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
 import { registerUploadHandlers } from './ipc/upload'
 import { registerCaptureExportHandlers } from './ipc/captureExport'
+import { registerProjectSyncHandlers } from './ipc/projectSync'
 import { fetchCurrentSession, registerAuthHandlers } from './ipc/auth'
 import { registerCloudHandlers } from './ipc/cloud'
 import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
@@ -96,6 +97,7 @@ app.whenReady().then(() => {
   registerDialogHandlers()
   registerUploadHandlers()
   registerCaptureExportHandlers()
+  registerProjectSyncHandlers()
   registerAuthHandlers()
   registerCloudHandlers()
 

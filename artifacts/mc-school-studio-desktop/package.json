@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "MC School Studio",
@@ -13,6 +13,7 @@
     "test:qr-marker": "node --experimental-strip-types --test test/qr-marker.test.ts",
     "test:qr": "node --experimental-strip-types --test test/qr-reader.test.ts",
     "test:sequence": "node --experimental-strip-types --test test/photo-sequence.test.ts",
+    "test:offline-flow": "node --experimental-strip-types --test test/offline-capture-flow.test.ts",
     "test:watcher": "node --experimental-strip-types --test test/watcher-photo-processing.test.ts",
     "test:retirement": "node --experimental-strip-types --test test/retirement.test.ts",
     "test:retirement-copy": "node --experimental-strip-types --test test/retirement-team-copy.test.ts",

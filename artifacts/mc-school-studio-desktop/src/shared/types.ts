@@ -10,6 +10,7 @@ export interface Project {
   contactPhone: string | null
   notes: string | null
   watchFolder: string | null
+  finishedAt: string | null
   classCount: number
   studentCount: number
   photoCount: number
@@ -144,6 +145,24 @@ export interface CaptureExportResult {
   exportedFileCount?: number
   skippedMissingFiles?: number
   error?: string
+}
+
+export interface ProjectSyncProgressEvent {
+  projectId: number
+  phase: 'syncing' | 'finished' | 'error'
+  completed: number
+  total: number
+  failed: number
+  error?: string
+}
+
+export interface ProjectSyncResult {
+  ok: boolean
+  completed: number
+  total: number
+  failed: number
+  error?: string
+  finishedAt?: string
 }
 
 export interface PhotoMatchedEvent {

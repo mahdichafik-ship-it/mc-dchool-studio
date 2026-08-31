@@ -11,6 +11,7 @@ export const projectsTable = sqliteTable('projects', {
   contactPhone: text('contact_phone'),
   notes: text('notes'),
   watchFolder: text('watch_folder'),
+  finishedAt: text('finished_at'),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })

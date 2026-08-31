@@ -134,6 +134,7 @@ export function registerProjectHandlers() {
     if (existing) {
       db.update(projectsTable)
         .set({
+          cloudId: Number.isInteger(p.id) ? p.id : existing.cloudId,
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,
@@ -152,6 +153,7 @@ export function registerProjectHandlers() {
       const result = db
         .insert(projectsTable)
         .values({
+          cloudId: Number.isInteger(p.id) ? p.id : null,
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,
@@ -172,6 +174,7 @@ export function registerProjectHandlers() {
       const result = db
         .insert(classesTable)
         .values({
+          cloudId: Number.isInteger(cls.id) ? cls.id : null,
           projectId,
           className: cls.className,
           createdAt: cls.createdAt ?? now(),
@@ -188,6 +191,7 @@ export function registerProjectHandlers() {
       if (!localClassId) continue
       db.insert(studentsTable)
         .values({
+          cloudId: Number.isInteger(stu.id) ? stu.id : null,
           projectId,
           classId: localClassId,
           firstName: stu.firstName,

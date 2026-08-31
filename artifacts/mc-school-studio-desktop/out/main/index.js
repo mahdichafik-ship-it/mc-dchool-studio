@@ -533,6 +533,7 @@ function registerProjectHandlers() {
     let projectId;
     if (existing) {
       db.update(projectsTable).set({
+        cloudId: Number.isInteger(p.id) ? p.id : existing.cloudId,
         schoolName: p.schoolName,
         photoDate: p.photoDate ?? null,
         address: p.address ?? null,
@@ -546,6 +547,7 @@ function registerProjectHandlers() {
       db.delete(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).run();
     } else {
       const result = db.insert(projectsTable).values({
+        cloudId: Number.isInteger(p.id) ? p.id : null,
         schoolName: p.schoolName,
         photoDate: p.photoDate ?? null,
         address: p.address ?? null,
@@ -561,6 +563,7 @@ function registerProjectHandlers() {
     const classIdMap = /* @__PURE__ */ new Map();
     for (const cls of classes) {
       const result = db.insert(classesTable).values({
+        cloudId: Number.isInteger(cls.id) ? cls.id : null,
         projectId,
         className: cls.className,
         createdAt: cls.createdAt ?? now$3(),
@@ -573,6 +576,7 @@ function registerProjectHandlers() {
       const localClassId = classIdMap.get(stu.classId);
       if (!localClassId) continue;
       db.insert(studentsTable).values({
+        cloudId: Number.isInteger(stu.id) ? stu.id : null,
         projectId,
         classId: localClassId,
         firstName: stu.firstName,
@@ -41240,6 +41244,7 @@ const activeUploads = /* @__PURE__ */ new Set();
 const activePhotoUploads = /* @__PURE__ */ new Map();
 const activeCaptureFileUploads = /* @__PURE__ */ new Map();
 let retryInProgress = false;
+const cloudIdentityRepairs = /* @__PURE__ */ new Map();
 class RetryableUploadError extends Error {
 }
 function disableCloudSyncForRetirement() {
@@ -41261,6 +41266,86 @@ function markCloudSessionVerified() {
 }
 function isCloudSessionVerified() {
   return cloudSessionVerified && !cloudSyncDisabledForRetirement;
+}
+async function repairCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
+  if (!project || !student) throw new Error("The local project or student no longer exists.");
+  if (project.cloudId !== null && student.cloudId !== null) return;
+  const normalizedName = project.schoolName.trim().toLocaleLowerCase();
+  const projectsResponse = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${connectionToken}` },
+    signal: AbortSignal.timeout(15e3)
+  });
+  if (!projectsResponse.ok) {
+    const text = await projectsResponse.text();
+    if (projectsResponse.status === 401) invalidateDesktopCredentials(true);
+    if (projectsResponse.status === 429 || projectsResponse.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${projectsResponse.status}: ${text}`);
+    }
+    throw new Error(`Could not refresh project identity (HTTP ${projectsResponse.status}: ${text})`);
+  }
+  const cloudProjects = await projectsResponse.json();
+  const cloudProject = project.cloudId !== null ? cloudProjects.find((candidate) => candidate.id === project.cloudId) : (() => {
+    const matches = cloudProjects.filter((candidate) => candidate.schoolName.trim().toLocaleLowerCase() === normalizedName);
+    if (matches.length > 1) {
+      throw new Error(`Several cloud projects match "${project.schoolName}". Sync this project again before uploading.`);
+    }
+    return matches[0];
+  })();
+  if (!cloudProject) {
+    throw new Error(`The cloud project "${project.schoolName}" is not assigned to this desktop.`);
+  }
+  const bundleResponse = await fetch(
+    `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProject.id}/bundle`,
+    {
+      headers: { Authorization: `Bearer ${connectionToken}` },
+      signal: AbortSignal.timeout(3e4)
+    }
+  );
+  if (!bundleResponse.ok) {
+    const text = await bundleResponse.text();
+    if (bundleResponse.status === 401) invalidateDesktopCredentials(true);
+    if (bundleResponse.status === 429 || bundleResponse.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${bundleResponse.status}: ${text}`);
+    }
+    throw new Error(`Could not refresh student identity (HTTP ${bundleResponse.status}: ${text})`);
+  }
+  const bundle = await bundleResponse.json();
+  const cloudStudent = bundle.students.find((candidate) => candidate.generatedStudentId.trim().toLocaleLowerCase() === student.generatedStudentId.trim().toLocaleLowerCase());
+  if (!cloudStudent) {
+    throw new Error(`Student "${student.generatedStudentId}" was not found in the cloud project.`);
+  }
+  db.transaction((tx) => {
+    tx.update(projectsTable).set({ cloudId: bundle.project.id }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
+    const localClasses = tx.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
+    for (const cloudClass of bundle.classes) {
+      const localClass = localClasses.find((candidate) => candidate.className.trim().toLocaleLowerCase() === cloudClass.className.trim().toLocaleLowerCase());
+      if (localClass) {
+        tx.update(classesTable).set({ cloudId: cloudClass.id }).where(drizzleOrm.eq(classesTable.id, localClass.id)).run();
+      }
+    }
+    const localStudent = tx.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
+    if (localStudent) {
+      tx.update(studentsTable).set({ cloudId: cloudStudent.id }).where(drizzleOrm.eq(studentsTable.id, studentId)).run();
+    }
+  });
+}
+async function ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
+  const repairKey = `${projectId}:${studentId}`;
+  const existing = cloudIdentityRepairs.get(repairKey);
+  if (existing) {
+    await existing;
+    return;
+  }
+  const repair = repairCloudIdentity(projectId, studentId, apiUrl, connectionToken);
+  cloudIdentityRepairs.set(repairKey, repair);
+  try {
+    await repair;
+  } finally {
+    cloudIdentityRepairs.delete(repairKey);
+  }
 }
 function invalidateDesktopCredentials(notifyRenderer = false) {
   markCloudSessionUnavailable();
@@ -41291,6 +41376,7 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
   db.update(photosTable).set({ uploadStatus: "uploading", fileUrl: null }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
   notifyUploadStatus(photoId, studentId, "uploading");
   try {
+    await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken);
     const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
     const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
     if (!project?.cloudId || !student?.cloudId) {
@@ -41381,6 +41467,7 @@ async function performUploadCaptureFile(captureId, fileId) {
   if (!connectionToken) return;
   setCaptureFileStatus(captureId, fileId, "uploading", null);
   try {
+    await ensureCloudIdentity(capture.projectId, capture.studentId, apiUrl, connectionToken);
     const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
     const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get();
     if (!project?.cloudId || !student?.cloudId) {

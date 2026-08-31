@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import {
   ArrowLeft,
   Folder,
@@ -963,6 +963,7 @@ function StudentDetail({
 
 function PhotoTile({
   photo,
+  previewPipeline,
   uploadStatus,
   onOpen,
   onDelete,
@@ -971,6 +972,7 @@ function PhotoTile({
   retrying,
 }: {
   photo: Photo
+  previewPipeline?: CaptureReview['previewPipeline']
   uploadStatus?: ProjectUploadStatusRow
   onOpen: () => void
   onDelete: () => void
@@ -980,24 +982,64 @@ function PhotoTile({
 }) {
   const status = getUploadStatusMeta(uploadStatus?.uploadStatus)
   const StatusIcon = status.icon
-  const reportPreviewRendered = () => {
-    if (photo.id >= 0 || !photo.previewKey) return
-    console.info(
-      `[ImagePipeline] ${photo.previewKey} T10 image rendered`
-        + ` · preview source=local://thumbnail/${photo.previewKey}`
-        + ` · original=${photo.filePath}`,
-    )
-  }
+  const imageRef = useRef<HTMLImageElement>(null)
+  const reportedTraceRef = useRef<string | null>(null)
+  const imageSource = photo.previewUrl ?? photo.thumbnailData
+
+  useLayoutEffect(() => {
+    const traceId = previewPipeline?.traceId
+    if (!traceId || !imageSource || reportedTraceRef.current === traceId) return
+    reportedTraceRef.current = traceId
+
+    const report = (
+      stage:
+        | 'React state update committed'
+        | 'image decode started'
+        | 'image decode complete'
+        | 'image pixels painted',
+      details?: string,
+    ) => {
+      void window.api.invoke('imagePipeline:rendererStage', {
+        traceId,
+        stage,
+        atEpochMs: Date.now(),
+        details,
+      }).catch(() => {
+        // Diagnostics are opt-in and must never affect the capture UI.
+      })
+    }
+
+    report('React state update committed')
+    const image = imageRef.current
+    if (!image) return
+    report('image decode started', `source=${photo.previewUrl ? 'local-url' : 'data-url'}`)
+    let completed = false
+    const finishDecode = () => {
+      if (completed) return
+      completed = true
+      report('image decode complete')
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => report('image pixels painted', `original=${photo.filePath}`))
+      })
+    }
+    image.addEventListener('load', finishDecode, { once: true })
+    void image.decode()
+      .then(finishDecode)
+      .catch(() => {
+        if (image.complete && image.naturalWidth > 0) finishDecode()
+      })
+    return () => image.removeEventListener('load', finishDecode)
+  }, [imageSource, photo.filePath, photo.previewUrl, previewPipeline?.traceId])
 
   return (
     <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
-      {photo.thumbnailData ? (
+      {imageSource ? (
         <img
-          src={photo.thumbnailData}
+          ref={imageRef}
+          src={imageSource}
           alt={photo.fileName}
           className="w-full h-full object-cover"
           draggable={false}
-          onLoad={reportPreviewRendered}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
@@ -1149,6 +1191,7 @@ function CaptureTile({
       <div className="group relative">
         <PhotoTile
           photo={photo}
+          previewPipeline={capture.previewPipeline}
           uploadStatus={uploadStatus}
           onOpen={onOpen}
           onDelete={onDelete!}

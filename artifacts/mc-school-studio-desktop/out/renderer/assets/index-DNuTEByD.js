@@ -15904,6 +15904,16 @@ function Badge({ className, variant = "default", ...props }) {
   );
 }
 const api = window.api;
+function reportImagePipelineStage(pipeline, stage, details) {
+  if (!pipeline) return;
+  void api.invoke("imagePipeline:rendererStage", {
+    traceId: pipeline.traceId,
+    stage,
+    atEpochMs: Date.now(),
+    details
+  }).catch(() => {
+  });
+}
 function useProjects() {
   const [data, setData] = reactExports.useState([]);
   const [loading, setLoading] = reactExports.useState(true);
@@ -16099,6 +16109,7 @@ function useCaptures(studentId) {
     });
     const unsubMatched = api.on("photo:matched", (event) => {
       if (event.student.id !== studentId) return;
+      if (event.preview) reportImagePipelineStage(event.pipeline, "frontend event received");
       setData((current) => {
         const existingIndex = current.captures.findIndex((capture) => event.previewKey && capture.legacyPhoto?.previewKey === event.previewKey || capture.legacyPhoto?.id === event.photo.id);
         if (existingIndex >= 0 && !event.preview) {
@@ -16107,7 +16118,8 @@ function useCaptures(studentId) {
             ...captures[existingIndex],
             id: event.captureId ?? captures[existingIndex].id,
             thumbnailData: event.photo.thumbnailData,
-            legacyPhoto: event.photo
+            legacyPhoto: event.photo,
+            previewPipeline: captures[existingIndex].previewPipeline
           };
           return { ...current, captures };
         }
@@ -16140,7 +16152,8 @@ function useCaptures(studentId) {
           assignmentLocked: true,
           files: [jpegFile],
           thumbnailData: event.photo.thumbnailData,
-          legacyPhoto: event.photo
+          legacyPhoto: event.photo,
+          previewPipeline: event.pipeline
         };
         return {
           ...current,
@@ -17373,6 +17386,7 @@ function StudentDetail({
 }
 function PhotoTile({
   photo,
+  previewPipeline,
   uploadStatus,
   onOpen,
   onDelete,
@@ -17382,21 +17396,50 @@ function PhotoTile({
 }) {
   const status = getUploadStatusMeta(uploadStatus?.uploadStatus);
   const StatusIcon = status.icon;
-  const reportPreviewRendered = () => {
-    if (photo.id >= 0 || !photo.previewKey) return;
-    console.info(
-      `[ImagePipeline] ${photo.previewKey} T10 image rendered · preview source=local://thumbnail/${photo.previewKey} · original=${photo.filePath}`
-    );
-  };
+  const imageRef = reactExports.useRef(null);
+  const reportedTraceRef = reactExports.useRef(null);
+  const imageSource = photo.previewUrl ?? photo.thumbnailData;
+  reactExports.useLayoutEffect(() => {
+    const traceId = previewPipeline?.traceId;
+    if (!traceId || !imageSource || reportedTraceRef.current === traceId) return;
+    reportedTraceRef.current = traceId;
+    const report = (stage, details) => {
+      void window.api.invoke("imagePipeline:rendererStage", {
+        traceId,
+        stage,
+        atEpochMs: Date.now(),
+        details
+      }).catch(() => {
+      });
+    };
+    report("React state update committed");
+    const image = imageRef.current;
+    if (!image) return;
+    report("image decode started", `source=${photo.previewUrl ? "local-url" : "data-url"}`);
+    let completed = false;
+    const finishDecode = () => {
+      if (completed) return;
+      completed = true;
+      report("image decode complete");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => report("image pixels painted", `original=${photo.filePath}`));
+      });
+    };
+    image.addEventListener("load", finishDecode, { once: true });
+    void image.decode().then(finishDecode).catch(() => {
+      if (image.complete && image.naturalWidth > 0) finishDecode();
+    });
+    return () => image.removeEventListener("load", finishDecode);
+  }, [imageSource, photo.filePath, photo.previewUrl, previewPipeline?.traceId]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
-    photo.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+    imageSource ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       "img",
       {
-        src: photo.thumbnailData,
+        ref: imageRef,
+        src: imageSource,
         alt: photo.fileName,
         className: "w-full h-full object-cover",
-        draggable: false,
-        onLoad: reportPreviewRendered
+        draggable: false
       }
     ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -17526,6 +17569,7 @@ function CaptureTile({
         PhotoTile,
         {
           photo,
+          previewPipeline: capture.previewPipeline,
           uploadStatus,
           onOpen,
           onDelete,

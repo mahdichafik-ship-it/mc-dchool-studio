@@ -134,6 +134,7 @@ interface ElectronAPI {
   // Cloud project sync
   invoke(channel: 'cloud:listProjects'): Promise<CloudProjectListResult>
   invoke(channel: 'cloud:pullProject', args: { cloudProjectId: number }): Promise<CloudProjectPullResult>
+  invoke(channel: 'imagePipeline:rendererStage', args: import('../shared/types').ImagePipelineRendererStage): Promise<{ ok: boolean }>
   on(channel: 'photo:matched', listener: (data: PhotoMatchedEvent) => void): () => void
   on(channel: 'photo:marker', listener: (data: PhotoMarkerEvent) => void): () => void
   on(channel: 'photo:unmatched', listener: (data: PhotoUnmatchedEvent) => void): () => void

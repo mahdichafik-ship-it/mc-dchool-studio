@@ -11,8 +11,11 @@ import { fetchCurrentSession, registerAuthHandlers } from './ipc/auth'
 import { registerCloudHandlers } from './ipc/cloud'
 import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
 import { getDb } from './db'
+import { registerLocalPreviewProtocol, registerLocalPreviewScheme } from './lib/localPreviewProtocol'
 
 const isDev = !app.isPackaged
+
+registerLocalPreviewScheme()
 
 const smokeUserDataDir = process.env.CI === 'true'
   ? process.env.MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR?.trim()
@@ -87,6 +90,7 @@ function monitorRetirement(mainWindow: BrowserWindow): void {
 }
 
 app.whenReady().then(() => {
+  registerLocalPreviewProtocol()
   // Initialize database (creates tables if needed)
   getDb()
 

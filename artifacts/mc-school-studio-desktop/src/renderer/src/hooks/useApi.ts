@@ -23,6 +23,7 @@ import type {
   UploadStatusChangedEvent,
   ProjectUploadStatusRow,
   ActiveCaptureTargetEvent,
+  ImagePipelineRendererStage,
 } from '../../../shared/types'
 
 // Re-export types for convenience
@@ -50,9 +51,26 @@ export type {
   UploadStatusChangedEvent,
   ProjectUploadStatusRow,
   ActiveCaptureTargetEvent,
+  ImagePipelineRendererStage,
 }
 
 const api = window.api
+
+function reportImagePipelineStage(
+  pipeline: PhotoMatchedEvent['pipeline'],
+  stage: ImagePipelineRendererStage['stage'],
+  details?: string,
+): void {
+  if (!pipeline) return
+  void api.invoke('imagePipeline:rendererStage', {
+    traceId: pipeline.traceId,
+    stage,
+    atEpochMs: Date.now(),
+    details,
+  }).catch(() => {
+    // Diagnostics are opt-in and must never affect the capture UI.
+  })
+}
 
 // Projects
 export function useProjects() {
@@ -294,6 +312,7 @@ export function useCaptures(studentId: number | null) {
     })
     const unsubMatched = api.on('photo:matched', (event: PhotoMatchedEvent) => {
       if (event.student.id !== studentId) return
+      if (event.preview) reportImagePipelineStage(event.pipeline, 'frontend event received')
 
       // A preview event is emitted before the managed copy and SQLite work.
       // The persisted event replaces that temporary row, while the database
@@ -309,6 +328,7 @@ export function useCaptures(studentId: number | null) {
             id: event.captureId ?? captures[existingIndex].id,
             thumbnailData: event.photo.thumbnailData,
             legacyPhoto: event.photo,
+              previewPipeline: captures[existingIndex].previewPipeline,
           }
           return { ...current, captures }
         }
@@ -343,6 +363,7 @@ export function useCaptures(studentId: number | null) {
           files: [jpegFile],
           thumbnailData: event.photo.thumbnailData,
           legacyPhoto: event.photo,
+          previewPipeline: event.pipeline,
         }
         return {
           ...current,

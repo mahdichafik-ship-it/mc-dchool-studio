@@ -152,6 +152,12 @@ export async function processWatchedPhoto(
     ? store.findStudent(projectId, reference)
     : store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId)
 
+  markImagePipeline(
+    diagnosticId,
+    'student lookup complete',
+    `reference=${reference ?? 'none'} student=${student?.id ?? 'none'} file=${fileName}`,
+  )
+
   if (!student) {
     return saveUnmatchedPhoto(
       store,
@@ -177,7 +183,7 @@ export async function processWatchedPhoto(
   const effectiveCapturedAt = capturedAt ?? now()
   markImagePipeline(
     diagnosticId,
-    'T2 active student identified',
+    'student assigned',
     `student=${student.id} file=${fileName}`,
   )
   const thumbnailData = await onPreviewReady?.({
@@ -194,9 +200,11 @@ export async function processWatchedPhoto(
   const destDir = join(photosDir, projectFolder, classFolder, studentFolder)
   mkdirSync(destDir, { recursive: true })
   const destPath = join(destDir, fileName)
-  markImagePipeline(diagnosticId, 'T3 local copy starts', `destination=${destPath}`)
+  markImagePipeline(diagnosticId, 'file move started', `destination=${destPath}`)
   copyFileSync(filePath, destPath)
+  markImagePipeline(diagnosticId, 'file move complete', `destination=${destPath}`)
 
+  markImagePipeline(diagnosticId, 'database write started', `file=${fileName}`)
   const photo = store.insertPhoto({
     projectId,
     studentId: student.id,
@@ -205,7 +213,7 @@ export async function processWatchedPhoto(
     capturedAt: effectiveCapturedAt,
     isMatched: true,
   })
-  markImagePipeline(diagnosticId, 'T11 database persistence completed', `photo=${photo.id}`)
+  markImagePipeline(diagnosticId, 'database write complete', `photo=${photo.id}`)
 
   return { kind: 'matched', photo, student, thumbnailData }
 }

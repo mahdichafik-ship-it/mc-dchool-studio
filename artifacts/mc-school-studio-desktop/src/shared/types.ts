@@ -53,6 +53,47 @@ export interface Photo {
   thumbnailData: string | null  // base64 data URL
   createdAt: string
   previewKey?: string
+  previewUrl?: string
+}
+
+export type ImagePipelineStage =
+  | 'filesystem event detected'
+  | 'file became stable'
+  | 'student lookup complete'
+  | 'student assigned'
+  | 'preview preparation started'
+  | 'preview prepared'
+  | 'thumbnail generation complete'
+  | 'IPC event sent'
+  | 'frontend event received'
+  | 'React state update committed'
+  | 'image decode started'
+  | 'image decode complete'
+  | 'image pixels painted'
+  | 'database write started'
+  | 'database write complete'
+  | 'file move started'
+  | 'file move complete'
+  | 'RAW pairing complete'
+  | 'cloud synchronization complete'
+
+export interface ImagePipelinePreviewContext {
+  traceId: string
+  startedAtEpochMs: number
+}
+
+export interface ImagePipelineRendererStage {
+  traceId: string
+  stage: Extract<
+    ImagePipelineStage,
+    | 'frontend event received'
+    | 'React state update committed'
+    | 'image decode started'
+    | 'image decode complete'
+    | 'image pixels painted'
+  >
+  atEpochMs: number
+  details?: string
 }
 
 export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
@@ -84,6 +125,7 @@ export interface CaptureReview {
   files: CaptureFileReview[]
   thumbnailData: string | null
   legacyPhoto: Photo | null
+  previewPipeline?: ImagePipelinePreviewContext
 }
 
 export interface QrMarkerReview {
@@ -172,6 +214,7 @@ export interface PhotoMatchedEvent {
   captureId?: number
   preview?: boolean
   previewKey?: string
+  pipeline?: ImagePipelinePreviewContext
 }
 
 export interface PhotoMarkerEvent {

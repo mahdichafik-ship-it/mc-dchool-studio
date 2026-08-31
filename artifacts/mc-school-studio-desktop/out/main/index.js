@@ -16,6 +16,7 @@ const require$$0$2 = require("assert");
 const require$$3 = require("buffer");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
+const node_url = require("node:url");
 const fs = require("node:fs/promises");
 const node_perf_hooks = require("node:perf_hooks");
 const node_crypto = require("node:crypto");
@@ -41708,6 +41709,37 @@ function extractStudentReference(fileName, studentIds) {
   });
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
+const previewFiles = /* @__PURE__ */ new Map();
+const PREVIEW_TTL_MS = 5 * 6e4;
+function registerLocalPreviewScheme() {
+  electron.protocol.registerSchemesAsPrivileged([{
+    scheme: "mc-preview",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }]);
+}
+function registerLocalPreviewProtocol() {
+  electron.protocol.handle("mc-preview", async (request) => {
+    const key = decodeURIComponent(new URL(request.url).hostname);
+    const filePath = previewFiles.get(key);
+    if (!filePath) return new Response("Preview not found", { status: 404 });
+    try {
+      return await electron.net.fetch(node_url.pathToFileURL(filePath).toString());
+    } catch {
+      return new Response("Preview unavailable", { status: 404 });
+    }
+  });
+}
+function createLocalPreviewUrl(filePath, traceId) {
+  previewFiles.set(traceId, filePath);
+  const cleanup = setTimeout(() => previewFiles.delete(traceId), PREVIEW_TTL_MS);
+  cleanup.unref();
+  return `mc-preview://${encodeURIComponent(traceId)}`;
+}
 const FILE_STABILITY_DELAY_MS = 75;
 const FILE_STABILITY_ATTEMPTS = 20;
 function wait(delayMs) {
@@ -41737,6 +41769,28 @@ async function waitForStableFile(filePath, statFile, delayMs = FILE_STABILITY_DE
 }
 const traces = /* @__PURE__ */ new Map();
 let sequence = 0;
+const REPORT_STAGE_ORDER = [
+  "filesystem event detected",
+  "file became stable",
+  "student lookup complete",
+  "student assigned",
+  "preview preparation started",
+  "preview prepared",
+  "thumbnail generation complete",
+  "IPC event sent",
+  "frontend event received",
+  "React state update committed",
+  "image decode started",
+  "image decode complete",
+  "image pixels painted",
+  "file move started",
+  "file move complete",
+  "database write started",
+  "database write complete",
+  "RAW pairing complete",
+  "cloud synchronization complete"
+];
+const PAINT_REPORT_TIMEOUT_MS = 6e4;
 function diagnosticsEnabled() {
   return process.env.MC_IMAGE_PIPELINE_DIAGNOSTICS === "1";
 }
@@ -41745,8 +41799,16 @@ function formatDetails(details) {
 }
 function startImagePipelineTrace(filePath) {
   const traceId = `capture-${Date.now()}-${sequence++}`;
-  traces.set(traceId, { startedAt: node_perf_hooks.performance.now(), filePath });
-  markImagePipeline(traceId, "T0 filesystem event received", `source=${filePath}`);
+  if (diagnosticsEnabled()) {
+    traces.set(traceId, {
+      startedAt: node_perf_hooks.performance.now(),
+      startedAtEpochMs: Date.now(),
+      filePath,
+      marks: /* @__PURE__ */ new Map(),
+      waitingForPaint: false
+    });
+  }
+  markImagePipeline(traceId, "filesystem event detected", `source=${filePath}`);
   return traceId;
 }
 function markImagePipeline(traceId, stage, details) {
@@ -41754,10 +41816,77 @@ function markImagePipeline(traceId, stage, details) {
   const trace = traces.get(traceId);
   if (!trace) return;
   const elapsedMs = (node_perf_hooks.performance.now() - trace.startedAt).toFixed(1);
+  const elapsed = Number(elapsedMs);
+  trace.marks.set(stage, { elapsedMs: elapsed, details });
   console.info(`[ImagePipeline] ${traceId} ${stage} +${elapsedMs}ms${formatDetails(details)}`);
 }
+function getImagePipelinePreviewContext(traceId) {
+  if (!traceId || !diagnosticsEnabled()) return void 0;
+  const trace = traces.get(traceId);
+  if (!trace) return void 0;
+  return {
+    traceId,
+    startedAtEpochMs: trace.startedAtEpochMs
+  };
+}
+function retainImagePipelineTraceForPaint(traceId) {
+  if (!traceId || !diagnosticsEnabled()) return;
+  const trace = traces.get(traceId);
+  if (!trace) return;
+  trace.waitingForPaint = true;
+  trace.paintTimeout = setTimeout(() => {
+    console.warn(`[ImagePipeline] ${traceId} paint report timed out`);
+    finishImagePipelineTrace(traceId);
+  }, PAINT_REPORT_TIMEOUT_MS);
+  trace.paintTimeout.unref();
+}
+function markImagePipelineRendererStage(event) {
+  if (!diagnosticsEnabled()) return;
+  const trace = traces.get(event.traceId);
+  if (!trace) return;
+  const elapsedMs = Math.max(0, event.atEpochMs - trace.startedAtEpochMs);
+  trace.marks.set(event.stage, { elapsedMs, details: event.details });
+  console.info(
+    `[ImagePipeline] ${event.traceId} ${event.stage} +${elapsedMs.toFixed(1)}ms` + formatDetails(event.details)
+  );
+  if (event.stage === "image pixels painted") {
+    reportAndDeleteTrace(event.traceId);
+  }
+}
+function reportAndDeleteTrace(traceId) {
+  const trace = traces.get(traceId);
+  if (!trace) return;
+  const stages = {};
+  let previousElapsed = 0;
+  let slowest = null;
+  for (const stage of REPORT_STAGE_ORDER) {
+    const mark = trace.marks.get(stage);
+    if (!mark) continue;
+    const durationMs = Math.max(0, mark.elapsedMs - previousElapsed);
+    stages[stage] = { elapsedMs: mark.elapsedMs, durationMs, details: mark.details };
+    if (!slowest || durationMs > slowest.durationMs) {
+      slowest = { stage, durationMs };
+    }
+    previousElapsed = mark.elapsedMs;
+  }
+  const paintedAt = trace.marks.get("image pixels painted")?.elapsedMs;
+  console.info(
+    `[ImagePipeline] REPORT ${traceId} ` + JSON.stringify({
+      filePath: trace.filePath,
+      totalToVisibleMs: paintedAt ?? null,
+      cloudSynchronization: "deferred by explicit project sync",
+      slowest,
+      stages
+    })
+  );
+  if (trace.paintTimeout) clearTimeout(trace.paintTimeout);
+  traces.delete(traceId);
+}
 function finishImagePipelineTrace(traceId) {
-  if (traceId) traces.delete(traceId);
+  if (!traceId || !diagnosticsEnabled()) return;
+  const trace = traces.get(traceId);
+  if (!trace || trace.waitingForPaint) return;
+  reportAndDeleteTrace(traceId);
 }
 function createSequenceState(manualStudentId = null) {
   return {
@@ -42069,6 +42198,11 @@ async function processWatchedPhoto(projectId, filePath, {
     return saveUnmatchedPhoto(store, projectId, filePath, fileName, "No QR code detected");
   }
   const student = reference ? store.findStudent(projectId, reference) : store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId);
+  markImagePipeline(
+    diagnosticId,
+    "student lookup complete",
+    `reference=${reference ?? "none"} student=${student?.id ?? "none"} file=${fileName}`
+  );
   if (!student) {
     return saveUnmatchedPhoto(
       store,
@@ -42090,7 +42224,7 @@ async function processWatchedPhoto(projectId, filePath, {
   const effectiveCapturedAt = capturedAt ?? now$1();
   markImagePipeline(
     diagnosticId,
-    "T2 active student identified",
+    "student assigned",
     `student=${student.id} file=${fileName}`
   );
   const thumbnailData = await onPreviewReady?.({
@@ -42106,8 +42240,10 @@ async function processWatchedPhoto(projectId, filePath, {
   const destDir = node_path.join(photosDir, projectFolder, classFolder, studentFolder);
   node_fs.mkdirSync(destDir, { recursive: true });
   const destPath = node_path.join(destDir, fileName);
-  markImagePipeline(diagnosticId, "T3 local copy starts", `destination=${destPath}`);
+  markImagePipeline(diagnosticId, "file move started", `destination=${destPath}`);
   node_fs.copyFileSync(filePath, destPath);
+  markImagePipeline(diagnosticId, "file move complete", `destination=${destPath}`);
+  markImagePipeline(diagnosticId, "database write started", `file=${fileName}`);
   const photo = store.insertPhoto({
     projectId,
     studentId: student.id,
@@ -42116,7 +42252,7 @@ async function processWatchedPhoto(projectId, filePath, {
     capturedAt: effectiveCapturedAt,
     isMatched: true
   });
-  markImagePipeline(diagnosticId, "T11 database persistence completed", `photo=${photo.id}`);
+  markImagePipeline(diagnosticId, "database write complete", `photo=${photo.id}`);
   return { kind: "matched", photo, student, thumbnailData };
 }
 function resolveWatchFolders(folderPath, folderExists = () => false) {
@@ -42141,6 +42277,7 @@ async function stopAllWatchersForRetirement() {
     if (session.flushTimer) clearTimeout(session.flushTimer);
     session.flushTimer = null;
     session.pendingFiles = [];
+    await Promise.allSettled([...session.pendingEnqueues]);
   }
   await Promise.allSettled(sessions.map((session) => session.watcher.close()));
   await Promise.allSettled(sessions.map((session) => session.processing));
@@ -42217,14 +42354,10 @@ function sendUnmatchedResult(win, projectId, result) {
 let nextPreviewId = -1;
 async function emitLocalPreview(win, projectId, capture, student, context) {
   const diagnosticId = capture.diagnosticId;
-  markImagePipeline(diagnosticId, "T7 thumbnail creation starts", `edge=${LIVE_PREVIEW_EDGE}`);
-  const thumbnailData = await generateThumbnail(context.filePath, LIVE_PREVIEW_EDGE);
-  markImagePipeline(
-    diagnosticId,
-    "T8 thumbnail ready",
-    thumbnailData ? `bytes=${thumbnailData.length}` : "thumbnail unavailable"
-  );
-  if (!thumbnailData) return null;
+  markImagePipeline(diagnosticId, "preview preparation started", "strategy=direct-local-jpeg");
+  if (!diagnosticId) return null;
+  const previewUrl = createLocalPreviewUrl(context.filePath, diagnosticId);
+  markImagePipeline(diagnosticId, "preview prepared", `source=${previewUrl}`);
   const preview = {
     id: nextPreviewId--,
     projectId,
@@ -42233,25 +42366,37 @@ async function emitLocalPreview(win, projectId, capture, student, context) {
     fileName: context.fileName,
     capturedAt: context.capturedAt,
     isMatched: true,
-    thumbnailData,
+    thumbnailData: null,
     createdAt: context.capturedAt,
-    previewKey: diagnosticId
+    previewKey: diagnosticId,
+    previewUrl
   };
+  retainImagePipelineTraceForPaint(diagnosticId);
   win?.webContents.send("photo:matched", {
     photo: preview,
     student: toStudentEvent(getDb(), student),
     preview: true,
-    previewKey: diagnosticId
+    previewKey: diagnosticId,
+    pipeline: getImagePipelinePreviewContext(diagnosticId)
   });
   markImagePipeline(
     diagnosticId,
-    "T9 UI event sent",
-    `preview source=local://thumbnail/${diagnosticId ?? context.fileName}`
+    "IPC event sent",
+    `preview source=${previewUrl}`
   );
-  return thumbnailData;
+  return previewUrl;
 }
 function registerWatcherHandlers() {
   const db = getDb();
+  electron.ipcMain.handle("imagePipeline:rendererStage", (_event, payload) => {
+    if (!payload || typeof payload !== "object") return { ok: false };
+    const stage = payload;
+    if (!stage.traceId || !stage.stage || !Number.isFinite(stage.atEpochMs)) {
+      return { ok: false };
+    }
+    markImagePipelineRendererStage(stage);
+    return { ok: true };
+  });
   electron.ipcMain.handle("watcher:start", async (_e, { projectId }) => {
     if (desktopRetiring || getSetting("desktop_retired") === "1") {
       throw new Error("Cloud sync is disabled because this desktop was retired");
@@ -42278,6 +42423,7 @@ function registerWatcherHandlers() {
     const session = {
       watcher,
       pendingFiles: [],
+      pendingEnqueues: /* @__PURE__ */ new Set(),
       flushTimer: null,
       processing: Promise.resolve(),
       seenPaths: /* @__PURE__ */ new Set(),
@@ -42286,7 +42432,9 @@ function registerWatcherHandlers() {
     watchers.set(projectId, session);
     watcher.on("add", (filePath) => {
       const diagnosticId = startImagePipelineTrace(filePath);
-      void enqueueCapture(projectId, filePath, diagnosticId);
+      const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId);
+      session.pendingEnqueues.add(enqueueTask);
+      void enqueueTask.finally(() => session.pendingEnqueues.delete(enqueueTask));
     });
     watcher.on("error", (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error);
@@ -42355,8 +42503,9 @@ async function stopProjectWatcher(projectId, options = {}) {
   watchers.delete(projectId);
   if (session.flushTimer) clearTimeout(session.flushTimer);
   session.flushTimer = null;
-  const pending = sortCaptureFiles(session.pendingFiles.splice(0));
   await session.watcher.close();
+  await Promise.allSettled([...session.pendingEnqueues]);
+  const pending = sortCaptureFiles(session.pendingFiles.splice(0));
   if (drain && pending.length > 0) {
     session.processing = session.processing.then(async () => {
       for (const capture of pending) {
@@ -42377,13 +42526,26 @@ async function stopProjectWatcher(projectId, options = {}) {
   }
 }
 async function enqueueCapture(projectId, filePath, diagnosticId) {
-  if (desktopRetiring) return;
+  if (desktopRetiring) {
+    finishImagePipelineTrace(diagnosticId);
+    return;
+  }
   const session = watchers.get(projectId);
-  if (!session || session.seenPaths.has(filePath)) return;
-  if (!getCaptureFileRole(filePath)) return;
+  if (!session || session.seenPaths.has(filePath)) {
+    finishImagePipelineTrace(diagnosticId);
+    return;
+  }
+  if (!getCaptureFileRole(filePath)) {
+    finishImagePipelineTrace(diagnosticId);
+    return;
+  }
   try {
     const fileStat = await waitForStableFile(filePath, promises.stat);
-    markImagePipeline(diagnosticId, "T1 local file finished writing", `bytes=${fileStat.size}`);
+    markImagePipeline(diagnosticId, "file became stable", `bytes=${fileStat.size}`);
+    if (desktopRetiring || watchers.get(projectId) !== session) {
+      finishImagePipelineTrace(diagnosticId);
+      return;
+    }
     if (!registerCapturePath(session.seenPaths, filePath)) return;
     session.pendingFiles.push({
       filePath,
@@ -42431,10 +42593,6 @@ function scheduleFlush(projectId) {
 }
 async function handleNewPhoto(projectId, capture, session) {
   if (desktopRetiring) return;
-  markImagePipeline(capture.diagnosticId, "T4 API request starts", "not used in live preview path");
-  markImagePipeline(capture.diagnosticId, "T5 upload starts", "not used in live preview path");
-  markImagePipeline(capture.diagnosticId, "T6 upload completes", "deferred until explicit project sync");
-  markImagePipeline(capture.diagnosticId, "T12 cloud synchronization completed", "deferred until explicit project sync");
   const db = getDb();
   const role = getCaptureFileRole(capture.fileName);
   if (!role || hasProcessedCaptureSource(db, capture.filePath) || hasProcessedQrMarkerSource(db, capture.filePath)) return;
@@ -42626,7 +42784,12 @@ function handleNewRaw(projectId, capture, session, db) {
   const student = conflictReason ? void 0 : manualStudent ?? filenameStudent ?? sequenceStudent;
   markImagePipeline(
     capture.diagnosticId,
-    "T2 active student identified",
+    "student lookup complete",
+    `reference=${filenameReference ?? "none"} student=${student?.id ?? "none"} file=${capture.fileName}`
+  );
+  markImagePipeline(
+    capture.diagnosticId,
+    "student assigned",
     student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`
   );
   const storage = ensureProjectStorageLayout(
@@ -42636,12 +42799,15 @@ function handleNewRaw(projectId, capture, session, db) {
       project.schoolName
     )
   );
-  markImagePipeline(capture.diagnosticId, "T3 local copy starts", `destination=${student ? "student folder" : "RAW originals"}`);
+  markImagePipeline(capture.diagnosticId, "file move started", `destination=${student ? "student folder" : "RAW originals"}`);
   const storedPath = copyToProjectFolder(
     capture.filePath,
     capture.fileName,
     student ? getStudentPhotoFolder(db, projectId, student) : storage.rawOriginals
   );
+  markImagePipeline(capture.diagnosticId, "file move complete", `storedPath=${storedPath}`);
+  markImagePipeline(capture.diagnosticId, "RAW pairing complete", `capture=${capture.fileName}`);
+  markImagePipeline(capture.diagnosticId, "database write started", `capture=${capture.fileName}`);
   const result = recordRawCapture(db, {
     projectId,
     studentId: student?.id ?? null,
@@ -42652,14 +42818,14 @@ function handleNewRaw(projectId, capture, session, db) {
     capturedAt: new Date(capture.capturedAtMs).toISOString()
   });
   if (result.kind === "duplicate") return;
-  markImagePipeline(capture.diagnosticId, "T11 database persistence completed", `capture=${result.captureId}`);
+  markImagePipeline(capture.diagnosticId, "database write complete", `capture=${result.captureId}`);
   const savedCapture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, result.captureId)).get();
   getMainWindow()?.webContents.send("capture:updated", {
     projectId,
     captureId: result.captureId,
     studentId: savedCapture?.studentId ?? null
   });
-  markImagePipeline(capture.diagnosticId, "T9 UI event sent", "RAW capture update");
+  markImagePipeline(capture.diagnosticId, "IPC event sent", "RAW capture update");
   if (conflictReason) {
     sendUnmatchedResult(getMainWindow(), projectId, {
       filePath: capture.filePath,
@@ -42673,7 +42839,8 @@ function handleNewRaw(projectId, capture, session, db) {
 }
 async function finishMatchedPhoto(db, win, photo, student, diagnosticId, previewThumbnailData) {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`);
-  const thumbnailData = previewThumbnailData === void 0 || previewThumbnailData === null ? await generateThumbnail(photo.filePath, LIVE_PREVIEW_EDGE) : previewThumbnailData;
+  const previewUrl = previewThumbnailData?.startsWith("mc-preview://") ? previewThumbnailData : void 0;
+  const thumbnailData = previewUrl ? null : previewThumbnailData === void 0 || previewThumbnailData === null ? await generateThumbnail(photo.filePath, LIVE_PREVIEW_EDGE) : previewThumbnailData;
   const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
   const photoForEvent = {
     id: photo.id,
@@ -42685,7 +42852,8 @@ async function finishMatchedPhoto(db, win, photo, student, diagnosticId, preview
     isMatched: true,
     thumbnailData,
     createdAt: photo.createdAt,
-    previewKey: diagnosticId
+    previewKey: diagnosticId,
+    previewUrl
   };
   win?.webContents.send("photo:matched", {
     photo: photoForEvent,
@@ -42693,7 +42861,7 @@ async function finishMatchedPhoto(db, win, photo, student, diagnosticId, preview
     captureId: capture?.id,
     previewKey: diagnosticId
   });
-  markImagePipeline(diagnosticId, "T9 UI event sent", "persisted local capture");
+  markImagePipeline(diagnosticId, "IPC event sent", "persisted local capture");
   if (capture) {
     win?.webContents.send("capture:updated", {
       projectId: photo.projectId,
@@ -42703,6 +42871,7 @@ async function finishMatchedPhoto(db, win, photo, student, diagnosticId, preview
   }
 }
 function recordUnmatched(db, win, projectId, capture, reason) {
+  markImagePipeline(capture.diagnosticId, "database write started", `file=${capture.fileName}`);
   const photo = db.insert(photosTable).values({
     projectId,
     studentId: null,
@@ -42712,7 +42881,7 @@ function recordUnmatched(db, win, projectId, capture, reason) {
     isMatched: false
   }).returning().get();
   mirrorPhotoAsCapture(db, photo, capture.filePath);
-  markImagePipeline(capture.diagnosticId, "T11 database persistence completed", `photo=${photo.id}`);
+  markImagePipeline(capture.diagnosticId, "database write complete", `photo=${photo.id}`);
   win?.webContents.send("photo:unmatched", {
     projectId,
     photoId: photo.id,
@@ -42720,7 +42889,7 @@ function recordUnmatched(db, win, projectId, capture, reason) {
     fileName: capture.fileName,
     reason
   });
-  markImagePipeline(capture.diagnosticId, "T9 UI event sent", "unmatched local capture");
+  markImagePipeline(capture.diagnosticId, "IPC event sent", "unmatched local capture");
 }
 function registerDialogHandlers() {
   electron.ipcMain.handle(
@@ -43450,6 +43619,7 @@ function scheduleUpdateCheck() {
   }, 1500);
 }
 const isDev = !electron.app.isPackaged;
+registerLocalPreviewScheme();
 const smokeUserDataDir = process.env.CI === "true" ? process.env.MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR?.trim() : void 0;
 if (smokeUserDataDir) electron.app.setPath("userData", smokeUserDataDir);
 function createWindow() {
@@ -43510,6 +43680,7 @@ function monitorRetirement(mainWindow2) {
   mainWindow2.on("closed", () => clearInterval(retirementTimer));
 }
 electron.app.whenReady().then(() => {
+  registerLocalPreviewProtocol();
   getDb();
   registerProjectHandlers();
   registerPhotoHandlers();

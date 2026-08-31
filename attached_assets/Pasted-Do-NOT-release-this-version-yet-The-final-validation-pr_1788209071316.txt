@@ -1,0 +1,77 @@
+Do NOT release this version yet.
+
+The final validation proves the backend/local ingest path is now fast enough, but the renderer decode path still fails under burst shooting.
+
+The current bottleneck is specifically:
+
+React commit → JPEG decode → pixels painted
+
+Single capture is good at ~194 ms total, but a 10-file burst reaching ~6.6 seconds is unacceptable for high-volume photography.
+
+Please focus ONLY on removing the renderer decode queue.
+
+I want you to test and compare these strategies:
+
+1. Newest-image-wins live preview
+    During burst shooting, do NOT decode and paint every incoming full JPEG sequentially in the active-student preview.
+    If captures 1, 2, 3, 4, 5 arrive faster than the renderer can display them, cancel/skip obsolete live-preview decodes and prioritize the newest capture.
+    The gallery may still retain every capture, but the LIVE PREVIEW must always prioritize the latest image.
+2. Separate live preview from gallery rendering
+    The active-student live preview must have its own isolated component and queue.
+    Incoming captures must not trigger simultaneous decode/render work for:
+    * gallery thumbnails
+    * previous captures
+    * student list images
+    * historical previews
+    The live preview gets priority.
+3. Use a smaller renderer-ready preview
+    Direct full-resolution JPEG access is fast to prepare, but Chromium decode becomes the new bottleneck during bursts.
+    Test a very fast native/embedded preview path that avoids Jimp and avoids decoding the full-resolution JPEG.
+    Ideally use:
+    * the camera JPEG’s embedded preview if available, or
+    * a fast native thumbnail/resize implementation outside the renderer
+    Target preview size only needs to match the visible live-preview area, for example roughly 800–1200 px long edge.
+4. Do NOT reintroduce Jimp
+    The previous benchmark already proved Jimp adds ~400 ms.
+    If a smaller preview is needed, use a faster native image path/library or embedded JPEG preview extraction.
+5. Decode concurrency control
+    Limit renderer decode concurrency.
+    Do not allow 10 full-resolution JPEG decodes to compete simultaneously.
+    For the live preview, use a queue policy such as:
+    * maximum 1 active decode
+    * newest capture replaces pending older preview requests
+    * obsolete pending preview decodes are cancelled/skipped
+    The goal is not to display every burst frame individually in the live preview.
+    The goal is to keep the newest capture visible with minimal delay.
+6. Gallery processing must be asynchronous
+    Every capture must still be preserved and assigned to the correct student.
+    But gallery thumbnails can appear progressively in the background.
+    They must never block the current live preview.
+7. Benchmark the new strategy
+    Repeat the same real Electron production test:
+    Single capture
+    10-file simultaneous burst
+    50-file burst
+    Report:
+    * newest-image visible latency
+    * image #1
+    * image #5
+    * image #10
+    * final image latency
+    * whether any renderer decode queue accumulates
+    For burst shooting, the key metric is:
+    How quickly does the MOST RECENT capture become visible?
+    It is acceptable for intermediate burst images to populate the gallery slightly later.
+    It is NOT acceptable for the live preview to be 6 seconds behind the photographer.
+8. Preserve every original capture
+    Skipping obsolete live-preview decodes must NEVER mean skipping:
+    * file assignment
+    * persistence
+    * gallery inclusion
+    * RAW/JPEG pairing
+    * student association
+    We are only allowed to skip unnecessary LIVE DISPLAY work for intermediate burst frames.
+
+After implementing this, give me a new production benchmark and a GO / NO-GO assessment.
+
+Do not change the already-fast Watch Folder detection, local preview transport, cloud deferral, or student assignment architecture unless the new measurements prove a problem there.

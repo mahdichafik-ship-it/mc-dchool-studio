@@ -269,7 +269,7 @@ async function handleNewPhoto(
   ) return
 
   if (role === 'RAW') {
-    handleNewRaw(projectId, capture, session, db)
+    await handleNewRaw(projectId, capture, session, db)
     return
   }
 

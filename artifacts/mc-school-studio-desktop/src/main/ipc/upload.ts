@@ -122,7 +122,6 @@ let cloudSessionVerified = false
 const activeUploads = new Set<Promise<void>>()
 const activePhotoUploads = new Map<number, Promise<void>>()
 const activeCaptureFileUploads = new Map<number, Promise<void>>()
-let retryInProgress = false
 const cloudIdentityRepairs = new Map<string, Promise<void>>()
 
 class RetryableUploadError extends Error {}
@@ -146,7 +145,6 @@ export function disableCloudSyncForRetirement(): void {
 export function enableCloudSyncAfterSignIn(): void {
   cloudSyncDisabledForRetirement = false
   cloudSessionVerified = true
-  retryPendingUploads()
 }
 
 export function markCloudSessionUnavailable(): void {
@@ -156,7 +154,6 @@ export function markCloudSessionUnavailable(): void {
 export function markCloudSessionVerified(): void {
   if (cloudSyncDisabledForRetirement) return
   cloudSessionVerified = true
-  retryPendingUploads()
 }
 
 export function isCloudSessionVerified(): boolean {
@@ -319,8 +316,7 @@ async function performUploadPhoto(
   const { apiUrl, connectionToken } = getUploadConfig()
 
   if (!apiUrl || !connectionToken) {
-    console.log('[Upload] Cloud upload not configured, skipping.')
-    return
+    throw new Error('Cloud upload is not configured.')
   }
 
   // Mark as uploading
@@ -456,10 +452,12 @@ async function performUploadCaptureFile(captureId: number, fileId: number): Prom
   const db = getDb()
   const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
   const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, fileId)).get()
-  if (!capture || !file || file.captureId !== captureId || capture.studentId === null) return
+  if (!capture) throw new Error(`Capture ${captureId} was not found.`)
+  if (!file || file.captureId !== captureId) throw new Error(`Capture file ${fileId} was not found.`)
+  if (capture.studentId === null) throw new Error('Capture is not matched to a student.')
 
   const { apiUrl, connectionToken } = getUploadConfig()
-  if (!apiUrl || !connectionToken) return
+  if (!apiUrl || !connectionToken) throw new Error('Cloud upload is not configured.')
 
   setCaptureFileStatus(captureId, fileId, 'uploading', null)
 
@@ -552,61 +550,120 @@ export async function queueCaptureUploads(captureId: number): Promise<void> {
   await Promise.allSettled(files.map((file) => uploadCaptureFile(captureId, file.id)))
 }
 
-export function retryPendingUploads(): void {
-  if (retryInProgress || !isCloudSessionVerified()) return
-  const { apiUrl, connectionToken } = getUploadConfig()
-  if (!apiUrl || !connectionToken) return
+export interface ProjectSyncProgress {
+  completed: number
+  total: number
+  failed: number
+  error?: string
+}
 
-  retryInProgress = true
-  void (async () => {
-    const db = getDb()
-    const pending = db
+type ProjectSyncJob =
+  | { kind: 'capture-file'; captureId: number; fileId: number }
+  | {
+    kind: 'legacy-photo'
+    projectId: number
+    studentId: number
+    photoId: number
+    filePath: string
+    fileName: string
+    capturedAt: string
+  }
+
+function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
+  const db = getDb()
+  const captures = db
+    .select()
+    .from(capturesTable)
+    .where(eq(capturesTable.projectId, projectId))
+    .all()
+  const jobs: ProjectSyncJob[] = []
+  const mirroredPhotoIds = new Set<number>()
+
+  for (const capture of captures) {
+    if (capture.legacyPhotoId !== null) mirroredPhotoIds.add(capture.legacyPhotoId)
+    if (capture.studentId === null) continue
+    const files = db
       .select()
-      .from(photosTable)
-      .where(or(
-        eq(photosTable.uploadStatus, 'pending'),
-        eq(photosTable.uploadStatus, 'uploading'),
-      ))
-      .all()
-
-    const captureFileRows = db
-      .select({ captureId: imageFilesTable.captureId })
       .from(imageFilesTable)
-      .innerJoin(capturesTable, eq(imageFilesTable.captureId, capturesTable.id))
-      .where(and(
-        or(
-          eq(imageFilesTable.uploadStatus, 'pending'),
-          eq(imageFilesTable.uploadStatus, 'uploading'),
-          isNull(imageFilesTable.uploadStatus),
-        ),
-      ))
+      .where(eq(imageFilesTable.captureId, capture.id))
       .all()
-    const captureIds = [...new Set(captureFileRows.map((row) => row.captureId))]
-    await Promise.allSettled(captureIds.map((captureId) => queueCaptureUploads(captureId)))
+    for (const file of files) {
+      if (file.uploadStatus !== 'done') {
+        jobs.push({ kind: 'capture-file', captureId: capture.id, fileId: file.id })
+      }
+    }
+  }
 
-    const mirroredPhotoIds = new Set(
-      db
-        .select({ photoId: capturesTable.legacyPhotoId })
-        .from(capturesTable)
-        .all()
-        .map((row) => row.photoId)
-        .filter((photoId): photoId is number => photoId !== null),
-    )
-    await Promise.allSettled(
-      pending
-        .filter((photo) => photo.studentId !== null && !mirroredPhotoIds.has(photo.id))
-        .map((photo) => uploadPhoto(
-          photo.projectId,
-          photo.studentId!,
-          photo.id,
-          photo.filePath,
-          photo.fileName,
-          photo.capturedAt,
-        )),
-    )
-  })().finally(() => {
-    retryInProgress = false
-  }).catch(() => {})
+  const legacyPhotos = db
+    .select()
+    .from(photosTable)
+    .where(eq(photosTable.projectId, projectId))
+    .all()
+  for (const photo of legacyPhotos) {
+    if (
+      !photo.isMatched
+      || photo.studentId === null
+      || mirroredPhotoIds.has(photo.id)
+      || photo.uploadStatus === 'done'
+    ) continue
+    jobs.push({
+      kind: 'legacy-photo',
+      projectId,
+      studentId: photo.studentId,
+      photoId: photo.id,
+      filePath: photo.filePath,
+      fileName: photo.fileName,
+      capturedAt: photo.capturedAt,
+    })
+  }
+
+  return jobs
+}
+
+/**
+ * Upload a complete local project only when explicitly requested by the
+ * photographer. This deliberately runs sequentially so progress is
+ * deterministic and an offline transition cannot silently count skipped work
+ * as complete.
+ */
+export async function syncProjectUploads(
+  projectId: number,
+  onProgress?: (progress: ProjectSyncProgress) => void,
+): Promise<ProjectSyncProgress> {
+  const jobs = getProjectSyncJobs(projectId)
+  let completed = 0
+  let failed = 0
+  let firstError: string | undefined
+  const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError })
+  report()
+
+  for (const job of jobs) {
+    try {
+      if (!isCloudSessionVerified()) {
+        throw new Error('Cloud sync is unavailable. Local captures are safe; reconnect and try again.')
+      }
+      if (job.kind === 'capture-file') {
+        await uploadCaptureFile(job.captureId, job.fileId)
+      } else {
+        await uploadPhoto(
+          job.projectId,
+          job.studentId,
+          job.photoId,
+          job.filePath,
+          job.fileName,
+          job.capturedAt,
+        )
+      }
+    } catch (error) {
+      failed++
+      firstError ??= String(error)
+    } finally {
+      completed++
+      report()
+    }
+  }
+
+  return { completed, total: jobs.length, failed, error: firstError }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ import type {
   CaptureExportMode,
   CaptureExportResult,
   CaptureFileUploadStatusChangedEvent,
+  ProjectSyncProgressEvent,
 } from '../shared/types'
 
 interface UploadConfig {
@@ -120,6 +121,7 @@ interface ElectronAPI {
   invoke(channel: 'upload:retryFile', args: { fileId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
+  invoke(channel: 'project:uploadAndFinish', args: { projectId: number }): Promise<import('../shared/types').ProjectSyncResult>
   invoke(channel: 'captures:export', args: {
     projectId: number
     destinationDir: string
@@ -144,6 +146,7 @@ interface ElectronAPI {
   on(channel: 'capture:updated', listener: (event: CaptureUpdatedEvent) => void): () => void
   on(channel: 'watcher:activeStudentChanged', listener: (event: ActiveCaptureTargetEvent) => void): () => void
   on(channel: 'capture:fileUploadStatusChanged', listener: (event: CaptureFileUploadStatusChangedEvent) => void): () => void
+  on(channel: 'project:syncProgress', listener: (event: ProjectSyncProgressEvent) => void): () => void
 }
 
 declare global {

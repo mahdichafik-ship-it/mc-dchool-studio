@@ -32,6 +32,7 @@ function enrichProject(
     contactPhone: p.contactPhone,
     notes: p.notes,
     watchFolder: p.watchFolder,
+    finishedAt: p.finishedAt,
     classCount,
     studentCount,
     photoCount,

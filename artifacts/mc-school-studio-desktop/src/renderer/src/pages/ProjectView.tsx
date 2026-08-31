@@ -46,6 +46,7 @@ import type {
   ProjectUploadStatusRow,
   UploadStatus,
   CaptureExportMode,
+  ProjectSyncProgressEvent,
 } from '@/hooks/useApi'
 
 interface Props {
@@ -89,8 +90,24 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
   const [exporting, setExporting] = useState(false)
+  const [finishing, setFinishing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
   const pendingUploadCount = [...uploadStatusMap.values()]
     .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
+
+  useEffect(() => {
+    return window.api.on('project:syncProgress', (event) => {
+      if (event.projectId === projectId) setSyncProgress(event)
+    })
+  }, [projectId])
+
+  // Closing the project ends the capture session. The native stop handler
+  // drains any queued files before clearing the active student target.
+  useEffect(() => {
+    return () => {
+      void stopWatcher()
+    }
+  }, [stopWatcher])
 
   // Re-select the student when students refresh (to get updated photoCount)
   useEffect(() => {
@@ -206,6 +223,40 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
+  async function handleUploadAndFinish() {
+    if (!project || project.finishedAt || finishing) return
+    setFinishing(true)
+    setSyncProgress({
+      projectId,
+      phase: 'syncing',
+      completed: 0,
+      total: 0,
+      failed: 0,
+    })
+    try {
+      const result = await window.api.invoke('project:uploadAndFinish', { projectId })
+      await reloadProject()
+      await reloadUploadStatus()
+      if (result.ok) {
+        addToast({
+          type: 'success',
+          title: 'Project uploaded and finished',
+          description: `${result.completed} local file${result.completed === 1 ? '' : 's'} synchronized successfully`,
+        })
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Project remains unfinished',
+          description: result.error ?? 'Some local files could not be synchronized.',
+        })
+      }
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not finish project', description: String(error) })
+    } finally {
+      setFinishing(false)
+    }
+  }
+
   const filteredStudents = students.filter((s) => {
     if (!search) return true
     const q = search.toLowerCase()
@@ -243,10 +294,60 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                {pendingUploadCount} photo{pendingUploadCount === 1 ? '' : 's'} waiting for upload
              </p>
            )}
+            {project?.finishedAt ? (
+              <p className="mt-1 flex items-center gap-1 text-xs text-green-700">
+                <CheckCircle className="size-3" />
+                Project finished · local capture is closed
+              </p>
+            ) : (
+              <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                <Folder className="size-3" />
+                Local capture is live · upload starts only when you finish the project
+              </p>
+            )}
+            {syncProgress?.phase === 'error' && (
+              <p className="mt-1 flex items-center gap-1 text-xs text-red-700">
+                <AlertCircle className="size-3" />
+                {syncProgress.failed} file{syncProgress.failed === 1 ? '' : 's'} failed · local project remains unfinished
+              </p>
+            )}
         </div>
 
         {/* Watch folder controls */}
         <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={() => void handleUploadAndFinish()}
+              disabled={finishing || Boolean(project?.finishedAt) || captureSummary.total === 0}
+              className={cn(
+                'gap-1.5',
+                project?.finishedAt
+                  ? 'bg-green-600 hover:bg-green-600'
+                  : 'bg-teal-600 hover:bg-teal-700',
+              )}
+              title={
+                project?.finishedAt
+                  ? 'This project has already been finished'
+                  : 'Stop local capture, upload the local project, and finish it'
+              }
+            >
+              {finishing ? (
+                <Loader className="size-3.5 animate-spin" />
+              ) : project?.finishedAt ? (
+                <CheckCircle className="size-3.5" />
+              ) : (
+                <CloudUpload className="size-3.5" />
+              )}
+              {finishing
+                ? syncProgress && syncProgress.total > 0
+                  ? `Uploading ${syncProgress.completed}/${syncProgress.total}`
+                  : 'Preparing…'
+                : project?.finishedAt
+                  ? 'Project finished'
+                  : syncProgress?.phase === 'error'
+                    ? 'Retry Upload & Finish'
+                    : 'Upload & Finish Project'}
+            </Button>
            {captureSummary.total > 0 && (
              <div className="flex items-center gap-1.5">
                <select

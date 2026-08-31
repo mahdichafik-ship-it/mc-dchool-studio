@@ -92,19 +92,50 @@ test('routes portraits to a manually selected student and supports target change
   })
 })
 
-test('keeps the manual target when a QR marker conflicts', () => {
+test('lets a valid QR marker replace the previous manual target', () => {
   const state = createSequenceState(10)
   assert.deepEqual(
     advanceSequence(state, { kind: 'marker', studentId: 20, reference: 'STU-20' }),
     {
-      kind: 'review',
-      reason: 'QR marker "STU-20" conflicts with the selected student',
+      kind: 'marker',
+      studentId: 20,
     },
   )
   assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
     kind: 'matched',
-    studentId: 10,
+    studentId: 20,
   })
+})
+
+test('keeps the exact offline A/B/QR-C capture sequence assigned without auto-advancing', () => {
+  const state = createSequenceState()
+  const assigned: number[] = []
+
+  setManualStudent(state, 101)
+  for (let index = 0; index < 3; index++) {
+    const decision = advanceSequence(state, { kind: 'portrait' })
+    assert.equal(decision.kind, 'matched')
+    if (decision.kind === 'matched') assigned.push(decision.studentId)
+  }
+
+  setManualStudent(state, 202)
+  for (let index = 0; index < 2; index++) {
+    const decision = advanceSequence(state, { kind: 'portrait' })
+    assert.equal(decision.kind, 'matched')
+    if (decision.kind === 'matched') assigned.push(decision.studentId)
+  }
+
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: 303, reference: 'STU-303' }),
+    { kind: 'marker', studentId: 303 },
+  )
+  for (let index = 0; index < 4; index++) {
+    const decision = advanceSequence(state, { kind: 'portrait' })
+    assert.equal(decision.kind, 'matched')
+    if (decision.kind === 'matched') assigned.push(decision.studentId)
+  }
+
+  assert.deepEqual(assigned, [101, 101, 101, 202, 202, 303, 303, 303, 303])
 })
 
 test('ignores duplicate file events within the same watcher session', () => {

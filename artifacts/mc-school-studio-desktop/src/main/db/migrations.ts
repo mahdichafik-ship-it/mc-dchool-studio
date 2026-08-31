@@ -23,6 +23,7 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
     ['students', 'cloud_id', 'INTEGER'],
     ['students', 'email', 'TEXT'],
     ['students', 'phone', 'TEXT'],
+    ['projects', 'finished_at', 'TEXT'],
   ] as const) {
     ensureColumn(sqlite, ...migration)
   }

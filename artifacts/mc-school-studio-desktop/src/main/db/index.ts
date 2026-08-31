@@ -45,6 +45,7 @@ function initializeSchema(sqlite: Database.Database) {
       contact_phone TEXT,
       notes TEXT,
       watch_folder TEXT,
+      finished_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

@@ -1,0 +1,445 @@
+CRITICAL ARCHITECTURE REQUIREMENT — LOCAL LIVE WATCH FOLDER
+
+The Watch Folder must behave like a professional tethered photography workflow such as Lightroom Auto Import / watched-folder workflows and Netlife-style high-volume photography systems.
+
+This is NOT a cloud-upload-first workflow.
+
+Core principle
+
+All image ingestion, student assignment, renaming, and folder routing must happen locally on the photographer’s computer in real time.
+
+The system must NEVER require this sequence:
+
+Camera → upload image to cloud → download/read image from cloud → assign image to student → place image in student folder.
+
+That architecture is incorrect.
+
+The required sequence is:
+
+Camera → local Watch Folder → app detects image immediately → app reads currently active student → image is renamed/assigned locally → image is placed/copied/moved into that student’s local folder immediately.
+
+Cloud synchronization, if enabled, happens only AFTER the local assignment has already been completed.
+
+⸻
+
+1. WATCH FOLDER BEHAVIOUR
+
+The desktop app must monitor a user-selected LOCAL folder on the photographer’s computer.
+
+Example:
+
+PROJECT/Watch/
+
+The camera/tethering software writes JPEG and/or RAW files into this folder.
+
+The app must use a native filesystem watcher and react whenever a new image appears.
+
+The app must NOT poll a remote server to discover images.
+
+The image must remain local throughout this process.
+
+As soon as the file has completely finished writing, the app must process it.
+
+⸻
+
+2. ACTIVE STUDENT / ACTIVE SUBJECT STATE
+
+The application must always maintain an explicit:
+
+CURRENT ACTIVE STUDENT
+
+Example:
+
+Current active student:
+
+* Name: Sara Andersson
+* Student ID: 004827
+* Class: 5B
+
+Once Sara is selected, she remains the active student until another student is selected.
+
+Every photograph arriving in the Watch Folder while Sara is active MUST automatically belong to Sara.
+
+There must be no need to manually assign every image afterward.
+
+⸻
+
+3. QR CODE WORKFLOW
+
+A student can become active in two ways:
+
+Method A — Select student in the app
+
+Photographer clicks/taps:
+
+Sara Andersson
+
+Sara immediately becomes ACTIVE.
+
+Every subsequent photograph goes to Sara.
+
+Method B — Photograph the student’s QR code
+
+The photographer photographs/scans the student’s QR code.
+
+The system recognizes:
+
+Student ID = 004827
+
+The app immediately changes the active student to:
+
+Sara Andersson / 004827
+
+The QR image itself must be associated with that student or flagged as the student’s QR/reference image according to project settings.
+
+Most importantly:
+
+ALL PHOTOGRAPHS TAKEN AFTER THAT QR CODE MUST AUTOMATICALLY BE ASSIGNED TO SARA UNTIL ANOTHER STUDENT IS SELECTED OR ANOTHER STUDENT QR CODE IS detected.
+
+The QR code therefore acts as a session boundary / subject switch.
+
+Example shooting sequence:
+
+QR_004827.jpg
+→ activates Sara Andersson
+
+DSC_1001.jpg
+→ Sara
+
+DSC_1002.jpg
+→ Sara
+
+DSC_1003.jpg
+→ Sara
+
+Then:
+
+QR_005132.jpg
+→ activates Adam Svensson
+
+DSC_1004.jpg
+→ Adam
+
+DSC_1005.jpg
+→ Adam
+
+There must be NO post-shoot cloud assignment step.
+
+⸻
+
+4. LIVE ASSIGNMENT MUST ALSO WORK WITHOUT PHOTOGRAPHING A QR CODE
+
+If the photographer manually selects a student in the application:
+
+ACTIVE STUDENT = Adam Svensson
+
+then the very next image arriving from the camera must automatically be assigned to Adam.
+
+Example:
+
+Photographer selects:
+
+Adam Svensson
+
+Then camera produces:
+
+DSC_2045.JPG
+
+The app must immediately route it locally to Adam.
+
+Then:
+
+DSC_2046.JPG
+DSC_2047.JPG
+DSC_2048.JPG
+
+All remain assigned to Adam.
+
+When photographer selects:
+
+Emma Karlsson
+
+the active state switches immediately.
+
+The next photograph belongs to Emma.
+
+⸻
+
+5. LOCAL FOLDER STRUCTURE
+
+The project must exist physically on the photographer’s local disk.
+
+For example:
+
+Project_Name/
+
+with folders such as:
+
+Watch/
+
+JPEG/
+RAW/
+
+or, depending on project configuration:
+
+JPEG/Class_5B/Sara_Andersson_004827/
+
+RAW/Class_5B/Sara_Andersson_004827/
+
+The exact structure can be configurable, but the important requirement is:
+
+these are real folders and real image files on the photographer’s computer.
+
+They must be accessible from Finder on macOS and Explorer on Windows without requiring the application or an internet connection.
+
+⸻
+
+6. JPEG + RAW PAIRING
+
+The system must support both JPEG and RAW workflows.
+
+If the camera produces:
+
+DSC_1025.JPG
+DSC_1025.NEF
+
+both files belong to the same photograph and the same active student.
+
+If Sara is active:
+
+DSC_1025.JPG → Sara
+DSC_1025.NEF → Sara
+
+The application must maintain the relationship between corresponding RAW + JPEG files.
+
+Do not assign one file to one student and its matching file to another student if the student selection changes during file transfer.
+
+Assignment should be based on the capture/image pair and the active student state at ingestion.
+
+⸻
+
+7. ASSIGNMENT MUST HAPPEN AT INGESTION TIME
+
+This is extremely important.
+
+When the filesystem detects a new image, the app must record immediately:
+
+* original filename
+* capture timestamp
+* ingestion timestamp
+* active student ID
+* class/group ID
+* project ID
+* file type
+* destination local path
+* QR/session identifier where applicable
+
+The student-image relationship must therefore be created at the moment the file enters the local system.
+
+Do NOT create a workflow where images remain “unassigned” until they reach the cloud.
+
+⸻
+
+8. ZERO CLOUD DEPENDENCY DURING SHOOTING
+
+The entire shooting workflow MUST continue working if:
+
+* Wi-Fi disappears
+* Internet is unavailable
+* cloud API is unavailable
+* server is temporarily offline
+
+The photographer must still be able to:
+
+* select students
+* scan/photograph QR codes
+* tether the camera
+* ingest photographs
+* assign images
+* rename images
+* create student folders
+* switch students
+* continue shooting
+
+without interruption.
+
+This is a LOCAL-FIRST DESKTOP APPLICATION.
+
+Cloud functionality is secondary.
+
+⸻
+
+9. CLOUD SYNC IS A SEPARATE BACKGROUND LAYER
+
+If cloud synchronization exists, the architecture must be:
+
+Layer 1 — Capture
+
+Camera
+
+↓
+
+Layer 2 — Local ingestion
+
+Local Watch Folder
+
+↓
+
+Layer 3 — Local assignment
+
+Current Student / QR session
+
+↓
+
+Layer 4 — Local file organisation
+
+Student / class folders + database
+
+↓
+
+Layer 5 — Optional synchronization
+
+Cloud/database/gallery/server
+
+The cloud must NEVER sit between capture and local student assignment.
+
+Correct:
+
+Camera → Local → Student Assignment → Optional Cloud
+
+Incorrect:
+
+Camera → Cloud → Student Assignment → Download/Local
+
+⸻
+
+10. THE ACTIVE STUDENT MUST BE STATEFUL
+
+The active student is persistent.
+
+Selecting a student does NOT apply only to the next image.
+
+It establishes a state:
+
+activeStudentId = 004827
+
+That state remains active until one of these events occurs:
+
+1. another student is manually selected;
+2. another student’s QR code is detected;
+3. photographer explicitly clears the active student;
+4. project/session is closed.
+
+Therefore, potentially 1, 3, 10, or 50 photographs can automatically belong to the same student without selecting them repeatedly.
+
+⸻
+
+11. UI REQUIREMENT
+
+During shooting, the photographer must always be able to clearly see who is currently active.
+
+Display prominently:
+
+CURRENT STUDENT
+
+Photo/avatar if available
+
+Sara Andersson
+ID 004827
+Class 5B
+
+Status:
+
+● READY — Images will be assigned to Sara
+
+When a new image arrives, show immediate feedback:
+
+DSC_1025.JPG → Sara Andersson ✓
+
+This should happen live without refreshing the page.
+
+When another student is selected:
+
+ACTIVE STUDENT CHANGED
+
+Adam Svensson
+ID 005132
+
+The change must take effect immediately for subsequent captures.
+
+⸻
+
+12. RACE-CONDITION PROTECTION
+
+This system will be used during fast professional shooting.
+
+The implementation must therefore handle the situation where several images arrive within fractions of a second.
+
+Files must be queued locally.
+
+Never process a file until the camera/tethering software has finished writing it.
+
+The application must ensure every image is processed exactly once.
+
+It must prevent:
+
+* duplicate imports
+* partial/corrupted file reads
+* missed photographs
+* wrong student assignment
+* RAW/JPEG separation
+* files being overwritten
+
+The local ingestion queue must remain reliable even during burst shooting.
+
+⸻
+
+13. IMPORTANT ARCHITECTURAL RULE
+
+Do NOT build the Watch Folder as a browser-only feature.
+
+A normal web browser cannot provide the required permanent native filesystem monitoring behaviour reliably.
+
+The Watch Folder functionality must run inside the DESKTOP/NATIVE layer of the application with filesystem access.
+
+The UI may use web technologies, but the file watcher itself must be part of the local desktop process.
+
+⸻
+
+14. REQUIRED TEST
+
+Before considering this feature complete, demonstrate this exact test with internet/cloud connectivity disabled:
+
+1. Open an existing local photography project.
+2. Select Student A.
+3. Drop/tether 3 images into the Watch Folder.
+4. Verify all 3 are immediately assigned locally to Student A.
+5. Select Student B.
+6. Drop/tether 2 images.
+7. Verify the 2 new images belong to Student B.
+8. Photograph/import Student C’s QR code.
+9. Verify Student C automatically becomes active.
+10. Import 4 photographs.
+11. Verify all 4 belong to Student C.
+12. Verify corresponding JPEG + RAW files are correctly paired.
+13. Open Finder/Explorer.
+14. Verify all images physically exist in the correct local project folders.
+15. Confirm the entire workflow worked while completely offline.
+
+If this test cannot be completed successfully, the Watch Folder implementation is NOT finished.
+
+NON-NEGOTIABLE SUMMARY
+
+The fundamental rule is:
+
+The photographer chooses or scans a student first. From that instant onward, every new image arriving from the camera is assigned locally and automatically to that student until another student is selected/scanned.
+
+No cloud upload is required for assignment.
+
+No cloud download is required for assignment.
+
+No manual post-shoot assignment is required.
+
+No internet connection is required.
+
+The system must behave like a professional live tethered high-volume photography workstation, not like a web gallery uploader.

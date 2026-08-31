@@ -1,0 +1,256 @@
+PERFORMANCE DEBUGGING — FIND THE EXACT BOTTLENECK
+
+The live preview is improved, but it is still not fast enough.
+
+Do NOT make random optimizations.
+
+I want you to instrument the entire capture-to-preview pipeline and show exactly where the remaining latency comes from.
+
+For every incoming image, record precise timings for:
+
+* filesystem event detected
+* file write completed / file became stable
+* active student lookup
+* image assignment
+* thumbnail generation start
+* thumbnail generation complete
+* IPC/event sent to UI
+* React/UI state update
+* image decode start
+* image decode complete
+* image painted/rendered on screen
+* database write
+* file move/rename
+* RAW pairing
+* cloud sync
+
+Output something like:
+
+DSC_1042.JPG
+watcher_detect = 14 ms
+file_stable = 178 ms
+student_assign = 2 ms
+thumbnail = 96 ms
+ipc = 3 ms
+ui_state = 8 ms
+image_decode = 74 ms
+paint = 16 ms
+TOTAL_TO_VISIBLE = 391 ms
+
+Then tell me which stage is currently the slowest.
+
+IMPORTANT: Measure actual paint time
+
+Do not stop timing when the frontend receives the image URL.
+
+I want the timing to stop only when the image is actually visible on screen.
+
+Measure:
+
+file detected → pixels painted
+
+because that is what the photographer experiences.
+
+Check these specific likely problems
+
+Audit whether any of the following still exist:
+
+* folder polling instead of true native file events
+* debounce longer than 50–100 ms
+* waiting too long to determine file stability
+* decoding the original full-resolution JPEG
+* generating thumbnails on the main/UI thread
+* writing thumbnail to disk before displaying it
+* unnecessary EXIF parsing before preview
+* unnecessary image hashing
+* database await before UI update
+* file rename/move before preview
+* React rerendering the full student list
+* React rerendering the full gallery
+* reading the image through HTTP when a direct local protocol could be used
+* converting image formats before display
+* creating multiple copies of the same image
+* waiting for RAW + JPEG pairing
+* waiting for cloud sync
+* excessive IPC serialization
+* sending image binary/base64 through IPC instead of sending only a local path
+* using base64/data URLs for large previews
+* memory pressure / garbage collection
+* disk I/O contention
+* thumbnail generation starting sequentially instead of concurrently
+
+Very important: inspect IPC
+
+If Electron/Tauri or another desktop bridge is being used, verify that the application is NOT sending the entire image file through IPC.
+
+Do NOT do:
+
+read image into memory
+→ convert to base64
+→ send huge payload through IPC
+→ frontend decode
+
+Instead send only:
+
+localPreviewPath
+
+or a lightweight secure local URL.
+
+Large IPC payloads can create unnecessary latency.
+
+Avoid disk thumbnail creation if memory preview is faster
+
+Test both approaches:
+
+A. Generate thumbnail → save thumbnail to disk → UI reads thumbnail
+
+B. Generate thumbnail in memory → expose immediately to UI → optionally cache to disk afterward
+
+Benchmark both.
+
+Use whichever gives lower capture-to-visible latency.
+
+Test direct JPEG preview
+
+For JPEG shooting, test whether generating a thumbnail is actually slower than using the JPEG’s embedded/browser-scaled preview.
+
+Compare:
+
+1. direct local JPEG display
+2. lightweight thumbnail generation
+3. embedded preview extraction if applicable
+
+Use the fastest approach.
+
+Do not assume thumbnail generation is always faster.
+
+Optimize file-stability detection
+
+Measure how long the app waits after the filesystem event.
+
+If file stability accounts for a large part of the delay, improve it.
+
+Do not use a fixed sleep.
+
+Try:
+
+* open/read access check
+* file size change detection
+* last-modified checks
+* retry every 20–50 ms
+
+Stop immediately when the file is readable and stable.
+
+Profile the UI
+
+Use React profiling / renderer profiling.
+
+Check whether adding one image causes:
+
+* entire student list rerender
+* all thumbnails rerender
+* large parent component rerender
+* expensive sorting/filtering
+* unnecessary effects
+* repeated database queries
+
+Only the affected student’s preview should update.
+
+Memoize or isolate components where appropriate.
+
+Check image decoding
+
+Measure image decode separately.
+
+If decoding is slow:
+
+* reduce preview resolution
+* avoid huge source files in UI
+* use browser/native decode APIs
+* preload/decode before swapping into the visible component
+* keep previous image visible until new preview is ready
+
+Worker threads
+
+Any expensive image work must happen outside the UI/main thread.
+
+Move these to workers if needed:
+
+* thumbnail generation
+* EXIF parsing
+* RAW preview extraction
+* hashing
+* file indexing
+
+The renderer should only receive a ready preview reference.
+
+Burst test
+
+Test with:
+
+10 images fired rapidly
+
+then:
+
+50 images fired rapidly
+
+Measure whether latency increases as the queue grows.
+
+If image 1 appears in 250 ms but image 10 appears in 2 seconds, the pipeline is serialized incorrectly.
+
+The live preview path must not wait for all previous background tasks.
+
+Use separate queues:
+
+HIGH PRIORITY:
+
+* watcher
+* student assignment
+* preview
+
+LOW PRIORITY:
+
+* database
+* RAW pairing
+* file organization
+* cloud
+* backup
+
+Give me a BEFORE / AFTER benchmark
+
+I want actual numbers.
+
+Example:
+
+BEFORE:
+
+* file stable: 240 ms
+* thumbnail: 180 ms
+* UI render: 140 ms
+* total: 560 ms
+
+AFTER:
+
+* file stable: 85 ms
+* thumbnail: 62 ms
+* UI render: 35 ms
+* total: 182 ms
+
+Do not respond only with “performance improved.”
+
+Show the measured improvement.
+
+PERFORMANCE TARGET
+
+Aim for:
+
+JPEG stable → visible preview:
+under 200–300 ms where hardware allows
+
+If under 300 ms is not achievable, explain precisely which unavoidable hardware or file-write operation is responsible.
+
+The most important metric is:
+
+CAPTURE / FILE AVAILABLE → PIXELS VISIBLE NEXT TO THE ACTIVE STUDENT
+
+Optimize for that metric only.

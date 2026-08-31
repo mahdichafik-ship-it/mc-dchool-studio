@@ -98,6 +98,44 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
   }
 })
 
+test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fallback', async () => {
+  const fixture = createFixture('Smith_John_class_school_001234_595.JPG')
+  const { store, photos } = createStore()
+  let qrReadAttempted = false
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => {
+        qrReadAttempted = true
+        return { studentId: '009999' }
+      },
+    })
+
+    assert.equal(result.kind, 'matched')
+    assert.equal(qrReadAttempted, false)
+    if (result.kind !== 'matched') return
+    assert.equal(result.student.id, 1)
+
+    const destination = join(
+      fixture.photosDir,
+      'Example School',
+      'Class 3',
+      '001234_Smith_John',
+      'Smith_John_class_school_001234_595.JPG',
+    )
+    assert.equal(existsSync(destination), true)
+    assert.equal(existsSync(fixture.sourcePath), true)
+    assert.deepEqual(readFileSync(destination), jpegBytes)
+    assert.deepEqual(readFileSync(fixture.sourcePath), jpegBytes)
+    assert.equal(photos[0]?.studentId, 1)
+    assert.equal(photos[0]?.filePath, destination)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
 test('leaves an ID belonging to another project unmatched', async () => {
   const fixture = createFixture('Smith_John_class_school-009999.jpg')
   const { store, photos } = createStore()

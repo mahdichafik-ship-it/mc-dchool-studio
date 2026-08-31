@@ -8,32 +8,79 @@ export interface QrResult {
   raw: string
 }
 
+const MAX_QR_SCAN_EDGE = 2_000
+
+function decodeBitmap(image: Jimp): QrResult | null {
+  const { data, width, height } = image.bitmap
+  const uint8Data = new Uint8ClampedArray(
+    data.buffer,
+    data.byteOffset,
+    data.byteLength,
+  )
+
+  const normal = jsQR(uint8Data, width, height, {
+    inversionAttempts: 'dontInvert',
+  })
+  if (normal) return parseQrData(normal.data)
+
+  const inverted = jsQR(uint8Data, width, height, {
+    inversionAttempts: 'invertFirst',
+  })
+  return inverted ? parseQrData(inverted.data) : null
+}
+
+function normalizedScanImage(image: Jimp): Jimp {
+  const { width, height } = image.bitmap
+  const longestEdge = Math.max(width, height)
+  if (longestEdge <= MAX_QR_SCAN_EDGE) return image.clone()
+
+  const scale = MAX_QR_SCAN_EDGE / longestEdge
+  return image.clone().resize({
+    w: Math.max(1, Math.round(width * scale)),
+    h: Math.max(1, Math.round(height * scale)),
+  })
+}
+
+function qrScanVariants(image: Jimp): Jimp[] {
+  const normalized = normalizedScanImage(image)
+  const variants = [normalized]
+
+  // Camera JPEGs can flatten the QR's blacks and whites. A grayscale,
+  // higher-contrast pass recovers many codes without an unbounded search.
+  variants.push(normalized.clone().greyscale().contrast(0.35))
+
+  // Marker cards are normally near the center of the frame. Cropping away
+  // distracting portrait/background detail gives jsQR a cleaner final pass.
+  const { width, height } = normalized.bitmap
+  if (width >= 240 && height >= 240) {
+    const cropWidth = Math.max(1, Math.round(width * 0.8))
+    const cropHeight = Math.max(1, Math.round(height * 0.8))
+    variants.push(normalized.clone().crop({
+      x: Math.round((width - cropWidth) / 2),
+      y: Math.round((height - cropHeight) / 2),
+      w: cropWidth,
+      h: cropHeight,
+    }).greyscale().contrast(0.35))
+  }
+
+  // If normalization changed a very large image, retain one full-resolution
+  // fallback for small or distant codes that would otherwise lose modules.
+  if (normalized.bitmap.width !== image.bitmap.width || normalized.bitmap.height !== image.bitmap.height) {
+    variants.push(image.clone())
+  }
+
+  return variants
+}
+
 export async function readQrFromImage(filePath: string): Promise<QrResult | null> {
   try {
     const image = await Jimp.read(filePath)
 
-    const { data, width, height } = image.bitmap
-
-    // jsQR expects Uint8ClampedArray of RGBA data
-    const uint8Data = new Uint8ClampedArray(
-      data.buffer,
-      data.byteOffset,
-      data.byteLength,
-    )
-
-    const code = jsQR(uint8Data, width, height, {
-      inversionAttempts: 'dontInvert',
-    })
-
-    if (!code) {
-      const code2 = jsQR(uint8Data, width, height, {
-        inversionAttempts: 'invertFirst',
-      })
-      if (!code2) return null
-      return parseQrData(code2.data)
+    for (const candidate of qrScanVariants(image)) {
+      const result = decodeBitmap(candidate)
+      if (result) return result
     }
-
-    return parseQrData(code.data)
+    return null
   } catch (err) {
     console.error('QR read error for', filePath, err)
     return null

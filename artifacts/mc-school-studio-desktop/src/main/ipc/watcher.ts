@@ -248,6 +248,10 @@ async function handleNewPhoto(
   }
 
   const win = getMainWindow()
+  // A QR marker may itself receive Smart Shooter's barcode-based filename.
+  // Detect the marker first so it selects the student without appearing as a
+  // portrait in the gallery. The following non-QR portrait is then matched by
+  // the same filename reference, including its numeric frame suffix.
   const qrResult = await readQrFromImage(capture.filePath)
 
   if (qrResult) {

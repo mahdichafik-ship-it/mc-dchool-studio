@@ -18,6 +18,13 @@ const debugPort = Number(process.env.MC_SCHOOL_STUDIO_UPDATE_SMOKE_DEBUG_PORT ??
 const mainDebugPort = debugPort + 1
 const root = join(tmpdir(), `mc-school-studio-update-smoke-${process.pid}`)
 const userDataDir = join(root, 'user-data')
+const autoUpdaterExpression = `
+  process
+    .getBuiltinModule('module')
+    .createRequire(process.resourcesPath + '/app.asar/out/main/index.js')
+    ('electron-updater')
+    .autoUpdater
+`
 
 mkdirSync(root, { recursive: true })
 mkdirSync(userDataDir, { recursive: true })
@@ -251,7 +258,7 @@ try {
   record('download-requested', { version: targetVersion })
   const downloadResult = await mainCdp.evaluate(`
     new Promise((resolve, reject) => {
-      const updater = require('electron-updater').autoUpdater
+      const updater = ${autoUpdaterExpression}
       const timeout = setTimeout(
         () => reject(new Error('Timed out downloading the target release')),
         300000,
@@ -279,7 +286,7 @@ try {
   record('restart-requested', { version: targetVersion })
   const installResult = await mainCdp.evaluate(`
     setTimeout(
-      () => require('electron-updater').autoUpdater.quitAndInstall(),
+      () => (${autoUpdaterExpression}).quitAndInstall(),
       250,
     )
     'install-scheduled'
@@ -333,10 +340,14 @@ try {
   } catch {
     // The app may already have exited after a failed or completed smoke.
   }
-  rmSync(root, {
-    recursive: true,
-    force: true,
-    maxRetries: 20,
-    retryDelay: 500,
-  })
+  try {
+    rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 500,
+    })
+  } catch (error) {
+    console.warn(`Updater smoke cleanup left temporary files at ${root}:`, error)
+  }
 }

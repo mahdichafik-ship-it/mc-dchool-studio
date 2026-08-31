@@ -46,6 +46,23 @@ permissions that are not reliable across runner images.
 **How to apply:** Trigger the packaged source app's real update check, download,
 install, bundle replacement, and relaunch. Require a distinct target process to
 stay alive and re-run signature, Gatekeeper, and notarization checks afterward.
+For an externalized updater in an ESM inspector context, load it with
+`process.getBuiltinModule('module').createRequire()` rooted at the packaged
+`app.asar` main entry. Suppress unattended native update dialogs in the harness,
+and disconnect every debugger before requesting restart because Squirrel waits
+for attached debuggers to leave before the source app can exit.
+
+Use GitHub's current standard Intel runner label rather than a retired image.
+As of 2026, `macos-15-intel` is the supported standard x86_64 label; a
+`macos-13` job can remain queued indefinitely.
+
+**Why:** The updater downloaded correctly on both architectures but the smoke
+test deadlocked while its own main-process debugger remained attached. Separately,
+the retired Intel image never acquired a hosted runner.
+
+**How to apply:** Keep both packaged retirement and installed-update smoke jobs
+on supported native architecture labels. Treat prolonged queueing on a retired
+label as runner configuration, not authentication failure.
 
 Replit's GitHub OAuth connection may have repository access without permission
 to modify workflow files. When that occurs, use a user-provided GitHub token with

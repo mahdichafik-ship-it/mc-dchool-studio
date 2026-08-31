@@ -15954,8 +15954,8 @@ function useProject(projectId) {
       if (event.student.projectId !== projectId) return;
       scheduleReload();
     });
-    const unsubUnmatched = api.on("photo:unmatched", (_event) => {
-      scheduleReload();
+    const unsubUnmatched = api.on("photo:unmatched", (event) => {
+      if (event.projectId === projectId) scheduleReload();
     });
     const unsubDeleted = api.on("photo:deleted", (event) => {
       if (event.projectId !== projectId) return;
@@ -16039,6 +16039,41 @@ function useStudents(projectId, classId) {
   }, [projectId, load]);
   return { data, loading, reload: load };
 }
+function useUnmatchedPhotos(projectId) {
+  const [data, setData] = reactExports.useState([]);
+  const [loading, setLoading] = reactExports.useState(false);
+  const load = reactExports.useCallback(async () => {
+    if (!projectId) return;
+    setLoading(true);
+    try {
+      const result = await api.invoke("photos:unmatched", { projectId });
+      setData(result);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId) return;
+    const unsubUnmatched = api.on("photo:unmatched", (event) => {
+      if (event.projectId === projectId) void load();
+    });
+    const unsubReassigned = api.on("photo:reassigned", (event) => {
+      if (event.projectId === projectId) void load();
+    });
+    const unsubDeleted = api.on("photo:deleted", (event) => {
+      if (event.projectId === projectId) void load();
+    });
+    return () => {
+      unsubUnmatched();
+      unsubReassigned();
+      unsubDeleted();
+    };
+  }, [projectId, load]);
+  return { data, loading, reload: load };
+}
 function useCaptures(studentId) {
   const [data, setData] = reactExports.useState({ captures: [], qrMarkers: [] });
   const [loading, setLoading] = reactExports.useState(false);
@@ -16103,7 +16138,9 @@ function useCaptureSummary(projectId) {
     const unsubMatched = api.on("photo:matched", (event) => {
       if (event.student.projectId === projectId) void load();
     });
-    const unsubUnmatched = api.on("photo:unmatched", () => void load());
+    const unsubUnmatched = api.on("photo:unmatched", (event) => {
+      if (event.projectId === projectId) void load();
+    });
     return () => {
       unsubCapture();
       unsubMatched();
@@ -16133,6 +16170,41 @@ function useWatcherStatus(projectId) {
     setIsRunning(false);
   }, [projectId]);
   return { isRunning, start, stop, refresh: check };
+}
+function useActiveCaptureTarget(projectId) {
+  const [studentId, setStudentId] = reactExports.useState(null);
+  const [source, setSource] = reactExports.useState("none");
+  const load = reactExports.useCallback(async () => {
+    if (!projectId) {
+      setStudentId(null);
+      setSource("none");
+      return;
+    }
+    const result = await api.invoke("watcher:getActiveStudent", { projectId });
+    setStudentId(result);
+    setSource(result === null ? "none" : "manual");
+  }, [projectId]);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId) return;
+    return api.on("watcher:activeStudentChanged", (event) => {
+      if (event.projectId !== projectId) return;
+      setStudentId(event.studentId);
+      setSource(event.source);
+    });
+  }, [projectId]);
+  const setTarget = reactExports.useCallback(async (nextStudentId) => {
+    if (!projectId) return;
+    const result = await api.invoke("watcher:setActiveStudent", {
+      projectId,
+      studentId: nextStudentId
+    });
+    setStudentId(result);
+    setSource(result === null ? "none" : "manual");
+  }, [projectId]);
+  return { studentId, source, setTarget, reload: load };
 }
 function usePhotoEvents(onMatched, onUnmatched, onMarker) {
   reactExports.useEffect(() => {
@@ -16517,8 +16589,18 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const { data: classes } = useClasses(projectId);
   const [selectedClassId, setSelectedClassId] = reactExports.useState(null);
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? void 0);
+  const {
+    data: unmatchedPhotos,
+    loading: unmatchedLoading,
+    reload: reloadUnmatchedPhotos
+  } = useUnmatchedPhotos(projectId);
   const [selectedStudent, setSelectedStudent] = reactExports.useState(null);
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId);
+  const {
+    studentId: activeStudentId,
+    source: activeStudentSource,
+    setTarget: setActiveCaptureTarget
+  } = useActiveCaptureTarget(projectId);
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId);
   const [search, setSearch] = reactExports.useState("");
   const [settingFolder, setSettingFolder] = reactExports.useState(false);
@@ -16533,6 +16615,34 @@ function ProjectView({ projectId, onBack, offline = false }) {
       if (refreshed) setSelectedStudent(refreshed);
     }
   }, [students]);
+  reactExports.useEffect(() => {
+    if (activeStudentId === null) return;
+    const activeStudent = students.find((student) => student.id === activeStudentId);
+    if (activeStudent) setSelectedStudent(activeStudent);
+  }, [activeStudentId, students]);
+  async function handleSelectCaptureStudent(student) {
+    setSelectedStudent(student);
+    try {
+      await setActiveCaptureTarget(student.id);
+    } catch (error) {
+      addToast({
+        type: "error",
+        title: "Could not select capture student",
+        description: String(error)
+      });
+    }
+  }
+  async function handleClearCaptureStudent() {
+    try {
+      await setActiveCaptureTarget(null);
+    } catch (error) {
+      addToast({
+        type: "error",
+        title: "Could not clear capture student",
+        description: String(error)
+      });
+    }
+  }
   async function handleSetWatchFolder() {
     const folder = await window.api.invoke("dialog:openFolder");
     if (!folder) return;
@@ -16756,7 +16866,8 @@ function ProjectView({ projectId, onBack, offline = false }) {
             {
               student: s,
               isSelected: selectedStudent?.id === s.id,
-              onClick: () => setSelectedStudent(s),
+              isActive: activeStudentId === s.id,
+              onClick: () => void handleSelectCaptureStudent(s),
               uploadSummary: uploadStatusMap.get(s.id)
             },
             s.id
@@ -16771,14 +16882,88 @@ function ProjectView({ projectId, onBack, offline = false }) {
           projectId,
           photoStatusMap,
           onReassign: () => reloadStudents(),
+          isActiveCaptureTarget: activeStudentId === selectedStudent.id,
+          activeStudentSource,
+          onClearCaptureTarget: () => void handleClearCaptureStudent(),
           offline
+        }
+      ) : unmatchedPhotos.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        UnmatchedPhotosPanel,
+        {
+          photos: unmatchedPhotos,
+          loading: unmatchedLoading,
+          onOpen: (filePath) => window.api.invoke("photos:openInSystem", { filePath }),
+          onReassign: setReassignDialogPhoto
         }
       ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full text-center p-8", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-20 h-20 rounded-2xl bg-slate-200 flex items-center justify-center mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(User, { className: "size-10 text-slate-400" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-600 mb-1", children: "No student selected" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400 max-w-xs", children: "Click a student on the left to display their QR code for the photographer." })
       ] }) })
-    ] })
+    ] }),
+    reassignDialogPhoto && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      ReassignDialog,
+      {
+        photo: reassignDialogPhoto,
+        projectId,
+        onClose: () => setReassignDialogPhoto(null),
+        onDone: () => {
+          setReassignDialogPhoto(null);
+          void reloadUnmatchedPhotos();
+          void reloadStudents();
+        }
+      }
+    )
+  ] });
+}
+function UnmatchedPhotosPanel({
+  photos,
+  loading,
+  onOpen,
+  onReassign
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-8", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-bold text-slate-900", children: "Photos needing assignment" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-slate-500", children: "These captures were saved, but no student QR or filename match was found. Assign them manually or photograph the student QR before the next portraits." })
+    ] }),
+    loading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-40 items-center justify-center text-sm text-slate-400", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "mr-2 size-4 animate-spin" }),
+      " Loading captures…"
+    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-3 gap-3", children: photos.map((photo) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "overflow-hidden rounded-lg border border-amber-200 bg-white", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "aspect-square bg-slate-100", children: photo.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "img",
+        {
+          src: photo.thumbnailData,
+          alt: photo.fileName,
+          className: "h-full w-full object-cover",
+          draggable: false
+        }
+      ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-full items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 p-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "truncate text-[11px] text-slate-600", title: photo.fileName, children: photo.fileName }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              onClick: () => void onOpen(photo.filePath),
+              className: "rounded bg-slate-100 px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-200",
+              children: "Open"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              onClick: () => onReassign(photo),
+              className: "rounded bg-teal-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-teal-700",
+              children: "Assign"
+            }
+          )
+        ] })
+      ] })
+    ] }, photo.id)) })
   ] });
 }
 function UploadBadge({ summary }) {
@@ -16799,6 +16984,7 @@ function UploadBadge({ summary }) {
 function StudentRow({
   student: s,
   isSelected,
+  isActive,
   onClick,
   uploadSummary
 }) {
@@ -16808,18 +16994,24 @@ function StudentRow({
       onClick,
       className: cn(
         "w-full px-3 py-2.5 text-left flex items-center gap-2 transition-colors border-b border-slate-50",
-        isSelected ? "bg-teal-50 border-l-2 border-l-teal-500" : "hover:bg-slate-50"
+        isActive ? "bg-blue-100 border-l-4 border-l-blue-600 ring-1 ring-inset ring-blue-200" : isSelected ? "bg-slate-100 border-l-2 border-l-slate-400" : "hover:bg-slate-50"
       ),
+      "aria-pressed": isActive,
+      title: isActive ? "Active capture student" : "Select as active capture student",
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: cn("text-sm font-medium truncate", isSelected ? "text-teal-700" : "text-slate-800"), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: cn("text-sm font-medium truncate", isActive ? "text-blue-800" : "text-slate-800"), children: [
             s.lastName,
             ", ",
             s.firstName
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 font-mono", children: s.generatedStudentId })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: cn("text-xs font-mono", isActive ? "text-blue-600" : "text-slate-400"), children: s.generatedStudentId })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1 shrink-0", children: [
+          isActive && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { className: "border-blue-200 bg-blue-600 text-[9px] text-white", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "mr-0.5 size-2.5" }),
+            "ACTIVE"
+          ] }),
           uploadSummary && /* @__PURE__ */ jsxRuntimeExports.jsx(UploadBadge, { summary: uploadSummary }),
           s.photoCount > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", className: "text-[10px] px-1.5 py-0", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-2.5 mr-0.5" }),
@@ -16835,6 +17027,9 @@ function StudentDetail({
   projectId,
   photoStatusMap,
   onReassign,
+  isActiveCaptureTarget,
+  activeStudentSource,
+  onClearCaptureTarget,
   offline
 }) {
   const { data: review, reload: reloadCaptures } = useCaptures(student.id);
@@ -16924,15 +17119,29 @@ function StudentDetail({
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mt-1", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded", children: student.generatedStudentId }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-500", children: student.className })
+        ] }),
+        isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 flex items-center gap-2 text-xs font-semibold text-blue-700", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-3.5" }),
+            "Active capture student",
+            activeStudentSource === "qr" ? " · selected by QR" : ""
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-normal text-blue-600", children: "New JPEG and RAW captures will be assigned here" })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2", children: captures.length > 0 || qrMarkers.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", children: [
-        captures.length,
-        " capture",
-        captures.length !== 1 ? "s" : "",
-        " recorded",
-        qrMarkers.length > 0 && ` · ${qrMarkers.length} QR marker${qrMarkers.length !== 1 ? "s" : ""}`
-      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "warning", children: "Not yet photographed" }) })
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+        isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: onClearCaptureTarget, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3.5" }),
+          "Clear target"
+        ] }),
+        captures.length > 0 || qrMarkers.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", children: [
+          captures.length,
+          " capture",
+          captures.length !== 1 ? "s" : "",
+          " recorded",
+          qrMarkers.length > 0 && ` · ${qrMarkers.length} QR marker${qrMarkers.length !== 1 ? "s" : ""}`
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "warning", children: "Not yet photographed" })
+      ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-8 p-8", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center", children: [

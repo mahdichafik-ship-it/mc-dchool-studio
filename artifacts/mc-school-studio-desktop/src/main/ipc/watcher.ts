@@ -252,14 +252,14 @@ export function registerWatcherHandlers() {
 
   ipcMain.handle('watcher:stop', async (_e, { projectId }: { projectId: number }) => {
     const session = watchers.get(projectId)
-    if (!session) return
-
-    if (session.flushTimer) clearTimeout(session.flushTimer)
-    session.pendingFiles = []
-    await session.watcher.close()
-    watchers.delete(projectId)
-  pendingManualTargets.delete(projectId)
-  emitActiveStudentChanged(projectId, null, 'none')
+    if (session) {
+      if (session.flushTimer) clearTimeout(session.flushTimer)
+      session.pendingFiles = []
+      await session.watcher.close()
+      watchers.delete(projectId)
+    }
+    pendingManualTargets.delete(projectId)
+    emitActiveStudentChanged(projectId, null, 'none')
     console.log(`[Watcher] Stopped watching for project ${projectId}`)
   })
 

@@ -2,8 +2,10 @@ import { strict as assert } from 'node:assert'
 import test from 'node:test'
 import {
   advanceSequence,
+  clearManualStudent,
   createSequenceState,
   registerCapturePath,
+  setManualStudent,
   sortCaptureFiles,
 } from '../src/main/lib/photoSequence.ts'
 
@@ -66,6 +68,42 @@ test('starts a fresh sequence after the watcher restarts', () => {
   assert.deepEqual(advanceSequence(restartedSession, { kind: 'portrait' }), {
     kind: 'review',
     reason: 'Portrait was captured before a valid student QR marker',
+  })
+})
+
+test('routes portraits to a manually selected student and supports target changes', () => {
+  const state = createSequenceState()
+  setManualStudent(state, 10)
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'matched',
+    studentId: 10,
+  })
+
+  setManualStudent(state, 20)
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'matched',
+    studentId: 20,
+  })
+
+  clearManualStudent(state)
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'review',
+    reason: 'Portrait was captured before a valid student QR marker',
+  })
+})
+
+test('keeps the manual target when a QR marker conflicts', () => {
+  const state = createSequenceState(10)
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: 20, reference: 'STU-20' }),
+    {
+      kind: 'review',
+      reason: 'QR marker "STU-20" conflicts with the selected student',
+    },
+  )
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'matched',
+    studentId: 10,
   })
 })
 

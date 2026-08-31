@@ -41597,8 +41597,19 @@ function extractStudentReference(fileName, studentIds) {
   });
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
-function createSequenceState() {
-  return { activeStudentId: null };
+function createSequenceState(manualStudentId = null) {
+  return {
+    activeStudentId: manualStudentId,
+    manualStudentId
+  };
+}
+function setManualStudent(state, studentId) {
+  state.manualStudentId = studentId;
+  state.activeStudentId = studentId;
+}
+function clearManualStudent(state) {
+  state.manualStudentId = null;
+  state.activeStudentId = null;
 }
 function registerCapturePath(seenPaths, filePath) {
   if (seenPaths.has(filePath)) return false;
@@ -41619,6 +41630,21 @@ function sortCaptureFiles(files) {
 }
 function advanceSequence(state, capture) {
   if (capture.kind === "marker") {
+    if (state.manualStudentId !== null && capture.studentId !== null && capture.studentId !== state.manualStudentId) {
+      return {
+        kind: "review",
+        reason: `QR marker "${capture.reference}" conflicts with the selected student`
+      };
+    }
+    if (state.manualStudentId !== null && capture.studentId === null) {
+      return {
+        kind: "review",
+        reason: `QR marker "${capture.reference}" does not match the selected student`
+      };
+    }
+    if (state.manualStudentId !== null) {
+      return { kind: "marker", studentId: state.manualStudentId };
+    }
     state.activeStudentId = capture.studentId;
     if (capture.studentId === null) {
       return {
@@ -41831,12 +41857,7 @@ function createWatchedPhotoStore(db, sourcePath) {
   return {
     findProject: (projectId) => db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get(),
     listStudents: (projectId) => db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all(),
-    findStudent: (projectId, generatedStudentId) => db.select().from(studentsTable).where(
-      drizzleOrm.and(
-        drizzleOrm.eq(studentsTable.projectId, projectId),
-        drizzleOrm.eq(studentsTable.generatedStudentId, generatedStudentId)
-      )
-    ).get(),
+    findStudent: (projectId, generatedStudentId) => db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all().find((student) => student.generatedStudentId.trim().toLocaleLowerCase() === generatedStudentId.trim().toLocaleLowerCase()),
     findClass: (classId) => db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, classId)).get(),
     insertPhoto: (photo) => {
       const saved = db.insert(photosTable).values(photo).returning().get();
@@ -41867,7 +41888,7 @@ function saveUnmatchedPhoto(store, projectId, filePath, fileName, reason) {
     reason
   };
 }
-async function processWatchedPhoto(projectId, filePath, { store, photosDir, readQr, capturedAt }) {
+async function processWatchedPhoto(projectId, filePath, { store, photosDir, readQr, targetStudentId = null, capturedAt }) {
   const fileName = node_path.basename(filePath);
   const project = store.findProject(projectId);
   if (!project) throw new Error(`Project ${projectId} not found`);
@@ -41878,17 +41899,26 @@ async function processWatchedPhoto(projectId, filePath, { store, photosDir, read
   );
   const qrResult = filenameReference ? null : await readQr(filePath);
   const reference = filenameReference ?? qrResult?.studentId;
-  if (!reference) {
+  if (!reference && targetStudentId === null) {
     return saveUnmatchedPhoto(store, projectId, filePath, fileName, "No QR code detected");
   }
-  const student = store.findStudent(projectId, reference);
+  const student = reference ? store.findStudent(projectId, reference) : store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId);
   if (!student) {
     return saveUnmatchedPhoto(
       store,
       projectId,
       filePath,
       fileName,
-      `Student ID "${reference}" not found in this project`
+      reference ? `Student ID "${reference}" not found in this project` : `Selected student "${targetStudentId}" was not found in this project`
+    );
+  }
+  if (targetStudentId !== null && reference && student.id !== targetStudentId) {
+    return saveUnmatchedPhoto(
+      store,
+      projectId,
+      filePath,
+      fileName,
+      `Filename student ID "${reference}" conflicts with the selected student`
     );
   }
   const classRow = store.findClass(student.classId);
@@ -41920,6 +41950,7 @@ function resolveWatchFolders(folderPath, folderExists = () => false) {
 }
 const FLUSH_DELAY_MS = 500;
 const watchers = /* @__PURE__ */ new Map();
+const pendingManualTargets = /* @__PURE__ */ new Map();
 let desktopRetiring = false;
 async function stopAllWatchersForRetirement() {
   desktopRetiring = true;
@@ -41969,6 +42000,39 @@ function toStudentEvent(db, student) {
     updatedAt: student.updatedAt
   };
 }
+function emitActiveStudentChanged(projectId, studentId, source) {
+  getMainWindow()?.webContents.send("watcher:activeStudentChanged", {
+    projectId,
+    studentId,
+    source
+  });
+}
+function findProjectStudent(db, projectId, studentId) {
+  return db.select().from(studentsTable).where(drizzleOrm.and(drizzleOrm.eq(studentsTable.projectId, projectId), drizzleOrm.eq(studentsTable.id, studentId))).get();
+}
+function findStudentByFilename(db, projectId, fileName) {
+  const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
+  const reference = extractStudentReference(fileName, students.map((student) => student.generatedStudentId));
+  if (!reference) return void 0;
+  const normalizedReference = reference.trim().toLocaleLowerCase();
+  return students.find((student) => student.generatedStudentId.trim().toLocaleLowerCase() === normalizedReference);
+}
+function getStudentPhotoFolder(db, projectId, student) {
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const classRow = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
+  return path.join(
+    getPhotosDir(),
+    safeFolderName(project?.schoolName ?? `Project ${projectId}`),
+    safeFolderName(classRow?.className ?? "Unassigned Class"),
+    safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
+  );
+}
+function sendUnmatchedResult(win, projectId, result) {
+  win?.webContents.send("photo:unmatched", {
+    ...result,
+    projectId
+  });
+}
 function registerWatcherHandlers() {
   const db = getDb();
   electron.ipcMain.handle("watcher:start", async (_e, { projectId }) => {
@@ -41998,7 +42062,7 @@ function registerWatcherHandlers() {
       flushTimer: null,
       processing: Promise.resolve(),
       seenPaths: /* @__PURE__ */ new Set(),
-      sequenceState: createSequenceState()
+      sequenceState: createSequenceState(pendingManualTargets.get(projectId) ?? null)
     };
     watchers.set(projectId, session);
     watcher.on("add", (filePath) => {
@@ -42027,16 +42091,44 @@ function registerWatcherHandlers() {
   });
   electron.ipcMain.handle("watcher:stop", async (_e, { projectId }) => {
     const session = watchers.get(projectId);
-    if (!session) return;
-    if (session.flushTimer) clearTimeout(session.flushTimer);
-    session.pendingFiles = [];
-    await session.watcher.close();
-    watchers.delete(projectId);
+    if (session) {
+      if (session.flushTimer) clearTimeout(session.flushTimer);
+      session.pendingFiles = [];
+      await session.watcher.close();
+      watchers.delete(projectId);
+    }
+    pendingManualTargets.delete(projectId);
+    emitActiveStudentChanged(projectId, null, "none");
     console.log(`[Watcher] Stopped watching for project ${projectId}`);
   });
   electron.ipcMain.handle("watcher:isRunning", (_e, { projectId }) => {
     return watchers.has(projectId);
   });
+  electron.ipcMain.handle(
+    "watcher:getActiveStudent",
+    (_e, { projectId }) => {
+      const session = watchers.get(projectId);
+      return session?.sequenceState.activeStudentId ?? pendingManualTargets.get(projectId) ?? null;
+    }
+  );
+  electron.ipcMain.handle(
+    "watcher:setActiveStudent",
+    (_e, { projectId, studentId }) => {
+      if (studentId !== null) {
+        const student = findProjectStudent(db, projectId, studentId);
+        if (!student) throw new Error("Student does not belong to this project");
+        pendingManualTargets.set(projectId, studentId);
+        const session = watchers.get(projectId);
+        if (session) setManualStudent(session.sequenceState, studentId);
+      } else {
+        pendingManualTargets.delete(projectId);
+        const session = watchers.get(projectId);
+        if (session) clearManualStudent(session.sequenceState);
+      }
+      emitActiveStudentChanged(projectId, studentId, studentId === null ? "none" : "manual");
+      return studentId;
+    }
+  );
 }
 async function enqueueCapture(projectId, filePath) {
   if (desktopRetiring) return;
@@ -42088,14 +42180,46 @@ async function handleNewPhoto(projectId, capture, session) {
   const role = getCaptureFileRole(capture.fileName);
   if (!role || hasProcessedCaptureSource(db, capture.filePath) || hasProcessedQrMarkerSource(db, capture.filePath)) return;
   if (role === "RAW") {
-    handleNewRaw(projectId, capture, session, db);
+    await handleNewRaw(projectId, capture, session, db);
     return;
   }
   const win = getMainWindow();
+  const manualStudentId = session.sequenceState.manualStudentId;
+  const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
+  const filenameReference = extractStudentReference(
+    capture.fileName,
+    knownStudents.map((student2) => student2.generatedStudentId)
+  );
+  if (filenameReference) {
+    const result = await processWatchedPhoto(projectId, capture.filePath, {
+      store: createWatchedPhotoStore(db, capture.filePath),
+      photosDir: getPhotosDir(),
+      readQr: async () => null,
+      targetStudentId: manualStudentId,
+      capturedAt: new Date(capture.capturedAtMs).toISOString()
+    });
+    if (result.kind === "unmatched") {
+      sendUnmatchedResult(win, projectId, result);
+      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
+      return;
+    }
+    finishMatchedPhoto(db, win, result.photo, result.student);
+    return;
+  }
   const qrResult = await readQrFromImage(capture.filePath);
   if (qrResult) {
     const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase();
     const student2 = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all().find((candidate) => candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId);
+    if (manualStudentId !== null && (!student2 || student2.id !== manualStudentId)) {
+      recordUnmatched(
+        db,
+        win,
+        projectId,
+        capture,
+        student2 ? `QR marker for ${student2.firstName} ${student2.lastName} conflicts with the selected student` : `QR marker "${qrResult.studentId}" does not match the selected student`
+      );
+      return;
+    }
     const decision2 = advanceSequence(session.sequenceState, {
       kind: "marker",
       studentId: student2?.id ?? null,
@@ -42103,6 +42227,7 @@ async function handleNewPhoto(projectId, capture, session) {
     });
     if (decision2.kind === "review") {
       recordUnmatched(db, win, projectId, capture, decision2.reason);
+      emitActiveStudentChanged(projectId, null, "none");
       return;
     }
     if (!student2) {
@@ -42122,16 +42247,32 @@ async function handleNewPhoto(projectId, capture, session) {
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       student: toStudentEvent(db, student2)
     });
+    emitActiveStudentChanged(
+      projectId,
+      student2.id,
+      manualStudentId === null ? "qr" : "manual"
+    );
     console.log(`[Watcher] QR marker ${capture.fileName} → ${student2.firstName} ${student2.lastName}`);
     return;
   }
+  if (manualStudentId !== null) {
+    const result = await processWatchedPhoto(projectId, capture.filePath, {
+      store: createWatchedPhotoStore(db, capture.filePath),
+      photosDir: getPhotosDir(),
+      readQr: async () => null,
+      targetStudentId: manualStudentId,
+      capturedAt: new Date(capture.capturedAtMs).toISOString()
+    });
+    if (result.kind === "unmatched") {
+      sendUnmatchedResult(win, projectId, result);
+      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
+      return;
+    }
+    finishMatchedPhoto(db, win, result.photo, result.student);
+    return;
+  }
   if (session.sequenceState.activeStudentId === null) {
-    const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
-    const filenameReference = extractStudentReference(
-      capture.fileName,
-      knownStudents.map((student2) => student2.generatedStudentId)
-    );
-    if (filenameReference || looksLikeSmartShooterName(capture.fileName)) {
+    if (looksLikeSmartShooterName(capture.fileName)) {
       const result = await processWatchedPhoto(projectId, capture.filePath, {
         store: createWatchedPhotoStore(db, capture.filePath),
         photosDir: getPhotosDir(),
@@ -42139,7 +42280,7 @@ async function handleNewPhoto(projectId, capture, session) {
         capturedAt: new Date(capture.capturedAtMs).toISOString()
       });
       if (result.kind === "unmatched") {
-        win?.webContents.send("photo:unmatched", result);
+        sendUnmatchedResult(win, projectId, result);
         console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`);
         return;
       }
@@ -42221,8 +42362,18 @@ function persistQrMarker(db, projectId, student, capture) {
 function handleNewRaw(projectId, capture, session, db) {
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   if (!project) return;
-  const studentId = session.sequenceState.activeStudentId;
-  const student = studentId === null ? void 0 : db.select().from(studentsTable).where(drizzleOrm.and(drizzleOrm.eq(studentsTable.projectId, projectId), drizzleOrm.eq(studentsTable.id, studentId))).get();
+  const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
+  const filenameReference = extractStudentReference(
+    capture.fileName,
+    knownStudents.map((student2) => student2.generatedStudentId)
+  );
+  const filenameStudent = findStudentByFilename(db, projectId, capture.fileName);
+  const manualStudentId = session.sequenceState.manualStudentId;
+  const manualStudent = manualStudentId === null ? void 0 : findProjectStudent(db, projectId, manualStudentId);
+  const sequenceStudentId = session.sequenceState.activeStudentId;
+  const sequenceStudent = sequenceStudentId === null ? void 0 : findProjectStudent(db, projectId, sequenceStudentId);
+  const conflictReason = manualStudentId !== null && filenameReference && (!filenameStudent || filenameStudent.id !== manualStudentId) ? filenameStudent ? `RAW filename for ${filenameStudent.firstName} ${filenameStudent.lastName} conflicts with the selected student` : `RAW filename student ID "${filenameReference}" conflicts with the selected student` : null;
+  const student = conflictReason ? void 0 : manualStudent ?? filenameStudent ?? sequenceStudent;
   const storage = ensureProjectStorageLayout(
     getProjectStorageLayout(
       getPhotoSystemLayout(electron.app.getPath("home")),
@@ -42230,7 +42381,11 @@ function handleNewRaw(projectId, capture, session, db) {
       project.schoolName
     )
   );
-  const storedPath = copyToProjectFolder(capture.filePath, capture.fileName, storage.rawOriginals);
+  const storedPath = copyToProjectFolder(
+    capture.filePath,
+    capture.fileName,
+    student ? getStudentPhotoFolder(db, projectId, student) : storage.rawOriginals
+  );
   const result = recordRawCapture(db, {
     projectId,
     studentId: student?.id ?? null,
@@ -42247,6 +42402,13 @@ function handleNewRaw(projectId, capture, session, db) {
     captureId: result.captureId,
     studentId: savedCapture?.studentId ?? null
   });
+  if (conflictReason) {
+    sendUnmatchedResult(getMainWindow(), projectId, {
+      filePath: capture.filePath,
+      fileName: capture.fileName,
+      reason: conflictReason
+    });
+  }
   void queueCaptureUploads(result.captureId).catch(() => {
   });
   console.log(
@@ -42306,6 +42468,8 @@ function recordUnmatched(db, win, projectId, capture, reason) {
   }).returning().get();
   mirrorPhotoAsCapture(db, photo, capture.filePath);
   win?.webContents.send("photo:unmatched", {
+    projectId,
+    photoId: photo.id,
     filePath: capture.filePath,
     fileName: capture.fileName,
     reason

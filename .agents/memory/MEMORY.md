@@ -11,3 +11,4 @@
 - [Capture review compatibility](capture-review-compatibility.md) — legacy JPEG actions must synchronize capture/file records or completeness becomes stale.
 - [Desktop cloud upload identity](desktop-cloud-upload-identity.md) — imported rosters must retain cloud IDs; legacy local projects need a safe identity repair before upload.
 - [Explicit project sync boundary](explicit-project-sync-boundary.md) — capture-time ingestion is local-only; cloud upload begins only from an explicit finish or retry action.
+- [Local preview pipeline](local-preview-pipeline.md) — emit a source-local JPEG preview before managed copy and persistence, then reconcile it by a stable preview key.

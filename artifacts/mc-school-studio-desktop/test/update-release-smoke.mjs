@@ -25,6 +25,13 @@ const autoUpdaterExpression = `
     ('electron-updater')
     .autoUpdater
 `
+const dialogExpression = `
+  process
+    .getBuiltinModule('module')
+    .createRequire(process.resourcesPath + '/app.asar/out/main/index.js')
+    ('electron')
+    .dialog
+`
 
 mkdirSync(root, { recursive: true })
 mkdirSync(userDataDir, { recursive: true })
@@ -242,6 +249,10 @@ try {
   cdp = await connectToRenderer()
   mainCdp = await connectToMainProcess()
   await waitFor('desktop renderer', () => cdp.evaluate('document.readyState === "complete"'))
+  await mainCdp.evaluate(`
+    (${dialogExpression}).showMessageBox = async () => ({ response: 1 })
+    'dialogs-suppressed'
+  `)
   record('checking')
   const checkResult = await cdp.evaluate('window.api.invoke("update:check")')
   if (checkResult?.status === 'error') {

@@ -1,0 +1,528 @@
+CRITICAL AUDIT + PERFORMANCE FIX — VERIFY THE ACTUAL IMAGE INGESTION PATH
+
+Do NOT assume the current Watch Folder implementation is architecturally correct.
+
+At the moment, the app eventually shows the image beside the selected student, but I do not have visibility into what is actually happening in the backend.
+
+Before optimizing anything, inspect the current implementation and determine the exact path taken by every image.
+
+I need you to verify whether the current workflow is:
+
+Camera → Local Watch Folder → Local Processing → Local Preview
+
+or whether it is actually doing something like:
+
+Camera → Local Watch Folder → Upload to backend/cloud/server/storage → Download/fetch again → UI Preview
+
+If any upload/download round-trip exists before the image can be displayed beside the selected student, that is a critical architectural problem and must be removed.
+
+⸻
+
+FIRST TASK — TRACE THE ENTIRE IMAGE FLOW
+
+Before changing code, map the actual current pipeline from the instant a new image appears in the Watch Folder until it becomes visible in the UI.
+
+For example, identify:
+
+1. Where the filesystem event is detected.
+2. Whether the app reads the image locally.
+3. Whether the image is copied or moved.
+4. Whether the image is uploaded anywhere.
+5. Whether an HTTP request/API call occurs.
+6. Whether cloud storage is involved.
+7. Whether the frontend receives a remote URL.
+8. Whether the frontend then downloads the image again.
+9. When the student assignment happens.
+10. When the thumbnail is generated.
+11. When the database is updated.
+12. When the UI is notified.
+13. When the image actually becomes visible.
+
+I want a clear explanation of the current code path before optimization.
+
+Do not guess.
+
+Inspect the existing codebase.
+
+⸻
+
+ADD TEMPORARY DIAGNOSTIC LOGGING
+
+Instrument the image pipeline so we can see exactly what happens.
+
+For each capture, log:
+
+T0 = filesystem event received
+T1 = local file finished writing
+T2 = active student identified
+T3 = any file copy/move starts
+T4 = any API request starts
+T5 = any upload starts
+T6 = any upload completes
+T7 = thumbnail creation starts
+T8 = thumbnail ready
+T9 = UI event sent
+T10 = image rendered
+T11 = database persistence completed
+T12 = cloud synchronization completed
+
+Also log the actual source being displayed in the UI.
+
+For example:
+
+preview source = local://...
+
+or
+
+preview source = http://localhost/...
+
+or
+
+preview source = https://cloud-storage/...
+
+I need to know whether the preview is local or remote.
+
+⸻
+
+SEARCH THE EXISTING CODEBASE FOR POSSIBLE REMOTE ROUND-TRIPS
+
+Audit all relevant code for:
+
+* fetch(…)
+* axios(…)
+* HTTP requests
+* API routes
+* multipart uploads
+* storage SDKs
+* S3
+* Firebase Storage
+* Supabase Storage
+* Cloudinary
+* object storage
+* upload functions
+* signed URLs
+* remote image URLs
+* download functions
+* server-side image processing
+* network requests before preview
+* database calls that return image URLs
+* wait-for-upload logic
+
+If any of these are required before a local image becomes visible, refactor the architecture.
+
+⸻
+
+REQUIRED ARCHITECTURE
+
+The live preview path MUST be fully local.
+
+The required critical path is:
+
+Camera
+↓
+Local Watch Folder
+↓
+Native filesystem event
+↓
+Current active student
+↓
+Fast local thumbnail
+↓
+Immediate UI preview
+
+No cloud.
+
+No upload.
+
+No remote API.
+
+No download.
+
+No external storage.
+
+No internet dependency.
+
+⸻
+
+VERY IMPORTANT DISTINCTION
+
+There are two completely separate systems:
+
+SYSTEM A — LIVE SHOOTING PATH
+
+This is latency-sensitive.
+
+It must stay local.
+
+Camera
+→ local disk
+→ local assignment
+→ local thumbnail
+→ UI
+
+SYSTEM B — STORAGE / SYNC / BACKUP
+
+This is not latency-sensitive.
+
+It can happen afterward.
+
+Local image
+→ database persistence
+→ optional upload
+→ cloud storage
+→ backup
+→ remote gallery
+→ synchronization
+
+System B must NEVER block System A.
+
+⸻
+
+DO NOT USE THE CLOUD AS THE APPLICATION’S IMAGE CACHE
+
+The application should not need to upload an image just to make that image accessible to its own interface.
+
+The image already exists on the same computer.
+
+The desktop application should expose the local image or local thumbnail directly to the renderer/frontend through an appropriate secure local mechanism.
+
+Examples depending on framework:
+
+* custom local file protocol
+* Electron IPC
+* localhost-only local asset server
+* Tauri asset protocol
+* native desktop file bridge
+
+The important requirement is:
+
+the image must not leave the computer and come back simply to be displayed.
+
+⸻
+
+TARGET PERFORMANCE
+
+Once the JPEG has finished writing to local disk, the preview should normally appear in approximately:
+
+100–500 ms
+
+on a normal modern local SSD.
+
+If it currently takes multiple seconds, identify exactly which stage is responsible.
+
+Do not hide the issue behind loaders.
+
+⸻
+
+DO NOT WAIT FOR FULL IMAGE PROCESSING
+
+The preview path must not wait for:
+
+* full-resolution decode
+* RAW development
+* RAW/JPEG pairing
+* metadata extraction
+* EXIF indexing
+* hashing
+* image upload
+* cloud sync
+* database sync
+* folder organization
+* backup
+* remote URL creation
+
+Show the preview first.
+
+Everything else can continue afterward.
+
+⸻
+
+CREATE A FAST LOCAL PREVIEW
+
+Do not display the original 45 MP / large JPEG directly if that causes delay.
+
+Immediately generate or extract a lightweight local preview.
+
+Recommended:
+
+long edge approximately 800–1200 px
+
+The original image must remain unchanged.
+
+The thumbnail is only for the live interface.
+
+⸻
+
+JPEG + RAW WORKFLOW
+
+When shooting JPEG + RAW:
+
+If the JPEG arrives first:
+
+SHOW THE JPEG IMMEDIATELY.
+
+Do not wait for the NEF.
+
+When the matching NEF arrives, associate it with the same capture in the background.
+
+If shooting RAW-only, extract the embedded JPEG preview from the NEF rather than performing full RAW development for the live interface.
+
+⸻
+
+DO NOT WAIT ON DATABASE WRITES
+
+Student assignment can be held immediately in local application state and persisted asynchronously.
+
+Do not do:
+
+new image
+→ database write
+→ await response
+→ query database again
+→ obtain record
+→ show image
+
+Instead:
+
+new image
+→ active student known
+→ show local preview immediately
+→ persist relationship asynchronously
+
+Persistence still has to be reliable, but it must not block the photographer.
+
+⸻
+
+NATIVE FILE WATCHING
+
+Verify that the current Watch Folder actually uses native filesystem events.
+
+Do NOT use slow polling such as:
+
+scan folder every 1 second
+
+or:
+
+refresh every 2 seconds
+
+or:
+
+ask backend for new images repeatedly.
+
+Use event-driven watching.
+
+Also audit for artificial delays including:
+
+setTimeout
+setInterval
+sleep
+debounce
+throttle
+
+especially values like:
+
+500 ms
+1000 ms
+2000 ms
+3000 ms
+
+Remove unnecessary delays.
+
+⸻
+
+FILE-STABILITY CHECK
+
+Do not solve partial-file problems by waiting several seconds.
+
+Instead use a short intelligent file-stability check:
+
+Detect image.
+
+Read file size.
+
+Wait approximately 50–100 ms.
+
+Read size again.
+
+If size is unchanged and the file can be opened:
+
+process it immediately.
+
+If still being written:
+
+repeat briefly.
+
+This must be event-driven and fast.
+
+⸻
+
+FILE MOVEMENT MUST NOT BLOCK PREVIEW
+
+If the current system does:
+
+Watch Folder
+→ copy large image
+→ move
+→ rename
+→ database
+→ upload
+→ thumbnail
+→ preview
+
+change it.
+
+Required:
+
+Watch Folder
+→ identify student
+→ thumbnail
+→ preview
+
+then afterward:
+
+→ rename
+→ organize
+→ pair RAW
+→ persist database
+→ cloud sync
+
+If the source and destination are on the same local filesystem, use an atomic move/rename where possible rather than copying the entire file unnecessarily.
+
+⸻
+
+DO NOT REFRESH THE WHOLE PROJECT
+
+When one new image arrives, update only:
+
+* that capture
+* that student’s image list
+* the active student preview
+
+Do not:
+
+* reload all students
+* reload the entire project
+* rescan all folders
+* query all captures again
+* rerender the full project
+* rebuild every thumbnail
+
+A single capture should trigger a tiny targeted UI update.
+
+⸻
+
+PUSH THE EVENT TO THE UI
+
+The desktop process should notify the UI immediately.
+
+Do not require the frontend to poll for updates.
+
+Conceptually:
+
+newCaptureReady
+
+with:
+
+* captureId
+* studentId
+* localPreviewUrl
+* timestamp
+* originalPath
+
+The UI inserts that preview immediately.
+
+⸻
+
+BENCHMARK THE CURRENT AND FIXED IMPLEMENTATION
+
+Create a development benchmark.
+
+Run:
+
+50 JPEG files
+
+then:
+
+50 JPEG + NEF pairs
+
+Measure:
+
+* filesystem detection latency
+* file-stability latency
+* active-student assignment latency
+* thumbnail generation
+* UI notification
+* actual render time
+* database time
+* upload/sync time
+* total stable-file-to-visible time
+
+Also verify:
+
+* no lost images
+* no duplicates
+* no wrong student assignment
+* no JPEG/RAW mismatches
+* no UI freezing
+
+⸻
+
+SHOW ME THE RESULT OF THE AUDIT
+
+After inspecting the code, give me a concise technical report showing the existing pipeline.
+
+For example:
+
+CURRENT:
+
+Camera
+→ Watch Folder
+→ Node watcher
+→ API POST /capture
+→ Supabase upload
+→ database INSERT
+→ signed URL
+→ React fetch
+→ preview
+
+Then:
+
+PROBLEM:
+Cloud round-trip is adding 1.8 seconds.
+
+Then:
+
+NEW:
+
+Camera
+→ Watch Folder
+→ local watcher
+→ local thumbnail
+→ IPC
+→ preview
+→ background database/cloud sync
+
+Do not simply tell me that it is “optimized.”
+
+Show me the actual before-and-after architecture.
+
+⸻
+
+NON-NEGOTIABLE REQUIREMENT
+
+Before making performance changes, prove whether the application currently uses a local-only path or an upload/download path.
+
+If it uses any remote round-trip to display an image that already exists locally, remove that dependency from the live shooting path.
+
+The system must feel like tethering software, not like a web uploader.
+
+The photographer should be able to disconnect the internet completely and still:
+
+* select a student
+* shoot
+* see the image beside that student almost immediately
+* switch student
+* continue shooting
+* see all previews live
+
+with no degradation in the core shooting workflow.

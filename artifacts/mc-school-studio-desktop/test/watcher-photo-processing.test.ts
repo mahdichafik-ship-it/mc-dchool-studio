@@ -99,6 +99,41 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
   }
 })
 
+test('emits a local preview before the managed copy and database persistence', async () => {
+  const fixture = createFixture('DSC_8290.jpg')
+  const { store, photos } = createStore()
+  const destination = join(
+    fixture.photosDir,
+    'Example School',
+    'Class 3',
+    'AB12_Zaki_Dina',
+    'DSC_8290.jpg',
+  )
+  const stages: string[] = []
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => null,
+      targetStudentId: 3,
+      onPreviewReady: async (context) => {
+        stages.push(`preview:${context.student.id}`)
+        assert.equal(existsSync(destination), false)
+        assert.equal(photos.length, 0)
+        return 'data:image/jpeg;base64,preview'
+      },
+    })
+
+    assert.equal(result.kind, 'matched')
+    assert.deepEqual(stages, ['preview:3'])
+    assert.equal(existsSync(destination), true)
+    assert.equal(photos.length, 1)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
 test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fallback', async () => {
   const fixture = createFixture('Smith_John_class_school_001234_595.JPG')
   const { store, photos } = createStore()

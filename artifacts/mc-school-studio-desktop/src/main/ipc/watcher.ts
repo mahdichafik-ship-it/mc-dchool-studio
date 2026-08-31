@@ -16,6 +16,12 @@ import {
 import { getSetting } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
 import { generateThumbnail, readQrFromImage } from '../lib/qrReader'
+import { waitForStableFile } from '../lib/fileStability'
+import {
+  finishImagePipelineTrace,
+  markImagePipeline,
+  startImagePipelineTrace,
+} from '../lib/imagePipelineDiagnostics'
 import {
   advanceSequence,
   clearManualStudent,
@@ -43,11 +49,13 @@ import {
 } from '../lib/storageLayout'
 import { resolveWatchFolders } from '../lib/watchFolders'
 
-const FLUSH_DELAY_MS = 500
+const FLUSH_DELAY_MS = 50
+const LIVE_PREVIEW_EDGE = 900
 
 interface WatchSession {
   watcher: FSWatcher
   pendingFiles: CaptureFile[]
+  pendingEnqueues: Set<Promise<void>>
   flushTimer: NodeJS.Timeout | null
   processing: Promise<void>
   seenPaths: Set<string>
@@ -67,6 +75,7 @@ export async function stopAllWatchersForRetirement(): Promise<void> {
     if (session.flushTimer) clearTimeout(session.flushTimer)
     session.flushTimer = null
     session.pendingFiles = []
+    await Promise.allSettled([...session.pendingEnqueues])
   }
   await Promise.allSettled(sessions.map((session) => session.watcher.close()))
   await Promise.allSettled(sessions.map((session) => session.processing))
@@ -180,6 +189,51 @@ function sendUnmatchedResult(
   })
 }
 
+let nextPreviewId = -1
+
+async function emitLocalPreview(
+  win: BrowserWindow | null,
+  projectId: number,
+  capture: CaptureFile,
+  student: typeof studentsTable.$inferSelect,
+  context: { filePath: string; fileName: string; capturedAt: string },
+): Promise<string | null> {
+  const diagnosticId = capture.diagnosticId
+  markImagePipeline(diagnosticId, 'T7 thumbnail creation starts', `edge=${LIVE_PREVIEW_EDGE}`)
+  const thumbnailData = await generateThumbnail(context.filePath, LIVE_PREVIEW_EDGE)
+  markImagePipeline(
+    diagnosticId,
+    'T8 thumbnail ready',
+    thumbnailData ? `bytes=${thumbnailData.length}` : 'thumbnail unavailable',
+  )
+  if (!thumbnailData) return null
+
+  const preview: Photo = {
+    id: nextPreviewId--,
+    projectId,
+    studentId: student.id,
+    filePath: context.filePath,
+    fileName: context.fileName,
+    capturedAt: context.capturedAt,
+    isMatched: true,
+    thumbnailData,
+    createdAt: context.capturedAt,
+    previewKey: diagnosticId,
+  }
+  win?.webContents.send('photo:matched', {
+    photo: preview,
+    student: toStudentEvent(getDb(), student),
+    preview: true,
+    previewKey: diagnosticId,
+  })
+  markImagePipeline(
+    diagnosticId,
+    'T9 UI event sent',
+    `preview source=local://thumbnail/${diagnosticId ?? context.fileName}`,
+  )
+  return thumbnailData
+}
+
 export function registerWatcherHandlers() {
   const db = getDb()
 
@@ -212,12 +266,12 @@ export function registerWatcherHandlers() {
       // opened the project. The database/source-path checks below make this
       // safe across restarts and prevent duplicate imports.
       ignoreInitial: false,
-      awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 },
     })
 
     const session: WatchSession = {
       watcher,
       pendingFiles: [],
+      pendingEnqueues: new Set(),
       flushTimer: null,
       processing: Promise.resolve(),
       seenPaths: new Set(),
@@ -226,7 +280,10 @@ export function registerWatcherHandlers() {
     watchers.set(projectId, session)
 
     watcher.on('add', (filePath) => {
-      void enqueueCapture(projectId, filePath)
+      const diagnosticId = startImagePipelineTrace(filePath)
+      const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId)
+      session.pendingEnqueues.add(enqueueTask)
+      void enqueueTask.finally(() => session.pendingEnqueues.delete(enqueueTask))
     })
     watcher.on('error', (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error)
@@ -310,8 +367,9 @@ export async function stopProjectWatcher(
   watchers.delete(projectId)
   if (session.flushTimer) clearTimeout(session.flushTimer)
   session.flushTimer = null
-  const pending = sortCaptureFiles(session.pendingFiles.splice(0))
   await session.watcher.close()
+  await Promise.allSettled([...session.pendingEnqueues])
+  const pending = sortCaptureFiles(session.pendingFiles.splice(0))
 
   if (drain && pending.length > 0) {
     session.processing = session.processing.then(async () => {
@@ -320,6 +378,8 @@ export async function stopProjectWatcher(
           await handleNewPhoto(projectId, capture, session)
         } catch (error) {
           console.error(`[Watcher] Could not drain ${capture.filePath} while stopping`, error)
+        } finally {
+          finishImagePipelineTrace(capture.diagnosticId)
         }
       }
     })
@@ -332,21 +392,39 @@ export async function stopProjectWatcher(
   }
 }
 
-async function enqueueCapture(projectId: number, filePath: string): Promise<void> {
-  if (desktopRetiring) return
+async function enqueueCapture(
+  projectId: number,
+  filePath: string,
+  diagnosticId?: string,
+): Promise<void> {
+  if (desktopRetiring) {
+    finishImagePipelineTrace(diagnosticId)
+    return
+  }
   const session = watchers.get(projectId)
-  if (!session || session.seenPaths.has(filePath)) return
+  if (!session || session.seenPaths.has(filePath)) {
+    finishImagePipelineTrace(diagnosticId)
+    return
+  }
 
-  if (!getCaptureFileRole(filePath)) return
+  if (!getCaptureFileRole(filePath)) {
+    finishImagePipelineTrace(diagnosticId)
+    return
+  }
 
   try {
-    const fileStat = await statFile(filePath)
-    if (!fileStat.isFile()) return
+    const fileStat = await waitForStableFile(filePath, statFile)
+    markImagePipeline(diagnosticId, 'T1 local file finished writing', `bytes=${fileStat.size}`)
+    if (desktopRetiring || watchers.get(projectId) !== session) {
+      finishImagePipelineTrace(diagnosticId)
+      return
+    }
     if (!registerCapturePath(session.seenPaths, filePath)) return
     session.pendingFiles.push({
       filePath,
       fileName: basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
+      diagnosticId,
       // Capture the effective target at arrival time. Processing can be
       // delayed by image copies or a burst of filesystem events, and a
       // photographer may select another student or scan another QR during
@@ -357,6 +435,7 @@ async function enqueueCapture(projectId: number, filePath: string): Promise<void
     scheduleFlush(projectId)
   } catch (error) {
     console.error(`[Watcher] Could not inspect ${filePath}`, error)
+    finishImagePipelineTrace(diagnosticId)
   }
 }
 
@@ -383,6 +462,8 @@ function scheduleFlush(projectId: number): void {
               `[Watcher] Could not process ${capture.filePath}; it will be retried`,
               error,
             )
+          } finally {
+            finishImagePipelineTrace(capture.diagnosticId)
           }
         }
       })
@@ -398,6 +479,10 @@ async function handleNewPhoto(
   session: WatchSession,
 ): Promise<void> {
   if (desktopRetiring) return
+  markImagePipeline(capture.diagnosticId, 'T4 API request starts', 'not used in live preview path')
+  markImagePipeline(capture.diagnosticId, 'T5 upload starts', 'not used in live preview path')
+  markImagePipeline(capture.diagnosticId, 'T6 upload completes', 'deferred until explicit project sync')
+  markImagePipeline(capture.diagnosticId, 'T12 cloud synchronization completed', 'deferred until explicit project sync')
   const db = getDb()
   const role = getCaptureFileRole(capture.fileName)
   if (
@@ -431,6 +516,8 @@ async function handleNewPhoto(
       readQr: async () => null,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      diagnosticId: capture.diagnosticId,
+      onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
     })
 
     if (result.kind === 'unmatched') {
@@ -439,7 +526,7 @@ async function handleNewPhoto(
       return
     }
 
-    await finishMatchedPhoto(db, win, result.photo, result.student)
+    await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
     return
   }
 
@@ -503,6 +590,8 @@ async function handleNewPhoto(
       readQr: async () => null,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      diagnosticId: capture.diagnosticId,
+      onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
     })
 
     if (result.kind === 'unmatched') {
@@ -511,7 +600,7 @@ async function handleNewPhoto(
       return
     }
 
-    await finishMatchedPhoto(db, win, result.photo, result.student)
+    await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
     return
   }
 
@@ -525,6 +614,8 @@ async function handleNewPhoto(
         photosDir: getPhotosDir(),
         readQr: async () => null,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
+        diagnosticId: capture.diagnosticId,
+        onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
       })
 
       if (result.kind === 'unmatched') {
@@ -533,7 +624,7 @@ async function handleNewPhoto(
         return
       }
 
-      await finishMatchedPhoto(db, win, result.photo, result.student)
+      await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
       return
     }
   }
@@ -561,32 +652,20 @@ async function handleNewPhoto(
     return
   }
 
-  const [classRow] = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).all()
-  const [project] = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).all()
-  const projectFolder = safeFolderName(project?.schoolName ?? `Project ${projectId}`)
-  const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
-  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
-  // Keep the source untouched; organize a durable local copy by project/class/student.
-  const destDir = join(getPhotosDir(), projectFolder, classFolder, studentFolder)
-  mkdirSync(destDir, { recursive: true })
-  const destPath = join(destDir, capture.fileName)
-  copyFileSync(capture.filePath, destPath)
-
-  const photo = db
-    .insert(photosTable)
-    .values({
-      projectId,
-      studentId: student.id,
-      filePath: destPath,
-      fileName: capture.fileName,
-      capturedAt: new Date(capture.capturedAtMs).toISOString(),
-      isMatched: true,
-    })
-    .returning()
-    .get()
-  mirrorPhotoAsCapture(db, photo, capture.filePath)
-
-  await finishMatchedPhoto(db, win, photo, student)
+  const result = await processWatchedPhoto(projectId, capture.filePath, {
+    store: createWatchedPhotoStore(db, capture.filePath),
+    photosDir: getPhotosDir(),
+    readQr: async () => null,
+    targetStudentId: student.id,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+    diagnosticId: capture.diagnosticId,
+    onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
+  })
+  if (result.kind === 'unmatched') {
+    sendUnmatchedResult(win, projectId, result)
+    return
+  }
+  await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
 }
 
 function copyToProjectFolder(sourcePath: string, fileName: string, destinationDir: string): string {
@@ -665,6 +744,11 @@ function handleNewRaw(
       : `RAW filename student ID "${filenameReference}" conflicts with the selected student`
     : null
   const student = conflictReason ? undefined : manualStudent ?? filenameStudent ?? sequenceStudent
+  markImagePipeline(
+    capture.diagnosticId,
+    'T2 active student identified',
+    student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`,
+  )
   const storage = ensureProjectStorageLayout(
     getProjectStorageLayout(
       getPhotoSystemLayout(app.getPath('home')),
@@ -672,6 +756,7 @@ function handleNewRaw(
       project.schoolName,
     ),
   )
+  markImagePipeline(capture.diagnosticId, 'T3 local copy starts', `destination=${student ? 'student folder' : 'RAW originals'}`)
   const storedPath = copyToProjectFolder(
     capture.filePath,
     capture.fileName,
@@ -688,6 +773,7 @@ function handleNewRaw(
   })
 
   if (result.kind === 'duplicate') return
+  markImagePipeline(capture.diagnosticId, 'T11 database persistence completed', `capture=${result.captureId}`)
   const savedCapture = db
     .select()
     .from(capturesTable)
@@ -698,6 +784,7 @@ function handleNewRaw(
     captureId: result.captureId,
     studentId: savedCapture?.studentId ?? null,
   })
+  markImagePipeline(capture.diagnosticId, 'T9 UI event sent', 'RAW capture update')
   if (conflictReason) {
     sendUnmatchedResult(getMainWindow(), projectId, {
       filePath: capture.filePath,
@@ -716,11 +803,16 @@ async function finishMatchedPhoto(
   win: BrowserWindow | null,
   photo: typeof photosTable.$inferSelect,
   student: typeof studentsTable.$inferSelect,
+  diagnosticId?: string,
+  previewThumbnailData?: string | null,
 ): Promise<void> {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`)
-  // Generate the preview from the managed local copy before announcing the
-  // capture. The renderer never needs the cloud URL to display a portrait.
-  const thumbnailData = await generateThumbnail(photo.filePath)
+  // The fast path normally generated this thumbnail from the untouched source
+  // before the managed copy and database work. Keep the fallback for legacy
+  // callers and recovery paths.
+  const thumbnailData = previewThumbnailData === undefined || previewThumbnailData === null
+    ? await generateThumbnail(photo.filePath, LIVE_PREVIEW_EDGE)
+    : previewThumbnailData
   const capture = db
     .select()
     .from(capturesTable)
@@ -736,13 +828,16 @@ async function finishMatchedPhoto(
     isMatched: true,
     thumbnailData,
     createdAt: photo.createdAt,
+    previewKey: diagnosticId,
   }
 
   win?.webContents.send('photo:matched', {
     photo: photoForEvent,
     student: toStudentEvent(db, student),
     captureId: capture?.id,
+    previewKey: diagnosticId,
   })
+  markImagePipeline(diagnosticId, 'T9 UI event sent', 'persisted local capture')
   if (capture) {
     win?.webContents.send('capture:updated', {
       projectId: photo.projectId,
@@ -772,6 +867,7 @@ function recordUnmatched(
     .returning()
     .get()
   mirrorPhotoAsCapture(db, photo, capture.filePath)
+  markImagePipeline(capture.diagnosticId, 'T11 database persistence completed', `photo=${photo.id}`)
 
   win?.webContents.send('photo:unmatched', {
     projectId,
@@ -780,4 +876,5 @@ function recordUnmatched(
     fileName: capture.fileName,
     reason,
   })
+  markImagePipeline(capture.diagnosticId, 'T9 UI event sent', 'unmatched local capture')
 }

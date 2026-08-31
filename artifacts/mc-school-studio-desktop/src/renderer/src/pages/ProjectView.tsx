@@ -980,6 +980,14 @@ function PhotoTile({
 }) {
   const status = getUploadStatusMeta(uploadStatus?.uploadStatus)
   const StatusIcon = status.icon
+  const reportPreviewRendered = () => {
+    if (photo.id >= 0 || !photo.previewKey) return
+    console.info(
+      `[ImagePipeline] ${photo.previewKey} T10 image rendered`
+        + ` · preview source=local://thumbnail/${photo.previewKey}`
+        + ` · original=${photo.filePath}`,
+    )
+  }
 
   return (
     <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
@@ -989,6 +997,7 @@ function PhotoTile({
           alt={photo.fileName}
           className="w-full h-full object-cover"
           draggable={false}
+          onLoad={reportPreviewRendered}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">

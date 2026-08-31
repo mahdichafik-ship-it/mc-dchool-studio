@@ -52,6 +52,7 @@ export interface Photo {
   isMatched: boolean
   thumbnailData: string | null  // base64 data URL
   createdAt: string
+  previewKey?: string
 }
 
 export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
@@ -169,6 +170,8 @@ export interface PhotoMatchedEvent {
   photo: Photo
   student: Student
   captureId?: number
+  preview?: boolean
+  previewKey?: string
 }
 
 export interface PhotoMarkerEvent {

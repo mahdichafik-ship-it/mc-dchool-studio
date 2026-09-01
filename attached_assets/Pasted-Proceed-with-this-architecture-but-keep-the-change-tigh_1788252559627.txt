@@ -1,0 +1,184 @@
+Proceed with this architecture, but keep the change tightly scoped and preserve all existing capture-safety behavior.
+
+The objective is:
+
+ORIGINAL FILE PIPELINE
+Full JPEG / NEF / CR3
+→ stable
+→ student assignment
+→ original preserved
+→ asynchronous managed persistence
+→ database / gallery / cloud later
+
+LIVE PREVIEW PIPELINE
+Same stable capture
+→ high-priority lightweight preview generation
+→ mc-preview:// points ONLY to lightweight preview
+→ renderer decodes only lightweight preview
+→ pixels visible
+
+The live renderer must no longer read the full original JPEG for normal preview display.
+
+IMPLEMENTATION REQUIREMENTS
+
+1. JPEG preview generation
+Create a reduced-resolution JPEG preview using a decoder that supports shrink-on-load / reduced-resolution decoding.
+
+Do NOT:
+- fully decode a 40–60 MB image into a full-resolution RGB bitmap and then resize it
+- use Jimp
+- use base64
+- pass image bytes over IPC
+
+Preferred preview target:
+- approximately 1280–1440 px long edge
+- maximum 1600 px
+- JPEG quality around 80–88
+- normally well below 1–2 MB
+- preserve orientation
+- sRGB-compatible output
+- unnecessary metadata may be stripped
+
+2. RAW preview generation
+For Nikon NEF, Canon CR3 and other supported RAW formats:
+
+Prefer embedded JPEG extraction.
+
+Do NOT perform full RAW development/demosaicing in the live shooting path.
+
+If the embedded JPEG is already suitable, use it directly or reduce it only if needed.
+
+If no usable embedded JPEG exists:
+- preserve and persist the RAW normally
+- do not block the shooting workflow
+- show preview pending / unavailable if necessary
+
+3. Preview priority
+Preview generation has the highest priority.
+
+Keep:
+- newest-image-wins
+- maximum one active live-preview generation/decode job
+- obsolete pending live previews may be superseded
+- superseding display work must NEVER discard the actual capture
+
+4. Preview cache
+Use a local preview cache such as:
+
+Cache/Previews/<stable-key>.jpg
+
+mc-preview:// should point to this lightweight preview artifact.
+
+The preview cache must NEVER replace:
+image_files.stored_path
+
+The original managed JPEG/RAW remains the durable asset.
+
+5. Stable reconciliation
+Use a stable preview/capture key so:
+
+temporary live preview
+→ persisted capture
+→ gallery item
+
+reconcile to the same capture without duplicate records.
+
+6. Original persistence
+Replace the current synchronous original copy with asynchronous filesystem persistence.
+
+Do not use move/rename as the default.
+
+Keep the original Smart Shooter/watch-folder file untouched.
+
+Original persistence should be:
+- asynchronous
+- throttled
+- deterministic
+- recoverable on failure
+
+Do not launch uncontrolled parallel 50–60 MB copies.
+
+A reasonable starting policy is:
+- 1 high-priority preview worker
+- 1 lower-priority persistence worker
+
+7. Disk I/O priority
+Preview generation must take priority over large original copying.
+
+If the disk is busy, do not allow background persistence to delay the next live preview unnecessarily.
+
+8. Gallery isolation
+The gallery should consume the finalized lightweight preview/cache artifact or the finalized managed capture state.
+
+Do not allow the gallery to briefly start decoding the large source JPEG and then replace it later.
+
+9. Preserve everything already working
+Do not change:
+- student assignment rules
+- filename matching
+- QR boundaries
+- manual student switching
+- JPEG/RAW pairing
+- source preservation
+- offline workflow
+- cloud deferral
+- newest-image-wins semantics
+- database identity rules
+
+10. VALIDATION
+
+Benchmark with realistic production-sized files, not only 3 MB JPEGs.
+
+Test at least:
+- 3 MB JPEG
+- 20–30 MB JPEG
+- 50–60 MB JPEG
+- representative Nikon NEF
+- representative Canon CR3 if available
+
+For each:
+- single capture
+- 10-file burst
+- 50-file burst where practical
+
+Report separately:
+
+LIVE PREVIEW
+- file stable
+- preview generation start
+- preview generation complete
+- IPC received
+- renderer decode
+- pixels painted
+- total stable-to-visible
+- total detection-to-visible
+
+ORIGINAL PERSISTENCE
+- copy start
+- copy complete
+- queue depth
+- final durable persistence latency
+
+RESPONSIVENESS
+- Watch Folder callback delay
+- renderer→main IPC delay
+- student-switch latency
+- QR-switch latency
+- memory usage
+- CPU usage
+
+INTEGRITY
+- lost captures
+- wrong assignments
+- duplicates
+- JPEG/RAW pairing errors
+- restart persistence
+- original-file integrity
+
+Do not publish automatically.
+
+First give me:
+1. before/after architecture summary
+2. before/after performance table
+3. any regressions
+4. GO / NO-GO recommendation

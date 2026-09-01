@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 const appExecutable = process.env.MC_SCHOOL_STUDIO_APP_PATH
 if (!appExecutable) throw new Error('MC_SCHOOL_STUDIO_APP_PATH must point to the packaged app executable')
@@ -38,6 +38,22 @@ assert.deepEqual(
   `expected a thin ${expectedArchitecture} packaged executable, found ${executableArchitectures.join(', ')}`,
 )
 
+const appBundle = resolve(dirname(appExecutable), '..', '..')
+const unpackedModules = join(appBundle, 'Contents', 'Resources', 'app.asar.unpacked', 'node_modules')
+const nativeBinaries = findFiles(unpackedModules).filter(
+  (path) => path.endsWith('.node') || path.endsWith('.dylib'),
+)
+assert(nativeBinaries.length > 0, 'packaged app must include unpacked native binaries')
+for (const binary of nativeBinaries) {
+  const architectures = execFileSync('/usr/bin/lipo', ['-archs', binary], {
+    encoding: 'utf8',
+  }).trim().split(/\s+/)
+  assert(
+    architectures.includes(expectedExecutableArchitecture),
+    `${binary} does not include ${expectedExecutableArchitecture}; found ${architectures.join(', ')}`,
+  )
+}
+
 const token = 'release-retirement-smoke-token'
 const projectName = 'Release Retirement School'
 const studentReference = '001234'
@@ -46,7 +62,7 @@ const userDataDir = join(root, 'user-data')
 const storageRoot = join(root, 'managed-photos')
 const watchFolder = join(root, 'camera-originals')
 const sourcePhoto = join(watchFolder, `Smith_John_release-${studentReference}.jpg`)
-const debugPort = 9327
+const debugPort = await reservePort()
 let online = true
 let retired = false
 let acknowledgedAt = null
@@ -322,6 +338,19 @@ function required(name) {
   return value
 }
 
+async function reservePort() {
+  const probe = createServer()
+  const address = await new Promise((resolveAddress, reject) => {
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => resolveAddress(probe.address()))
+  })
+  await new Promise((resolveClose, reject) => {
+    probe.close((error) => error ? reject(error) : resolveClose())
+  })
+  if (!address || typeof address === 'string') throw new Error('Could not reserve renderer debug port')
+  return address.port
+}
+
 const apiAddress = await new Promise((resolve, reject) => {
   server.once('error', reject)
   server.listen(0, '127.0.0.1', () => resolve(server.address()))
@@ -342,6 +371,11 @@ const appProcess = spawn(appExecutable, [`--remote-debugging-port=${debugPort}`]
 let appOutput = ''
 appProcess.stdout.on('data', (chunk) => { appOutput += chunk })
 appProcess.stderr.on('data', (chunk) => { appOutput += chunk })
+let appProcessError
+appProcess.once('error', (error) => { appProcessError = error })
+appProcess.once('exit', (code, signal) => {
+  appOutput += `\n[smoke] packaged app exited code=${code ?? 'null'} signal=${signal ?? 'null'}\n`
+})
 
 let cdp
 try {
@@ -482,7 +516,15 @@ try {
 
   console.log('Packaged retirement smoke test passed.')
 } catch (error) {
-  console.error(appOutput)
+  console.error([
+    `[smoke] runner=${execFileSync('/usr/bin/uname', ['-a'], { encoding: 'utf8' }).trim()}`,
+    `[smoke] executable=${appExecutable}`,
+    `[smoke] executable architectures=${executableArchitectures.join(',')}`,
+    `[smoke] debug port=${debugPort}`,
+    `[smoke] process pid=${appProcess.pid ?? 'none'} exit=${appProcess.exitCode ?? 'running'} signal=${appProcess.signalCode ?? 'none'}`,
+    appProcessError ? `[smoke] spawn error=${appProcessError.stack ?? appProcessError}` : '',
+    appOutput,
+  ].filter(Boolean).join('\n'))
   throw error
 } finally {
   cdp?.close()

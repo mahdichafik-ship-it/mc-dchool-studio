@@ -134,6 +134,43 @@ test('emits a local preview before the managed copy and database persistence', a
   }
 })
 
+test('can defer original persistence until after the preview is ready', async () => {
+  const fixture = createFixture('DSC_8292.jpg')
+  const { store, photos } = createStore()
+  const destination = join(
+    fixture.photosDir,
+    'Example School',
+    'Class 3',
+    'AB12_Zaki_Dina',
+    'DSC_8292.jpg',
+  )
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => null,
+      targetStudentId: 3,
+      deferPersistence: true,
+      onPreviewReady: async () => 'mc-preview://capture',
+    })
+
+    assert.equal(result.kind, 'matched-pending')
+    assert.equal(existsSync(destination), false)
+    assert.equal(photos.length, 0)
+    assert.equal(existsSync(fixture.sourcePath), true)
+
+    if (result.kind !== 'matched-pending') return
+    await result.persist()
+    assert.equal(existsSync(destination), true)
+    assert.deepEqual(readFileSync(destination), jpegBytes)
+    assert.equal(photos.length, 1)
+    assert.equal(existsSync(fixture.sourcePath), true)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
 test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fallback', async () => {
   const fixture = createFixture('Smith_John_class_school_001234_595.JPG')
   const { store, photos } = createStore()

@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "MC School Studio",
@@ -24,6 +24,7 @@
     "test:updater": "node --test test/updater-metadata.test.mjs",
     "test:db-migration": "node --experimental-strip-types --test test/database-migration.test.ts",
     "validate:updater": "node scripts/validate-updater-metadata.mjs",
+    "prune:mac-native": "node scripts/prune-mac-native-dependencies.mjs",
     "dist:mac": "pnpm run build && electron-builder --mac --publish never",
     "dist:mac:x64": "pnpm run build && electron-builder --mac --x64 --publish never",
     "dist:mac:arm64": "pnpm run build && electron-builder --mac --arm64 --publish never",

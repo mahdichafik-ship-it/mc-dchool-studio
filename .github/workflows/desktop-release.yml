@@ -143,6 +143,13 @@ jobs:
         # the lockfile was generated on Linux and does not include darwin entries.
         run: pnpm install --no-frozen-lockfile
 
+      - name: Prune incompatible Sharp native packages
+        env:
+          PACKAGE_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          pnpm --filter @workspace/mc-school-studio-desktop run prune:mac-native -- \
+            "$PACKAGE_ARCHITECTURE"
+
       - name: Build & package native macOS DMG
         env:
           PACKAGE_ARCHITECTURE: ${{ matrix.architecture }}

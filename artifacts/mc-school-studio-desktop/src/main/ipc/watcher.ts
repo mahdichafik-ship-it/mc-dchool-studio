@@ -674,6 +674,37 @@ async function handleNewPhoto(
     return
   }
 
+  if (manualStudentId !== null) {
+    const result = await processWatchedPhoto(projectId, capture.filePath, {
+      store: createWatchedPhotoStore(db, capture.filePath),
+      photosDir: getPhotosDir(),
+      readQr: async () => null,
+      targetStudentId: manualStudentId,
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      diagnosticId: capture.diagnosticId,
+      deferPersistence: true,
+      onPreviewReady: (context) => enqueueLocalPreview(
+        session.previewScheduler,
+        win,
+        projectId,
+        capture,
+        context.student,
+        context,
+      ),
+    })
+
+    if (result.kind === 'unmatched') {
+      sendUnmatchedResult(win, projectId, result)
+      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
+      return
+    }
+
+    if (result.kind === 'matched-pending') {
+      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+    }
+    return
+  }
+
   // A QR marker can select the next student when the photographer has not
   // explicitly selected one in the roster.
   const qrResult = await readQrFromImage(capture.filePath)
@@ -724,37 +755,6 @@ async function handleNewPhoto(
       'qr',
     )
     console.log(`[Watcher] QR marker ${capture.fileName} → ${student!.firstName} ${student!.lastName}`)
-    return
-  }
-
-  if (manualStudentId !== null) {
-    const result = await processWatchedPhoto(projectId, capture.filePath, {
-      store: createWatchedPhotoStore(db, capture.filePath),
-      photosDir: getPhotosDir(),
-      readQr: async () => null,
-      targetStudentId: manualStudentId,
-      capturedAt: new Date(capture.capturedAtMs).toISOString(),
-      diagnosticId: capture.diagnosticId,
-      deferPersistence: true,
-      onPreviewReady: (context) => enqueueLocalPreview(
-        session.previewScheduler,
-        win,
-        projectId,
-        capture,
-        context.student,
-        context,
-      ),
-    })
-
-    if (result.kind === 'unmatched') {
-      sendUnmatchedResult(win, projectId, result)
-      console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
-      return
-    }
-
-    if (result.kind === 'matched-pending') {
-      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
-    }
     return
   }
 

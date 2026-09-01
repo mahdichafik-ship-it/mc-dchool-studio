@@ -408,9 +408,6 @@ export function useCaptures(studentId: number | null) {
     const unsubMarker = api.on('photo:marker', (event: PhotoMarkerEvent) => {
       if (event.student.id === studentId) void load()
     })
-    const unsubMarker = api.on('photo:marker', (event: PhotoMarkerEvent) => {
-      if (event.student.id === studentId) void load()
-    })
     const unsubFileUpload = api.on('capture:fileUploadStatusChanged', (event: CaptureFileUploadStatusChangedEvent) => {
       if (event.studentId === studentId) void load()
     })

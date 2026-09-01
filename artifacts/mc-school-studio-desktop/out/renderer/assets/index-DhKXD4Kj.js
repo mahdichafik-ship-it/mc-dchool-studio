@@ -17150,6 +17150,14 @@ function ProjectView({ projectId, onBack, offline = false }) {
           onOpen: (filePath) => window.api.invoke("photos:openInSystem", { filePath }),
           onReassign: setReassignDialogPhoto
         }
+      ) : unmatchedPhotos.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        UnmatchedPhotosPanel,
+        {
+          photos: unmatchedPhotos,
+          loading: unmatchedLoading,
+          onOpen: (filePath) => window.api.invoke("photos:openInSystem", { filePath }),
+          onReassign: setReassignDialogPhoto
+        }
       ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full text-center p-8", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-20 h-20 rounded-2xl bg-slate-200 flex items-center justify-center mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(User, { className: "size-10 text-slate-400" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-600 mb-1", children: "No student selected" }),

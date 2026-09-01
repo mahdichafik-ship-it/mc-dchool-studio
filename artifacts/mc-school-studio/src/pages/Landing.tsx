@@ -2,8 +2,8 @@ import React from 'react';
 import { Link } from 'wouter';
 import { Camera, ArrowRight, ShieldCheck, Zap, Users, Monitor, Apple } from 'lucide-react';
 
-const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.30';
-const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.30-arm64.dmg`;
+const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.28';
+const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.28-arm64.dmg`;
 
 export default function Landing() {
   return (

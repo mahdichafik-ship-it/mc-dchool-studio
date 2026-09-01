@@ -14,7 +14,7 @@ const sharpDirectory = await realpath(path.join(packageRoot, 'node_modules', 'sh
   () => null,
 )
 const sharpImgDirectory = sharpDirectory
-  ? path.join(sharpDirectory, 'node_modules', '@img')
+  ? path.join(path.dirname(sharpDirectory), '@img')
   : null
 const expectedPackages = new Set([
   `sharp-darwin-${architecture}`,

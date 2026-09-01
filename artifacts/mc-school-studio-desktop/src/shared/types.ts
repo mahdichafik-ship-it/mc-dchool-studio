@@ -147,6 +147,22 @@ export interface StudentCaptureReview {
   qrMarkers: QrMarkerReview[]
 }
 
+export interface QrMarkerReview {
+  id: number
+  projectId: number
+  studentId: number
+  filePath: string
+  fileName: string
+  capturedAt: string
+  thumbnailData: string | null
+  createdAt: string
+}
+
+export interface StudentCaptureReview {
+  captures: CaptureReview[]
+  qrMarkers: QrMarkerReview[]
+}
+
 export interface CaptureCompletenessSummary {
   total: number
   complete: number

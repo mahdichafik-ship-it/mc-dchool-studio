@@ -517,6 +517,13 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               onOpen={(filePath) => window.api.invoke('photos:openInSystem', { filePath })}
               onReassign={setReassignDialogPhoto}
             />
+          ) : unmatchedPhotos.length > 0 ? (
+            <UnmatchedPhotosPanel
+              photos={unmatchedPhotos}
+              loading={unmatchedLoading}
+              onOpen={(filePath) => window.api.invoke('photos:openInSystem', { filePath })}
+              onReassign={setReassignDialogPhoto}
+            />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-center p-8">
               <div className="w-20 h-20 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">

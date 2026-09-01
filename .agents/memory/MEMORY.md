@@ -12,6 +12,9 @@
 - [Desktop cloud upload identity](desktop-cloud-upload-identity.md) — imported rosters must retain cloud IDs; legacy local projects need a safe identity repair before upload.
 - [Explicit project sync boundary](explicit-project-sync-boundary.md) — capture-time ingestion is local-only; cloud upload begins only from an explicit finish or retry action.
 - [Local preview pipeline](local-preview-pipeline.md) — emit a source-local JPEG preview before managed copy and persistence, then reconcile it by a stable preview key.
+- [Lightweight preview artifacts](lightweight-preview-artifacts.md) — renderer preview URLs must resolve to reduced JPEGs, never full originals or full RAW decodes.
+- [Newest live preview scheduling](newest-live-preview-scheduling.md) — coalesce preview work before generation; persistence must remain FIFO and independent of dropped live-preview jobs.
 - [Burst preview release gate](burst-preview-release-gate.md) — judge newest-image responsiveness by final paint delay and capture preservation; gallery work must not block the live path.
 - [macOS packaging validation](macos-packaging-validation.md) — Linux can generate unsigned macOS ZIPs, but the configured DMG target requires the locked dmg-license dependency.
 - [Electron runtime validation](electron-runtime-validation.md) — packaged Electron smoke tests need the native GLib runtime, which is absent from this Linux workspace.
+- [macOS smoke cleanup](macos-smoke-cleanup.md) — native packaged-app smoke teardown can briefly race with Electron user-data removal, especially on Apple silicon.

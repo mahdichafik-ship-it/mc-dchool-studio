@@ -4,7 +4,7 @@ import { join } from 'path'
 import { and, eq, count, or } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable } from '../db/schema'
-import { generateThumbnail } from '../lib/qrReader'
+import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import type {
   CaptureCompletenessSummary,
@@ -81,8 +81,17 @@ export function registerPhotoHandlers() {
 
     const result: Photo[] = []
     for (const row of rows) {
-      const thumb = await generateThumbnail(row.filePath)
-      result.push(rowToPhoto(row, thumb))
+      const previewPath = await generateLivePreview(row.filePath, {
+        previewKey: `gallery-photo-${row.id}`,
+        cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+      })
+      result.push(rowToPhoto(
+        row,
+        null,
+        previewPath
+          ? createLocalPreviewUrl(previewPath, `gallery-photo-${row.id}`)
+          : undefined,
+      ))
     }
     return result
   })
@@ -109,7 +118,13 @@ export function registerPhotoHandlers() {
           .where(eq(imageFilesTable.captureId, capture.id))
           .all()
         const jpegFile = files.find((file) => file.fileRole === 'JPEG')
-        const previewPath = jpegFile?.storedPath ?? photo?.filePath
+        const sourcePath = jpegFile?.storedPath ?? photo?.filePath
+        const previewPath = sourcePath
+          ? await generateLivePreview(sourcePath, {
+            previewKey: `gallery-capture-${capture.id}`,
+            cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+          })
+          : null
         const previewUrl = previewPath
           ? createLocalPreviewUrl(previewPath, `gallery-capture-${capture.id}`)
           : undefined
@@ -137,17 +152,25 @@ export function registerPhotoHandlers() {
         .where(eq(qrMarkersTable.studentId, studentId))
         .orderBy(qrMarkersTable.capturedAt)
         .all()
-      const qrMarkers = await Promise.all(markerRows.map(async (marker) => ({
-        id: marker.id,
-        projectId: marker.projectId,
-        studentId: marker.studentId,
-        filePath: marker.filePath,
-        fileName: marker.fileName,
-        capturedAt: marker.capturedAt,
-        thumbnailData: null,
-        previewUrl: createLocalPreviewUrl(marker.filePath, `gallery-marker-${marker.id}`),
-        createdAt: marker.createdAt,
-      })))
+      const qrMarkers = await Promise.all(markerRows.map(async (marker) => {
+        const previewPath = await generateLivePreview(marker.filePath, {
+          previewKey: `gallery-marker-${marker.id}`,
+          cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+        })
+        return {
+          id: marker.id,
+          projectId: marker.projectId,
+          studentId: marker.studentId,
+          filePath: marker.filePath,
+          fileName: marker.fileName,
+          capturedAt: marker.capturedAt,
+          thumbnailData: null,
+          previewUrl: previewPath
+            ? createLocalPreviewUrl(previewPath, `gallery-marker-${marker.id}`)
+            : undefined,
+          createdAt: marker.createdAt,
+        }
+      }))
 
       return { captures: result, qrMarkers }
     },

@@ -172,6 +172,11 @@ const server = createServer((request, response) => {
   }
   json(response, 404, { error: `Unhandled smoke-test route ${request.method} ${url.pathname}` })
 })
+const serverSockets = new Set()
+server.on('connection', (socket) => {
+  serverSockets.add(socket)
+  socket.once('close', () => serverSockets.delete(socket))
+})
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -203,8 +208,16 @@ class CdpClient {
       const pending = this.pending.get(message.id)
       if (!pending) return
       this.pending.delete(message.id)
+      clearTimeout(pending.timeout)
       if (message.error) pending.reject(new Error(message.error.message))
       else pending.resolve(message.result)
+    })
+    socket.addEventListener('close', () => {
+      for (const [id, pending] of this.pending) {
+        clearTimeout(pending.timeout)
+        pending.reject(new Error(`CDP socket closed while waiting for request ${id}`))
+      }
+      this.pending.clear()
     })
   }
 
@@ -223,10 +236,14 @@ class CdpClient {
     return new CdpClient(socket)
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, timeoutMs = 60_000) {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const timeout = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`Timed out waiting for CDP ${method}`))
+      }, timeoutMs)
+      this.pending.set(id, { resolve, reject, timeout })
       this.socket.send(JSON.stringify({ id, method, params }))
     })
   }
@@ -246,6 +263,45 @@ class CdpClient {
   close() {
     this.socket.close()
   }
+}
+
+async function waitForProcessExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return true
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timeout)
+      resolve(true)
+    }
+    const timeout = setTimeout(() => {
+      child.off('exit', finish)
+      resolve(false)
+    }, timeoutMs)
+    child.once('exit', finish)
+  })
+}
+
+async function stopAppProcess(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  child.kill('SIGTERM')
+  if (await waitForProcessExit(child, 10_000)) return
+  child.kill('SIGKILL')
+  if (!await waitForProcessExit(child, 5_000)) {
+    throw new Error('Packaged app did not exit after SIGKILL')
+  }
+}
+
+async function closeSmokeServer() {
+  for (const socket of serverSockets) socket.destroy()
+  server.closeAllConnections?.()
+  if (!server.listening) return
+  await Promise.race([
+    new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve())
+    }),
+    wait(5_000).then(() => {
+      throw new Error('Timed out closing smoke API server')
+    }),
+  ])
 }
 
 function findFiles(directory) {
@@ -430,7 +486,7 @@ try {
   throw error
 } finally {
   cdp?.close()
-  appProcess.kill('SIGTERM')
-  server.close()
+  await stopAppProcess(appProcess)
+  await closeSmokeServer()
   rmSync(root, { recursive: true, force: true })
 }

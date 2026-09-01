@@ -29,9 +29,10 @@ asarUnpack:
 mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
+  hardenedRuntime: true
   extendInfo:
-    - NSDocumentsFolderUsageDescription: Required to store photo data.
-    - NSDownloadsFolderUsageDescription: Required to import project files.
+    NSDocumentsFolderUsageDescription: Required to store photo data.
+    NSDownloadsFolderUsageDescription: Required to import project files.
   notarize: true
   target:
     - target: dmg

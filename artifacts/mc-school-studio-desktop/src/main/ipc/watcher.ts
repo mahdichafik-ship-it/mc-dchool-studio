@@ -1,7 +1,7 @@
 import { app, ipcMain, BrowserWindow } from 'electron'
 import chokidar, { FSWatcher } from 'chokidar'
-import { copyFileSync, existsSync, mkdirSync } from 'fs'
-import { stat as statFile } from 'fs/promises'
+import { existsSync, mkdirSync } from 'fs'
+import { copyFile, mkdir, stat as statFile } from 'fs/promises'
 import { basename, extname, join, parse, resolve } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
@@ -15,13 +15,15 @@ import {
 } from '../db/schema'
 import { getSetting } from './upload'
 import { extractStudentReference } from '../lib/photoFileNaming'
-import { generateThumbnail, readQrFromImage } from '../lib/qrReader'
+import { readQrFromImage } from '../lib/qrReader'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
+import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
 import { waitForStableFile } from '../lib/fileStability'
 import {
   finishImagePipelineTrace,
   getImagePipelinePreviewContext,
   markImagePipeline,
+  markImagePipelinePreviewSuperseded,
   markImagePipelineRendererStage,
   retainImagePipelineTraceForPaint,
   startImagePipelineTrace,
@@ -42,7 +44,11 @@ import type {
   Photo,
   Student,
 } from '../../shared/types'
-import { createWatchedPhotoStore, processWatchedPhoto } from '../lib/watchedPhotoProcessor'
+import {
+  createWatchedPhotoStore,
+  processWatchedPhoto,
+  type WatchedPhotoResult,
+} from '../lib/watchedPhotoProcessor'
 import {
   hasProcessedCaptureSource,
   hasProcessedQrMarkerSource,
@@ -56,17 +62,19 @@ import {
   getPhotoSystemLayout,
   getProjectStorageLayout,
 } from '../lib/storageLayout'
+import { NewestLivePreviewScheduler } from '../lib/livePreviewScheduler'
 import { resolveWatchFolders } from '../lib/watchFolders'
 
 const FLUSH_DELAY_MS = 50
-const LIVE_PREVIEW_EDGE = 900
-
 interface WatchSession {
   watcher: FSWatcher
   pendingFiles: CaptureFile[]
   pendingEnqueues: Set<Promise<void>>
   flushTimer: NodeJS.Timeout | null
   processing: Promise<void>
+  persistence: Promise<void>
+  pendingPersistences: Set<Promise<void>>
+  previewScheduler: NewestLivePreviewScheduler
   seenPaths: Set<string>
   sequenceState: SequenceState
 }
@@ -88,6 +96,9 @@ export async function stopAllWatchersForRetirement(): Promise<void> {
   }
   await Promise.allSettled(sessions.map((session) => session.watcher.close()))
   await Promise.allSettled(sessions.map((session) => session.processing))
+  await Promise.allSettled(sessions.map((session) => session.persistence))
+  await Promise.allSettled(sessions.flatMap((session) => [...session.pendingPersistences]))
+  await Promise.allSettled(sessions.map((session) => session.previewScheduler.waitForIdle()))
 }
 
 export async function stopAllWatchersForShutdown(): Promise<void> {
@@ -218,12 +229,16 @@ async function emitLocalPreview(
   capture: CaptureFile,
   student: typeof studentsTable.$inferSelect,
   context: { filePath: string; fileName: string; capturedAt: string },
+  previewPath: string,
 ): Promise<string | null> {
   const diagnosticId = capture.diagnosticId
-  markImagePipeline(diagnosticId, 'preview preparation started', 'strategy=direct-local-jpeg')
   if (!diagnosticId) return null
-  const previewUrl = createLocalPreviewUrl(context.filePath, diagnosticId)
-  markImagePipeline(diagnosticId, 'preview prepared', `source=${previewUrl}`)
+  const previewUrl = createLocalPreviewUrl(previewPath, diagnosticId)
+  markImagePipeline(
+    diagnosticId,
+    'preview prepared',
+    `source=${previewUrl} artifact=${previewPath}`,
+  )
 
   const preview: Photo = {
     id: nextPreviewId--,
@@ -252,6 +267,93 @@ async function emitLocalPreview(
     `preview source=${previewUrl}`,
   )
   return previewUrl
+}
+
+async function prepareAndEmitLocalPreview(
+  win: BrowserWindow | null,
+  projectId: number,
+  capture: CaptureFile,
+  student: typeof studentsTable.$inferSelect,
+  context: { filePath: string; fileName: string; capturedAt: string },
+): Promise<string | null> {
+  const previewKey = capture.diagnosticId ?? `${projectId}:${capture.filePath}`
+  markImagePipeline(
+    capture.diagnosticId,
+    'preview preparation started',
+    'strategy=libvips-reduced-artifact',
+  )
+  const previewPath = await generateLivePreview(context.filePath, {
+    previewKey,
+    cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+  })
+  if (!previewPath) return null
+  return emitLocalPreview(win, projectId, capture, student, context, previewPath)
+}
+
+function enqueueLocalPreview(
+  scheduler: NewestLivePreviewScheduler,
+  win: BrowserWindow | null,
+  projectId: number,
+  capture: CaptureFile,
+  student: typeof studentsTable.$inferSelect,
+  context: { filePath: string; fileName: string; capturedAt: string },
+): null {
+  // The trace must outlive the capture-processing loop because generation now
+  // runs independently of persistence and may start after the loop advances.
+  retainImagePipelineTraceForPaint(capture.diagnosticId)
+  scheduler.enqueue({
+    traceId: capture.diagnosticId,
+    run: async () => {
+      const previewUrl = await prepareAndEmitLocalPreview(
+        win,
+        projectId,
+        capture,
+        student,
+        context,
+      )
+      if (!previewUrl) finishImagePipelineTrace(capture.diagnosticId)
+    },
+    supersede: () => markImagePipelinePreviewSuperseded(
+      capture.diagnosticId,
+      'superseded before live-preview generation',
+    ),
+  })
+  return null
+}
+
+type PendingMatchedPhoto = Extract<WatchedPhotoResult, { kind: 'matched-pending' }>
+
+function enqueueMatchedPhotoPersistence(
+  session: WatchSession,
+  db: ReturnType<typeof getDb>,
+  win: BrowserWindow | null,
+  projectId: number,
+  capture: CaptureFile,
+  result: PendingMatchedPhoto,
+): void {
+  const task = session.persistence
+    .then(async () => {
+      await session.previewScheduler.waitForIdle()
+      const photo = await result.persist()
+      await finishMatchedPhoto(
+        db,
+        win,
+        photo,
+        result.student,
+        capture.diagnosticId,
+        result.thumbnailData,
+        { skipPreviewGeneration: true },
+      )
+    })
+    .catch((error) => {
+      // The source remains untouched and can be retried after a removable or
+      // network-backed destination becomes available again.
+      session.seenPaths.delete(capture.filePath)
+      console.error(`[Watcher] Could not persist ${capture.filePath}; it will be retried`, error)
+    })
+  session.persistence = task
+  session.pendingPersistences.add(task)
+  void task.finally(() => session.pendingPersistences.delete(task)).catch(() => {})
 }
 
 export function registerWatcherHandlers() {
@@ -304,6 +406,9 @@ export function registerWatcherHandlers() {
       pendingEnqueues: new Set(),
       flushTimer: null,
       processing: Promise.resolve(),
+      persistence: Promise.resolve(),
+      pendingPersistences: new Set(),
+      previewScheduler: new NewestLivePreviewScheduler(),
       seenPaths: new Set(),
       sequenceState: createSequenceState(pendingManualTargets.get(projectId) ?? null),
     }
@@ -415,6 +520,9 @@ export async function stopProjectWatcher(
     })
   }
   await session.processing
+  await session.persistence
+  await Promise.allSettled([...session.pendingPersistences])
+  await session.previewScheduler.waitForIdle()
 
   if (clearTarget) {
     pendingManualTargets.delete(projectId)
@@ -543,7 +651,15 @@ async function handleNewPhoto(
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
-      onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
+      deferPersistence: true,
+      onPreviewReady: (context) => enqueueLocalPreview(
+        session.previewScheduler,
+        win,
+        projectId,
+        capture,
+        context.student,
+        context,
+      ),
     })
 
     if (result.kind === 'unmatched') {
@@ -552,7 +668,9 @@ async function handleNewPhoto(
       return
     }
 
-    await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
+    if (result.kind === 'matched-pending') {
+      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+    }
     return
   }
 
@@ -593,7 +711,7 @@ async function handleNewPhoto(
       return
     }
 
-    const marker = persistQrMarker(db, projectId, student, capture)
+    const marker = await persistQrMarker(db, projectId, student, capture)
     win?.webContents.send('photo:marker', {
       markerId: marker.id,
       fileName: capture.fileName,
@@ -617,7 +735,15 @@ async function handleNewPhoto(
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
-      onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
+      deferPersistence: true,
+      onPreviewReady: (context) => enqueueLocalPreview(
+        session.previewScheduler,
+        win,
+        projectId,
+        capture,
+        context.student,
+        context,
+      ),
     })
 
     if (result.kind === 'unmatched') {
@@ -626,7 +752,9 @@ async function handleNewPhoto(
       return
     }
 
-    await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
+    if (result.kind === 'matched-pending') {
+      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+    }
     return
   }
 
@@ -641,7 +769,15 @@ async function handleNewPhoto(
         readQr: async () => null,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
         diagnosticId: capture.diagnosticId,
-        onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
+        deferPersistence: true,
+        onPreviewReady: (context) => enqueueLocalPreview(
+          session.previewScheduler,
+          win,
+          projectId,
+          capture,
+          context.student,
+          context,
+        ),
       })
 
       if (result.kind === 'unmatched') {
@@ -650,7 +786,9 @@ async function handleNewPhoto(
         return
       }
 
-      await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
+      if (result.kind === 'matched-pending') {
+        enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+      }
       return
     }
   }
@@ -685,17 +823,31 @@ async function handleNewPhoto(
     targetStudentId: student.id,
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
     diagnosticId: capture.diagnosticId,
-    onPreviewReady: (context) => emitLocalPreview(win, projectId, capture, context.student, context),
+    deferPersistence: true,
+    onPreviewReady: (context) => enqueueLocalPreview(
+      session.previewScheduler,
+      win,
+      projectId,
+      capture,
+      context.student,
+      context,
+    ),
   })
   if (result.kind === 'unmatched') {
     sendUnmatchedResult(win, projectId, result)
     return
   }
-  await finishMatchedPhoto(db, win, result.photo, result.student, capture.diagnosticId, result.thumbnailData)
+  if (result.kind === 'matched-pending') {
+    enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+  }
 }
 
-function copyToProjectFolder(sourcePath: string, fileName: string, destinationDir: string): string {
-  mkdirSync(destinationDir, { recursive: true })
+async function copyToProjectFolder(
+  sourcePath: string,
+  fileName: string,
+  destinationDir: string,
+): Promise<string> {
+  await mkdir(destinationDir, { recursive: true })
   let destinationPath = join(destinationDir, fileName)
   if (resolve(sourcePath) !== resolve(destinationPath) && existsSync(destinationPath)) {
     const parsed = parse(fileName)
@@ -706,17 +858,17 @@ function copyToProjectFolder(sourcePath: string, fileName: string, destinationDi
     } while (existsSync(destinationPath))
   }
   if (resolve(sourcePath) !== resolve(destinationPath)) {
-    copyFileSync(sourcePath, destinationPath)
+    await copyFile(sourcePath, destinationPath)
   }
   return destinationPath
 }
 
-function persistQrMarker(
+async function persistQrMarker(
   db: ReturnType<typeof getDb>,
   projectId: number,
   student: typeof studentsTable.$inferSelect,
   capture: CaptureFile,
-): typeof qrMarkersTable.$inferSelect {
+): Promise<typeof qrMarkersTable.$inferSelect> {
   const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
   const classRow = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).get()
   if (!project) throw new Error(`Project ${projectId} not found`)
@@ -725,7 +877,7 @@ function persistQrMarker(
   const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
   const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
   const markerDir = join(getPhotosDir(), projectFolder, classFolder, studentFolder, 'QR Markers')
-  const storedPath = copyToProjectFolder(capture.filePath, capture.fileName, markerDir)
+  const storedPath = await copyToProjectFolder(capture.filePath, capture.fileName, markerDir)
   const result = recordQrMarker(db, {
     projectId,
     studentId: student.id,
@@ -737,12 +889,12 @@ function persistQrMarker(
   return result.marker
 }
 
-function handleNewRaw(
+async function handleNewRaw(
   projectId: number,
   capture: CaptureFile,
   session: WatchSession,
   db: ReturnType<typeof getDb>,
-): void {
+): Promise<void> {
   const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
   if (!project) return
 
@@ -780,56 +932,86 @@ function handleNewRaw(
     'student assigned',
     student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`,
   )
-  const storage = ensureProjectStorageLayout(
-    getProjectStorageLayout(
-      getPhotoSystemLayout(app.getPath('home')),
+  if (student) {
+    enqueueLocalPreview(
+      session.previewScheduler,
+      getMainWindow(),
       projectId,
-      project.schoolName,
-    ),
-  )
-  markImagePipeline(capture.diagnosticId, 'file move started', `destination=${student ? 'student folder' : 'RAW originals'}`)
-  const storedPath = copyToProjectFolder(
-    capture.filePath,
-    capture.fileName,
-    student ? getStudentPhotoFolder(db, projectId, student) : storage.rawOriginals,
-  )
-  markImagePipeline(capture.diagnosticId, 'file move complete', `storedPath=${storedPath}`)
-  markImagePipeline(capture.diagnosticId, 'RAW pairing complete', `capture=${capture.fileName}`)
-  markImagePipeline(capture.diagnosticId, 'database write started', `capture=${capture.fileName}`)
-  const result = recordRawCapture(db, {
-    projectId,
-    studentId: student?.id ?? null,
-    classId: student?.classId ?? null,
-    filePath: capture.filePath,
-    storedPath,
-    fileName: capture.fileName,
-    capturedAt: new Date(capture.capturedAtMs).toISOString(),
-  })
-
-  if (result.kind === 'duplicate') return
-  markImagePipeline(capture.diagnosticId, 'database write complete', `capture=${result.captureId}`)
-  const savedCapture = db
-    .select()
-    .from(capturesTable)
-    .where(eq(capturesTable.id, result.captureId))
-    .get()
-  getMainWindow()?.webContents.send('capture:updated', {
-    projectId,
-    captureId: result.captureId,
-    studentId: savedCapture?.studentId ?? null,
-  })
-  markImagePipeline(capture.diagnosticId, 'IPC event sent', 'RAW capture update')
-  if (conflictReason) {
-    sendUnmatchedResult(getMainWindow(), projectId, {
-      filePath: capture.filePath,
-      fileName: capture.fileName,
-      reason: conflictReason,
-    })
+      capture,
+      student,
+      {
+        filePath: capture.filePath,
+        fileName: capture.fileName,
+        capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      },
+    )
   }
-  console.log(
-    `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
-      + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
-  )
+
+  const task = session.persistence
+    .then(async () => {
+      await session.previewScheduler.waitForIdle()
+      const storage = ensureProjectStorageLayout(
+        getProjectStorageLayout(
+          getPhotoSystemLayout(app.getPath('home')),
+          projectId,
+          project.schoolName,
+        ),
+      )
+      markImagePipeline(
+        capture.diagnosticId,
+        'file move started',
+        `destination=${student ? 'student folder' : 'RAW originals'} mode=async-copy`,
+      )
+      const storedPath = await copyToProjectFolder(
+        capture.filePath,
+        capture.fileName,
+        student ? getStudentPhotoFolder(db, projectId, student) : storage.rawOriginals,
+      )
+      markImagePipeline(capture.diagnosticId, 'file move complete', `storedPath=${storedPath} mode=async-copy`)
+      markImagePipeline(capture.diagnosticId, 'RAW pairing complete', `capture=${capture.fileName}`)
+      markImagePipeline(capture.diagnosticId, 'database write started', `capture=${capture.fileName}`)
+      const result = recordRawCapture(db, {
+        projectId,
+        studentId: student?.id ?? null,
+        classId: student?.classId ?? null,
+        filePath: capture.filePath,
+        storedPath,
+        fileName: capture.fileName,
+        capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      })
+
+      if (result.kind === 'duplicate') return
+      markImagePipeline(capture.diagnosticId, 'database write complete', `capture=${result.captureId}`)
+      const savedCapture = db
+        .select()
+        .from(capturesTable)
+        .where(eq(capturesTable.id, result.captureId))
+        .get()
+      getMainWindow()?.webContents.send('capture:updated', {
+        projectId,
+        captureId: result.captureId,
+        studentId: savedCapture?.studentId ?? null,
+      })
+      markImagePipeline(capture.diagnosticId, 'IPC event sent', 'RAW capture update')
+      if (conflictReason) {
+        sendUnmatchedResult(getMainWindow(), projectId, {
+          filePath: capture.filePath,
+          fileName: capture.fileName,
+          reason: conflictReason,
+        })
+      }
+      console.log(
+        `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
+          + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
+      )
+    })
+    .catch((error) => {
+      session.seenPaths.delete(capture.filePath)
+      console.error(`[Watcher] Could not persist RAW ${capture.filePath}; it will be retried`, error)
+    })
+  session.persistence = task
+  session.pendingPersistences.add(task)
+  void task.finally(() => session.pendingPersistences.delete(task)).catch(() => {})
 }
 
 async function finishMatchedPhoto(
@@ -839,19 +1021,29 @@ async function finishMatchedPhoto(
   student: typeof studentsTable.$inferSelect,
   diagnosticId?: string,
   previewThumbnailData?: string | null,
+  options: { skipPreviewGeneration?: boolean } = {},
 ): Promise<void> {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`)
-  // The fast path normally generated this thumbnail from the untouched source
-  // before the managed copy and database work. Keep the fallback for legacy
-  // callers and recovery paths.
-  const previewUrl = previewThumbnailData?.startsWith('mc-preview://')
+  // The fast path normally generated this artifact from the untouched source
+  // before the managed copy and database work. Recovery paths also generate a
+  // reduced artifact rather than sending the managed original to the renderer.
+  let previewUrl = previewThumbnailData?.startsWith('mc-preview://')
     ? previewThumbnailData
     : undefined
-  const thumbnailData = previewUrl
-    ? null
-    : previewThumbnailData === undefined || previewThumbnailData === null
-      ? await generateThumbnail(photo.filePath, LIVE_PREVIEW_EDGE)
-      : previewThumbnailData
+  if (
+    !options.skipPreviewGeneration
+    && !previewUrl
+    && (previewThumbnailData === undefined || previewThumbnailData === null)
+  ) {
+    const previewPath = await generateLivePreview(photo.filePath, {
+      previewKey: diagnosticId ?? `persisted-photo-${photo.id}`,
+      cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+    })
+    previewUrl = previewPath
+      ? createLocalPreviewUrl(previewPath, diagnosticId ?? `persisted-photo-${photo.id}`)
+      : undefined
+  }
+  const thumbnailData = previewUrl ? null : previewThumbnailData
   const capture = db
     .select()
     .from(capturesTable)
@@ -865,7 +1057,7 @@ async function finishMatchedPhoto(
     fileName: photo.fileName,
     capturedAt: photo.capturedAt,
     isMatched: true,
-    thumbnailData,
+    thumbnailData: thumbnailData ?? null,
     createdAt: photo.createdAt,
     previewKey: diagnosticId,
     previewUrl,

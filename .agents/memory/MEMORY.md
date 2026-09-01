@@ -18,3 +18,4 @@
 - [macOS packaging validation](macos-packaging-validation.md) — Linux can generate unsigned macOS ZIPs, but the configured DMG target requires the locked dmg-license dependency.
 - [Electron runtime validation](electron-runtime-validation.md) — packaged Electron smoke tests need the native GLib runtime, which is absent from this Linux workspace.
 - [macOS smoke cleanup](macos-smoke-cleanup.md) — native packaged-app smoke teardown can briefly race with Electron user-data removal, especially on Apple silicon.
+- [Native macOS release builds](native-macos-release-builds.md) — build each thin Mac package on its matching CPU architecture before combining updater metadata.

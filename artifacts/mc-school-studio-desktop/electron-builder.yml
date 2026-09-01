@@ -38,15 +38,11 @@ mac:
     NSDocumentsFolderUsageDescription: Required to store photo data.
     NSDownloadsFolderUsageDescription: Required to import project files.
   notarize: true
+  # Each release-matrix job supplies exactly one architecture on the CLI.
+  # Do not list architectures here or every native runner will build both.
   target:
-    - target: dmg
-      arch:
-        - x64
-        - arm64
-    - target: zip
-      arch:
-        - x64
-        - arm64
+    - dmg
+    - zip
 
 dmg:
   # The x64 and arm64 builds run in parallel, so their filenames must differ.

@@ -279,7 +279,9 @@ test('routes a JPEG without a filename or QR identity to the selected student', 
     const result = await processWatchedPhoto(1, fixture.sourcePath, {
       store,
       photosDir: fixture.photosDir,
-      readQr: async () => null,
+      readQr: async () => {
+        throw new Error('selected student should bypass QR fallback')
+      },
       targetStudentId: 3,
     })
 

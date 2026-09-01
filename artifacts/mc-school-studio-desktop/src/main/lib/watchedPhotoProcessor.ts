@@ -187,7 +187,9 @@ export async function processWatchedPhoto(
     fileName,
     knownStudents.map((student) => student.generatedStudentId),
   )
-  const qrResult = filenameReference ? null : await readQr(filePath)
+  const qrResult = filenameReference || targetStudentId !== null
+    ? null
+    : await readQr(filePath)
   const reference = filenameReference ?? qrResult?.studentId
 
   if (!reference && targetStudentId === null) {

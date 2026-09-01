@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.28",
+  "version": "1.0.29",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "MC School Studio",
@@ -15,6 +15,7 @@
     "test:sequence": "node --experimental-strip-types --test test/photo-sequence.test.ts",
     "test:offline-flow": "node --experimental-strip-types --test test/offline-capture-flow.test.ts",
     "test:watcher": "node --experimental-strip-types --test test/watcher-photo-processing.test.ts",
+    "test:live-preview": "node --experimental-strip-types --test test/live-preview.test.ts",
     "benchmark:image-ingestion": "node --experimental-strip-types test/image-ingestion-benchmark.ts",
     "test:retirement": "node --experimental-strip-types --test test/retirement.test.ts",
     "test:retirement-copy": "node --experimental-strip-types --test test/retirement-team-copy.test.ts",
@@ -31,8 +32,10 @@
     "chokidar": "^4.0.3",
     "drizzle-orm": "catalog:",
     "electron-updater": "^6.8.9",
+    "exiftool-vendored": "^37.2.0",
     "jimp": "^1.6.0",
-    "jsqr": "^1.4.0"
+    "jsqr": "^1.4.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",

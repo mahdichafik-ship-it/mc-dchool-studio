@@ -1,0 +1,127 @@
+The scheduler architecture is accepted.
+
+Do NOT make any further performance changes yet.
+
+The remaining work is VALIDATION ONLY on the real production workflow.
+
+I want to validate the current implementation with real camera files and the actual desktop Electron app.
+
+Please prepare the app/diagnostics so I can test on the real shooting Mac with:
+
+- Nikon JPEG
+- Nikon NEF
+- Canon JPEG if available
+- Canon CR3 if available
+- actual Smart Shooter Watch Folder
+- normal production project/student assignment workflow
+
+Do not change the scheduler, Sharp settings, preview size, persistence queue, or gallery architecture unless the real-world test proves a specific problem.
+
+For the real test, capture:
+
+1. SINGLE JPEG
+Report:
+- file detected
+- file stable
+- student assigned
+- preview generation start
+- preview generation complete
+- IPC received
+- renderer decode complete
+- pixels painted
+- total detected → visible
+- total stable → visible
+
+2. 10-FILE BURST
+Report:
+- newest image stable → preview generation start
+- generation duration
+- newest image → pixels visible
+- preview jobs generated
+- previews superseded
+- captures persisted
+- assignments correct
+
+3. 50-FILE BURST
+Same measurements.
+
+The key release criterion is:
+
+BURST LATENCY MUST REMAIN BOUNDED.
+
+The 50-file burst must not create a FIFO preview backlog.
+
+4. REAL NIKON NEF
+Confirm:
+- embedded preview extraction succeeds
+- no full RAW development occurs
+- preview becomes visible
+- RAW original remains untouched
+- JPEG/RAW pairing remains correct where applicable
+
+Report extracted embedded-preview:
+- dimensions
+- approximate file size
+- extraction time
+- total RAW stable → preview visible
+
+5. REAL CANON CR3
+If a real CR3 is available, run the same validation.
+
+If unavailable, report:
+CANON CR3 REAL-FILE VALIDATION NOT PERFORMED
+
+Do not claim compatibility without a real test.
+
+6. LARGE FILE TEST
+Use representative real production files, including files significantly larger than 3 MB.
+
+If possible test:
+- 20–30 MB
+- 40–60 MB
+- RAW files in the same size range
+
+I want to confirm that live-preview latency remains independent from original-file size as much as reasonably possible.
+
+7. INTEGRITY
+After the test confirm:
+
+Lost captures: 0
+Wrong assignments: 0
+Duplicates: 0
+JPEG/RAW mismatches: 0
+Original files modified: 0
+Restart persistence: PASS
+Offline workflow: PASS
+
+8. REAL END-TO-END RESULT
+The final performance number I care about is:
+
+PHOTOGRAPHER TAKES IMAGE
+→ IMAGE APPEARS VISIBLY IN APP
+
+Report this as:
+Detected → visible
+Stable → visible
+
+Do not report only Sharp-generation time.
+
+After this validation give me:
+
+FINAL RELEASE STATUS: GO / NO-GO
+
+Single JPEG visible:
+10-file newest visible:
+50-file newest visible:
+Nikon NEF:
+Canon CR3:
+Large-file performance:
+Lost captures:
+Wrong assignments:
+Duplicates:
+Pairing:
+Restart:
+Offline:
+
+Do not publish automatically.
+Wait for my approval.

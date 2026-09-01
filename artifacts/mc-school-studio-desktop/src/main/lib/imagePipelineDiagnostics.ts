@@ -93,6 +93,7 @@ export function retainImagePipelineTraceForPaint(traceId: string | undefined): v
   if (!traceId || !diagnosticsEnabled()) return
   const trace = traces.get(traceId)
   if (!trace) return
+  if (trace.waitingForPaint) return
   trace.waitingForPaint = true
   trace.paintTimeout = setTimeout(() => {
     console.warn(`[ImagePipeline] ${traceId} paint report timed out`)
@@ -114,6 +115,19 @@ export function markImagePipelineRendererStage(event: ImagePipelineRendererStage
   if (event.stage === 'image pixels painted' || event.stage === 'image preview superseded') {
     reportAndDeleteTrace(event.traceId)
   }
+}
+
+export function markImagePipelinePreviewSuperseded(
+  traceId: string | undefined,
+  details?: string,
+): void {
+  if (!traceId) return
+  markImagePipelineRendererStage({
+    traceId,
+    stage: 'image preview superseded',
+    atEpochMs: Date.now(),
+    details,
+  })
 }
 
 function reportAndDeleteTrace(traceId: string): void {

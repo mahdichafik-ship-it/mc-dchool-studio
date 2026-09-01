@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { copyFile, mkdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import type { getDb } from '../db'
@@ -57,6 +57,7 @@ export interface WatchedPhotoProcessorOptions {
   targetStudentId?: number | null
   capturedAt?: string
   diagnosticId?: string
+  deferPersistence?: boolean
   onPreviewReady?: (context: {
     filePath: string
     fileName: string
@@ -71,6 +72,12 @@ export type WatchedPhotoResult =
       photo: typeof photosTable.$inferSelect
       student: typeof studentsTable.$inferSelect
       thumbnailData?: string | null
+    }
+  | {
+      kind: 'matched-pending'
+      student: typeof studentsTable.$inferSelect
+      thumbnailData?: string | null
+      persist: () => Promise<typeof photosTable.$inferSelect>
     }
   | {
       kind: 'unmatched'
@@ -111,6 +118,46 @@ function saveUnmatchedPhoto(
   }
 }
 
+interface MatchedPhotoPersistenceContext {
+  project: ProjectRow
+  student: StudentRow
+  classRow: ClassRow | undefined
+  filePath: string
+  fileName: string
+  capturedAt: string
+}
+
+export async function persistMatchedPhoto(
+  store: WatchedPhotoStore,
+  photosDir: string,
+  context: MatchedPhotoPersistenceContext,
+  diagnosticId?: string,
+): Promise<PhotoRow> {
+  const projectFolder = safeFolderName(context.project.schoolName)
+  const classFolder = safeFolderName(context.classRow?.className ?? 'Unassigned Class')
+  const studentFolder = safeFolderName(
+    `${context.student.generatedStudentId}_${context.student.lastName}_${context.student.firstName}`,
+  )
+  const destDir = join(photosDir, projectFolder, classFolder, studentFolder)
+  await mkdir(destDir, { recursive: true })
+  const destPath = join(destDir, context.fileName)
+  markImagePipeline(diagnosticId, 'file move started', `destination=${destPath} mode=async-copy`)
+  await copyFile(context.filePath, destPath)
+  markImagePipeline(diagnosticId, 'file move complete', `destination=${destPath} mode=async-copy`)
+
+  markImagePipeline(diagnosticId, 'database write started', `file=${context.fileName}`)
+  const photo = store.insertPhoto({
+    projectId: context.project.id,
+    studentId: context.student.id,
+    filePath: destPath,
+    fileName: context.fileName,
+    capturedAt: context.capturedAt,
+    isMatched: true,
+  })
+  markImagePipeline(diagnosticId, 'database write complete', `photo=${photo.id}`)
+  return photo
+}
+
 /**
  * Process one file discovered by the Smart Shooter watcher.
  *
@@ -128,6 +175,7 @@ export async function processWatchedPhoto(
     capturedAt,
     diagnosticId,
     onPreviewReady,
+    deferPersistence = false,
   }: WatchedPhotoProcessorOptions,
 ): Promise<WatchedPhotoResult> {
   const fileName = basename(filePath)
@@ -193,27 +241,23 @@ export async function processWatchedPhoto(
     student,
   })
 
-  const classRow = store.findClass(student.classId)
-  const projectFolder = safeFolderName(project.schoolName)
-  const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
-  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
-  const destDir = join(photosDir, projectFolder, classFolder, studentFolder)
-  mkdirSync(destDir, { recursive: true })
-  const destPath = join(destDir, fileName)
-  markImagePipeline(diagnosticId, 'file move started', `destination=${destPath}`)
-  copyFileSync(filePath, destPath)
-  markImagePipeline(diagnosticId, 'file move complete', `destination=${destPath}`)
-
-  markImagePipeline(diagnosticId, 'database write started', `file=${fileName}`)
-  const photo = store.insertPhoto({
-    projectId,
-    studentId: student.id,
-    filePath: destPath,
+  const context = {
+    project,
+    student,
+    classRow: store.findClass(student.classId),
+    filePath,
     fileName,
     capturedAt: effectiveCapturedAt,
-    isMatched: true,
-  })
-  markImagePipeline(diagnosticId, 'database write complete', `photo=${photo.id}`)
+  }
+  if (deferPersistence) {
+    return {
+      kind: 'matched-pending',
+      student,
+      thumbnailData,
+      persist: () => persistMatchedPhoto(store, photosDir, context, diagnosticId),
+    }
+  }
 
+  const photo = await persistMatchedPhoto(store, photosDir, context, diagnosticId)
   return { kind: 'matched', photo, student, thumbnailData }
 }

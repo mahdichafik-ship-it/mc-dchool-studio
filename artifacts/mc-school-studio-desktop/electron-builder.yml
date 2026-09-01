@@ -25,6 +25,10 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/**/*
+  # Native libvips and ExifTool must be runnable outside the ASAR archive.
+  - node_modules/sharp/**/*
+  - node_modules/@img/**/*
+  - "**/node_modules/exiftool-vendored.{pl,exe}/**/*"
 
 mac:
   entitlements: build/entitlements.mac.plist

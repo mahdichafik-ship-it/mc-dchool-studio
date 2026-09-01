@@ -1,0 +1,175 @@
+Do not publish yet.
+
+The lightweight-preview architecture is accepted.
+
+The remaining release blocker is now clearly identified:
+
+The preview generator is still processing every burst image sequentially before IPC, so stale preview jobs accumulate.
+
+Please implement ONE targeted change only:
+
+NEWEST-IMAGE-WINS MUST APPLY BEFORE PREVIEW GENERATION, NOT ONLY IN THE RENDERER.
+
+Required behavior:
+
+1. Preserve every original capture
+Every JPEG/RAW must still:
+- be assigned to the correct student
+- be persisted
+- be paired correctly
+- appear in the gallery
+- remain available after restart
+
+Skipping a LIVE PREVIEW generation job must never mean skipping the capture itself.
+
+2. Coalesce pending live-preview generation jobs
+
+If images A, B, C, D, E arrive while preview A is being generated:
+
+- allow the current active preview job to finish if it cannot be safely cancelled
+- discard/supersede pending preview jobs B, C and D
+- generate preview E next
+
+The live-preview queue should therefore contain at most:
+
+- 1 active preview-generation job
+- 1 newest pending preview-generation job
+
+Do not allow a 10- or 50-image FIFO preview-generation backlog.
+
+3. Separate preview generation from persistence
+
+Every capture must still enter the persistence queue independently.
+
+Example:
+
+A B C D E captured
+
+LIVE PREVIEW:
+A → E
+
+PERSISTENCE:
+A → B → C → D → E
+
+The photographer only needs the newest live image quickly.
+The gallery/database still need every capture.
+
+4. High priority for preview generation
+
+The preview worker must remain higher priority than:
+- original copy
+- gallery work
+- database enrichment not required for assignment
+- cloud work
+
+Do not let large background file copies compete with the newest preview unnecessarily.
+
+5. Do not regenerate obsolete previews later
+
+If B/C/D were superseded as LIVE previews, do not later create 1440px live-preview artifacts for them just because they were skipped.
+
+For the gallery, generate smaller/lower-priority gallery thumbnails separately when needed.
+
+Live-preview artifact generation and gallery-thumbnail generation should not be treated as the same job.
+
+6. Keep Sharp/libvips
+
+Do not go back to Jimp.
+
+The current Sharp/libvips reduced-resolution path is acceptable.
+
+7. Benchmark the corrected scheduler
+
+Repeat:
+
+Single JPEG
+10-file burst
+50-file burst
+
+Report specifically:
+
+- newest image stable → preview generation starts
+- newest preview generation duration
+- newest image → pixels visible
+- number of preview-generation jobs actually executed
+- number superseded before generation
+- persistence count
+- gallery count
+
+Expected behavior for a 50-file burst should look approximately like:
+
+50 captures persisted
+50 captures assigned
+50 gallery records preserved
+
+but only a small number of LIVE preview jobs generated, for example:
+
+1 active + newest pending
+
+rather than 50 sequential live-preview generations.
+
+8. Performance gate
+
+The key metric is no longer:
+
+“How long to generate previews for all 50?”
+
+The key metric is:
+
+“How quickly does the newest capture become visible?”
+
+Target:
+
+Single capture:
+preferably ≤300 ms where hardware allows
+
+10-file burst newest image:
+≤500 ms preferred
+
+50-file burst newest image:
+should not accumulate into multi-second backlog
+
+Most importantly:
+preview latency must remain bounded as burst length increases.
+
+10 images and 50 images should not produce 10× or 50× queue delay.
+
+9. RAW validation
+
+Do not claim RAW release readiness until tested with real representative:
+- Nikon NEF
+- Canon CR3
+
+If those files are unavailable in Replit, mark this explicitly as:
+REAL CAMERA RAW VALIDATION REQUIRED
+
+Do not invent compatibility results.
+
+10. Preview cache cleanup
+
+The preview-cache accumulation issue is valid, but treat it separately from this performance fix.
+
+For now:
+- do not allow cache artifacts to grow forever
+- propose a safe cleanup policy
+- do not delete anything required for restart/gallery recovery
+
+After implementation, report:
+
+FINAL STATUS: GO / NO-GO
+
+Single capture newest-visible:
+10-file newest-visible:
+50-file newest-visible:
+
+Preview jobs generated / captures:
+10-file:
+50-file:
+
+Lost captures:
+Wrong assignments:
+Duplicates:
+JPEG/RAW pairing:
+Restart persistence:
+Offline:
+RAW real-file validation:

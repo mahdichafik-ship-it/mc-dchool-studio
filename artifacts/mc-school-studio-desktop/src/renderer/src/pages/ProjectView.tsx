@@ -1016,7 +1016,7 @@ function LivePreview({
       priority: 'live',
       execute: async (signal) => {
         report('image decode started', 'source=resized-local-url')
-        const bitmap = await decodeResizedPreview(photo.previewUrl!, 900, signal)
+        const bitmap = await decodeResizedPreview(photo.previewUrl!, 1440, signal)
         if (!bitmap || signal.aborted || !mounted) {
           bitmap?.close()
           return

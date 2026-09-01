@@ -2,7 +2,7 @@ import { readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 
-const architecture = process.argv[2]
+const architecture = process.argv.slice(2).find((argument) => argument !== '--')
 
 if (architecture !== 'x64' && architecture !== 'arm64') {
   throw new Error('Expected a macOS package architecture of x64 or arm64')

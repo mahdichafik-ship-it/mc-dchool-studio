@@ -23,16 +23,30 @@ test('prunes incompatible Sharp packages from the pnpm virtual-store layout', (t
   )
   const sharpDirectory = path.join(virtualNodeModules, 'sharp')
   const imgDirectory = path.join(virtualNodeModules, '@img')
-
-  mkdirSync(sharpDirectory, { recursive: true })
-  for (const packageName of [
+  const packageNames = [
     'sharp-darwin-x64',
     'sharp-libvips-darwin-x64',
     'sharp-darwin-arm64',
     'sharp-libvips-darwin-arm64',
     'sharp-linux-x64',
-  ]) {
-    mkdirSync(path.join(imgDirectory, packageName), { recursive: true })
+  ]
+
+  mkdirSync(sharpDirectory, { recursive: true })
+  mkdirSync(imgDirectory, { recursive: true })
+  for (const packageName of packageNames) {
+    const storeEntry = path.join(
+      packageRoot,
+      'node_modules',
+      '.pnpm',
+      `@img+${packageName}@fixture`,
+    )
+    const storedPackage = path.join(storeEntry, 'node_modules', '@img', packageName)
+    mkdirSync(storedPackage, { recursive: true })
+    symlinkSync(
+      storedPackage,
+      path.join(imgDirectory, packageName),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
   }
   symlinkSync(
     sharpDirectory,
@@ -51,4 +65,32 @@ test('prunes incompatible Sharp packages from the pnpm virtual-store layout', (t
   assert.equal(existsSync(path.join(imgDirectory, 'sharp-darwin-arm64')), false)
   assert.equal(existsSync(path.join(imgDirectory, 'sharp-libvips-darwin-arm64')), false)
   assert.equal(existsSync(path.join(imgDirectory, 'sharp-linux-x64')), false)
+  assert.equal(
+    existsSync(
+      path.join(packageRoot, 'node_modules', '.pnpm', '@img+sharp-darwin-x64@fixture'),
+    ),
+    true,
+  )
+  assert.equal(
+    existsSync(
+      path.join(packageRoot, 'node_modules', '.pnpm', '@img+sharp-libvips-darwin-x64@fixture'),
+    ),
+    true,
+  )
+  assert.equal(
+    existsSync(
+      path.join(packageRoot, 'node_modules', '.pnpm', '@img+sharp-darwin-arm64@fixture'),
+    ),
+    false,
+  )
+  assert.equal(
+    existsSync(
+      path.join(packageRoot, 'node_modules', '.pnpm', '@img+sharp-libvips-darwin-arm64@fixture'),
+    ),
+    false,
+  )
+  assert.equal(
+    existsSync(path.join(packageRoot, 'node_modules', '.pnpm', '@img+sharp-linux-x64@fixture')),
+    false,
+  )
 })

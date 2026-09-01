@@ -16,10 +16,21 @@ const sharpDirectory = await realpath(path.join(packageRoot, 'node_modules', 'sh
 const sharpImgDirectory = sharpDirectory
   ? path.join(path.dirname(sharpDirectory), '@img')
   : null
+let virtualStoreDirectory = sharpDirectory
+  ? path.dirname(sharpDirectory)
+  : null
+while (virtualStoreDirectory && path.basename(virtualStoreDirectory) !== '.pnpm') {
+  const parentDirectory = path.dirname(virtualStoreDirectory)
+  virtualStoreDirectory =
+    parentDirectory === virtualStoreDirectory ? null : parentDirectory
+}
 const expectedPackages = new Set([
   `sharp-darwin-${architecture}`,
   `sharp-libvips-darwin-${architecture}`,
 ])
+const expectedStorePrefixes = [...expectedPackages].map(
+  (packageName) => `@img+${packageName}@`,
+)
 
 const candidateDirectories = [...new Set([packageImgDirectory, sharpImgDirectory].filter(Boolean))]
 const imgDirectories = []
@@ -35,6 +46,9 @@ if (imgDirectories.length === 0) {
   throw new Error(
     `Sharp optional dependency directories are missing: ${candidateDirectories.join(', ')}`,
   )
+}
+if (!virtualStoreDirectory) {
+  throw new Error(`Unable to locate the pnpm virtual store from ${sharpDirectory}`)
 }
 
 const installedPackages = new Set()
@@ -75,6 +89,34 @@ for (const directory of imgDirectories) {
   }
 }
 
+const storeEntries = await readdir(virtualStoreDirectory)
+const nativeStoreEntries = storeEntries.filter((entry) => entry.startsWith('@img+sharp-'))
+for (const expectedPrefix of expectedStorePrefixes) {
+  if (!nativeStoreEntries.some((entry) => entry.startsWith(expectedPrefix))) {
+    throw new Error(`Required pnpm virtual-store package ${expectedPrefix}* is missing`)
+  }
+}
+
+const removableStoreEntries = nativeStoreEntries.filter(
+  (entry) => !expectedStorePrefixes.some((prefix) => entry.startsWith(prefix)),
+)
+await Promise.all(
+  removableStoreEntries.map((entry) =>
+    rm(path.join(virtualStoreDirectory, entry), { force: true, recursive: true }),
+  ),
+)
+
+const unexpectedStoreEntries = (await readdir(virtualStoreDirectory)).filter(
+  (entry) =>
+    entry.startsWith('@img+sharp-') &&
+    !expectedStorePrefixes.some((prefix) => entry.startsWith(prefix)),
+)
+if (unexpectedStoreEntries.length > 0) {
+  throw new Error(
+    `Unexpected Sharp native packages remain in the pnpm virtual store for ${architecture}: ${unexpectedStoreEntries.join(', ')}`,
+  )
+}
+
 console.log(
-  `Prepared Sharp native dependencies for macOS ${architecture}; checked ${imgDirectories.length} link director${imgDirectories.length === 1 ? 'y' : 'ies'} and removed ${removedCount} incompatible package(s)`,
+  `Prepared Sharp native dependencies for macOS ${architecture}; checked ${imgDirectories.length} link director${imgDirectories.length === 1 ? 'y' : 'ies'}, removed ${removedCount} incompatible link(s), and removed ${removableStoreEntries.length} incompatible virtual-store package(s)`,
 )

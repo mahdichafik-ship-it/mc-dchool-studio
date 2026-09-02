@@ -11,6 +11,7 @@ import {
   getPhotoSystemLayout,
   getProjectStorageLayout,
 } from '../lib/storageLayout'
+import { formatStudentFolderName } from '../lib/photoFileNaming'
 
 function now() {
   return new Date().toISOString()
@@ -59,7 +60,14 @@ export function prepareProjectFolders(
     const students = projectDb.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
     for (const student of students) {
       mkdirSync(
-        join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+        join(
+          classDir,
+          safeProjectFolderName(formatStudentFolderName(
+            student.firstName,
+            student.lastName,
+            student.generatedStudentId,
+          )),
+        ),
         { recursive: true },
       )
     }

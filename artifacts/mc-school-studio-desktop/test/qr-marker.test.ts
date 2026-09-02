@@ -58,7 +58,7 @@ function createFakeDb() {
 const marker = {
   projectId: 1,
   studentId: 7,
-  filePath: '/photos/School/Class/7_Student/QR Markers/marker.jpg',
+  filePath: '/photos/School/Class/Student_7_7/QR Markers/marker.jpg',
   fileName: 'marker.jpg',
   sourcePath: '/spool/marker.jpg',
   capturedAt: '2026-08-31T12:00:00.000Z',

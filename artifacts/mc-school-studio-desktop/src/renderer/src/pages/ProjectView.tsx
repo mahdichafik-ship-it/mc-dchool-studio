@@ -97,6 +97,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [exporting, setExporting] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
+  const autoStartAttemptedRef = useRef<number | null>(null)
   const pendingUploadCount = [...uploadStatusMap.values()]
     .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
 
@@ -113,6 +114,28 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       void stopWatcher()
     }
   }, [stopWatcher])
+
+  // Opening an unfinished project with a configured folder starts its capture
+  // session automatically. A manual stop remains respected until the project
+  // is closed and opened again.
+  useEffect(() => {
+    if (
+      !project?.watchFolder
+      || project.finishedAt
+      || isRunning
+      || autoStartAttemptedRef.current === projectId
+    ) {
+      return
+    }
+    autoStartAttemptedRef.current = projectId
+    void startWatcher().catch((error) => {
+      addToast({
+        type: 'error',
+        title: 'Watch folder could not start automatically',
+        description: String(error),
+      })
+    })
+  }, [isRunning, project?.finishedAt, project?.watchFolder, projectId, startWatcher])
 
   // Re-select the student when students refresh (to get updated photoCount)
   useEffect(() => {
@@ -729,7 +752,13 @@ function StudentDetail({
   onClearCaptureTarget: () => void
   offline: boolean
 }) {
-  const { data: review, reload: reloadCaptures, livePreview } = useCaptures(student.id)
+  const {
+    data: review,
+    loading: capturesLoading,
+    error: capturesError,
+    reload: reloadCaptures,
+    livePreview,
+  } = useCaptures(student.id)
   const captures = review.captures
   const qrMarkers = review.qrMarkers
   const [reassignOpen, setReassignOpen] = useState(false)
@@ -917,7 +946,25 @@ function StudentDetail({
             ))}
           </div>
 
-          {captures.length === 0 && qrMarkers.length === 0 ? (
+          {capturesLoading && captures.length === 0 && qrMarkers.length === 0 ? (
+            <div className="h-40 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400">
+              <Loader className="mr-2 size-4 animate-spin" />
+              Loading captures…
+            </div>
+          ) : capturesError ? (
+            <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-red-200 bg-red-50 rounded-xl px-6 text-center">
+              <AlertCircle className="size-8 text-red-400 mb-2" />
+              <p className="text-sm font-medium text-red-700">Could not load these captures</p>
+              <p className="text-xs text-red-600 mt-1">{capturesError}</p>
+              <button
+                type="button"
+                onClick={() => void reloadCaptures()}
+                className="mt-3 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-200"
+              >
+                Try again
+              </button>
+            </div>
+          ) : captures.length === 0 && qrMarkers.length === 0 ? (
             <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
               <Image className="size-8 text-slate-300 mb-2" />
               <p className="text-sm text-slate-400">No captures yet</p>
@@ -988,11 +1035,15 @@ function LivePreview({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [showImageFallback, setShowImageFallback] = useState(false)
+  const [canvasPainted, setCanvasPainted] = useState(false)
+  const [previewFailed, setPreviewFailed] = useState(false)
 
   useEffect(() => {
     if (!photo.previewUrl || !traceId) return
     let mounted = true
     setShowImageFallback(false)
+    setCanvasPainted(false)
+    setPreviewFailed(false)
     const report = (
       stage:
         | 'React state update committed'
@@ -1037,6 +1088,7 @@ function LivePreview({
           context.clearRect(0, 0, canvas.width, canvas.height)
           context.drawImage(bitmap, 0, 0)
           bitmap.close()
+          setCanvasPainted(true)
 
           await waitForPaintFrames()
           if (!mounted || signal.aborted) return
@@ -1072,16 +1124,24 @@ function LivePreview({
         aria-label={`Latest capture ${photo.fileName}`}
         className={cn(
           'block max-h-96 w-full object-contain',
-          showImageFallback && 'hidden',
+          (!canvasPainted || showImageFallback) && 'hidden',
         )}
       />
-      {showImageFallback && (
+      {(!canvasPainted || showImageFallback) && !previewFailed && (
         <img
           src={photo.previewUrl}
           alt={`Latest capture ${photo.fileName}`}
           className="block max-h-96 w-full object-contain"
           draggable={false}
+          onError={() => setPreviewFailed(true)}
         />
+      )}
+      {previewFailed && !canvasPainted && (
+        <div className="flex h-40 flex-col items-center justify-center px-6 text-center">
+          <AlertCircle className="mb-2 size-7 text-amber-300" />
+          <p className="text-sm font-medium text-white">Latest preview could not be displayed</p>
+          <p className="mt-1 text-xs text-slate-400">The original photograph remains safely stored.</p>
+        </div>
       )}
     </div>
   )

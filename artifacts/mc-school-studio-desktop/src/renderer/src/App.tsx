@@ -50,6 +50,9 @@ export default function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' })
   const [authBusy, setAuthBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  const [captureNotificationsEnabled, setCaptureNotificationsEnabled] = useState(
+    () => window.localStorage.getItem('capture-notifications-enabled') !== 'false',
+  )
 
   const loadAuth = useCallback(async () => {
     const result = await window.api.invoke('auth:getSession')
@@ -138,28 +141,36 @@ export default function App() {
   }, [])
 
   const handleMatched = useCallback((data: PhotoMatchedEvent) => {
+    if (!captureNotificationsEnabled) return
     if (data.preview) return
     addToast({
       type: 'success',
       title: `Photo matched: ${data.student.firstName} ${data.student.lastName}`,
       description: data.photo.fileName,
     })
-  }, [])
+  }, [captureNotificationsEnabled])
 
   const handleUnmatched = useCallback((data: PhotoUnmatchedEvent) => {
+    if (!captureNotificationsEnabled) return
     addToast({
       type: 'error',
       title: 'Photo could not be matched',
       description: data.reason,
     })
-  }, [])
+  }, [captureNotificationsEnabled])
 
   const handleMarker = useCallback((data: PhotoMarkerEvent) => {
+    if (!captureNotificationsEnabled) return
     addToast({
       type: 'info',
       title: `Now photographing: ${data.student.firstName} ${data.student.lastName}`,
       description: 'The next portraits will be assigned to this student until the next QR marker.',
     })
+  }, [captureNotificationsEnabled])
+
+  const changeCaptureNotifications = useCallback((enabled: boolean) => {
+    setCaptureNotificationsEnabled(enabled)
+    window.localStorage.setItem('capture-notifications-enabled', String(enabled))
   }, [])
 
   usePhotoEvents(handleMatched, handleUnmatched, handleMarker)
@@ -200,7 +211,14 @@ export default function App() {
           offline={auth.offline === true}
         />
       )}
-      {currentPage === 'settings' && <Settings member={auth.member} onSignedOut={() => setAuth({ status: 'signed-out', error: 'You have signed out of this desktop.' })} />}
+      {currentPage === 'settings' && (
+        <Settings
+          member={auth.member}
+          captureNotificationsEnabled={captureNotificationsEnabled}
+          onCaptureNotificationsChange={changeCaptureNotifications}
+          onSignedOut={() => setAuth({ status: 'signed-out', error: 'You have signed out of this desktop.' })}
+        />
+      )}
       <Toaster />
     </AppLayout>
   )

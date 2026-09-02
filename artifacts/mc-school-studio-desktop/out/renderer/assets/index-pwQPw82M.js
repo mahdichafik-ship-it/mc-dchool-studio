@@ -12090,11 +12090,28 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$u = [
+const __iconNode$v = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$u);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$v);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$u = [
+  ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
+  [
+    "path",
+    {
+      d: "M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326",
+      key: "11g9vi"
+    }
+  ]
+];
+const Bell = createLucideIcon("bell", __iconNode$u);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -16809,6 +16826,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [exporting, setExporting] = reactExports.useState(false);
   const [finishing, setFinishing] = reactExports.useState(false);
   const [syncProgress, setSyncProgress] = reactExports.useState(null);
+  const autoStartAttemptedRef = reactExports.useRef(null);
   const pendingUploadCount = [...uploadStatusMap.values()].reduce((count, summary) => count + summary.pending + summary.uploading, 0);
   reactExports.useEffect(() => {
     return window.api.on("project:syncProgress", (event) => {
@@ -16820,6 +16838,19 @@ function ProjectView({ projectId, onBack, offline = false }) {
       void stopWatcher();
     };
   }, [stopWatcher]);
+  reactExports.useEffect(() => {
+    if (!project?.watchFolder || project.finishedAt || isRunning || autoStartAttemptedRef.current === projectId) {
+      return;
+    }
+    autoStartAttemptedRef.current = projectId;
+    void startWatcher().catch((error) => {
+      addToast({
+        type: "error",
+        title: "Watch folder could not start automatically",
+        description: String(error)
+      });
+    });
+  }, [isRunning, project?.finishedAt, project?.watchFolder, projectId, startWatcher]);
   reactExports.useEffect(() => {
     if (selectedStudent) {
       const refreshed = students.find((s) => s.id === selectedStudent.id);
@@ -17562,10 +17593,14 @@ function LivePreview({
 }) {
   const canvasRef = reactExports.useRef(null);
   const [showImageFallback, setShowImageFallback] = reactExports.useState(false);
+  const [canvasPainted, setCanvasPainted] = reactExports.useState(false);
+  const [previewFailed, setPreviewFailed] = reactExports.useState(false);
   reactExports.useEffect(() => {
     if (!photo.previewUrl || !traceId) return;
     let mounted = true;
     setShowImageFallback(false);
+    setCanvasPainted(false);
+    setPreviewFailed(false);
     const report = (stage, details) => {
       void window.api.invoke("imagePipeline:rendererStage", {
         traceId,
@@ -17599,6 +17634,7 @@ function LivePreview({
           context.clearRect(0, 0, canvas.width, canvas.height);
           context.drawImage(bitmap, 0, 0);
           bitmap.close();
+          setCanvasPainted(true);
           await waitForPaintFrames();
           if (!mounted || signal.aborted) return;
           report("image pixels painted", `original=${photo.filePath}`);
@@ -17630,19 +17666,25 @@ function LivePreview({
         "aria-label": `Latest capture ${photo.fileName}`,
         className: cn(
           "block max-h-96 w-full object-contain",
-          showImageFallback && "hidden"
+          (!canvasPainted || showImageFallback) && "hidden"
         )
       }
     ),
-    showImageFallback && /* @__PURE__ */ jsxRuntimeExports.jsx(
+    (!canvasPainted || showImageFallback) && !previewFailed && /* @__PURE__ */ jsxRuntimeExports.jsx(
       "img",
       {
         src: photo.previewUrl,
         alt: `Latest capture ${photo.fileName}`,
         className: "block max-h-96 w-full object-contain",
-        draggable: false
+        draggable: false,
+        onError: () => setPreviewFailed(true)
       }
-    )
+    ),
+    previewFailed && !canvasPainted && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-40 flex-col items-center justify-center px-6 text-center", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "mb-2 size-7 text-amber-300" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-white", children: "Latest preview could not be displayed" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-xs text-slate-400", children: "The original photograph remains safely stored." })
+    ] })
   ] });
 }
 function GalleryThumbnail({
@@ -18100,7 +18142,12 @@ function ReassignDialog({
     ] })
   ] });
 }
-function Settings({ member, onSignedOut }) {
+function Settings({
+  member,
+  captureNotificationsEnabled,
+  onCaptureNotificationsChange,
+  onSignedOut
+}) {
   const [photosDir, setPhotosDir] = reactExports.useState("");
   const [spoolDir, setSpoolDir] = reactExports.useState("");
   const [updateState, setUpdateState] = reactExports.useState({ status: "unsupported" });
@@ -18203,6 +18250,34 @@ function Settings({ member, onSignedOut }) {
           ] })
         ] })
       ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border border-slate-200 rounded-xl p-5", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Bell, { className: "size-5 text-teal-600" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "Capture notifications" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500", children: "Show the temporary photo matched, QR marker, and unmatched-photo messages. Important upload and watcher errors remain visible." }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              type: "button",
+              role: "switch",
+              "aria-checked": captureNotificationsEnabled,
+              onClick: () => onCaptureNotificationsChange(!captureNotificationsEnabled),
+              className: `relative h-7 w-12 shrink-0 rounded-full transition-colors ${captureNotificationsEnabled ? "bg-teal-600" : "bg-slate-300"}`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "span",
+                  {
+                    className: `absolute top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${captureNotificationsEnabled ? "translate-x-6" : "translate-x-1"}`
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: captureNotificationsEnabled ? "Turn capture notifications off" : "Turn capture notifications on" })
+              ]
+            }
+          )
+        ] })
+      ] }),
       globalErrorCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "size-5 text-red-500 shrink-0" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
@@ -18268,7 +18343,7 @@ function Settings({ member, onSignedOut }) {
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Prepare the school project in the web app and export it as JSON" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: 'Import the JSON file here using the "Import Project" button' }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Open the project and set the watch folder (SmartShooter output folder)" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: 'Start the watcher — the green "Live" indicator appears' }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: 'Open the project — watching starts automatically and the green "Live" indicator appears' }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Select a student to display their QR code on screen" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the QR code first — this marks the start of that student’s capture sequence" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "Photograph the student; every following portrait is assigned to that student until the next QR marker" }),
@@ -18304,6 +18379,9 @@ function App() {
   const [auth, setAuth] = reactExports.useState({ status: "loading" });
   const [authBusy, setAuthBusy] = reactExports.useState(false);
   const [appVersion, setAppVersion] = reactExports.useState("");
+  const [captureNotificationsEnabled, setCaptureNotificationsEnabled] = reactExports.useState(
+    () => window.localStorage.getItem("capture-notifications-enabled") !== "false"
+  );
   const loadAuth = reactExports.useCallback(async () => {
     const result = await window.api.invoke("auth:getSession");
     setAuth((previous) => {
@@ -18378,26 +18456,33 @@ function App() {
     }
   }, []);
   const handleMatched = reactExports.useCallback((data) => {
+    if (!captureNotificationsEnabled) return;
     if (data.preview) return;
     addToast({
       type: "success",
       title: `Photo matched: ${data.student.firstName} ${data.student.lastName}`,
       description: data.photo.fileName
     });
-  }, []);
+  }, [captureNotificationsEnabled]);
   const handleUnmatched = reactExports.useCallback((data) => {
+    if (!captureNotificationsEnabled) return;
     addToast({
       type: "error",
       title: "Photo could not be matched",
       description: data.reason
     });
-  }, []);
+  }, [captureNotificationsEnabled]);
   const handleMarker = reactExports.useCallback((data) => {
+    if (!captureNotificationsEnabled) return;
     addToast({
       type: "info",
       title: `Now photographing: ${data.student.firstName} ${data.student.lastName}`,
       description: "The next portraits will be assigned to this student until the next QR marker."
     });
+  }, [captureNotificationsEnabled]);
+  const changeCaptureNotifications = reactExports.useCallback((enabled) => {
+    setCaptureNotificationsEnabled(enabled);
+    window.localStorage.setItem("capture-notifications-enabled", String(enabled));
   }, []);
   usePhotoEvents(handleMatched, handleUnmatched, handleMarker);
   if (auth.status === "loading") {
@@ -18432,7 +18517,15 @@ function App() {
             offline: auth.offline === true
           }
         ),
-        currentPage === "settings" && /* @__PURE__ */ jsxRuntimeExports.jsx(Settings, { member: auth.member, onSignedOut: () => setAuth({ status: "signed-out", error: "You have signed out of this desktop." }) }),
+        currentPage === "settings" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Settings,
+          {
+            member: auth.member,
+            captureNotificationsEnabled,
+            onCaptureNotificationsChange: changeCaptureNotifications,
+            onSignedOut: () => setAuth({ status: "signed-out", error: "You have signed out of this desktop." })
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsx(Toaster, {})
       ]
     }

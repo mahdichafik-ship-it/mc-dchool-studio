@@ -987,10 +987,12 @@ function LivePreview({
   traceId?: string
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [showImageFallback, setShowImageFallback] = useState(false)
 
   useEffect(() => {
     if (!photo.previewUrl || !traceId) return
     let mounted = true
+    setShowImageFallback(false)
     const report = (
       stage:
         | 'React state update committed'
@@ -1015,29 +1017,35 @@ function LivePreview({
       id: traceId,
       priority: 'live',
       execute: async (signal) => {
-        report('image decode started', 'source=resized-local-url')
-        const bitmap = await decodeResizedPreview(photo.previewUrl!, 1440, signal)
-        if (!bitmap || signal.aborted || !mounted) {
-          bitmap?.close()
-          return
-        }
+        try {
+          report('image decode started', 'source=resized-local-url')
+          const bitmap = await decodeResizedPreview(photo.previewUrl!, 1440, signal)
+          if (!bitmap || signal.aborted || !mounted) {
+            bitmap?.close()
+            return
+          }
 
-        report('image decode complete', `size=${bitmap.width}x${bitmap.height}`)
-        const canvas = canvasRef.current
-        const context = canvas?.getContext('2d')
-        if (!canvas || !context || signal.aborted || !mounted) {
+          report('image decode complete', `size=${bitmap.width}x${bitmap.height}`)
+          const canvas = canvasRef.current
+          const context = canvas?.getContext('2d')
+          if (!canvas || !context || signal.aborted || !mounted) {
+            bitmap.close()
+            return
+          }
+          canvas.width = bitmap.width
+          canvas.height = bitmap.height
+          context.clearRect(0, 0, canvas.width, canvas.height)
+          context.drawImage(bitmap, 0, 0)
           bitmap.close()
-          return
-        }
-        canvas.width = bitmap.width
-        canvas.height = bitmap.height
-        context.clearRect(0, 0, canvas.width, canvas.height)
-        context.drawImage(bitmap, 0, 0)
-        bitmap.close()
 
-        await waitForPaintFrames()
-        if (!mounted || signal.aborted) return
-        report('image pixels painted', `original=${photo.filePath}`)
+          await waitForPaintFrames()
+          if (!mounted || signal.aborted) return
+          report('image pixels painted', `original=${photo.filePath}`)
+        } catch (error) {
+          if (!mounted || signal.aborted) return
+          console.warn('[LivePreview] Canvas decode failed; using image fallback', error)
+          setShowImageFallback(true)
+        }
       },
       onCancelled: () => {
         report('image preview superseded', 'newer capture prioritized')
@@ -1062,8 +1070,19 @@ function LivePreview({
         ref={canvasRef}
         role="img"
         aria-label={`Latest capture ${photo.fileName}`}
-        className="block max-h-96 w-full object-contain"
+        className={cn(
+          'block max-h-96 w-full object-contain',
+          showImageFallback && 'hidden',
+        )}
       />
+      {showImageFallback && (
+        <img
+          src={photo.previewUrl}
+          alt={`Latest capture ${photo.fileName}`}
+          className="block max-h-96 w-full object-contain"
+          draggable={false}
+        />
+      )}
     </div>
   )
 }

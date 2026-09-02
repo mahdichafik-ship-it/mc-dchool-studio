@@ -25,6 +25,7 @@ import type {
   ActiveCaptureTargetEvent,
   ImagePipelineRendererStage,
 } from '../../../shared/types'
+import { mergeMatchedPhoto } from '../lib/captureEventReconciliation'
 
 // Re-export types for convenience
 export type {
@@ -299,7 +300,24 @@ export function useCaptures(studentId: number | null) {
     setLoading(true)
     try {
       const result = await api.invoke('captures:list', { studentId })
-      setData(result as StudentCaptureReview)
+      const loaded = result as StudentCaptureReview
+      setData((current) => {
+        // An initial/reconciliation load can finish after the fast preview
+        // event. Keep a temporary capture visible until its persisted event
+        // replaces it, instead of briefly reverting to a file-only tile.
+        const loadedSourcePaths = new Set(
+          loaded.captures
+            .map((capture) => capture.legacyPhoto?.filePath)
+            .filter((filePath): filePath is string => Boolean(filePath)),
+        )
+        const pending = current.captures.filter((capture) => {
+          const photo = capture.legacyPhoto
+          return capture.id < 0 && Boolean(photo) && !loadedSourcePaths.has(photo!.filePath)
+        })
+        return pending.length > 0
+          ? { ...loaded, captures: [...loaded.captures, ...pending] }
+          : loaded
+      })
     } finally {
       setLoading(false)
     }
@@ -351,12 +369,12 @@ export function useCaptures(studentId: number | null) {
           || capture.legacyPhoto?.id === event.photo.id)
         if (existingIndex >= 0 && !event.preview) {
           const captures = [...current.captures]
+          const previous = captures[existingIndex]
           captures[existingIndex] = {
-            ...captures[existingIndex],
+            ...previous,
             id: event.captureId ?? captures[existingIndex].id,
             thumbnailData: event.photo.thumbnailData,
-            legacyPhoto: event.photo,
-              previewPipeline: captures[existingIndex].previewPipeline,
+            legacyPhoto: mergeMatchedPhoto(previous.legacyPhoto, event),
           }
           return { ...current, captures }
         }
@@ -376,10 +394,7 @@ export function useCaptures(studentId: number | null) {
           fileUrl: null,
         }
         const galleryPhoto: Photo = {
-          ...event.photo,
-          previewUrl: undefined,
-          previewKey: undefined,
-          thumbnailData: null,
+          ...mergeMatchedPhoto(null, event),
         }
         const optimisticCapture: CaptureReview = {
           id: event.captureId ?? -event.photo.id,
@@ -397,6 +412,7 @@ export function useCaptures(studentId: number | null) {
           files: [jpegFile],
           thumbnailData: null,
           legacyPhoto: galleryPhoto,
+          previewPipeline: event.pipeline,
         }
         return {
           ...current,

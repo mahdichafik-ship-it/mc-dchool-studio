@@ -15903,6 +15903,14 @@ function Badge({ className, variant = "default", ...props }) {
     }
   );
 }
+function mergeMatchedPhoto(previous, event) {
+  return {
+    ...event.photo,
+    previewUrl: event.photo.previewUrl ?? previous?.previewUrl,
+    previewKey: event.previewKey ?? event.photo.previewKey ?? previous?.previewKey,
+    thumbnailData: event.photo.thumbnailData ?? previous?.thumbnailData ?? null
+  };
+}
 const api = window.api;
 function reportImagePipelineStage(pipeline, stage, details) {
   if (!pipeline) return;
@@ -16096,7 +16104,17 @@ function useCaptures(studentId) {
     setLoading(true);
     try {
       const result = await api.invoke("captures:list", { studentId });
-      setData(result);
+      const loaded = result;
+      setData((current) => {
+        const loadedSourcePaths = new Set(
+          loaded.captures.map((capture) => capture.legacyPhoto?.filePath).filter((filePath) => Boolean(filePath))
+        );
+        const pending = current.captures.filter((capture) => {
+          const photo = capture.legacyPhoto;
+          return capture.id < 0 && Boolean(photo) && !loadedSourcePaths.has(photo.filePath);
+        });
+        return pending.length > 0 ? { ...loaded, captures: [...loaded.captures, ...pending] } : loaded;
+      });
     } finally {
       setLoading(false);
     }
@@ -16138,12 +16156,12 @@ function useCaptures(studentId) {
         const existingIndex = current.captures.findIndex((capture) => event.previewKey && capture.legacyPhoto?.previewKey === event.previewKey || capture.legacyPhoto?.id === event.photo.id);
         if (existingIndex >= 0 && !event.preview) {
           const captures = [...current.captures];
+          const previous = captures[existingIndex];
           captures[existingIndex] = {
-            ...captures[existingIndex],
+            ...previous,
             id: event.captureId ?? captures[existingIndex].id,
             thumbnailData: event.photo.thumbnailData,
-            legacyPhoto: event.photo,
-            previewPipeline: captures[existingIndex].previewPipeline
+            legacyPhoto: mergeMatchedPhoto(previous.legacyPhoto, event)
           };
           return { ...current, captures };
         }
@@ -16162,10 +16180,7 @@ function useCaptures(studentId) {
           fileUrl: null
         };
         const galleryPhoto = {
-          ...event.photo,
-          previewUrl: void 0,
-          previewKey: void 0,
-          thumbnailData: null
+          ...mergeMatchedPhoto(null, event)
         };
         const optimisticCapture = {
           id: event.captureId ?? -event.photo.id,
@@ -16182,7 +16197,8 @@ function useCaptures(studentId) {
           assignmentLocked: true,
           files: [jpegFile],
           thumbnailData: null,
-          legacyPhoto: galleryPhoto
+          legacyPhoto: galleryPhoto,
+          previewPipeline: event.pipeline
         };
         return {
           ...current,
@@ -17519,9 +17535,11 @@ function LivePreview({
   traceId
 }) {
   const canvasRef = reactExports.useRef(null);
+  const [showImageFallback, setShowImageFallback] = reactExports.useState(false);
   reactExports.useEffect(() => {
     if (!photo.previewUrl || !traceId) return;
     let mounted = true;
+    setShowImageFallback(false);
     const report = (stage, details) => {
       void window.api.invoke("imagePipeline:rendererStage", {
         traceId,
@@ -17536,27 +17554,33 @@ function LivePreview({
       id: traceId,
       priority: "live",
       execute: async (signal) => {
-        report("image decode started", "source=resized-local-url");
-        const bitmap = await decodeResizedPreview(photo.previewUrl, 1440, signal);
-        if (!bitmap || signal.aborted || !mounted) {
-          bitmap?.close();
-          return;
-        }
-        report("image decode complete", `size=${bitmap.width}x${bitmap.height}`);
-        const canvas = canvasRef.current;
-        const context = canvas?.getContext("2d");
-        if (!canvas || !context || signal.aborted || !mounted) {
+        try {
+          report("image decode started", "source=resized-local-url");
+          const bitmap = await decodeResizedPreview(photo.previewUrl, 1440, signal);
+          if (!bitmap || signal.aborted || !mounted) {
+            bitmap?.close();
+            return;
+          }
+          report("image decode complete", `size=${bitmap.width}x${bitmap.height}`);
+          const canvas = canvasRef.current;
+          const context = canvas?.getContext("2d");
+          if (!canvas || !context || signal.aborted || !mounted) {
+            bitmap.close();
+            return;
+          }
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(bitmap, 0, 0);
           bitmap.close();
-          return;
+          await waitForPaintFrames();
+          if (!mounted || signal.aborted) return;
+          report("image pixels painted", `original=${photo.filePath}`);
+        } catch (error) {
+          if (!mounted || signal.aborted) return;
+          console.warn("[LivePreview] Canvas decode failed; using image fallback", error);
+          setShowImageFallback(true);
         }
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        await waitForPaintFrames();
-        if (!mounted || signal.aborted) return;
-        report("image pixels painted", `original=${photo.filePath}`);
       },
       onCancelled: () => {
         report("image preview superseded", "newer capture prioritized");
@@ -17578,7 +17602,19 @@ function LivePreview({
         ref: canvasRef,
         role: "img",
         "aria-label": `Latest capture ${photo.fileName}`,
-        className: "block max-h-96 w-full object-contain"
+        className: cn(
+          "block max-h-96 w-full object-contain",
+          showImageFallback && "hidden"
+        )
+      }
+    ),
+    showImageFallback && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "img",
+      {
+        src: photo.previewUrl,
+        alt: `Latest capture ${photo.fileName}`,
+        className: "block max-h-96 w-full object-contain",
+        draggable: false
       }
     )
   ] });

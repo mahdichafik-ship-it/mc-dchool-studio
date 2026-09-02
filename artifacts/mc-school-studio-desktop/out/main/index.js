@@ -13,7 +13,6 @@ const exiftoolVendored = require("exiftool-vendored");
 const fs = require("node:fs/promises");
 const node_crypto = require("node:crypto");
 const sharp = require("sharp");
-const node_url = require("node:url");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
 const require$$0$1 = require("util");
@@ -745,7 +744,14 @@ function registerLocalPreviewProtocol() {
     const filePath = previewFiles.get(key);
     if (!filePath) return new Response("Preview not found", { status: 404 });
     try {
-      return await electron.net.fetch(node_url.pathToFileURL(filePath).toString());
+      const bytes = await fs.readFile(filePath);
+      return new Response(bytes, {
+        headers: {
+          "Cache-Control": "no-store",
+          "Content-Length": String(bytes.byteLength),
+          "Content-Type": "image/jpeg"
+        }
+      });
     } catch {
       return new Response("Preview unavailable", { status: 404 });
     }

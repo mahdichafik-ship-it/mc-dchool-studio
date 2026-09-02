@@ -460,6 +460,23 @@ function retireLocalProjects(store, fileSystem, photosRoot) {
   store.clearProjects();
   return { projectsCleared: projects.length, pathsRemoved: orderedPaths.length };
 }
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function extractStudentReference(fileName, studentIds) {
+  const stem = node_path.basename(fileName, node_path.extname(fileName));
+  const matches = studentIds.filter((id) => {
+    if (!id) return false;
+    return new RegExp(`(?:^|[-_])${escapeRegExp(id)}(?:[-_]\\d+)?$`, "i").test(stem);
+  });
+  return matches.sort((a, b) => b.length - a.length)[0] ?? null;
+}
+function formatStudentFolderName(firstName, lastName, studentId) {
+  return `${firstName}_${lastName}_${studentId}`;
+}
+function formatStudentPhotoName(firstName, lastName, studentId, sourceFileName) {
+  return `${formatStudentFolderName(firstName, lastName, studentId)}${node_path.extname(sourceFileName)}`;
+}
 function now$3() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
@@ -494,7 +511,14 @@ function prepareProjectFolders(projectDb, projectId) {
     const students = projectDb.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.classId, cls.id)).all();
     for (const student of students) {
       require$$0.mkdirSync(
-        path.join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+        path.join(
+          classDir,
+          safeProjectFolderName(formatStudentFolderName(
+            student.firstName,
+            student.lastName,
+            student.generatedStudentId
+          ))
+        ),
         { recursive: true }
       );
     }
@@ -1517,17 +1541,6 @@ function registerUploadHandlers() {
     );
     return photos.filter((photo) => !mirroredPhotoIds.has(photo.id)).length + captureFiles.length;
   });
-}
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function extractStudentReference(fileName, studentIds) {
-  const stem = node_path.basename(fileName, node_path.extname(fileName));
-  const matches = studentIds.filter((id) => {
-    if (!id) return false;
-    return new RegExp(`(?:^|[-_])${escapeRegExp(id)}(?:[-_]\\d+)?$`, "i").test(stem);
-  });
-  return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
 var commonjsGlobal = typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : {};
 function getDefaultExportFromCjs(x2) {
@@ -42267,6 +42280,18 @@ function now$1() {
 function safeFolderName$1(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
+function nextAvailableFileName$1(destinationDirs, fileName) {
+  const isAvailable = (candidate2) => destinationDirs.every((directory) => !node_fs.existsSync(node_path.join(directory, candidate2)));
+  if (isAvailable(fileName)) return fileName;
+  const parsed = node_path.parse(fileName);
+  let suffix = 2;
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  while (!isAvailable(candidate)) {
+    suffix++;
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  }
+  return candidate;
+}
 function saveUnmatchedPhoto(store, projectId, filePath, fileName, reason) {
   store.insertPhoto({
     projectId,
@@ -42287,15 +42312,24 @@ async function persistMatchedPhoto(store, photosDir, context, diagnosticId) {
   const projectFolder = safeFolderName$1(context.project.schoolName);
   const classFolder = safeFolderName$1(context.classRow?.className ?? "Unassigned Class");
   const studentFolder = safeFolderName$1(
-    `${context.student.generatedStudentId}_${context.student.lastName}_${context.student.firstName}`
+    formatStudentFolderName(
+      context.student.firstName,
+      context.student.lastName,
+      context.student.generatedStudentId
+    )
   );
   const destDir = node_path.join(photosDir, projectFolder, classFolder, studentFolder);
+  const destinationDirs = [
+    destDir,
+    ...context.projectJpegOriginalsDir ? [context.projectJpegOriginalsDir] : []
+  ];
+  const outputFileName = nextAvailableFileName$1(destinationDirs, context.fileName);
   await fs.mkdir(destDir, { recursive: true });
-  const destPath = node_path.join(destDir, context.fileName);
+  const destPath = node_path.join(destDir, outputFileName);
   markImagePipeline(diagnosticId, "file move started", `destination=${destPath} mode=async-copy`);
   await fs.copyFile(context.filePath, destPath);
   if (context.projectJpegOriginalsDir) {
-    const projectOriginalPath = node_path.join(context.projectJpegOriginalsDir, context.fileName);
+    const projectOriginalPath = node_path.join(context.projectJpegOriginalsDir, outputFileName);
     await fs.mkdir(context.projectJpegOriginalsDir, { recursive: true });
     await fs.copyFile(context.filePath, projectOriginalPath);
     markImagePipeline(
@@ -42310,7 +42344,7 @@ async function persistMatchedPhoto(store, photosDir, context, diagnosticId) {
     projectId: context.project.id,
     studentId: context.student.id,
     filePath: destPath,
-    fileName: context.fileName,
+    fileName: outputFileName,
     capturedAt: context.capturedAt,
     isMatched: true
   });
@@ -42337,11 +42371,11 @@ async function processWatchedPhoto(projectId, filePath, {
     knownStudents.map((student2) => student2.generatedStudentId)
   );
   const qrResult = filenameReference || targetStudentId !== null ? null : await readQr(filePath);
-  const reference = filenameReference ?? qrResult?.studentId;
+  const reference = targetStudentId !== null ? null : filenameReference ?? qrResult?.studentId;
   if (!reference && targetStudentId === null) {
     return saveUnmatchedPhoto(store, projectId, filePath, fileName, "No QR code detected");
   }
-  const student = reference ? store.findStudent(projectId, reference) : store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId);
+  const student = targetStudentId !== null ? store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId) : reference ? store.findStudent(projectId, reference) : void 0;
   markImagePipeline(
     diagnosticId,
     "student lookup complete",
@@ -42356,16 +42390,13 @@ async function processWatchedPhoto(projectId, filePath, {
       reference ? `Student ID "${reference}" not found in this project` : `Selected student "${targetStudentId}" was not found in this project`
     );
   }
-  if (targetStudentId !== null && reference && student.id !== targetStudentId) {
-    return saveUnmatchedPhoto(
-      store,
-      projectId,
-      filePath,
-      fileName,
-      `Filename student ID "${reference}" conflicts with the selected student`
-    );
-  }
   const effectiveCapturedAt = capturedAt ?? now$1();
+  const destinationFileName = formatStudentPhotoName(
+    student.firstName,
+    student.lastName,
+    student.generatedStudentId,
+    fileName
+  );
   markImagePipeline(
     diagnosticId,
     "student assigned",
@@ -42373,7 +42404,7 @@ async function processWatchedPhoto(projectId, filePath, {
   );
   const thumbnailData = await onPreviewReady?.({
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     student
   });
@@ -42382,7 +42413,7 @@ async function processWatchedPhoto(projectId, filePath, {
     student,
     classRow: store.findClass(student.classId),
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     projectJpegOriginalsDir
   };
@@ -42543,7 +42574,11 @@ function getStudentPhotoFolder(db, projectId, student) {
     getPhotosDir(),
     safeFolderName(project?.schoolName ?? `Project ${projectId}`),
     safeFolderName(classRow?.className ?? "Unassigned Class"),
-    safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
+    safeFolderName(formatStudentFolderName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId
+    ))
   );
 }
 function getProjectStorage(projectId, project) {
@@ -43070,13 +43105,29 @@ async function copyToProjectFolder(sourcePath, fileName, destinationDir) {
   }
   return destinationPath;
 }
+function nextAvailableFileName(destinationDirs, fileName) {
+  const isAvailable = (candidate2) => destinationDirs.every((directory) => !require$$0.existsSync(path.join(directory, candidate2)));
+  if (isAvailable(fileName)) return fileName;
+  const parsed = path.parse(fileName);
+  let suffix = 2;
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  while (!isAvailable(candidate)) {
+    suffix++;
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  }
+  return candidate;
+}
 async function persistQrMarker(db, projectId, student, capture) {
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const classRow = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
   if (!project) throw new Error(`Project ${projectId} not found`);
   const projectFolder = safeFolderName(project.schoolName);
   const classFolder = safeFolderName(classRow?.className ?? "Unassigned Class");
-  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`);
+  const studentFolder = safeFolderName(formatStudentFolderName(
+    student.firstName,
+    student.lastName,
+    student.generatedStudentId
+  ));
   const markerDir = path.join(getPhotosDir(), projectFolder, classFolder, studentFolder, "QR Markers");
   const storedPath = await copyToProjectFolder(capture.filePath, capture.fileName, markerDir);
   const result = recordQrMarker(db, {
@@ -43102,8 +43153,7 @@ async function handleNewRaw(projectId, capture, session, db) {
   const manualStudent = manualStudentId === null ? void 0 : findProjectStudent(db, projectId, manualStudentId);
   const sequenceStudentId = session.sequenceState.activeStudentId;
   const sequenceStudent = sequenceStudentId === null ? void 0 : findProjectStudent(db, projectId, sequenceStudentId);
-  const conflictReason = manualStudentId !== null && filenameReference && (!filenameStudent || filenameStudent.id !== manualStudentId) ? filenameStudent ? `RAW filename for ${filenameStudent.firstName} ${filenameStudent.lastName} conflicts with the selected student` : `RAW filename student ID "${filenameReference}" conflicts with the selected student` : null;
-  const student = conflictReason ? void 0 : manualStudent ?? filenameStudent ?? sequenceStudent;
+  const student = manualStudentId !== null ? manualStudent : filenameStudent ?? sequenceStudent;
   markImagePipeline(
     capture.diagnosticId,
     "student lookup complete",
@@ -43115,6 +43165,12 @@ async function handleNewRaw(projectId, capture, session, db) {
     student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`
   );
   if (student) {
+    const destinationFileName = formatStudentPhotoName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId,
+      capture.fileName
+    );
     enqueueLocalPreview(
       session.previewScheduler,
       getMainWindow(),
@@ -43123,7 +43179,7 @@ async function handleNewRaw(projectId, capture, session, db) {
       student,
       {
         filePath: capture.filePath,
-        fileName: capture.fileName,
+        fileName: destinationFileName,
         capturedAt: new Date(capture.capturedAtMs).toISOString()
       }
     );
@@ -43131,6 +43187,17 @@ async function handleNewRaw(projectId, capture, session, db) {
   const task = session.persistence.then(async () => {
     await session.previewScheduler.waitForIdle();
     const storage = getProjectStorage(projectId, project);
+    const destinationFileName = student ? formatStudentPhotoName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId,
+      capture.fileName
+    ) : capture.fileName;
+    const studentFolder = student ? getStudentPhotoFolder(db, projectId, student) : null;
+    const outputFileName = nextAvailableFileName(
+      [studentFolder, storage.rawOriginals].filter((directory) => directory !== null),
+      destinationFileName
+    );
     markImagePipeline(
       capture.diagnosticId,
       "file move started",
@@ -43138,12 +43205,12 @@ async function handleNewRaw(projectId, capture, session, db) {
     );
     const legacyStoredPath = student ? await copyToProjectFolder(
       capture.filePath,
-      capture.fileName,
-      getStudentPhotoFolder(db, projectId, student)
+      outputFileName,
+      studentFolder
     ) : null;
     const storedPath = await copyToProjectFolder(
       capture.filePath,
-      capture.fileName,
+      outputFileName,
       storage.rawOriginals
     );
     markImagePipeline(
@@ -43159,7 +43226,7 @@ async function handleNewRaw(projectId, capture, session, db) {
       classId: student?.classId ?? null,
       filePath: capture.filePath,
       storedPath,
-      fileName: capture.fileName,
+      fileName: outputFileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString()
     });
     if (result.kind === "duplicate") return;
@@ -43171,13 +43238,6 @@ async function handleNewRaw(projectId, capture, session, db) {
       studentId: savedCapture?.studentId ?? null
     });
     markImagePipeline(capture.diagnosticId, "IPC event sent", "RAW capture update");
-    if (conflictReason) {
-      sendUnmatchedResult(getMainWindow(), projectId, {
-        filePath: capture.filePath,
-        fileName: capture.fileName,
-        reason: conflictReason
-      });
-    }
     console.log(
       `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
     );

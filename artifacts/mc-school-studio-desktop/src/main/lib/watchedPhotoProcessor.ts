@@ -1,9 +1,14 @@
+import { existsSync } from 'node:fs'
 import { copyFile, mkdir } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, parse } from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import type { getDb } from '../db'
 import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema.ts'
-import { extractStudentReference } from './photoFileNaming.ts'
+import {
+  extractStudentReference,
+  formatStudentFolderName,
+  formatStudentPhotoName,
+} from './photoFileNaming.ts'
 import { mirrorPhotoAsCapture } from './captureRepository.ts'
 import { markImagePipeline } from './imagePipelineDiagnostics.ts'
 
@@ -95,6 +100,21 @@ function safeFolderName(value: string): string {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
 }
 
+function nextAvailableFileName(destinationDirs: string[], fileName: string): string {
+  const isAvailable = (candidate: string) =>
+    destinationDirs.every((directory) => !existsSync(join(directory, candidate)))
+  if (isAvailable(fileName)) return fileName
+
+  const parsed = parse(fileName)
+  let suffix = 2
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  while (!isAvailable(candidate)) {
+    suffix++
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  }
+  return candidate
+}
+
 function saveUnmatchedPhoto(
   store: WatchedPhotoStore,
   projectId: number,
@@ -138,15 +158,24 @@ export async function persistMatchedPhoto(
   const projectFolder = safeFolderName(context.project.schoolName)
   const classFolder = safeFolderName(context.classRow?.className ?? 'Unassigned Class')
   const studentFolder = safeFolderName(
-    `${context.student.generatedStudentId}_${context.student.lastName}_${context.student.firstName}`,
+    formatStudentFolderName(
+      context.student.firstName,
+      context.student.lastName,
+      context.student.generatedStudentId,
+    ),
   )
   const destDir = join(photosDir, projectFolder, classFolder, studentFolder)
+  const destinationDirs = [
+    destDir,
+    ...(context.projectJpegOriginalsDir ? [context.projectJpegOriginalsDir] : []),
+  ]
+  const outputFileName = nextAvailableFileName(destinationDirs, context.fileName)
   await mkdir(destDir, { recursive: true })
-  const destPath = join(destDir, context.fileName)
+  const destPath = join(destDir, outputFileName)
   markImagePipeline(diagnosticId, 'file move started', `destination=${destPath} mode=async-copy`)
   await copyFile(context.filePath, destPath)
   if (context.projectJpegOriginalsDir) {
-    const projectOriginalPath = join(context.projectJpegOriginalsDir, context.fileName)
+    const projectOriginalPath = join(context.projectJpegOriginalsDir, outputFileName)
     await mkdir(context.projectJpegOriginalsDir, { recursive: true })
     await copyFile(context.filePath, projectOriginalPath)
     markImagePipeline(
@@ -162,7 +191,7 @@ export async function persistMatchedPhoto(
     projectId: context.project.id,
     studentId: context.student.id,
     filePath: destPath,
-    fileName: context.fileName,
+    fileName: outputFileName,
     capturedAt: context.capturedAt,
     isMatched: true,
   })
@@ -200,10 +229,14 @@ export async function processWatchedPhoto(
     fileName,
     knownStudents.map((student) => student.generatedStudentId),
   )
+  // An in-app student selection is authoritative. Smart Shooter's filename
+  // remains the fallback only when no student was selected in the app.
   const qrResult = filenameReference || targetStudentId !== null
     ? null
     : await readQr(filePath)
-  const reference = filenameReference ?? qrResult?.studentId
+  const reference = targetStudentId !== null
+    ? null
+    : filenameReference ?? qrResult?.studentId
 
   if (!reference && targetStudentId === null) {
     return saveUnmatchedPhoto(store, projectId, filePath, fileName, 'No QR code detected')
@@ -211,9 +244,11 @@ export async function processWatchedPhoto(
 
   // The ID lookup is scoped to this project so an ID from another project
   // cannot accidentally assign a photo to the wrong student.
-  const student = reference
-    ? store.findStudent(projectId, reference)
-    : store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId)
+  const student = targetStudentId !== null
+    ? store.listStudents(projectId).find((candidate) => candidate.id === targetStudentId)
+    : reference
+      ? store.findStudent(projectId, reference)
+      : undefined
 
   markImagePipeline(
     diagnosticId,
@@ -233,17 +268,13 @@ export async function processWatchedPhoto(
     )
   }
 
-  if (targetStudentId !== null && reference && student.id !== targetStudentId) {
-    return saveUnmatchedPhoto(
-      store,
-      projectId,
-      filePath,
-      fileName,
-      `Filename student ID "${reference}" conflicts with the selected student`,
-    )
-  }
-
   const effectiveCapturedAt = capturedAt ?? now()
+  const destinationFileName = formatStudentPhotoName(
+    student.firstName,
+    student.lastName,
+    student.generatedStudentId,
+    fileName,
+  )
   markImagePipeline(
     diagnosticId,
     'student assigned',
@@ -251,7 +282,7 @@ export async function processWatchedPhoto(
   )
   const thumbnailData = await onPreviewReady?.({
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     student,
   })
@@ -261,7 +292,7 @@ export async function processWatchedPhoto(
     student,
     classRow: store.findClass(student.classId),
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     projectJpegOriginalsDir,
   }

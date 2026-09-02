@@ -14,7 +14,11 @@ import {
   studentsTable,
 } from '../db/schema'
 import { getSetting } from './upload'
-import { extractStudentReference } from '../lib/photoFileNaming'
+import {
+  extractStudentReference,
+  formatStudentFolderName,
+  formatStudentPhotoName,
+} from '../lib/photoFileNaming'
 import { readQrFromImage } from '../lib/qrReader'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
@@ -206,7 +210,11 @@ function getStudentPhotoFolder(
     getPhotosDir(),
     safeFolderName(project?.schoolName ?? `Project ${projectId}`),
     safeFolderName(classRow?.className ?? 'Unassigned Class'),
-    safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`),
+    safeFolderName(formatStudentFolderName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId,
+    )),
   )
 }
 
@@ -888,6 +896,21 @@ async function copyToProjectFolder(
   return destinationPath
 }
 
+function nextAvailableFileName(destinationDirs: string[], fileName: string): string {
+  const isAvailable = (candidate: string) =>
+    destinationDirs.every((directory) => !existsSync(join(directory, candidate)))
+  if (isAvailable(fileName)) return fileName
+
+  const parsed = parse(fileName)
+  let suffix = 2
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  while (!isAvailable(candidate)) {
+    suffix++
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  }
+  return candidate
+}
+
 async function persistQrMarker(
   db: ReturnType<typeof getDb>,
   projectId: number,
@@ -900,7 +923,11 @@ async function persistQrMarker(
 
   const projectFolder = safeFolderName(project.schoolName)
   const classFolder = safeFolderName(classRow?.className ?? 'Unassigned Class')
-  const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
+  const studentFolder = safeFolderName(formatStudentFolderName(
+    student.firstName,
+    student.lastName,
+    student.generatedStudentId,
+  ))
   const markerDir = join(getPhotosDir(), projectFolder, classFolder, studentFolder, 'QR Markers')
   const storedPath = await copyToProjectFolder(capture.filePath, capture.fileName, markerDir)
   const result = recordQrMarker(db, {
@@ -939,14 +966,10 @@ async function handleNewRaw(
   const sequenceStudent = sequenceStudentId === null
     ? undefined
     : findProjectStudent(db, projectId, sequenceStudentId)
-  const conflictReason = manualStudentId !== null
-    && filenameReference
-    && (!filenameStudent || filenameStudent.id !== manualStudentId)
-    ? filenameStudent
-      ? `RAW filename for ${filenameStudent.firstName} ${filenameStudent.lastName} conflicts with the selected student`
-      : `RAW filename student ID "${filenameReference}" conflicts with the selected student`
-    : null
-  const student = conflictReason ? undefined : manualStudent ?? filenameStudent ?? sequenceStudent
+  // The in-app target is authoritative when one was captured with the file.
+  const student = manualStudentId !== null
+    ? manualStudent
+    : filenameStudent ?? sequenceStudent
   markImagePipeline(
     capture.diagnosticId,
     'student lookup complete',
@@ -958,6 +981,12 @@ async function handleNewRaw(
     student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`,
   )
   if (student) {
+    const destinationFileName = formatStudentPhotoName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId,
+      capture.fileName,
+    )
     enqueueLocalPreview(
       session.previewScheduler,
       getMainWindow(),
@@ -966,7 +995,7 @@ async function handleNewRaw(
       student,
       {
         filePath: capture.filePath,
-        fileName: capture.fileName,
+        fileName: destinationFileName,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
       },
     )
@@ -976,6 +1005,20 @@ async function handleNewRaw(
     .then(async () => {
       await session.previewScheduler.waitForIdle()
       const storage = getProjectStorage(projectId, project)
+      const destinationFileName = student
+        ? formatStudentPhotoName(
+          student.firstName,
+          student.lastName,
+          student.generatedStudentId,
+          capture.fileName,
+        )
+        : capture.fileName
+      const studentFolder = student ? getStudentPhotoFolder(db, projectId, student) : null
+      const outputFileName = nextAvailableFileName(
+        [studentFolder, storage.rawOriginals]
+          .filter((directory): directory is string => directory !== null),
+        destinationFileName,
+      )
       markImagePipeline(
         capture.diagnosticId,
         'file move started',
@@ -984,13 +1027,13 @@ async function handleNewRaw(
       const legacyStoredPath = student
         ? await copyToProjectFolder(
           capture.filePath,
-          capture.fileName,
-          getStudentPhotoFolder(db, projectId, student),
+          outputFileName,
+          studentFolder!,
         )
         : null
       const storedPath = await copyToProjectFolder(
         capture.filePath,
-        capture.fileName,
+        outputFileName,
         storage.rawOriginals,
       )
       markImagePipeline(
@@ -1006,7 +1049,7 @@ async function handleNewRaw(
         classId: student?.classId ?? null,
         filePath: capture.filePath,
         storedPath,
-        fileName: capture.fileName,
+        fileName: outputFileName,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
       })
 
@@ -1023,13 +1066,6 @@ async function handleNewRaw(
         studentId: savedCapture?.studentId ?? null,
       })
       markImagePipeline(capture.diagnosticId, 'IPC event sent', 'RAW capture update')
-      if (conflictReason) {
-        sendUnmatchedResult(getMainWindow(), projectId, {
-          filePath: capture.filePath,
-          fileName: capture.fileName,
-          reason: conflictReason,
-        })
-      }
       console.log(
         `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
           + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,

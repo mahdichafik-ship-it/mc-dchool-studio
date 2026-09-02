@@ -111,6 +111,23 @@ export async function canAccessAssignedDesktopProject(
   return !!assignment;
 }
 
+export async function canAccessDesktopProject(
+  member: AccessMember & { userId: string },
+  projectId: number,
+) {
+  if (member.status === "removed") return false;
+  const { isPlatformOwner } = await import("./platformAccess");
+  if (await isPlatformOwner(member.userId)) {
+    const [project] = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId))
+      .limit(1);
+    return Boolean(project);
+  }
+  return canAccessAssignedDesktopProject(member, projectId);
+}
+
 export async function assignedDesktopProjectIds(
   member: AccessMember,
 ) {

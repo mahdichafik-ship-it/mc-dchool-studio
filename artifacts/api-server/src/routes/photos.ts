@@ -15,7 +15,7 @@ import { eq, and, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
-import { canAccessAssignedDesktopProject, canAccessProject } from "../lib/studioAccess";
+import { canAccessDesktopProject, canAccessProject } from "../lib/studioAccess";
 import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
 import { backupFileToGoogleDrive, GoogleDriveBackupError } from "../lib/googleDriveBackup";
 
@@ -120,13 +120,14 @@ function connectionAccessMember(connection: ReturnType<typeof getDesktopConnecti
     id: connection.memberId,
     studioId: connection.studioId,
     role: connection.memberRole,
+    userId: connection.memberUserId,
   };
 }
 
 async function authorizeDesktopUploadTarget(req: Request, res: Response, next: NextFunction): Promise<void> {
   const projectId = Number(req.params.projectId);
   const studentId = Number(req.params.studentId);
-  if (!(await canAccessAssignedDesktopProject(connectionAccessMember(getDesktopConnection(req)), projectId))) {
+  if (!(await canAccessDesktopProject(connectionAccessMember(getDesktopConnection(req)), projectId))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -475,7 +476,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       res.status(401).json({ error: "Desktop connection was revoked while uploading" });
       return;
     }
-    if (!(await canAccessAssignedDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
+    if (!(await canAccessDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
       discardUploadedFile(req);
       res.status(404).json({ error: "Project not found" });
       return;
@@ -599,7 +600,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       res.status(401).json({ error: "Desktop connection was revoked while uploading" });
       return;
     }
-    if (!(await canAccessAssignedDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
+    if (!(await canAccessDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
       discardUploadedFile(req);
       res.status(404).json({ error: "Project not found" });
       return;

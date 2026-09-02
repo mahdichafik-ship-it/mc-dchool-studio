@@ -18,7 +18,7 @@ import {
   requireDesktopConnectionWithRetirement,
   createDesktopToken,
 } from "../lib/desktopAuth";
-import { assignedDesktopProjectIds, canAccessAssignedDesktopProject } from "../lib/studioAccess";
+import { assignedDesktopProjectIds, canAccessDesktopProject } from "../lib/studioAccess";
 import { getStudioMember } from "../lib/studioAccess";
 import { getUserId, requireAuth } from "../lib/auth";
 import { isPlatformOwner } from "../lib/platformAccess";
@@ -203,6 +203,7 @@ function memberForAccess(connection: ReturnType<typeof getDesktopConnection>) {
     studioId: connection.studioId,
     role: connection.memberRole,
     status: "active" as const,
+    userId: connection.memberUserId,
   };
 }
 
@@ -212,21 +213,6 @@ async function desktopProjectIds(connection: ReturnType<typeof getDesktopConnect
     return rows.map((row) => row.id);
   }
   return assignedDesktopProjectIds(memberForAccess(connection));
-}
-
-async function canAccessDesktopProject(
-  connection: ReturnType<typeof getDesktopConnection>,
-  projectId: number,
-) {
-  if (await isPlatformOwner(connection.memberUserId)) {
-    const [project] = await db
-      .select({ id: projectsTable.id })
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId))
-      .limit(1);
-    return Boolean(project);
-  }
-  return canAccessAssignedDesktopProject(memberForAccess(connection), projectId);
 }
 
 async function requireStillActiveBeforeDataResponse(
@@ -351,7 +337,7 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
     return;
   }
 
-  if (!(await canAccessDesktopProject(connection, projectId))) {
+  if (!(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }

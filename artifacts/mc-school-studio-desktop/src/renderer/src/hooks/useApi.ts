@@ -293,11 +293,13 @@ export function useCaptures(studentId: number | null) {
   const [data, setData] = useState<StudentCaptureReview>({ captures: [], qrMarkers: [] })
   const [livePreview, setLivePreview] = useState<PhotoMatchedEvent | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const liveTraceRef = useRef<PhotoMatchedEvent['pipeline']>(undefined)
 
   const load = useCallback(async () => {
     if (!studentId) return
     setLoading(true)
+    setError(null)
     try {
       const result = await api.invoke('captures:list', { studentId })
       const loaded = result as StudentCaptureReview
@@ -318,6 +320,8 @@ export function useCaptures(studentId: number | null) {
           ? { ...loaded, captures: [...loaded.captures, ...pending] }
           : loaded
       })
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError))
     } finally {
       setLoading(false)
     }
@@ -435,7 +439,7 @@ export function useCaptures(studentId: number | null) {
     }
   }, [studentId, load])
 
-  return { data, loading, reload: load, livePreview }
+  return { data, loading, error, reload: load, livePreview }
 }
 
 export function useCaptureSummary(projectId: number | null) {

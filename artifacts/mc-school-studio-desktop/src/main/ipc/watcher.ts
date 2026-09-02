@@ -633,6 +633,12 @@ async function handleNewPhoto(
 ): Promise<void> {
   if (desktopRetiring) return
   const db = getDb()
+  const project = db
+    .select()
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId))
+    .get()
+  if (!project) throw new Error(`Project ${projectId} not found`)
   const role = getCaptureFileRole(capture.fileName)
   if (
     !role

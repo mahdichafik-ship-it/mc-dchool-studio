@@ -62,6 +62,7 @@ const userDataDir = join(root, 'user-data')
 const storageRoot = join(root, 'managed-photos')
 const watchFolder = join(root, 'camera-originals')
 const sourcePhoto = join(watchFolder, `Smith_John_release-${studentReference}.jpg`)
+const managedPhotoName = `John_Smith_${studentReference}.jpg`
 const debugPort = await reservePort()
 let online = true
 let retired = false
@@ -426,9 +427,9 @@ try {
 
   await waitFor('managed photo copy and SQLite photo row', async () => {
     const project = await cdp.evaluate(`window.api.invoke('projects:get', { projectId: ${localProjectId} })`)
-    return project?.photoCount === 1 && findFiles(storageRoot).some((path) => basename(path) === basename(sourcePhoto))
+    return project?.photoCount === 1 && findFiles(storageRoot).some((path) => basename(path) === managedPhotoName)
   }, 40_000)
-  const managedPhoto = findFiles(storageRoot).find((path) => basename(path) === basename(sourcePhoto))
+  const managedPhoto = findFiles(storageRoot).find((path) => basename(path) === managedPhotoName)
   assert(managedPhoto)
   assert.deepEqual(readFileSync(managedPhoto), readFileSync(sourcePhoto))
 

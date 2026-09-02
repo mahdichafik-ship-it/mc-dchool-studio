@@ -14,7 +14,11 @@ import {
   studentsTable,
 } from '../db/schema'
 import { getSetting } from './upload'
-import { extractStudentReference, formatStudentFolderName } from '../lib/photoFileNaming'
+import {
+  extractStudentReference,
+  formatStudentFolderName,
+  formatStudentPhotoName,
+} from '../lib/photoFileNaming'
 import { readQrFromImage } from '../lib/qrReader'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
@@ -892,6 +896,21 @@ async function copyToProjectFolder(
   return destinationPath
 }
 
+function nextAvailableFileName(destinationDirs: string[], fileName: string): string {
+  const isAvailable = (candidate: string) =>
+    destinationDirs.every((directory) => !existsSync(join(directory, candidate)))
+  if (isAvailable(fileName)) return fileName
+
+  const parsed = parse(fileName)
+  let suffix = 2
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  while (!isAvailable(candidate)) {
+    suffix++
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  }
+  return candidate
+}
+
 async function persistQrMarker(
   db: ReturnType<typeof getDb>,
   projectId: number,
@@ -962,6 +981,12 @@ async function handleNewRaw(
     student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`,
   )
   if (student) {
+    const destinationFileName = formatStudentPhotoName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId,
+      capture.fileName,
+    )
     enqueueLocalPreview(
       session.previewScheduler,
       getMainWindow(),
@@ -970,7 +995,7 @@ async function handleNewRaw(
       student,
       {
         filePath: capture.filePath,
-        fileName: capture.fileName,
+        fileName: destinationFileName,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
       },
     )
@@ -980,6 +1005,20 @@ async function handleNewRaw(
     .then(async () => {
       await session.previewScheduler.waitForIdle()
       const storage = getProjectStorage(projectId, project)
+      const destinationFileName = student
+        ? formatStudentPhotoName(
+          student.firstName,
+          student.lastName,
+          student.generatedStudentId,
+          capture.fileName,
+        )
+        : capture.fileName
+      const studentFolder = student ? getStudentPhotoFolder(db, projectId, student) : null
+      const outputFileName = nextAvailableFileName(
+        [studentFolder, storage.rawOriginals]
+          .filter((directory): directory is string => directory !== null),
+        destinationFileName,
+      )
       markImagePipeline(
         capture.diagnosticId,
         'file move started',
@@ -988,13 +1027,13 @@ async function handleNewRaw(
       const legacyStoredPath = student
         ? await copyToProjectFolder(
           capture.filePath,
-          capture.fileName,
-          getStudentPhotoFolder(db, projectId, student),
+          outputFileName,
+          studentFolder!,
         )
         : null
       const storedPath = await copyToProjectFolder(
         capture.filePath,
-        capture.fileName,
+        outputFileName,
         storage.rawOriginals,
       )
       markImagePipeline(
@@ -1010,7 +1049,7 @@ async function handleNewRaw(
         classId: student?.classId ?? null,
         filePath: capture.filePath,
         storedPath,
-        fileName: capture.fileName,
+        fileName: outputFileName,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
       })
 

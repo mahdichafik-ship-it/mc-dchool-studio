@@ -91,13 +91,13 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
       'Example School',
       'Class 3',
       'John_Smith_001234',
-      'Smith_John_class_school-001234.jpg',
+      'John_Smith_001234.jpg',
     )
     assert.equal(existsSync(destination), true)
     assert.deepEqual(readFileSync(destination), jpegBytes)
     assert.equal(
       readFileSync(
-        join(fixture.projectJpegOriginalsDir, 'Smith_John_class_school-001234.jpg'),
+        join(fixture.projectJpegOriginalsDir, 'John_Smith_001234.jpg'),
       ).equals(jpegBytes),
       true,
     )
@@ -119,7 +119,7 @@ test('emits a local preview before the managed copy and database persistence', a
     'Example School',
     'Class 3',
     'Dina_Zaki_AB12',
-    'DSC_8290.jpg',
+    'Dina_Zaki_AB12.jpg',
   )
   const stages: string[] = []
 
@@ -154,7 +154,7 @@ test('can defer original persistence until after the preview is ready', async ()
     'Example School',
     'Class 3',
     'Dina_Zaki_AB12',
-    'DSC_8292.jpg',
+    'Dina_Zaki_AB12.jpg',
   )
 
   try {
@@ -208,7 +208,7 @@ test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fall
       'Example School',
       'Class 3',
       'John_Smith_001234',
-      'Smith_John_class_school_001234_595.JPG',
+      'John_Smith_001234.JPG',
     )
     assert.equal(existsSync(destination), true)
     assert.equal(existsSync(fixture.sourcePath), true)
@@ -303,7 +303,7 @@ test('routes a JPEG without a filename or QR identity to the selected student', 
     assert.equal(photos[0]?.studentId, 3)
     assert.equal(
       photos[0]?.filePath,
-      join(fixture.photosDir, 'Example School', 'Class 3', 'Dina_Zaki_AB12', 'DSC_8291.jpg'),
+      join(fixture.photosDir, 'Example School', 'Class 3', 'Dina_Zaki_AB12', 'Dina_Zaki_AB12.jpg'),
     )
     assert.equal(existsSync(fixture.sourcePath), true)
   } finally {
@@ -329,7 +329,7 @@ test('uses the selected student instead of a conflicting Smart Shooter filename'
     assert.equal(photos[0]?.studentId, 3)
     assert.equal(
       photos[0]?.filePath,
-      join(fixture.photosDir, 'Example School', 'Class 3', 'Dina_Zaki_AB12', 'Smith_John_class_school-001234.jpg'),
+      join(fixture.photosDir, 'Example School', 'Class 3', 'Dina_Zaki_AB12', 'Dina_Zaki_AB12.jpg'),
     )
     assert.equal(existsSync(fixture.sourcePath), true)
   } finally {

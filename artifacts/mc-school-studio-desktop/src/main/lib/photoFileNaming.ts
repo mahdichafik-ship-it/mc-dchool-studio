@@ -32,3 +32,12 @@ export function formatStudentFolderName(
 ): string {
   return `${firstName}_${lastName}_${studentId}`
 }
+
+export function formatStudentPhotoName(
+  firstName: string,
+  lastName: string,
+  studentId: string,
+  sourceFileName: string,
+): string {
+  return `${formatStudentFolderName(firstName, lastName, studentId)}${extname(sourceFileName)}`
+}

@@ -474,6 +474,9 @@ function extractStudentReference(fileName, studentIds) {
 function formatStudentFolderName(firstName, lastName, studentId) {
   return `${firstName}_${lastName}_${studentId}`;
 }
+function formatStudentPhotoName(firstName, lastName, studentId, sourceFileName) {
+  return `${formatStudentFolderName(firstName, lastName, studentId)}${node_path.extname(sourceFileName)}`;
+}
 function now$3() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
@@ -42277,6 +42280,18 @@ function now$1() {
 function safeFolderName$1(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
+function nextAvailableFileName$1(destinationDirs, fileName) {
+  const isAvailable = (candidate2) => destinationDirs.every((directory) => !node_fs.existsSync(node_path.join(directory, candidate2)));
+  if (isAvailable(fileName)) return fileName;
+  const parsed = node_path.parse(fileName);
+  let suffix = 2;
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  while (!isAvailable(candidate)) {
+    suffix++;
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  }
+  return candidate;
+}
 function saveUnmatchedPhoto(store, projectId, filePath, fileName, reason) {
   store.insertPhoto({
     projectId,
@@ -42304,12 +42319,17 @@ async function persistMatchedPhoto(store, photosDir, context, diagnosticId) {
     )
   );
   const destDir = node_path.join(photosDir, projectFolder, classFolder, studentFolder);
+  const destinationDirs = [
+    destDir,
+    ...context.projectJpegOriginalsDir ? [context.projectJpegOriginalsDir] : []
+  ];
+  const outputFileName = nextAvailableFileName$1(destinationDirs, context.fileName);
   await fs.mkdir(destDir, { recursive: true });
-  const destPath = node_path.join(destDir, context.fileName);
+  const destPath = node_path.join(destDir, outputFileName);
   markImagePipeline(diagnosticId, "file move started", `destination=${destPath} mode=async-copy`);
   await fs.copyFile(context.filePath, destPath);
   if (context.projectJpegOriginalsDir) {
-    const projectOriginalPath = node_path.join(context.projectJpegOriginalsDir, context.fileName);
+    const projectOriginalPath = node_path.join(context.projectJpegOriginalsDir, outputFileName);
     await fs.mkdir(context.projectJpegOriginalsDir, { recursive: true });
     await fs.copyFile(context.filePath, projectOriginalPath);
     markImagePipeline(
@@ -42324,7 +42344,7 @@ async function persistMatchedPhoto(store, photosDir, context, diagnosticId) {
     projectId: context.project.id,
     studentId: context.student.id,
     filePath: destPath,
-    fileName: context.fileName,
+    fileName: outputFileName,
     capturedAt: context.capturedAt,
     isMatched: true
   });
@@ -42371,6 +42391,12 @@ async function processWatchedPhoto(projectId, filePath, {
     );
   }
   const effectiveCapturedAt = capturedAt ?? now$1();
+  const destinationFileName = formatStudentPhotoName(
+    student.firstName,
+    student.lastName,
+    student.generatedStudentId,
+    fileName
+  );
   markImagePipeline(
     diagnosticId,
     "student assigned",
@@ -42378,7 +42404,7 @@ async function processWatchedPhoto(projectId, filePath, {
   );
   const thumbnailData = await onPreviewReady?.({
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     student
   });
@@ -42387,7 +42413,7 @@ async function processWatchedPhoto(projectId, filePath, {
     student,
     classRow: store.findClass(student.classId),
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     projectJpegOriginalsDir
   };
@@ -43079,6 +43105,18 @@ async function copyToProjectFolder(sourcePath, fileName, destinationDir) {
   }
   return destinationPath;
 }
+function nextAvailableFileName(destinationDirs, fileName) {
+  const isAvailable = (candidate2) => destinationDirs.every((directory) => !require$$0.existsSync(path.join(directory, candidate2)));
+  if (isAvailable(fileName)) return fileName;
+  const parsed = path.parse(fileName);
+  let suffix = 2;
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  while (!isAvailable(candidate)) {
+    suffix++;
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`;
+  }
+  return candidate;
+}
 async function persistQrMarker(db, projectId, student, capture) {
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const classRow = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
@@ -43127,6 +43165,12 @@ async function handleNewRaw(projectId, capture, session, db) {
     student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`
   );
   if (student) {
+    const destinationFileName = formatStudentPhotoName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId,
+      capture.fileName
+    );
     enqueueLocalPreview(
       session.previewScheduler,
       getMainWindow(),
@@ -43135,7 +43179,7 @@ async function handleNewRaw(projectId, capture, session, db) {
       student,
       {
         filePath: capture.filePath,
-        fileName: capture.fileName,
+        fileName: destinationFileName,
         capturedAt: new Date(capture.capturedAtMs).toISOString()
       }
     );
@@ -43143,6 +43187,17 @@ async function handleNewRaw(projectId, capture, session, db) {
   const task = session.persistence.then(async () => {
     await session.previewScheduler.waitForIdle();
     const storage = getProjectStorage(projectId, project);
+    const destinationFileName = student ? formatStudentPhotoName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId,
+      capture.fileName
+    ) : capture.fileName;
+    const studentFolder = student ? getStudentPhotoFolder(db, projectId, student) : null;
+    const outputFileName = nextAvailableFileName(
+      [studentFolder, storage.rawOriginals].filter((directory) => directory !== null),
+      destinationFileName
+    );
     markImagePipeline(
       capture.diagnosticId,
       "file move started",
@@ -43150,12 +43205,12 @@ async function handleNewRaw(projectId, capture, session, db) {
     );
     const legacyStoredPath = student ? await copyToProjectFolder(
       capture.filePath,
-      capture.fileName,
-      getStudentPhotoFolder(db, projectId, student)
+      outputFileName,
+      studentFolder
     ) : null;
     const storedPath = await copyToProjectFolder(
       capture.filePath,
-      capture.fileName,
+      outputFileName,
       storage.rawOriginals
     );
     markImagePipeline(
@@ -43171,7 +43226,7 @@ async function handleNewRaw(projectId, capture, session, db) {
       classId: student?.classId ?? null,
       filePath: capture.filePath,
       storedPath,
-      fileName: capture.fileName,
+      fileName: outputFileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString()
     });
     if (result.kind === "duplicate") return;

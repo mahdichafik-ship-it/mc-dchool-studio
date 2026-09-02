@@ -1,9 +1,14 @@
+import { existsSync } from 'node:fs'
 import { copyFile, mkdir } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, parse } from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import type { getDb } from '../db'
 import { classesTable, photosTable, projectsTable, studentsTable } from '../db/schema.ts'
-import { extractStudentReference, formatStudentFolderName } from './photoFileNaming.ts'
+import {
+  extractStudentReference,
+  formatStudentFolderName,
+  formatStudentPhotoName,
+} from './photoFileNaming.ts'
 import { mirrorPhotoAsCapture } from './captureRepository.ts'
 import { markImagePipeline } from './imagePipelineDiagnostics.ts'
 
@@ -95,6 +100,21 @@ function safeFolderName(value: string): string {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Unknown'
 }
 
+function nextAvailableFileName(destinationDirs: string[], fileName: string): string {
+  const isAvailable = (candidate: string) =>
+    destinationDirs.every((directory) => !existsSync(join(directory, candidate)))
+  if (isAvailable(fileName)) return fileName
+
+  const parsed = parse(fileName)
+  let suffix = 2
+  let candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  while (!isAvailable(candidate)) {
+    suffix++
+    candidate = `${parsed.name}-${suffix}${parsed.ext}`
+  }
+  return candidate
+}
+
 function saveUnmatchedPhoto(
   store: WatchedPhotoStore,
   projectId: number,
@@ -145,12 +165,17 @@ export async function persistMatchedPhoto(
     ),
   )
   const destDir = join(photosDir, projectFolder, classFolder, studentFolder)
+  const destinationDirs = [
+    destDir,
+    ...(context.projectJpegOriginalsDir ? [context.projectJpegOriginalsDir] : []),
+  ]
+  const outputFileName = nextAvailableFileName(destinationDirs, context.fileName)
   await mkdir(destDir, { recursive: true })
-  const destPath = join(destDir, context.fileName)
+  const destPath = join(destDir, outputFileName)
   markImagePipeline(diagnosticId, 'file move started', `destination=${destPath} mode=async-copy`)
   await copyFile(context.filePath, destPath)
   if (context.projectJpegOriginalsDir) {
-    const projectOriginalPath = join(context.projectJpegOriginalsDir, context.fileName)
+    const projectOriginalPath = join(context.projectJpegOriginalsDir, outputFileName)
     await mkdir(context.projectJpegOriginalsDir, { recursive: true })
     await copyFile(context.filePath, projectOriginalPath)
     markImagePipeline(
@@ -166,7 +191,7 @@ export async function persistMatchedPhoto(
     projectId: context.project.id,
     studentId: context.student.id,
     filePath: destPath,
-    fileName: context.fileName,
+    fileName: outputFileName,
     capturedAt: context.capturedAt,
     isMatched: true,
   })
@@ -244,6 +269,12 @@ export async function processWatchedPhoto(
   }
 
   const effectiveCapturedAt = capturedAt ?? now()
+  const destinationFileName = formatStudentPhotoName(
+    student.firstName,
+    student.lastName,
+    student.generatedStudentId,
+    fileName,
+  )
   markImagePipeline(
     diagnosticId,
     'student assigned',
@@ -251,7 +282,7 @@ export async function processWatchedPhoto(
   )
   const thumbnailData = await onPreviewReady?.({
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     student,
   })
@@ -261,7 +292,7 @@ export async function processWatchedPhoto(
     student,
     classRow: store.findClass(student.classId),
     filePath,
-    fileName,
+    fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     projectJpegOriginalsDir,
   }

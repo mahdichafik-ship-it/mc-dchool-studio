@@ -53,6 +53,7 @@ export interface WatchedPhotoQrResult {
 export interface WatchedPhotoProcessorOptions {
   store: WatchedPhotoStore
   photosDir: string
+  projectJpegOriginalsDir?: string
   readQr: (filePath: string) => Promise<WatchedPhotoQrResult | null>
   targetStudentId?: number | null
   capturedAt?: string
@@ -125,6 +126,7 @@ interface MatchedPhotoPersistenceContext {
   filePath: string
   fileName: string
   capturedAt: string
+  projectJpegOriginalsDir?: string
 }
 
 export async function persistMatchedPhoto(
@@ -143,6 +145,16 @@ export async function persistMatchedPhoto(
   const destPath = join(destDir, context.fileName)
   markImagePipeline(diagnosticId, 'file move started', `destination=${destPath} mode=async-copy`)
   await copyFile(context.filePath, destPath)
+  if (context.projectJpegOriginalsDir) {
+    const projectOriginalPath = join(context.projectJpegOriginalsDir, context.fileName)
+    await mkdir(context.projectJpegOriginalsDir, { recursive: true })
+    await copyFile(context.filePath, projectOriginalPath)
+    markImagePipeline(
+      diagnosticId,
+      'project original copy complete',
+      `destination=${projectOriginalPath} mode=async-copy`,
+    )
+  }
   markImagePipeline(diagnosticId, 'file move complete', `destination=${destPath} mode=async-copy`)
 
   markImagePipeline(diagnosticId, 'database write started', `file=${context.fileName}`)
@@ -170,6 +182,7 @@ export async function processWatchedPhoto(
   {
     store,
     photosDir,
+    projectJpegOriginalsDir,
     readQr,
     targetStudentId = null,
     capturedAt,
@@ -250,6 +263,7 @@ export async function processWatchedPhoto(
     filePath,
     fileName,
     capturedAt: effectiveCapturedAt,
+    projectJpegOriginalsDir,
   }
   if (deferPersistence) {
     return {

@@ -449,9 +449,9 @@ function retireLocalProjects(store, fileSystem, photosRoot) {
   for (const filePath of store.listPhotoPaths()) {
     if (isInside(photosRoot, filePath)) paths.add(node_path.resolve(filePath));
   }
-  for (const project of projects) {
-    paths.add(node_path.resolve(photosRoot, safeProjectFolderName(project.schoolName)));
-    paths.add(node_path.resolve(photosRoot, String(project.id)));
+  for (const project2 of projects) {
+    paths.add(node_path.resolve(photosRoot, safeProjectFolderName(project2.schoolName)));
+    paths.add(node_path.resolve(photosRoot, String(project2.id)));
   }
   const orderedPaths = [...paths].sort((left, right) => right.length - left.length);
   for (const path2 of orderedPaths) {
@@ -483,9 +483,9 @@ function enrichProject(p, classCount, studentCount, photoCount) {
   };
 }
 function prepareProjectFolders(projectDb, projectId) {
-  const project = projectDb.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-  if (!project) return;
-  const projectDir = path.join(getPhotosDir(), safeProjectFolderName(project.schoolName));
+  const project2 = projectDb.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project2) return;
+  const projectDir = path.join(getPhotosDir(), safeProjectFolderName(project2.schoolName));
   require$$0.mkdirSync(projectDir, { recursive: true });
   const classes = projectDb.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
   for (const cls of classes) {
@@ -501,9 +501,9 @@ function prepareProjectFolders(projectDb, projectId) {
   }
   ensureProjectStorageLayout(
     getProjectStorageLayout(
-      getPhotoSystemLayout(electron.app.getPath("home")),
-      project.id,
-      project.schoolName
+      getPhotoSystemLayout(path.dirname(getPhotosDir())),
+      project2.id,
+      project2.schoolName
     )
   );
 }
@@ -1093,11 +1093,11 @@ function isCloudSessionVerified() {
 }
 async function repairCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
   const db = getDb();
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
-  if (!project || !student) throw new Error("The local project or student no longer exists.");
-  if (project.cloudId !== null && student.cloudId !== null) return;
-  const normalizedName = project.schoolName.trim().toLocaleLowerCase();
+  if (!project2 || !student) throw new Error("The local project or student no longer exists.");
+  if (project2.cloudId !== null && student.cloudId !== null) return;
+  const normalizedName = project2.schoolName.trim().toLocaleLowerCase();
   const projectsResponse = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`, {
     headers: { Authorization: `Bearer ${connectionToken}` },
     signal: AbortSignal.timeout(15e3)
@@ -1111,15 +1111,15 @@ async function repairCloudIdentity(projectId, studentId, apiUrl, connectionToken
     throw new Error(`Could not refresh project identity (HTTP ${projectsResponse.status}: ${text})`);
   }
   const cloudProjects = await projectsResponse.json();
-  const cloudProject = project.cloudId !== null ? cloudProjects.find((candidate) => candidate.id === project.cloudId) : (() => {
+  const cloudProject = project2.cloudId !== null ? cloudProjects.find((candidate) => candidate.id === project2.cloudId) : (() => {
     const matches = cloudProjects.filter((candidate) => candidate.schoolName.trim().toLocaleLowerCase() === normalizedName);
     if (matches.length > 1) {
-      throw new Error(`Several cloud projects match "${project.schoolName}". Sync this project again before uploading.`);
+      throw new Error(`Several cloud projects match "${project2.schoolName}". Sync this project again before uploading.`);
     }
     return matches[0];
   })();
   if (!cloudProject) {
-    throw new Error(`The cloud project "${project.schoolName}" is not assigned to this desktop.`);
+    throw new Error(`The cloud project "${project2.schoolName}" is not assigned to this desktop.`);
   }
   const bundleResponse = await fetch(
     `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProject.id}/bundle`,
@@ -1200,9 +1200,9 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
   notifyUploadStatus(photoId, studentId, "uploading");
   try {
     await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken);
-    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
     const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
-    if (!project?.cloudId || !student?.cloudId) {
+    if (!project2?.cloudId || !student?.cloudId) {
       throw new Error("This project needs to be re-synced before its photos can upload.");
     }
     const fileBuffer = require$$0.readFileSync(filePath);
@@ -1210,7 +1210,7 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
     const formData = new FormData();
     formData.append("photo", blob, fileName);
     formData.append("capturedAt", capturedAt);
-    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/photos`;
+    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project2.cloudId}/students/${student.cloudId}/photos`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -1293,9 +1293,9 @@ async function performUploadCaptureFile(captureId, fileId) {
   setCaptureFileStatus(captureId, fileId, "uploading", null);
   try {
     await ensureCloudIdentity(capture.projectId, capture.studentId, apiUrl, connectionToken);
-    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
+    const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
     const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get();
-    if (!project?.cloudId || !student?.cloudId) {
+    if (!project2?.cloudId || !student?.cloudId) {
       throw new Error("This project needs to be re-synced before its captures can upload.");
     }
     const fileBuffer = require$$0.readFileSync(file.storedPath);
@@ -1311,7 +1311,7 @@ async function performUploadCaptureFile(captureId, fileId) {
     formData.append("favorite", String(capture.favorite));
     formData.append("rejected", String(capture.rejected));
     formData.append("selected", String(capture.selected));
-    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/captures`;
+    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project2.cloudId}/students/${student.cloudId}/captures`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -42294,6 +42294,16 @@ async function persistMatchedPhoto(store, photosDir, context, diagnosticId) {
   const destPath = node_path.join(destDir, context.fileName);
   markImagePipeline(diagnosticId, "file move started", `destination=${destPath} mode=async-copy`);
   await fs.copyFile(context.filePath, destPath);
+  if (context.projectJpegOriginalsDir) {
+    const projectOriginalPath = node_path.join(context.projectJpegOriginalsDir, context.fileName);
+    await fs.mkdir(context.projectJpegOriginalsDir, { recursive: true });
+    await fs.copyFile(context.filePath, projectOriginalPath);
+    markImagePipeline(
+      diagnosticId,
+      "project original copy complete",
+      `destination=${projectOriginalPath} mode=async-copy`
+    );
+  }
   markImagePipeline(diagnosticId, "file move complete", `destination=${destPath} mode=async-copy`);
   markImagePipeline(diagnosticId, "database write started", `file=${context.fileName}`);
   const photo = store.insertPhoto({
@@ -42310,6 +42320,7 @@ async function persistMatchedPhoto(store, photosDir, context, diagnosticId) {
 async function processWatchedPhoto(projectId, filePath, {
   store,
   photosDir,
+  projectJpegOriginalsDir,
   readQr,
   targetStudentId = null,
   capturedAt,
@@ -42318,8 +42329,8 @@ async function processWatchedPhoto(projectId, filePath, {
   deferPersistence = false
 }) {
   const fileName = node_path.basename(filePath);
-  const project = store.findProject(projectId);
-  if (!project) throw new Error(`Project ${projectId} not found`);
+  const project2 = store.findProject(projectId);
+  if (!project2) throw new Error(`Project ${projectId} not found`);
   const knownStudents = store.listStudents(projectId);
   const filenameReference = extractStudentReference(
     fileName,
@@ -42367,12 +42378,13 @@ async function processWatchedPhoto(projectId, filePath, {
     student
   });
   const context = {
-    project,
+    project: project2,
     student,
     classRow: store.findClass(student.classId),
     filePath,
     fileName,
-    capturedAt: effectiveCapturedAt
+    capturedAt: effectiveCapturedAt,
+    projectJpegOriginalsDir
   };
   if (deferPersistence) {
     return {
@@ -42525,13 +42537,22 @@ function findStudentByFilename(db, projectId, fileName) {
   return students.find((student) => student.generatedStudentId.trim().toLocaleLowerCase() === normalizedReference);
 }
 function getStudentPhotoFolder(db, projectId, student) {
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const classRow = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
   return path.join(
     getPhotosDir(),
-    safeFolderName(project?.schoolName ?? `Project ${projectId}`),
+    safeFolderName(project2?.schoolName ?? `Project ${projectId}`),
     safeFolderName(classRow?.className ?? "Unassigned Class"),
     safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)
+  );
+}
+function getProjectStorage(projectId, project2) {
+  return ensureProjectStorageLayout(
+    getProjectStorageLayout(
+      getPhotoSystemLayout(path.dirname(getPhotosDir())),
+      projectId,
+      project2.schoolName
+    )
   );
 }
 function sendUnmatchedResult(win, projectId, result) {
@@ -42651,14 +42672,14 @@ function registerWatcherHandlers() {
       throw new Error("Cloud sync is disabled because this desktop was retired");
     }
     if (watchers.has(projectId)) return;
-    const [project] = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).all();
-    if (!project?.watchFolder) {
+    const [project2] = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).all();
+    if (!project2?.watchFolder) {
       throw new Error("No watch folder configured for this project");
     }
-    if (project.finishedAt) {
+    if (project2.finishedAt) {
       throw new Error("This project is finished. Reopen it as a new local project before capturing more photos.");
     }
-    const watchFolders = resolveWatchFolders(project.watchFolder, require$$0.existsSync);
+    const watchFolders = resolveWatchFolders(project2.watchFolder, require$$0.existsSync);
     if (watchFolders.mode === "dual") {
       for (const folder of watchFolders.paths) require$$0.mkdirSync(folder, { recursive: true });
     }
@@ -42866,6 +42887,7 @@ async function handleNewPhoto(projectId, capture, session) {
     const result2 = await processWatchedPhoto(projectId, capture.filePath, {
       store: createWatchedPhotoStore(db, capture.filePath),
       photosDir: getPhotosDir(),
+      projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
@@ -42894,6 +42916,7 @@ async function handleNewPhoto(projectId, capture, session) {
     const result2 = await processWatchedPhoto(projectId, capture.filePath, {
       store: createWatchedPhotoStore(db, capture.filePath),
       photosDir: getPhotosDir(),
+      projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
@@ -42962,6 +42985,7 @@ async function handleNewPhoto(projectId, capture, session) {
       const result2 = await processWatchedPhoto(projectId, capture.filePath, {
         store: createWatchedPhotoStore(db, capture.filePath),
         photosDir: getPhotosDir(),
+        projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
         readQr: async () => null,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
         diagnosticId: capture.diagnosticId,
@@ -43005,6 +43029,7 @@ async function handleNewPhoto(projectId, capture, session) {
   const result = await processWatchedPhoto(projectId, capture.filePath, {
     store: createWatchedPhotoStore(db, capture.filePath),
     photosDir: getPhotosDir(),
+    projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
     readQr: async () => null,
     targetStudentId: student.id,
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
@@ -43044,10 +43069,10 @@ async function copyToProjectFolder(sourcePath, fileName, destinationDir) {
   return destinationPath;
 }
 async function persistQrMarker(db, projectId, student, capture) {
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const classRow = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
-  if (!project) throw new Error(`Project ${projectId} not found`);
-  const projectFolder = safeFolderName(project.schoolName);
+  if (!project2) throw new Error(`Project ${projectId} not found`);
+  const projectFolder = safeFolderName(project2.schoolName);
   const classFolder = safeFolderName(classRow?.className ?? "Unassigned Class");
   const studentFolder = safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`);
   const markerDir = path.join(getPhotosDir(), projectFolder, classFolder, studentFolder, "QR Markers");
@@ -43063,8 +43088,8 @@ async function persistQrMarker(db, projectId, student, capture) {
   return result.marker;
 }
 async function handleNewRaw(projectId, capture, session, db) {
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-  if (!project) return;
+  const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project2) return;
   const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
   const filenameReference = extractStudentReference(
     capture.fileName,
@@ -43103,24 +43128,27 @@ async function handleNewRaw(projectId, capture, session, db) {
   }
   const task = session.persistence.then(async () => {
     await session.previewScheduler.waitForIdle();
-    const storage = ensureProjectStorageLayout(
-      getProjectStorageLayout(
-        getPhotoSystemLayout(electron.app.getPath("home")),
-        projectId,
-        project.schoolName
-      )
-    );
+    const storage = getProjectStorage(projectId, project2);
     markImagePipeline(
       capture.diagnosticId,
       "file move started",
       `destination=${student ? "student folder" : "RAW originals"} mode=async-copy`
     );
+    const legacyStoredPath = student ? await copyToProjectFolder(
+      capture.filePath,
+      capture.fileName,
+      getStudentPhotoFolder(db, projectId, student)
+    ) : null;
     const storedPath = await copyToProjectFolder(
       capture.filePath,
       capture.fileName,
-      student ? getStudentPhotoFolder(db, projectId, student) : storage.rawOriginals
+      storage.rawOriginals
     );
-    markImagePipeline(capture.diagnosticId, "file move complete", `storedPath=${storedPath} mode=async-copy`);
+    markImagePipeline(
+      capture.diagnosticId,
+      "file move complete",
+      `storedPath=${storedPath} legacyPath=${legacyStoredPath ?? "none"} mode=async-copy`
+    );
     markImagePipeline(capture.diagnosticId, "RAW pairing complete", `capture=${capture.fileName}`);
     markImagePipeline(capture.diagnosticId, "database write started", `capture=${capture.fileName}`);
     const result = recordRawCapture(db, {
@@ -43287,9 +43315,9 @@ function registerCaptureExportHandlers() {
       }
       try {
         const db = getDb();
-        const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-        if (!project) return { ok: false, error: "Project not found." };
-        const outputDir = path.join(destinationDir, `${safeName(project.schoolName)}-captures`);
+        const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+        if (!project2) return { ok: false, error: "Project not found." };
+        const outputDir = path.join(destinationDir, `${safeName(project2.schoolName)}-captures`);
         require$$0.mkdirSync(outputDir, { recursive: true });
         const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().filter((capture) => shouldExport(mode, capture));
         let exportedCaptureCount = 0;
@@ -43338,17 +43366,17 @@ function registerProjectSyncHandlers() {
       if (existing) return existing;
       const task = (async () => {
         const db = getDb();
-        const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-        if (!project) {
+        const project2 = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+        if (!project2) {
           return { ok: false, completed: 0, total: 0, failed: 0, error: "Project not found." };
         }
-        if (project.finishedAt) {
+        if (project2.finishedAt) {
           return {
             ok: true,
             completed: 0,
             total: 0,
             failed: 0,
-            finishedAt: project.finishedAt
+            finishedAt: project2.finishedAt
           };
         }
         const { connectionToken } = getUploadConfig$1();
@@ -43504,7 +43532,7 @@ function registerCloudHandlers() {
           const { project: p, classes, students } = bundle;
           const imported = db.transaction((tx) => {
             const localProjects = tx.select().from(projectsTable).all();
-            const existingProject = localProjects.find((project) => project.cloudId === p.id) ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName);
+            const existingProject = localProjects.find((project2) => project2.cloudId === p.id) ?? localProjects.find((project2) => project2.cloudId === null && project2.schoolName === p.schoolName);
             const projectValues = {
               cloudId: p.id,
               schoolName: p.schoolName,

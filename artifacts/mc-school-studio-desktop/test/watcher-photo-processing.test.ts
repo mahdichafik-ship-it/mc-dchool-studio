@@ -56,7 +56,12 @@ function createFixture(fileName: string) {
   const sourcePath = join(root, 'smart-shooter', fileName)
   mkdirSync(dirname(sourcePath), { recursive: true })
   writeFileSync(sourcePath, jpegBytes)
-  return { root, sourcePath, photosDir: join(root, 'organized') }
+  return {
+    root,
+    sourcePath,
+    photosDir: join(root, 'organized'),
+    projectJpegOriginalsDir: join(root, 'job', 'Images', 'JPEG', 'Originals'),
+  }
 }
 
 function cleanup(root: string) {
@@ -71,6 +76,7 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
     const result = await processWatchedPhoto(1, fixture.sourcePath, {
       store,
       photosDir: fixture.photosDir,
+      projectJpegOriginalsDir: fixture.projectJpegOriginalsDir,
       readQr: async () => {
         throw new Error('filename match should not need QR fallback')
       },
@@ -89,6 +95,12 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
     )
     assert.equal(existsSync(destination), true)
     assert.deepEqual(readFileSync(destination), jpegBytes)
+    assert.equal(
+      readFileSync(
+        join(fixture.projectJpegOriginalsDir, 'Smith_John_class_school-001234.jpg'),
+      ).equals(jpegBytes),
+      true,
+    )
     assert.equal(existsSync(fixture.sourcePath), true)
     assert.deepEqual(readFileSync(fixture.sourcePath), jpegBytes)
     assert.equal(photos[0]?.studentId, 1)

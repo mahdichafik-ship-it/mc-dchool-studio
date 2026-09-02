@@ -2,7 +2,7 @@ import { app, ipcMain, BrowserWindow } from 'electron'
 import chokidar, { FSWatcher } from 'chokidar'
 import { existsSync, mkdirSync } from 'fs'
 import { copyFile, mkdir, stat as statFile } from 'fs/promises'
-import { basename, extname, join, parse, resolve } from 'path'
+import { basename, dirname, extname, join, parse, resolve } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import {
@@ -207,6 +207,21 @@ function getStudentPhotoFolder(
     safeFolderName(project?.schoolName ?? `Project ${projectId}`),
     safeFolderName(classRow?.className ?? 'Unassigned Class'),
     safeFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`),
+  )
+}
+
+function getProjectStorage(
+  projectId: number,
+  project: typeof projectsTable.$inferSelect,
+) {
+  // getPhotosDir() is the configured PHOTOS directory. Keep Jobs beside it
+  // so custom storage roots do not silently send project originals elsewhere.
+  return ensureProjectStorageLayout(
+    getProjectStorageLayout(
+      getPhotoSystemLayout(dirname(getPhotosDir())),
+      projectId,
+      project.schoolName,
+    ),
   )
 }
 
@@ -647,6 +662,7 @@ async function handleNewPhoto(
     const result = await processWatchedPhoto(projectId, capture.filePath, {
       store: createWatchedPhotoStore(db, capture.filePath),
       photosDir: getPhotosDir(),
+      projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
@@ -678,6 +694,7 @@ async function handleNewPhoto(
     const result = await processWatchedPhoto(projectId, capture.filePath, {
       store: createWatchedPhotoStore(db, capture.filePath),
       photosDir: getPhotosDir(),
+      projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
@@ -766,6 +783,7 @@ async function handleNewPhoto(
       const result = await processWatchedPhoto(projectId, capture.filePath, {
         store: createWatchedPhotoStore(db, capture.filePath),
         photosDir: getPhotosDir(),
+        projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
         readQr: async () => null,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
         diagnosticId: capture.diagnosticId,
@@ -819,6 +837,7 @@ async function handleNewPhoto(
   const result = await processWatchedPhoto(projectId, capture.filePath, {
     store: createWatchedPhotoStore(db, capture.filePath),
     photosDir: getPhotosDir(),
+    projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
     readQr: async () => null,
     targetStudentId: student.id,
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
@@ -950,24 +969,29 @@ async function handleNewRaw(
   const task = session.persistence
     .then(async () => {
       await session.previewScheduler.waitForIdle()
-      const storage = ensureProjectStorageLayout(
-        getProjectStorageLayout(
-          getPhotoSystemLayout(app.getPath('home')),
-          projectId,
-          project.schoolName,
-        ),
-      )
+      const storage = getProjectStorage(projectId, project)
       markImagePipeline(
         capture.diagnosticId,
         'file move started',
         `destination=${student ? 'student folder' : 'RAW originals'} mode=async-copy`,
       )
+      const legacyStoredPath = student
+        ? await copyToProjectFolder(
+          capture.filePath,
+          capture.fileName,
+          getStudentPhotoFolder(db, projectId, student),
+        )
+        : null
       const storedPath = await copyToProjectFolder(
         capture.filePath,
         capture.fileName,
-        student ? getStudentPhotoFolder(db, projectId, student) : storage.rawOriginals,
+        storage.rawOriginals,
       )
-      markImagePipeline(capture.diagnosticId, 'file move complete', `storedPath=${storedPath} mode=async-copy`)
+      markImagePipeline(
+        capture.diagnosticId,
+        'file move complete',
+        `storedPath=${storedPath} legacyPath=${legacyStoredPath ?? 'none'} mode=async-copy`,
+      )
       markImagePipeline(capture.diagnosticId, 'RAW pairing complete', `capture=${capture.fileName}`)
       markImagePipeline(capture.diagnosticId, 'database write started', `capture=${capture.fileName}`)
       const result = recordRawCapture(db, {

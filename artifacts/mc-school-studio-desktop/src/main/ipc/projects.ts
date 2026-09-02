@@ -1,6 +1,6 @@
-import { app, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import { readFileSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { eq, count } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
@@ -67,7 +67,7 @@ export function prepareProjectFolders(
 
   ensureProjectStorageLayout(
     getProjectStorageLayout(
-      getPhotoSystemLayout(app.getPath('home')),
+      getPhotoSystemLayout(dirname(getPhotosDir())),
       project.id,
       project.schoolName,
     ),

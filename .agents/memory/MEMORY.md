@@ -19,3 +19,4 @@
 - [Electron runtime validation](electron-runtime-validation.md) — packaged Electron smoke tests need the native GLib runtime, which is absent from this Linux workspace.
 - [macOS smoke cleanup](macos-smoke-cleanup.md) — native packaged-app smoke teardown can briefly race with Electron user-data removal, especially on Apple silicon.
 - [Native macOS release builds](native-macos-release-builds.md) — build each thin Mac package on its matching CPU architecture before combining updater metadata.
+- [Apple notarization timeouts](apple-notarization-timeouts.md) — distinguish transient notary API polling timeouts from Intel architecture or packaged-launch failures.

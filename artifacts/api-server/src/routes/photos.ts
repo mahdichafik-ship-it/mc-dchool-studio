@@ -6,6 +6,8 @@ import { db } from "@workspace/db";
 import {
   capturesTable,
   captureFilesTable,
+  classesTable,
+  projectsTable,
   studentsTable,
   studentPhotosTable,
 } from "@workspace/db";
@@ -15,6 +17,7 @@ import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
 import { canAccessAssignedDesktopProject, canAccessProject } from "../lib/studioAccess";
 import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
+import { backupFileToGoogleDrive, GoogleDriveBackupError } from "../lib/googleDriveBackup";
 
 const router = Router({ mergeParams: true });
 
@@ -407,6 +410,51 @@ function captureFileToResponse(file: typeof captureFilesTable.$inferSelect) {
   };
 }
 
+async function backupUploadedFile(
+  projectId: number,
+  studentId: number,
+  filePath: string,
+  fileName: string,
+  fileRole: "JPEG" | "RAW",
+  fileFormat: string,
+  backupKey: string,
+): Promise<void> {
+  const [context] = await db
+    .select({
+      schoolName: projectsTable.schoolName,
+      classId: classesTable.id,
+      className: classesTable.className,
+      generatedStudentId: studentsTable.generatedStudentId,
+      firstName: studentsTable.firstName,
+      lastName: studentsTable.lastName,
+    })
+    .from(studentsTable)
+    .innerJoin(projectsTable, eq(projectsTable.id, studentsTable.projectId))
+    .innerJoin(classesTable, eq(classesTable.id, studentsTable.classId))
+    .where(and(
+      eq(studentsTable.id, studentId),
+      eq(studentsTable.projectId, projectId),
+    ));
+
+  if (!context) {
+    throw new GoogleDriveBackupError("Could not resolve the project, class, or student for Drive backup.");
+  }
+
+  await backupFileToGoogleDrive({
+    projectId,
+    schoolName: context.schoolName,
+    classId: context.classId,
+    className: context.className,
+    studentId,
+    studentFolderName: `${context.generatedStudentId}_${context.lastName}_${context.firstName}`,
+    filePath,
+    fileName,
+    fileRole,
+    fileFormat,
+    backupKey,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -510,6 +558,27 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
     };
 
     const result = await savePhoto();
+    try {
+      await backupUploadedFile(
+        projectId,
+        studentId,
+        resolveFilePath(result.photo.fileUrl),
+        result.photo.fileName,
+        "JPEG",
+        "JPG",
+        `photo:${result.photo.id}`,
+      );
+    } catch (error) {
+      if (error instanceof GoogleDriveBackupError) {
+        logger.error({ err: error, projectId, studentId, photoId: result.photo.id }, "Google Drive photo backup failed");
+        res.status(503).json({
+          error: "Photo saved locally, but Google Drive backup failed. Retry the upload.",
+          code: "GOOGLE_DRIVE_BACKUP_FAILED",
+        });
+        return;
+      }
+      throw error;
+    }
     res.status(result.reused ? 200 : 201).json(photoToResponse(result.photo));
   } catch (error) {
     discardUploadedFile(req);
@@ -661,6 +730,44 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         .returning();
       return { capture, file, reused: false };
     });
+
+    const fileRole = result.file.fileRole === "RAW"
+      ? "RAW"
+      : result.file.fileRole === "JPEG"
+        ? "JPEG"
+        : null;
+    if (!fileRole) {
+      throw new Error(`Unsupported capture file role "${result.file.fileRole}"`);
+    }
+
+    try {
+      await backupUploadedFile(
+        projectId,
+        studentId,
+        resolveFilePath(result.file.fileUrl),
+        result.file.originalFilename,
+        fileRole,
+        result.file.fileFormat,
+        `capture:${result.capture.id}:${fileRole}`,
+      );
+    } catch (error) {
+      if (error instanceof GoogleDriveBackupError) {
+        logger.error({
+          err: error,
+          projectId,
+          studentId,
+          captureId: result.capture.id,
+          fileId: result.file.id,
+          fileRole,
+        }, "Google Drive capture backup failed");
+        res.status(503).json({
+          error: "Capture saved locally, but Google Drive backup failed. Retry the upload.",
+          code: "GOOGLE_DRIVE_BACKUP_FAILED",
+        });
+        return;
+      }
+      throw error;
+    }
 
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,

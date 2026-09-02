@@ -16098,10 +16098,12 @@ function useCaptures(studentId) {
   const [data, setData] = reactExports.useState({ captures: [], qrMarkers: [] });
   const [livePreview, setLivePreview] = reactExports.useState(null);
   const [loading, setLoading] = reactExports.useState(false);
+  const [error, setError] = reactExports.useState(null);
   const liveTraceRef = reactExports.useRef(void 0);
   const load = reactExports.useCallback(async () => {
     if (!studentId) return;
     setLoading(true);
+    setError(null);
     try {
       const result = await api.invoke("captures:list", { studentId });
       const loaded = result;
@@ -16115,6 +16117,8 @@ function useCaptures(studentId) {
         });
         return pending.length > 0 ? { ...loaded, captures: [...loaded.captures, ...pending] } : loaded;
       });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       setLoading(false);
     }
@@ -16220,7 +16224,7 @@ function useCaptures(studentId) {
       unsubFileUpload();
     };
   }, [studentId, load]);
-  return { data, loading, reload: load, livePreview };
+  return { data, loading, error, reload: load, livePreview };
 }
 function useCaptureSummary(projectId) {
   const [data, setData] = reactExports.useState({
@@ -17311,7 +17315,13 @@ function StudentDetail({
   onClearCaptureTarget,
   offline
 }) {
-  const { data: review, reload: reloadCaptures, livePreview } = useCaptures(student.id);
+  const {
+    data: review,
+    loading: capturesLoading,
+    error: capturesError,
+    reload: reloadCaptures,
+    livePreview
+  } = useCaptures(student.id);
   const captures = review.captures;
   const qrMarkers = review.qrMarkers;
   const [reassignOpen, setReassignOpen] = reactExports.useState(false);
@@ -17477,7 +17487,23 @@ function StudentDetail({
           },
           option.value
         )) }),
-        captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
+        capturesLoading && captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "mr-2 size-4 animate-spin" }),
+          "Loading captures…"
+        ] }) : capturesError ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-red-200 bg-red-50 rounded-xl px-6 text-center", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-8 text-red-400 mb-2" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-700", children: "Could not load these captures" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mt-1", children: capturesError }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              onClick: () => void reloadCaptures(),
+              className: "mt-3 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-200",
+              children: "Try again"
+            }
+          )
+        ] }) : captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300 mb-2" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No captures yet" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-0.5", children: "JPEG and RAW files will appear here automatically when captured" })

@@ -729,7 +729,13 @@ function StudentDetail({
   onClearCaptureTarget: () => void
   offline: boolean
 }) {
-  const { data: review, reload: reloadCaptures, livePreview } = useCaptures(student.id)
+  const {
+    data: review,
+    loading: capturesLoading,
+    error: capturesError,
+    reload: reloadCaptures,
+    livePreview,
+  } = useCaptures(student.id)
   const captures = review.captures
   const qrMarkers = review.qrMarkers
   const [reassignOpen, setReassignOpen] = useState(false)
@@ -917,7 +923,25 @@ function StudentDetail({
             ))}
           </div>
 
-          {captures.length === 0 && qrMarkers.length === 0 ? (
+          {capturesLoading && captures.length === 0 && qrMarkers.length === 0 ? (
+            <div className="h-40 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400">
+              <Loader className="mr-2 size-4 animate-spin" />
+              Loading captures…
+            </div>
+          ) : capturesError ? (
+            <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-red-200 bg-red-50 rounded-xl px-6 text-center">
+              <AlertCircle className="size-8 text-red-400 mb-2" />
+              <p className="text-sm font-medium text-red-700">Could not load these captures</p>
+              <p className="text-xs text-red-600 mt-1">{capturesError}</p>
+              <button
+                type="button"
+                onClick={() => void reloadCaptures()}
+                className="mt-3 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-200"
+              >
+                Try again
+              </button>
+            </div>
+          ) : captures.length === 0 && qrMarkers.length === 0 ? (
             <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
               <Image className="size-8 text-slate-300 mb-2" />
               <p className="text-sm text-slate-400">No captures yet</p>

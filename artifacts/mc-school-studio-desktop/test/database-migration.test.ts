@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
 import { ensureCaptureTables, ensureLegacyColumns } from '../src/main/db/migrations.ts'
+import { reconcileLegacyPhotosAsCaptures } from '../src/main/lib/captureRepository.ts'
 
 test('upgrades an older local database without replacing existing rows', () => {
   const columns = new Map<string, Set<string>>([
@@ -60,4 +61,22 @@ test('capture migration is repeatable and keeps legacy rows as the compatibility
   assert.match(statements[1] ?? '', /FROM photos p/)
   assert.match(statements[1] ?? '', /INSERT OR IGNORE INTO image_files/)
   assert.match(statements[1] ?? '', /WHERE NOT EXISTS/)
+})
+
+test('gallery reconciliation retries every legacy photo without deleting or moving it', () => {
+  const photos = [
+    { id: 11, filePath: '/photos/student/photo-1.jpg' },
+    { id: 12, filePath: '/photos/student/photo-2.jpg' },
+  ]
+  const mirrored: Array<{ id: number; filePath: string }> = []
+
+  reconcileLegacyPhotosAsCaptures(
+    {} as never,
+    photos as never,
+    (_db, photo) => {
+      mirrored.push({ id: photo.id, filePath: photo.filePath })
+    },
+  )
+
+  assert.deepEqual(mirrored, photos)
 })

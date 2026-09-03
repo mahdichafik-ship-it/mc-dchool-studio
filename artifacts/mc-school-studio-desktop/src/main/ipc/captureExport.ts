@@ -3,8 +3,19 @@ import { copyFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
-import { capturesTable, imageFilesTable, projectsTable } from '../db/schema'
-import type { CaptureExportMode, CaptureExportResult } from '../../shared/types'
+import {
+  capturesTable,
+  classesTable,
+  imageFilesTable,
+  projectsTable,
+  studentsTable,
+} from '../db/schema'
+import { buildLightroomFilename } from '../lib/lightroomExport'
+import type {
+  CaptureExportLayout,
+  CaptureExportMode,
+  CaptureExportResult,
+} from '../../shared/types'
 
 function safeName(value: string): string {
   return value
@@ -46,7 +57,13 @@ export function registerCaptureExportHandlers(): void {
         projectId,
         destinationDir,
         mode,
-      }: { projectId: number; destinationDir: string; mode: CaptureExportMode },
+        layout = 'capture_folders',
+      }: {
+        projectId: number
+        destinationDir: string
+        mode: CaptureExportMode
+        layout?: CaptureExportLayout
+      },
     ): CaptureExportResult => {
       if (!destinationDir || !Number.isInteger(projectId)) {
         return { ok: false, error: 'Choose a destination folder and a valid project.' }
@@ -56,7 +73,9 @@ export function registerCaptureExportHandlers(): void {
         const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
         if (!project) return { ok: false, error: 'Project not found.' }
 
-        const outputDir = join(destinationDir, `${safeName(project.schoolName)}-captures`)
+        const outputDir = layout === 'lightroom_watch_folder'
+          ? destinationDir
+          : join(destinationDir, `${safeName(project.schoolName)}-captures`)
         mkdirSync(outputDir, { recursive: true })
         const captures = db
           .select()
@@ -68,6 +87,7 @@ export function registerCaptureExportHandlers(): void {
         let exportedCaptureCount = 0
         let exportedFileCount = 0
         let skippedMissingFiles = 0
+        let skippedExistingFiles = 0
 
         for (const capture of captures) {
           const files = db
@@ -77,6 +97,12 @@ export function registerCaptureExportHandlers(): void {
             .all()
           const sequence = String(capture.sequence ?? capture.id).padStart(6, '0')
           const captureDir = join(outputDir, `${sequence}_${safeName(capture.baseFilename)}`)
+          const student = capture.studentId === null
+            ? null
+            : db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get() ?? null
+          const captureClass = capture.classId === null
+            ? null
+            : db.select().from(classesTable).where(eq(classesTable.id, capture.classId)).get() ?? null
           let captureExported = false
 
           for (const file of files) {
@@ -84,8 +110,24 @@ export function registerCaptureExportHandlers(): void {
               skippedMissingFiles++
               continue
             }
-            mkdirSync(captureDir, { recursive: true })
-            copyFileSync(file.storedPath, join(captureDir, safeName(file.originalFilename)))
+            const destinationPath = layout === 'lightroom_watch_folder'
+              ? join(outputDir, buildLightroomFilename({
+                  schoolName: project.schoolName,
+                  className: captureClass?.className ?? null,
+                  student,
+                  captureId: capture.id,
+                  sequence: capture.sequence,
+                  originalFilename: file.originalFilename,
+                  fileRole: file.fileRole,
+                  fileFormat: file.fileFormat,
+                }))
+              : join(captureDir, safeName(file.originalFilename))
+            if (layout === 'lightroom_watch_folder' && existsSync(destinationPath)) {
+              skippedExistingFiles++
+              continue
+            }
+            if (layout === 'capture_folders') mkdirSync(captureDir, { recursive: true })
+            copyFileSync(file.storedPath, destinationPath)
             exportedFileCount++
             captureExported = true
           }
@@ -98,6 +140,7 @@ export function registerCaptureExportHandlers(): void {
           exportedCaptureCount,
           exportedFileCount,
           skippedMissingFiles,
+          skippedExistingFiles,
         }
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) }

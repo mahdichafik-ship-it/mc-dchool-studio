@@ -16823,7 +16823,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [reassignDialogPhoto, setReassignDialogPhoto] = reactExports.useState(null);
   const [retrying, setRetrying] = reactExports.useState(false);
   const [exportMode, setExportMode] = reactExports.useState("all");
-  const [exporting, setExporting] = reactExports.useState(false);
+  const [exporting, setExporting] = reactExports.useState(null);
   const [finishing, setFinishing] = reactExports.useState(false);
   const [syncProgress, setSyncProgress] = reactExports.useState(null);
   const autoStartAttemptedRef = reactExports.useRef(null);
@@ -16931,29 +16931,35 @@ function ProjectView({ projectId, onBack, offline = false }) {
       addToast({ type: "error", title: "Retry finished with errors", description: `${successCount} succeeded, ${failCount} still failed` });
     }
   }
-  async function handleExportCaptures() {
+  async function handleExportCaptures(layout = "capture_folders") {
     const destinationDir = await window.api.invoke("dialog:openFolder");
     if (!destinationDir) return;
-    setExporting(true);
+    setExporting(layout);
     try {
       const result = await window.api.invoke("captures:export", {
         projectId,
         destinationDir,
-        mode: exportMode
+        mode: exportMode,
+        layout
       });
       if (!result.ok) {
-        addToast({ type: "error", title: "Export failed", description: result.error });
+        addToast({
+          type: "error",
+          title: layout === "lightroom_watch_folder" ? "Lightroom export failed" : "Export failed",
+          description: result.error
+        });
         return;
       }
+      const skipped = result.skippedExistingFiles ?? 0;
       addToast({
         type: "success",
-        title: "Capture export complete",
-        description: `${result.exportedFileCount ?? 0} file${result.exportedFileCount === 1 ? "" : "s"} from ${result.exportedCaptureCount ?? 0} capture${result.exportedCaptureCount === 1 ? "" : "s"} exported`
+        title: layout === "lightroom_watch_folder" ? "Sent to Lightroom watched folder" : "Capture export complete",
+        description: `${result.exportedFileCount ?? 0} file${result.exportedFileCount === 1 ? "" : "s"} from ${result.exportedCaptureCount ?? 0} capture${result.exportedCaptureCount === 1 ? "" : "s"} exported${skipped > 0 ? ` · ${skipped} already there` : ""}`
       });
     } catch (error) {
       addToast({ type: "error", title: "Export failed", description: String(error) });
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   }
   async function handleUploadAndFinish() {
@@ -17073,10 +17079,33 @@ function ProjectView({ projectId, onBack, offline = false }) {
               ]
             }
           ),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: handleExportCaptures, disabled: exporting, children: [
-            exporting ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3.5" }),
-            exporting ? "Exporting…" : "Export"
-          ] })
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            Button,
+            {
+              variant: "outline",
+              size: "sm",
+              onClick: () => void handleExportCaptures("capture_folders"),
+              disabled: exporting !== null,
+              children: [
+                exporting === "capture_folders" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3.5" }),
+                exporting === "capture_folders" ? "Exporting…" : "Export"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            Button,
+            {
+              variant: "outline",
+              size: "sm",
+              onClick: () => void handleExportCaptures("lightroom_watch_folder"),
+              disabled: exporting !== null,
+              title: "Choose the folder configured as Lightroom Classic's Auto Import watched folder",
+              children: [
+                exporting === "lightroom_watch_folder" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-3.5" }),
+                exporting === "lightroom_watch_folder" ? "Sending…" : "Send to Lightroom"
+              ]
+            }
+          )
         ] }),
         project?.watchFolder ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-500 max-w-[200px] truncate hidden lg:block", children: project.watchFolder }),

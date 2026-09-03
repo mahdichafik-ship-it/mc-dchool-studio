@@ -51,6 +51,7 @@ import type {
   ProjectUploadStatusRow,
   UploadStatus,
   CaptureExportMode,
+  CaptureExportLayout,
   ProjectSyncProgressEvent,
 } from '@/hooks/useApi'
 
@@ -94,7 +95,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
-  const [exporting, setExporting] = useState(false)
+  const [exporting, setExporting] = useState<CaptureExportLayout | null>(null)
   const [finishing, setFinishing] = useState(false)
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
   const autoStartAttemptedRef = useRef<number | null>(null)
@@ -225,29 +226,37 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
-  async function handleExportCaptures() {
+  async function handleExportCaptures(layout: CaptureExportLayout = 'capture_folders') {
     const destinationDir = await window.api.invoke('dialog:openFolder') as string | null
     if (!destinationDir) return
-    setExporting(true)
+    setExporting(layout)
     try {
       const result = await window.api.invoke('captures:export', {
         projectId,
         destinationDir,
         mode: exportMode,
+        layout,
       })
       if (!result.ok) {
-        addToast({ type: 'error', title: 'Export failed', description: result.error })
+        addToast({
+          type: 'error',
+          title: layout === 'lightroom_watch_folder' ? 'Lightroom export failed' : 'Export failed',
+          description: result.error,
+        })
         return
       }
+      const skipped = result.skippedExistingFiles ?? 0
       addToast({
         type: 'success',
-        title: 'Capture export complete',
-        description: `${result.exportedFileCount ?? 0} file${result.exportedFileCount === 1 ? '' : 's'} from ${result.exportedCaptureCount ?? 0} capture${result.exportedCaptureCount === 1 ? '' : 's'} exported`,
+        title: layout === 'lightroom_watch_folder'
+          ? 'Sent to Lightroom watched folder'
+          : 'Capture export complete',
+        description: `${result.exportedFileCount ?? 0} file${result.exportedFileCount === 1 ? '' : 's'} from ${result.exportedCaptureCount ?? 0} capture${result.exportedCaptureCount === 1 ? '' : 's'} exported${skipped > 0 ? ` · ${skipped} already there` : ''}`,
       })
     } catch (error) {
       addToast({ type: 'error', title: 'Export failed', description: String(error) })
     } finally {
-      setExporting(false)
+      setExporting(null)
     }
   }
 
@@ -392,9 +401,24 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                  <option value="favorite">Export favorites</option>
                  <option value="final_selection">Export final selection</option>
                </select>
-               <Button variant="outline" size="sm" onClick={handleExportCaptures} disabled={exporting}>
-                 {exporting ? <Loader className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
-                 {exporting ? 'Exporting…' : 'Export'}
+               <Button
+                 variant="outline"
+                 size="sm"
+                 onClick={() => void handleExportCaptures('capture_folders')}
+                 disabled={exporting !== null}
+               >
+                  {exporting === 'capture_folders' ? <Loader className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                  {exporting === 'capture_folders' ? 'Exporting…' : 'Export'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleExportCaptures('lightroom_watch_folder')}
+                  disabled={exporting !== null}
+                  title="Choose the folder configured as Lightroom Classic's Auto Import watched folder"
+                >
+                  {exporting === 'lightroom_watch_folder' ? <Loader className="size-3.5 animate-spin" /> : <Image className="size-3.5" />}
+                  {exporting === 'lightroom_watch_folder' ? 'Sending…' : 'Send to Lightroom'}
                </Button>
              </div>
            )}

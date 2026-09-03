@@ -43350,6 +43350,25 @@ function registerDialogHandlers() {
     return getPhotosDir();
   });
 }
+function safeFileSegment(value, fallback) {
+  return value.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, "_").replace(/_+/g, "_").replace(/^[.\s_-]+|[.\s_-]+$/g, "").slice(0, 60) || fallback;
+}
+function buildLightroomFilename(input) {
+  const extension = node_path.extname(input.originalFilename) || (input.fileRole === "JPEG" ? ".jpg" : `.${input.fileFormat.toLowerCase()}`);
+  const student = input.student ? [
+    safeFileSegment(input.student.lastName, "Student"),
+    safeFileSegment(input.student.firstName, "Unknown"),
+    safeFileSegment(input.student.generatedStudentId, "No-ID")
+  ].join("_") : "Unmatched";
+  const sequence2 = String(input.sequence ?? input.captureId).padStart(6, "0");
+  return [
+    safeFileSegment(input.schoolName, "School"),
+    safeFileSegment(input.className ?? "Unassigned", "Unassigned"),
+    student,
+    sequence2,
+    `capture-${input.captureId}`
+  ].join("_") + extension;
+}
 function safeName(value) {
   return value.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, " ").trim().slice(0, 100) || "captures";
 }
@@ -43377,7 +43396,8 @@ function registerCaptureExportHandlers() {
     (_event, {
       projectId,
       destinationDir,
-      mode
+      mode,
+      layout = "capture_folders"
     }) => {
       if (!destinationDir || !Number.isInteger(projectId)) {
         return { ok: false, error: "Choose a destination folder and a valid project." };
@@ -43386,24 +43406,41 @@ function registerCaptureExportHandlers() {
         const db = getDb();
         const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
         if (!project) return { ok: false, error: "Project not found." };
-        const outputDir = path.join(destinationDir, `${safeName(project.schoolName)}-captures`);
+        const outputDir = layout === "lightroom_watch_folder" ? destinationDir : path.join(destinationDir, `${safeName(project.schoolName)}-captures`);
         require$$0.mkdirSync(outputDir, { recursive: true });
         const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().filter((capture) => shouldExport(mode, capture));
         let exportedCaptureCount = 0;
         let exportedFileCount = 0;
         let skippedMissingFiles = 0;
+        let skippedExistingFiles = 0;
         for (const capture of captures) {
           const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
           const sequence2 = String(capture.sequence ?? capture.id).padStart(6, "0");
           const captureDir = path.join(outputDir, `${sequence2}_${safeName(capture.baseFilename)}`);
+          const student = capture.studentId === null ? null : db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get() ?? null;
+          const captureClass = capture.classId === null ? null : db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, capture.classId)).get() ?? null;
           let captureExported = false;
           for (const file of files) {
             if (!require$$0.existsSync(file.storedPath)) {
               skippedMissingFiles++;
               continue;
             }
-            require$$0.mkdirSync(captureDir, { recursive: true });
-            require$$0.copyFileSync(file.storedPath, path.join(captureDir, safeName(file.originalFilename)));
+            const destinationPath = layout === "lightroom_watch_folder" ? path.join(outputDir, buildLightroomFilename({
+              schoolName: project.schoolName,
+              className: captureClass?.className ?? null,
+              student,
+              captureId: capture.id,
+              sequence: capture.sequence,
+              originalFilename: file.originalFilename,
+              fileRole: file.fileRole,
+              fileFormat: file.fileFormat
+            })) : path.join(captureDir, safeName(file.originalFilename));
+            if (layout === "lightroom_watch_folder" && require$$0.existsSync(destinationPath)) {
+              skippedExistingFiles++;
+              continue;
+            }
+            if (layout === "capture_folders") require$$0.mkdirSync(captureDir, { recursive: true });
+            require$$0.copyFileSync(file.storedPath, destinationPath);
             exportedFileCount++;
             captureExported = true;
           }
@@ -43414,7 +43451,8 @@ function registerCaptureExportHandlers() {
           outputDir,
           exportedCaptureCount,
           exportedFileCount,
-          skippedMissingFiles
+          skippedMissingFiles,
+          skippedExistingFiles
         };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };

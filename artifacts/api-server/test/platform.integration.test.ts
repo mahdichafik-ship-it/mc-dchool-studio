@@ -394,3 +394,57 @@ test("never exposes or selects another studio's storage connection", async () =>
   assert.equal(viewer.status, 200);
   assert.deepEqual((await viewer.json() as { connections: unknown[] }).connections, []);
 });
+
+test("lets the platform owner audit and control one studio without leaking credentials", async () => {
+  const detail = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}`);
+  assert.equal(detail.status, 200);
+  const detailBody = await detail.json() as {
+    studio: { id: number };
+    members: Array<{ id: number; userId: string; status: string }>;
+    storageConnections: Array<Record<string, unknown>>;
+    platformAudit: unknown[];
+  };
+  assert.equal(detailBody.studio.id, onboardedStudioId);
+  assert.ok(detailBody.members.some((member) => member.userId === inviteeId));
+  assert.doesNotMatch(JSON.stringify(detailBody.storageConnections), /encryptedCredentials|encrypted-north-star-credential/);
+
+  const target = detailBody.members.find((member) => member.userId === inviteeId)!;
+  const suspended = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}/members/${target.id}/access`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "removed" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(suspended.status, 200);
+  assert.equal((await request(inviteeId, "/api/studio")).status, 404);
+
+  const restoredMember = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}/members/${target.id}/access`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "active" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(restoredMember.status, 200);
+  assert.equal((await request(inviteeId, "/api/studio")).status, 200);
+
+  const archived = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}/lifecycle`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "archive", reason: "Integration audit hold" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(archived.status, 200);
+  assert.equal((await request(inviteeId, "/api/studio")).status, 404);
+  assert.equal((await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}`)).status, 200);
+
+  const restoredStudio = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}/lifecycle`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "restore" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(restoredStudio.status, 200);
+  assert.equal((await request(inviteeId, "/api/studio")).status, 200);
+
+  const refreshedDetail = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}`);
+  const refreshedBody = await refreshedDetail.json() as { platformAudit: Array<{ action: string }> };
+  assert.ok(refreshedBody.platformAudit.some((entry) => entry.action === "member_suspended"));
+  assert.ok(refreshedBody.platformAudit.some((entry) => entry.action === "studio_archived"));
+  assert.ok(refreshedBody.platformAudit.some((entry) => entry.action === "studio_restored"));
+});

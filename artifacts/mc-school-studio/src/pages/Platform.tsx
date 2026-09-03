@@ -178,6 +178,7 @@ export default function Platform() {
                 {studio.website ? <p className="inline-flex max-w-full items-center gap-1.5 truncate"><Link2 className="h-3.5 w-3.5 shrink-0" />{studio.website}</p> : <p className="text-slate-400">No website added</p>}
                 {studio.contactEmail ? <p className="inline-flex max-w-full items-center gap-1.5 truncate"><Mail className="h-3.5 w-3.5 shrink-0" />{studio.contactEmail}</p> : <p className="text-slate-400">No contact email added</p>}
               </div>
+              <Link href={`/platform/studios/${studio.id}`} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">Open owner-equivalent view <ChevronRight className="h-4 w-4" /></Link>
             </article>)}
           </div>}
         </section>

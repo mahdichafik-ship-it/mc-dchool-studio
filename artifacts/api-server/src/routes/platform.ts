@@ -1,13 +1,48 @@
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
-import { and, asc, count, desc, eq } from "drizzle-orm";
-import { db, classesTable, platformInvitesTable, projectsTable, studentsTable, studioMembersTable, studiosTable } from "@workspace/db";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import {
+  db,
+  classesTable,
+  desktopConnectionsTable,
+  platformActionAuditTable,
+  platformInvitesTable,
+  projectsTable,
+  studentsTable,
+  studioMembersTable,
+  studioStorageAuditTable,
+  studioStorageConnectionsTable,
+  studiosTable,
+} from "@workspace/db";
 import { getUserId, requireAuth } from "../lib/auth";
 import { getUserEmail } from "../lib/studioAccess";
 import { platformOwnerIsConfigured, requirePlatformOwner } from "../lib/platformAccess";
 
 const router = Router();
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function recordPlatformAction(
+  actorUserId: string,
+  studioId: number,
+  action: string,
+  targetType: string,
+  targetId?: string | number | null,
+  detail?: string | null,
+) {
+  await db.insert(platformActionAuditTable).values({
+    actorUserId,
+    studioId,
+    action,
+    targetType,
+    targetId: targetId == null ? null : String(targetId),
+    detail: detail?.slice(0, 500) || null,
+  });
+}
+
+function studioIdParam(value: string | string[] | undefined): number | null {
+  const id = Number(Array.isArray(value) ? value[0] : value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
 
 function inviteCode() {
   return randomBytes(32).toString("base64url");
@@ -127,6 +162,181 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
   });
 });
 
+router.get("/studios/:studioId", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
+  const studioId = studioIdParam(req.params.studioId);
+  if (!studioId) {
+    res.status(400).json({ error: "A valid studio ID is required" });
+    return;
+  }
+  const [studio] = await db.select().from(studiosTable).where(eq(studiosTable.id, studioId)).limit(1);
+  if (!studio) {
+    res.status(404).json({ error: "Studio not found" });
+    return;
+  }
+  const [members, projects, desktopConnections, storageConnections, storageAudit, platformAudit] = await Promise.all([
+    db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, studioId)).orderBy(asc(studioMembersTable.createdAt)),
+    db.select().from(projectsTable).where(eq(projectsTable.studioId, studioId)).orderBy(desc(projectsTable.updatedAt)),
+    db.select({
+      id: desktopConnectionsTable.id,
+      memberId: desktopConnectionsTable.memberId,
+      memberEmail: studioMembersTable.email,
+      deviceName: desktopConnectionsTable.deviceName,
+      tokenPrefix: desktopConnectionsTable.tokenPrefix,
+      status: desktopConnectionsTable.status,
+      lastUsedAt: desktopConnectionsTable.lastUsedAt,
+      expiresAt: desktopConnectionsTable.expiresAt,
+      createdAt: desktopConnectionsTable.createdAt,
+      revokedAt: desktopConnectionsTable.revokedAt,
+      retiredAt: desktopConnectionsTable.retiredAt,
+      retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
+    }).from(desktopConnectionsTable)
+      .innerJoin(studioMembersTable, eq(desktopConnectionsTable.memberId, studioMembersTable.id))
+      .where(eq(desktopConnectionsTable.studioId, studioId))
+      .orderBy(desc(desktopConnectionsTable.createdAt)),
+    db.select({
+      id: studioStorageConnectionsTable.id,
+      provider: studioStorageConnectionsTable.provider,
+      providerAccountEmail: studioStorageConnectionsTable.providerAccountEmail,
+      status: studioStorageConnectionsTable.status,
+      lastVerifiedAt: studioStorageConnectionsTable.lastVerifiedAt,
+      createdAt: studioStorageConnectionsTable.createdAt,
+      updatedAt: studioStorageConnectionsTable.updatedAt,
+      disconnectedAt: studioStorageConnectionsTable.disconnectedAt,
+    }).from(studioStorageConnectionsTable)
+      .where(eq(studioStorageConnectionsTable.studioId, studioId))
+      .orderBy(desc(studioStorageConnectionsTable.updatedAt)),
+    db.select().from(studioStorageAuditTable)
+      .where(eq(studioStorageAuditTable.studioId, studioId))
+      .orderBy(desc(studioStorageAuditTable.createdAt))
+      .limit(100),
+    db.select().from(platformActionAuditTable)
+      .where(eq(platformActionAuditTable.studioId, studioId))
+      .orderBy(desc(platformActionAuditTable.createdAt))
+      .limit(100),
+  ]);
+  res.json({ studio, members, projects, desktopConnections, storageConnections, storageAudit, platformAudit });
+});
+
+router.patch("/studios/:studioId/lifecycle", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
+  const studioId = studioIdParam(req.params.studioId);
+  const action = String(req.body?.action ?? "");
+  const reason = String(req.body?.reason ?? "").trim();
+  if (!studioId || !["archive", "restore"].includes(action)) {
+    res.status(400).json({ error: "A valid studio and lifecycle action are required" });
+    return;
+  }
+  const actorUserId = getUserId(req);
+  const now = new Date();
+  const [updated] = await db.update(studiosTable).set(action === "archive"
+    ? { archivedAt: now, archivedByUserId: actorUserId, archiveReason: reason.slice(0, 500) || null }
+    : { archivedAt: null, archivedByUserId: null, archiveReason: null })
+    .where(eq(studiosTable.id, studioId))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Studio not found" });
+    return;
+  }
+  if (action === "archive") {
+    await db.update(desktopConnectionsTable)
+      .set({ status: "revoked", revokedAt: now })
+      .where(and(eq(desktopConnectionsTable.studioId, studioId), inArray(desktopConnectionsTable.status, ["active", "retired"])));
+  }
+  await recordPlatformAction(actorUserId, studioId, `studio_${action}d`, "studio", studioId, reason);
+  res.json(updated);
+});
+
+router.patch("/studios/:studioId/members/:memberId/access", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
+  const studioId = studioIdParam(req.params.studioId);
+  const memberId = studioIdParam(req.params.memberId);
+  const status = String(req.body?.status ?? "");
+  if (!studioId || !memberId || !["active", "removed"].includes(status)) {
+    res.status(400).json({ error: "A valid member access status is required" });
+    return;
+  }
+  const [updated] = await db.update(studioMembersTable)
+    .set({ status: status as "active" | "removed" })
+    .where(and(eq(studioMembersTable.id, memberId), eq(studioMembersTable.studioId, studioId)))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Studio member not found" });
+    return;
+  }
+  if (status === "removed") {
+    await db.update(desktopConnectionsTable)
+      .set({ status: "revoked", revokedAt: new Date() })
+      .where(and(eq(desktopConnectionsTable.studioId, studioId), eq(desktopConnectionsTable.memberId, memberId), inArray(desktopConnectionsTable.status, ["active", "retired"])));
+  }
+  await recordPlatformAction(getUserId(req), studioId, status === "active" ? "member_reactivated" : "member_suspended", "studio_member", memberId);
+  res.json(updated);
+});
+
+router.patch("/studios/:studioId/desktop-connections/:connectionId", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
+  const studioId = studioIdParam(req.params.studioId);
+  const connectionId = studioIdParam(req.params.connectionId);
+  const action = String(req.body?.action ?? "");
+  if (!studioId || !connectionId || !["revoke", "retire", "set_expiry"].includes(action)) {
+    res.status(400).json({ error: "A valid desktop connection action is required" });
+    return;
+  }
+  let update: Record<string, unknown>;
+  if (action === "revoke") update = { status: "revoked", revokedAt: new Date() };
+  else if (action === "retire") update = { status: "retired", retiredAt: new Date(), retirementAcknowledgedAt: null };
+  else {
+    const days = Number(req.body?.days);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      res.status(400).json({ error: "Desktop access duration must be between 1 and 365 days" });
+      return;
+    }
+    update = { expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000) };
+  }
+  const [updated] = await db.update(desktopConnectionsTable).set(update)
+    .where(and(eq(desktopConnectionsTable.id, connectionId), eq(desktopConnectionsTable.studioId, studioId)))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Desktop connection not found" });
+    return;
+  }
+  await recordPlatformAction(getUserId(req), studioId, `desktop_${action}`, "desktop_connection", connectionId, action === "set_expiry" ? `${req.body.days} days` : null);
+  res.json(updated);
+});
+
+router.delete("/studios/:studioId/storage-connections/:connectionId", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
+  const studioId = studioIdParam(req.params.studioId);
+  const connectionId = studioIdParam(req.params.connectionId);
+  if (!studioId || !connectionId) {
+    res.status(400).json({ error: "A valid storage connection is required" });
+    return;
+  }
+  const now = new Date();
+  const [updated] = await db.update(studioStorageConnectionsTable).set({
+    encryptedCredentials: null,
+    status: "revoked",
+    disconnectedAt: now,
+    updatedAt: now,
+  }).where(and(eq(studioStorageConnectionsTable.id, connectionId), eq(studioStorageConnectionsTable.studioId, studioId)))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Storage connection not found" });
+    return;
+  }
+  await db.update(studiosTable).set({
+    storageProvider: "platform_google_drive",
+    storageStatus: "using_platform",
+    storageConnectedAt: null,
+    storageRequestedAt: null,
+  }).where(eq(studiosTable.id, studioId));
+  await db.insert(studioStorageAuditTable).values({
+    studioId,
+    action: "disconnected",
+    provider: updated.provider,
+    providerAccountId: updated.providerAccountId,
+    providerAccountEmail: updated.providerAccountEmail,
+    detail: "Revoked by platform owner",
+  });
+  await recordPlatformAction(getUserId(req), studioId, "storage_revoked", "storage_connection", connectionId, updated.provider);
+  res.status(204).send();
+});
+
 router.patch("/studios/:studioId", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
   const studioId = Number(req.params.studioId);
   if (!Number.isInteger(studioId) || studioId < 1) {
@@ -153,7 +363,7 @@ router.patch("/studios/:studioId", requireAuth, requirePlatformOwner, async (req
     res.status(404).json({ error: "Studio not found" });
     return;
   }
-
+  await recordPlatformAction(getUserId(req), studioId, "studio_details_updated", "studio", studioId);
   res.json(updated);
 });
 

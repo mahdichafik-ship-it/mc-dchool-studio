@@ -14,6 +14,9 @@ export const studiosTable = pgTable("studios", {
   }).notNull().default("needs_setup"),
   storageRequestedAt: timestamp("storage_requested_at", { withTimezone: true }),
   storageConnectedAt: timestamp("storage_connected_at", { withTimezone: true }),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  archivedByUserId: text("archived_by_user_id"),
+  archiveReason: text("archive_reason"),
   createdByUserId: text("created_by_user_id").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -66,6 +69,7 @@ export const desktopConnectionsTable = pgTable("desktop_connections", {
   tokenPrefix: text("token_prefix").notNull(),
   status: text("status", { enum: ["active", "revoked", "retired"] }).notNull().default("active"),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   retiredAt: timestamp("retired_at", { withTimezone: true }),

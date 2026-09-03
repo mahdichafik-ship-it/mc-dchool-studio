@@ -21,3 +21,4 @@
 - [Native macOS release builds](native-macos-release-builds.md) — build each thin Mac package on its matching CPU architecture before combining updater metadata.
 - [Apple notarization timeouts](apple-notarization-timeouts.md) — distinguish transient notary API polling timeouts from Intel architecture or packaged-launch failures.
 - [Studio storage fallback](studio-storage-fallback.md) — platform Drive stays active until a studio-owned provider is fully connected; provider requests never create a backup gap.
+- [Platform studio oversight](platform-studio-oversight.md) — owner-equivalent support access is explicit and audited; archive blocks access without deleting studio data.

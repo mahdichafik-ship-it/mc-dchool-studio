@@ -10,7 +10,7 @@ export const studiosTable = pgTable("studios", {
     enum: ["platform_google_drive", "google_drive", "dropbox"],
   }).notNull().default("platform_google_drive"),
   storageStatus: text("storage_status", {
-    enum: ["needs_setup", "using_platform", "connection_requested", "connected"],
+    enum: ["needs_setup", "using_platform", "connection_requested", "connected", "connection_error"],
   }).notNull().default("needs_setup"),
   storageRequestedAt: timestamp("storage_requested_at", { withTimezone: true }),
   storageConnectedAt: timestamp("storage_connected_at", { withTimezone: true }),

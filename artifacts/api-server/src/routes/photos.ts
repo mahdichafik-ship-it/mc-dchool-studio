@@ -18,7 +18,8 @@ import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
 import { canAccessDesktopProject, canAccessProject } from "../lib/studioAccess";
 import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
-import { backupFileToGoogleDrive, GoogleDriveBackupError } from "../lib/googleDriveBackup";
+import { GoogleDriveBackupError } from "../lib/googleDriveBackup";
+import { backupFileForStudio } from "../lib/studioStorageBackup";
 
 const router = Router({ mergeParams: true });
 
@@ -445,7 +446,7 @@ async function backupUploadedFile(
     throw new GoogleDriveBackupError("Could not resolve the project, class, or student for Drive backup.");
   }
 
-  await backupFileToGoogleDrive({
+  await backupFileForStudio({
     studioId: context.studioId,
     studioName: context.studioName,
     projectId,

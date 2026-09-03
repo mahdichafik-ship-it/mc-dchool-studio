@@ -19,7 +19,7 @@ type DriveListResponse = {
   nextPageToken?: string;
 };
 
-type DriveBackupInput = {
+export type DriveBackupInput = {
   studioId: number;
   studioName: string;
   projectId: number;
@@ -34,6 +34,11 @@ type DriveBackupInput = {
   fileFormat: string;
   backupKey: string;
 };
+
+export type DriveRequester = (
+  path: string,
+  options?: { method?: string; headers?: Record<string, string>; body?: unknown },
+) => Promise<Response>;
 
 export class GoogleDriveBackupError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -51,10 +56,10 @@ function driveName(value: string, fallback: string): string {
   return (cleaned || fallback).slice(0, 180);
 }
 
-async function driveRequest(
+const platformDriveRequest: DriveRequester = async (
   path: string,
   options: { method?: string; headers?: Record<string, string>; body?: unknown } = {},
-): Promise<Response> {
+): Promise<Response> => {
   const connectors = new ReplitConnectors();
   const response = await connectors.proxy(CONNECTOR_NAME, path, options);
   if (!response.ok) {
@@ -64,9 +69,10 @@ async function driveRequest(
     );
   }
   return response;
-}
+};
 
 async function findFileByAppProperty(
+  request: DriveRequester,
   key: string,
   value: string,
   parentId?: string,
@@ -82,12 +88,14 @@ async function findFileByAppProperty(
     fields: "files(id,name,mimeType,webViewLink,size),nextPageToken",
     pageSize: "100",
   });
-  const response = await driveRequest(`/drive/v3/files?${query.toString()}`);
+  const response = await request(`/drive/v3/files?${query.toString()}`);
+  if (!response.ok) throw new GoogleDriveBackupError(`Google Drive returned HTTP ${response.status}`);
   const payload = await response.json() as DriveListResponse;
   return payload.files?.[0] ?? null;
 }
 
 async function createFolder(
+  request: DriveRequester,
   name: string,
   appPropertyKey: string,
   appPropertyValue: string,
@@ -102,26 +110,29 @@ async function createFolder(
     },
   };
   const query = new URLSearchParams({ fields: "id,name,mimeType,webViewLink" });
-  const response = await driveRequest(`/drive/v3/files?${query.toString()}`, {
+  const response = await request(`/drive/v3/files?${query.toString()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(metadata),
   });
+  if (!response.ok) throw new GoogleDriveBackupError(`Google Drive returned HTTP ${response.status}`);
   return await response.json() as DriveFile;
 }
 
 async function ensureFolder(
+  request: DriveRequester,
   name: string,
   appPropertyKey: string,
   appPropertyValue: string,
   parentId?: string,
 ): Promise<DriveFile> {
-  const existing = await findFileByAppProperty(appPropertyKey, appPropertyValue, parentId);
+  const existing = await findFileByAppProperty(request, appPropertyKey, appPropertyValue, parentId);
   if (existing) return existing;
-  return createFolder(name, appPropertyKey, appPropertyValue, parentId);
+  return createFolder(request, name, appPropertyKey, appPropertyValue, parentId);
 }
 
 async function uploadFile(
+  request: DriveRequester,
   filePath: string,
   fileName: string,
   mimeType: string,
@@ -132,7 +143,7 @@ async function uploadFile(
   studentId: number,
   fileRole: "JPEG" | "RAW",
 ): Promise<DriveFile> {
-  const existing = await findFileByAppProperty("mcSchoolStudioBackupKey", backupKey);
+  const existing = await findFileByAppProperty(request, "mcSchoolStudioBackupKey", backupKey);
   if (existing) return existing;
 
   const fileBytes = fs.readFileSync(filePath);
@@ -159,25 +170,30 @@ async function uploadFile(
     uploadType: "multipart",
     fields: "id,name,mimeType,webViewLink,size",
   });
-  const response = await driveRequest(`/upload/drive/v3/files?${query.toString()}`, {
+  const response = await request(`/upload/drive/v3/files?${query.toString()}`, {
     method: "POST",
     headers: {
       "Content-Type": `multipart/related; boundary=${boundary}`,
     },
     body,
   });
+  if (!response.ok) throw new GoogleDriveBackupError(`Google Drive returned HTTP ${response.status}`);
   return await response.json() as DriveFile;
 }
 
-export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<DriveFile> {
+export async function backupFileToGoogleDrive(
+  input: DriveBackupInput,
+  request: DriveRequester = platformDriveRequest,
+): Promise<DriveFile> {
   if (!fs.existsSync(input.filePath)) {
     throw new GoogleDriveBackupError("The local file is missing before Google Drive backup.");
   }
 
-  const root = await ensureFolder(ROOT_FOLDER_NAME, ROOT_FOLDER_KEY, ROOT_FOLDER_VALUE);
+  const root = await ensureFolder(request, ROOT_FOLDER_NAME, ROOT_FOLDER_KEY, ROOT_FOLDER_VALUE);
   if (!root.id) throw new GoogleDriveBackupError("Google Drive did not return the backup root folder ID.");
 
   const studio = await ensureFolder(
+    request,
     driveName(input.studioName, `Studio ${input.studioId}`),
     "mcSchoolStudioStudioId",
     String(input.studioId),
@@ -186,6 +202,7 @@ export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<
   if (!studio.id) throw new GoogleDriveBackupError("Google Drive did not return the studio folder ID.");
 
   const project = await ensureFolder(
+    request,
     driveName(`${input.schoolName} (Project ${input.projectId})`, `Project ${input.projectId}`),
     "mcSchoolStudioProjectId",
     String(input.projectId),
@@ -194,6 +211,7 @@ export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<
   if (!project.id) throw new GoogleDriveBackupError("Google Drive did not return the project folder ID.");
 
   const classFolder = await ensureFolder(
+    request,
     driveName(input.className, `Class ${input.classId}`),
     "mcSchoolStudioClassId",
     String(input.classId),
@@ -202,6 +220,7 @@ export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<
   if (!classFolder.id) throw new GoogleDriveBackupError("Google Drive did not return the class folder ID.");
 
   const studentFolder = await ensureFolder(
+    request,
     driveName(input.studentFolderName, `Student ${input.studentId}`),
     "mcSchoolStudioStudentId",
     String(input.studentId),
@@ -210,6 +229,7 @@ export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<
   if (!studentFolder.id) throw new GoogleDriveBackupError("Google Drive did not return the student folder ID.");
 
   const roleFolder = await ensureFolder(
+    request,
     input.fileRole,
     "mcSchoolStudioRoleFolder",
     `${input.studentId}:${input.fileRole}`,
@@ -218,6 +238,7 @@ export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<
   if (!roleFolder.id) throw new GoogleDriveBackupError("Google Drive did not return the file-role folder ID.");
 
   return uploadFile(
+    request,
     input.filePath,
     input.fileName,
     input.fileRole === "JPEG" ? "image/jpeg" : "application/octet-stream",

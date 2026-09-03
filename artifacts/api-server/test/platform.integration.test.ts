@@ -10,13 +10,16 @@ import {
   pool,
   projectsTable,
   studioMembersTable,
+  studioStorageConnectionsTable,
   studiosTable,
 } from "@workspace/db";
 import platformRouter from "../src/routes/platform";
 import projectsRouter from "../src/routes/projects";
 import studioRouter from "../src/routes/studio";
+import { decryptStorageValue, encryptStorageValue } from "../src/lib/storageCrypto";
 
 process.env.CLERK_SECRET_KEY = "";
+process.env.SESSION_SECRET ||= "integration-test-session-secret-at-least-32-characters";
 const suffix = `${process.pid}-${Date.now()}`;
 process.env.PLATFORM_OWNER_USER_ID = `platform-owner-${suffix}`;
 
@@ -83,6 +86,20 @@ test("only the configured platform owner can view the platform workspace", async
   assert.ok(Array.isArray(body.studios));
   assert.ok(Array.isArray(body.projects));
   assert.ok(Array.isArray(body.invites));
+});
+
+test("encrypts storage credentials with authenticated encryption", () => {
+  const encrypted = encryptStorageValue({
+    accessToken: "access-token-value",
+    refreshToken: "refresh-token-value",
+  });
+  assert.doesNotMatch(encrypted, /access-token-value|refresh-token-value/);
+  assert.deepEqual(decryptStorageValue(encrypted), {
+    accessToken: "access-token-value",
+    refreshToken: "refresh-token-value",
+  });
+  const tampered = encrypted.replace(/"ciphertext":"./, '"ciphertext":"A');
+  assert.throws(() => decryptStorageValue(tampered));
 });
 
 test("creates one-time owner invites and onboards the invited account", async () => {
@@ -319,4 +336,61 @@ test("rejects email mismatches and keeps studios isolated", async () => {
 
   await db.delete(platformInvitesTable).where(eq(platformInvitesTable.id, invite.id));
   await db.delete(platformInvitesTable).where(eq(platformInvitesTable.id, cancelledInvite.id));
+});
+
+test("never exposes or selects another studio's storage connection", async () => {
+  await db.insert(studioStorageConnectionsTable).values([
+    {
+      studioId: onboardedStudioId,
+      provider: "google_drive",
+      providerAccountId: `google-${suffix}`,
+      providerAccountEmail: `north-star-${suffix}@example.com`,
+      encryptedCredentials: "encrypted-north-star-credential",
+      status: "active",
+    },
+    {
+      studioId: isolatedStudioId,
+      provider: "google_drive",
+      providerAccountId: `google-other-${suffix}`,
+      providerAccountEmail: `separate-${suffix}@example.com`,
+      encryptedCredentials: "encrypted-separate-credential",
+      status: "active",
+    },
+  ]);
+  await db.update(studiosTable).set({
+    storageProvider: "google_drive",
+    storageStatus: "connected",
+    storageConnectedAt: new Date(),
+  }).where(eq(studiosTable.id, onboardedStudioId));
+  await db.update(studiosTable).set({
+    storageProvider: "google_drive",
+    storageStatus: "connected",
+    storageConnectedAt: new Date(),
+  }).where(eq(studiosTable.id, isolatedStudioId));
+
+  const northStar = await request(inviteeId, "/api/studio");
+  assert.equal(northStar.status, 200);
+  const northStarBody = await northStar.json() as {
+    connections: Array<{ providerAccountEmail: string }>;
+  };
+  assert.deepEqual(
+    northStarBody.connections.map((connection) => connection.providerAccountEmail),
+    [`north-star-${suffix}@example.com`],
+  );
+  assert.doesNotMatch(JSON.stringify(northStarBody), /encrypted-.*-credential/);
+
+  const separate = await request(otherUserId, "/api/studio");
+  assert.equal(separate.status, 200);
+  const separateBody = await separate.json() as {
+    connections: Array<{ providerAccountEmail: string }>;
+  };
+  assert.deepEqual(
+    separateBody.connections.map((connection) => connection.providerAccountEmail),
+    [`separate-${suffix}@example.com`],
+  );
+  assert.doesNotMatch(JSON.stringify(separateBody), /encrypted-.*-credential/);
+
+  const viewer = await request(studioViewerId, "/api/studio");
+  assert.equal(viewer.status, 200);
+  assert.deepEqual((await viewer.json() as { connections: unknown[] }).connections, []);
 });

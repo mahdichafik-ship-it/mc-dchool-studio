@@ -5,7 +5,7 @@ import { useLocation } from "wouter";
 type StudioStorageContext = {
   studio: {
     name: string;
-    storageStatus: "needs_setup" | "using_platform" | "connection_requested" | "connected";
+    storageStatus: "needs_setup" | "using_platform" | "connection_requested" | "connected" | "connection_error";
   };
   member: {
     role: string;

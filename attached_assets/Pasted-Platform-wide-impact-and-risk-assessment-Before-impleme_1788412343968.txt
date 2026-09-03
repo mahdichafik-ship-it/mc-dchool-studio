@@ -1,0 +1,30 @@
+Platform-wide impact and risk assessment
+
+Before implementing anything, I also need you to determine whether introducing this Platform Owner / Studio Owner / Administrator / Photographer separation could create any issues elsewhere in the existing Volume Capture system.
+
+Please trace the proposed changes through the current application and identify anything they could potentially affect, including authentication, existing users, studio membership, project access, permissions, desktop login, project assignments, local capture workflow, uploads/sync, API endpoints, database relationships, tokens/licenses, existing sessions and any other functionality that depends on the current user or studio model.
+
+I especially want to know:
+
+* Could any existing studio or user lose access?
+* Could existing projects or project assignments be affected?
+* Could this interfere with the desktop application or photographer login?
+* Could changing the role structure break existing permissions?
+* Could introducing a Platform Owner role weaken studio data isolation?
+* Could existing tokens or authentication sessions become invalid?
+* Would any database migration be required, and is there a risk to existing data?
+* Are there parts of the application that currently assume every user belongs to one studio?
+* Are there APIs or background processes that assume the current role structure?
+* Could support access/“view as studio” accidentally bypass security or tenant isolation?
+* Are there any other dependencies or side effects that we haven’t considered?
+
+Please inspect the actual code and database relationships rather than answering these questions theoretically.
+
+For every risk you identify, explain:
+what could be affected → why → severity → recommended mitigation.
+
+Most importantly, tell me if you see any reason we should NOT proceed with this approach, or if there is a safer way of achieving the same business objective using the architecture that already exists.
+
+Do not make any changes yet.
+
+I want the complete current-state assessment, proposed approach and platform-wide risk analysis first. We will review that before authorizing implementation.

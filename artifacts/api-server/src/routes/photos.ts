@@ -10,6 +10,7 @@ import {
   projectsTable,
   studentsTable,
   studentPhotosTable,
+  studiosTable,
 } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -422,6 +423,8 @@ async function backupUploadedFile(
 ): Promise<void> {
   const [context] = await db
     .select({
+      studioId: studiosTable.id,
+      studioName: studiosTable.name,
       schoolName: projectsTable.schoolName,
       classId: classesTable.id,
       className: classesTable.className,
@@ -431,6 +434,7 @@ async function backupUploadedFile(
     })
     .from(studentsTable)
     .innerJoin(projectsTable, eq(projectsTable.id, studentsTable.projectId))
+    .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
     .innerJoin(classesTable, eq(classesTable.id, studentsTable.classId))
     .where(and(
       eq(studentsTable.id, studentId),
@@ -442,6 +446,8 @@ async function backupUploadedFile(
   }
 
   await backupFileToGoogleDrive({
+    studioId: context.studioId,
+    studioName: context.studioName,
     projectId,
     schoolName: context.schoolName,
     classId: context.classId,

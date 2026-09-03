@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, LayoutDashboard, FolderKanban, LogOut, Users, ShieldCheck } from 'lucide-react';
+import { Camera, LayoutDashboard, FolderKanban, LogOut, Users, ShieldCheck, HardDrive } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
@@ -9,6 +9,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
   const [location] = useLocation();
   const [isPlatformOwner, setIsPlatformOwner] = useState(false);
+  const [canManageStudio, setCanManageStudio] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -22,6 +23,24 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return () => { active = false; };
   }, [user?.id]);
 
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/studio')
+      .then(async (response) => response.ok ? response.json() as Promise<{ member: { role: string; status: string } }> : null)
+      .then((data) => {
+        if (!active) return;
+        setCanManageStudio(Boolean(
+          data
+          && data.member.status === 'active'
+          && (data.member.role === 'owner' || data.member.role === 'admin'),
+        ));
+      })
+      .catch(() => {
+        if (active) setCanManageStudio(false);
+      });
+    return () => { active = false; };
+  }, [user?.id]);
+
   const handleSignOut = () => {
     signOut({ redirectUrl: import.meta.env.BASE_URL.replace(/\/$/, '') || '/' });
   };
@@ -30,6 +49,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
     { label: 'Projects', icon: FolderKanban, href: '/dashboard' }, // We just link to dashboard for projects list, or we could have a separate route. Let's just use dashboard for both.
     { label: 'Team', icon: Users, href: '/team' },
+    ...(canManageStudio ? [{ label: 'Storage', icon: HardDrive, href: '/studio/settings' }] : []),
     ...(isPlatformOwner ? [{ label: 'Platform', icon: ShieldCheck, href: '/platform' }] : []),
   ];
 

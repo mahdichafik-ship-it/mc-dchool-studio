@@ -6,6 +6,14 @@ export const studiosTable = pgTable("studios", {
   description: text("description"),
   website: text("website"),
   contactEmail: text("contact_email"),
+  storageProvider: text("storage_provider", {
+    enum: ["platform_google_drive", "google_drive", "dropbox"],
+  }).notNull().default("platform_google_drive"),
+  storageStatus: text("storage_status", {
+    enum: ["needs_setup", "using_platform", "connection_requested", "connected"],
+  }).notNull().default("needs_setup"),
+  storageRequestedAt: timestamp("storage_requested_at", { withTimezone: true }),
+  storageConnectedAt: timestamp("storage_connected_at", { withTimezone: true }),
   createdByUserId: text("created_by_user_id").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

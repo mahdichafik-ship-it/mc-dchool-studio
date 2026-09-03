@@ -20,6 +20,8 @@ type DriveListResponse = {
 };
 
 type DriveBackupInput = {
+  studioId: number;
+  studioName: string;
   projectId: number;
   schoolName: string;
   classId: number;
@@ -125,6 +127,7 @@ async function uploadFile(
   mimeType: string,
   parentId: string,
   backupKey: string,
+  studioId: number,
   projectId: number,
   studentId: number,
   fileRole: "JPEG" | "RAW",
@@ -139,6 +142,7 @@ async function uploadFile(
     parents: [parentId],
     appProperties: {
       mcSchoolStudioBackupKey: backupKey,
+      mcSchoolStudioStudioId: String(studioId),
       mcSchoolStudioProjectId: String(projectId),
       mcSchoolStudioStudentId: String(studentId),
       mcSchoolStudioFileRole: fileRole,
@@ -173,11 +177,19 @@ export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<
   const root = await ensureFolder(ROOT_FOLDER_NAME, ROOT_FOLDER_KEY, ROOT_FOLDER_VALUE);
   if (!root.id) throw new GoogleDriveBackupError("Google Drive did not return the backup root folder ID.");
 
+  const studio = await ensureFolder(
+    driveName(input.studioName, `Studio ${input.studioId}`),
+    "mcSchoolStudioStudioId",
+    String(input.studioId),
+    root.id,
+  );
+  if (!studio.id) throw new GoogleDriveBackupError("Google Drive did not return the studio folder ID.");
+
   const project = await ensureFolder(
     driveName(`${input.schoolName} (Project ${input.projectId})`, `Project ${input.projectId}`),
     "mcSchoolStudioProjectId",
     String(input.projectId),
-    root.id,
+    studio.id,
   );
   if (!project.id) throw new GoogleDriveBackupError("Google Drive did not return the project folder ID.");
 
@@ -211,6 +223,7 @@ export async function backupFileToGoogleDrive(input: DriveBackupInput): Promise<
     input.fileRole === "JPEG" ? "image/jpeg" : "application/octet-stream",
     roleFolder.id,
     input.backupKey,
+    input.studioId,
     input.projectId,
     input.studentId,
     input.fileRole,

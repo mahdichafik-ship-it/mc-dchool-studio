@@ -14,6 +14,7 @@ import {
 } from "@workspace/db";
 import platformRouter from "../src/routes/platform";
 import projectsRouter from "../src/routes/projects";
+import studioRouter from "../src/routes/studio";
 
 process.env.CLERK_SECRET_KEY = "";
 const suffix = `${process.pid}-${Date.now()}`;
@@ -22,6 +23,7 @@ process.env.PLATFORM_OWNER_USER_ID = `platform-owner-${suffix}`;
 const platformOwnerId = process.env.PLATFORM_OWNER_USER_ID;
 const inviteeId = `studio-owner-${suffix}`;
 const otherUserId = `other-user-${suffix}`;
+const studioViewerId = `studio-viewer-${suffix}`;
 const inviteeEmail = `${inviteeId}@member.local`;
 
 let server: Server;
@@ -45,6 +47,7 @@ app.use((req, _res, next) => {
 });
 app.use("/api/platform", platformRouter);
 app.use("/api/projects", projectsRouter);
+app.use("/api/studio", studioRouter);
 
 async function request(userId: string, pathname: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -174,6 +177,60 @@ test("creates one-time owner invites and onboards the invited account", async ()
 
   const members = await db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, onboardedStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);
+});
+
+test("keeps platform storage active while a studio-owned connection is pending", async () => {
+  const initial = await request(inviteeId, "/api/studio");
+  assert.equal(initial.status, 200);
+  const initialBody = await initial.json() as {
+    studio: { storageProvider: string; storageStatus: string };
+    activeStorageProvider: string;
+  };
+  assert.equal(initialBody.studio.storageStatus, "needs_setup");
+  assert.equal(initialBody.activeStorageProvider, "platform_google_drive");
+
+  const requested = await request(inviteeId, "/api/studio/storage", {
+    method: "PUT",
+    body: JSON.stringify({ provider: "google_drive" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(requested.status, 200);
+  const requestedBody = await requested.json() as {
+    studio: { storageProvider: string; storageStatus: string; storageRequestedAt: string | null };
+    activeStorageProvider: string;
+  };
+  assert.equal(requestedBody.studio.storageProvider, "google_drive");
+  assert.equal(requestedBody.studio.storageStatus, "connection_requested");
+  assert.ok(requestedBody.studio.storageRequestedAt);
+  assert.equal(requestedBody.activeStorageProvider, "platform_google_drive");
+
+  await db.insert(studioMembersTable).values({
+    studioId: onboardedStudioId,
+    userId: studioViewerId,
+    email: `${studioViewerId}@member.local`,
+    role: "viewer",
+  });
+  const forbidden = await request(studioViewerId, "/api/studio/storage", {
+    method: "PUT",
+    body: JSON.stringify({ provider: "dropbox" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(forbidden.status, 403);
+
+  const fallback = await request(inviteeId, "/api/studio/storage", {
+    method: "PUT",
+    body: JSON.stringify({ provider: "platform_google_drive" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(fallback.status, 200);
+  const fallbackBody = await fallback.json() as {
+    studio: { storageProvider: string; storageStatus: string; storageRequestedAt: string | null };
+    activeStorageProvider: string;
+  };
+  assert.equal(fallbackBody.studio.storageProvider, "platform_google_drive");
+  assert.equal(fallbackBody.studio.storageStatus, "using_platform");
+  assert.equal(fallbackBody.studio.storageRequestedAt, null);
+  assert.equal(fallbackBody.activeStorageProvider, "platform_google_drive");
 });
 
 test("rejects email mismatches and keeps studios isolated", async () => {

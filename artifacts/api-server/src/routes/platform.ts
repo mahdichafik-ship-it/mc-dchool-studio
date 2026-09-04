@@ -93,7 +93,7 @@ function parseStudioUpdate(body: unknown): {
 }
 
 router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<void> => {
-  const [studios, members, projectCounts, projectRows, invites] = await Promise.all([
+  const [studios, members, projectCounts, projectRows, invites, desktopConnections] = await Promise.all([
     db.select().from(studiosTable).orderBy(asc(studiosTable.createdAt)),
     db.select().from(studioMembersTable).where(eq(studioMembersTable.status, "active")),
     db.select({ studioId: projectsTable.studioId, count: count() }).from(projectsTable).groupBy(projectsTable.studioId),
@@ -115,6 +115,11 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
       .leftJoin(studiosTable, eq(projectsTable.studioId, studiosTable.id))
       .orderBy(desc(projectsTable.updatedAt)),
     db.select().from(platformInvitesTable).orderBy(asc(platformInvitesTable.createdAt)),
+    db.select({
+      studioId: desktopConnectionsTable.studioId,
+      status: desktopConnectionsTable.status,
+      expiresAt: desktopConnectionsTable.expiresAt,
+    }).from(desktopConnectionsTable),
   ]);
 
   const ownerByStudio = new Map(
@@ -123,6 +128,70 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
       .map((member) => [member.studioId, member]),
   );
   const projectCountByStudio = new Map(projectCounts.map((row) => [row.studioId, Number(row.count)]));
+  const desktopByStudio = new Map<number, typeof desktopConnections>();
+  for (const connection of desktopConnections) {
+    const connections = desktopByStudio.get(connection.studioId) ?? [];
+    connections.push(connection);
+    desktopByStudio.set(connection.studioId, connections);
+  }
+  const now = new Date();
+  const healthByStudio = new Map<number, {
+    severity: "healthy" | "attention" | "critical";
+    alerts: Array<{ code: string; label: string; severity: "info" | "attention" | "critical" }>;
+    activeMemberCount: number;
+    activeDesktopCount: number;
+    expiredDesktopCount: number;
+  }>();
+
+  for (const studio of studios) {
+    const studioMembers = members.filter((member) => member.studioId === studio.id);
+    const connections = desktopByStudio.get(studio.id) ?? [];
+    const activeDesktops = connections.filter((connection) => connection.status === "active");
+    const expiredDesktops = activeDesktops.filter((connection) => connection.expiresAt && connection.expiresAt <= now);
+    const alerts: Array<{ code: string; label: string; severity: "info" | "attention" | "critical" }> = [];
+
+    if (studio.archivedAt) {
+      alerts.push({ code: "archived", label: "Studio is archived", severity: "info" });
+    }
+    if (!studioMembers.some((member) => member.role === "owner")) {
+      alerts.push({ code: "owner_missing", label: "No active studio owner", severity: "critical" });
+    }
+    if (studioMembers.length === 0) {
+      alerts.push({ code: "members_missing", label: "No active members", severity: "critical" });
+    }
+    if (studio.storageStatus === "connection_error") {
+      alerts.push({ code: "storage_error", label: "Storage connection has an error", severity: "critical" });
+    } else if (studio.storageStatus === "needs_setup") {
+      alerts.push({ code: "storage_setup", label: "Studio storage is not configured", severity: "attention" });
+    } else if (studio.storageStatus === "connection_requested") {
+      alerts.push({ code: "storage_pending", label: "Storage connection is pending", severity: "attention" });
+    } else if (studio.storageStatus === "using_platform") {
+      alerts.push({ code: "platform_storage", label: "Using platform storage fallback", severity: "attention" });
+    }
+    if (expiredDesktops.length > 0) {
+      alerts.push({
+        code: "desktop_expired",
+        label: `${expiredDesktops.length} desktop connection${expiredDesktops.length === 1 ? "" : "s"} expired`,
+        severity: "attention",
+      });
+    }
+    if ((projectCountByStudio.get(studio.id) ?? 0) === 0) {
+      alerts.push({ code: "no_projects", label: "No school projects yet", severity: "info" });
+    }
+
+    const severity = alerts.some((alert) => alert.severity === "critical")
+      ? "critical"
+      : alerts.some((alert) => alert.severity === "attention")
+        ? "attention"
+        : "healthy";
+    healthByStudio.set(studio.id, {
+      severity,
+      alerts,
+      activeMemberCount: studioMembers.length,
+      activeDesktopCount: activeDesktops.length,
+      expiredDesktopCount: expiredDesktops.length,
+    });
+  }
   const projects = await Promise.all(
     projectRows.map(async (project) => {
       const [{ classCount }] = await db
@@ -145,10 +214,18 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
 
   res.json({
     configured: platformOwnerIsConfigured(),
+    healthSummary: {
+      totalStudios: studios.length,
+      healthyStudios: studios.filter((studio) => healthByStudio.get(studio.id)?.severity === "healthy").length,
+      attentionStudios: studios.filter((studio) => healthByStudio.get(studio.id)?.severity === "attention").length,
+      criticalStudios: studios.filter((studio) => healthByStudio.get(studio.id)?.severity === "critical").length,
+      archivedStudios: studios.filter((studio) => Boolean(studio.archivedAt)).length,
+    },
     studios: studios.map((studio) => ({
       ...studio,
       memberCount: members.filter((member) => member.studioId === studio.id).length,
       projectCount: projectCountByStudio.get(studio.id) ?? 0,
+      health: healthByStudio.get(studio.id),
       owner: ownerByStudio.get(studio.id)
         ? {
           userId: ownerByStudio.get(studio.id)!.userId,

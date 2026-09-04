@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import type { Request } from "express";
 import { and, desc, eq, gt, isNull, ne } from "drizzle-orm";
@@ -24,6 +25,9 @@ import {
 
 const router = Router();
 const storageProviders = ["platform_google_drive", "google_drive", "dropbox"] as const;
+const logoContentTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+const brandColorPattern = /^#[0-9a-fA-F]{6}$/;
+const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 type StorageProvider = typeof storageProviders[number];
 
 function isStorageProvider(value: unknown): value is StorageProvider {
@@ -45,6 +49,37 @@ function publicOrigin(req: Request): string {
     throw new Error("Could not determine a safe OAuth callback host");
   }
   return `${protocol}://${host}`;
+}
+
+function privateObjectDir(): string {
+  const value = process.env.PRIVATE_OBJECT_DIR;
+  if (!value) throw new Error("Studio logo storage is not configured");
+  return value.replace(/\/$/, "");
+}
+
+function parseObjectPath(path: string): { bucketName: string; objectName: string } {
+  const parts = path.replace(/^\/+/, "").split("/");
+  if (parts.length < 2) throw new Error("Invalid object path");
+  return { bucketName: parts[0]!, objectName: parts.slice(1).join("/") };
+}
+
+async function signedObjectUrl(path: string, method: "GET" | "PUT" | "HEAD"): Promise<string> {
+  const { bucketName, objectName } = parseObjectPath(path);
+  const response = await fetch(`${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      bucket_name: bucketName,
+      object_name: objectName,
+      method,
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error("Could not authorize logo storage");
+  const body = await response.json() as { signed_url?: string };
+  if (!body.signed_url) throw new Error("Logo storage returned an invalid response");
+  return body.signed_url;
 }
 
 async function studioContext(userId: string) {
@@ -103,6 +138,120 @@ router.get("/", requireAuth, async (req, res): Promise<void> => {
     connections,
     storageAudit: audit,
   });
+});
+
+router.patch("/branding", requireAuth, async (req, res): Promise<void> => {
+  const { member, studio } = await studioContext(getUserId(req));
+  if (!studio || member.status !== "active") {
+    res.status(404).json({ error: "Studio not found" });
+    return;
+  }
+  if (member.role !== "owner" && member.role !== "admin") {
+    res.status(403).json({ error: "Only studio owners and admins can manage branding" });
+    return;
+  }
+
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const tagline = typeof req.body?.tagline === "string" ? req.body.tagline.trim() : "";
+  const website = typeof req.body?.website === "string" ? req.body.website.trim() : "";
+  const contactEmail = typeof req.body?.contactEmail === "string" ? req.body.contactEmail.trim().toLowerCase() : "";
+  const primaryColor = req.body?.primaryColor;
+  const accentColor = req.body?.accentColor;
+  const logoObjectPath = req.body?.logoObjectPath === null
+    ? null
+    : typeof req.body?.logoObjectPath === "string"
+      ? req.body.logoObjectPath
+      : studio.logoObjectPath;
+
+  if (name.length < 2 || name.length > 120) {
+    res.status(400).json({ error: "Studio name must be between 2 and 120 characters" });
+    return;
+  }
+  if (tagline.length > 120) {
+    res.status(400).json({ error: "Tagline must be 120 characters or fewer" });
+    return;
+  }
+  if (website) {
+    try {
+      const parsed = new URL(website);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error();
+    } catch {
+      res.status(400).json({ error: "Enter a valid http or https website" });
+      return;
+    }
+  }
+  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+    res.status(400).json({ error: "Enter a valid contact email" });
+    return;
+  }
+  if (!brandColorPattern.test(primaryColor) || !brandColorPattern.test(accentColor)) {
+    res.status(400).json({ error: "Brand colors must use six-digit hex values" });
+    return;
+  }
+  if (logoObjectPath) {
+    const expectedPrefix = `${privateObjectDir()}/branding/studios/${studio.id}/`;
+    if (!logoObjectPath.startsWith(expectedPrefix)) {
+      res.status(400).json({ error: "Choose a logo uploaded for this studio" });
+      return;
+    }
+    if (logoObjectPath !== studio.logoObjectPath) {
+      const headUrl = await signedObjectUrl(logoObjectPath, "HEAD");
+      const exists = await fetch(headUrl, { method: "HEAD", signal: AbortSignal.timeout(30_000) });
+      if (!exists.ok) {
+        res.status(400).json({ error: "The uploaded logo could not be verified" });
+        return;
+      }
+    }
+  }
+
+  const [updated] = await db.update(studiosTable).set({
+    name,
+    tagline: tagline || null,
+    website: website || null,
+    contactEmail: contactEmail || null,
+    logoObjectPath,
+    primaryColor: primaryColor.toUpperCase(),
+    accentColor: accentColor.toUpperCase(),
+    brandingUpdatedAt: new Date(),
+  }).where(eq(studiosTable.id, studio.id)).returning();
+  res.json({ studio: updated });
+});
+
+router.post("/branding/logo-upload-url", requireAuth, async (req, res): Promise<void> => {
+  const { member, studio } = await studioContext(getUserId(req));
+  if (!studio || member.status !== "active") {
+    res.status(404).json({ error: "Studio not found" });
+    return;
+  }
+  if (member.role !== "owner" && member.role !== "admin") {
+    res.status(403).json({ error: "Only studio owners and admins can upload branding" });
+    return;
+  }
+  const contentType = typeof req.body?.contentType === "string" ? req.body.contentType : "";
+  const size = Number(req.body?.size);
+  if (!logoContentTypes.has(contentType)) {
+    res.status(400).json({ error: "Upload a PNG, JPEG, or WebP logo" });
+    return;
+  }
+  if (!Number.isFinite(size) || size <= 0 || size > 2 * 1024 * 1024) {
+    res.status(400).json({ error: "Logo files must be smaller than 2 MB" });
+    return;
+  }
+  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const objectPath = `${privateObjectDir()}/branding/studios/${studio.id}/${randomUUID()}.${extension}`;
+  const uploadUrl = await signedObjectUrl(objectPath, "PUT");
+  res.json({ uploadUrl, objectPath });
+});
+
+router.get("/branding/logo", requireAuth, async (req, res): Promise<void> => {
+  const { member, studio } = await studioContext(getUserId(req));
+  if (!studio || member.status !== "active" || !studio.logoObjectPath) {
+    res.status(404).json({ error: "Studio logo not found" });
+    return;
+  }
+  const logoUrl = await signedObjectUrl(studio.logoObjectPath, "GET");
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.redirect(302, logoUrl);
 });
 
 router.put("/storage", requireAuth, async (req, res): Promise<void> => {

@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Cloud, Database, ExternalLink, HardDrive, Loader2, ShieldCheck, Unplug } from "lucide-react";
+import { CheckCircle2, Cloud, Database, ExternalLink, HardDrive, ImageIcon, Loader2, Palette, Save, ShieldCheck, Unplug, Upload, X } from "lucide-react";
 
 type StorageProvider = "platform_google_drive" | "google_drive" | "dropbox";
 type StudioContext = {
   studio: {
     id: number;
     name: string;
+    tagline: string | null;
+    description: string | null;
+    website: string | null;
+    contactEmail: string | null;
+    logoObjectPath: string | null;
+    primaryColor: string;
+    accentColor: string;
+    brandingUpdatedAt: string | null;
     storageProvider: StorageProvider;
     storageStatus: "needs_setup" | "using_platform" | "connection_requested" | "connected" | "connection_error";
     storageRequestedAt: string | null;
@@ -55,11 +63,31 @@ const providerDetails: Record<StorageProvider, {
   },
 };
 
+function contrastColor(hex: string) {
+  const value = hex.replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(value)) return "#FFFFFF";
+  const [red, green, blue] = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+  return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? "#0F172A" : "#FFFFFF";
+}
+
 export default function StudioSettings() {
   const [context, setContext] = useState<StudioContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<StorageProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [branding, setBranding] = useState({
+    name: "",
+    tagline: "",
+    website: "",
+    contactEmail: "",
+    logoObjectPath: null as string | null,
+    primaryColor: "#0F766E",
+    accentColor: "#14B8A6",
+  });
+  const [brandingSaving, setBrandingSaving] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [brandingMessage, setBrandingMessage] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -68,6 +96,15 @@ export default function StudioSettings() {
       const body = await response.json().catch(() => ({})) as StudioContext & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Could not load studio storage.");
       setContext(body);
+      setBranding({
+        name: body.studio.name,
+        tagline: body.studio.tagline ?? "",
+        website: body.studio.website ?? "",
+        contactEmail: body.studio.contactEmail ?? "",
+        logoObjectPath: body.studio.logoObjectPath,
+        primaryColor: body.studio.primaryColor,
+        accentColor: body.studio.accentColor,
+      });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not load studio storage.");
     } finally {
@@ -134,6 +171,78 @@ export default function StudioSettings() {
     }
   }
 
+  async function uploadLogo(file: File) {
+    setLogoUploading(true);
+    setBrandingMessage(null);
+    setError(null);
+    try {
+      const request = await fetch("/api/studio/branding/logo-upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+      });
+      const upload = await request.json().catch(() => ({})) as { uploadUrl?: string; objectPath?: string; error?: string };
+      if (!request.ok || !upload.uploadUrl || !upload.objectPath) throw new Error(upload.error ?? "Could not prepare the logo upload.");
+      const uploaded = await fetch(upload.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!uploaded.ok) throw new Error("The logo upload did not complete.");
+      setBranding((current) => ({ ...current, logoObjectPath: upload.objectPath! }));
+      setLogoPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return URL.createObjectURL(file);
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not upload the logo.");
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function saveBranding(event: React.FormEvent) {
+    event.preventDefault();
+    setBrandingSaving(true);
+    setBrandingMessage(null);
+    setError(null);
+    try {
+      const response = await fetch("/api/studio/branding", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(branding),
+      });
+      const body = await response.json().catch(() => ({})) as { studio?: StudioContext["studio"]; error?: string };
+      if (!response.ok || !body.studio) throw new Error(body.error ?? "Could not save studio branding.");
+      setContext((current) => current ? { ...current, studio: body.studio! } : current);
+      setBranding({
+        name: body.studio.name,
+        tagline: body.studio.tagline ?? "",
+        website: body.studio.website ?? "",
+        contactEmail: body.studio.contactEmail ?? "",
+        logoObjectPath: body.studio.logoObjectPath,
+        primaryColor: body.studio.primaryColor,
+        accentColor: body.studio.accentColor,
+      });
+      if (logoPreview) URL.revokeObjectURL(logoPreview);
+      setLogoPreview(null);
+      setBrandingMessage("Studio branding saved.");
+      window.dispatchEvent(new CustomEvent("studio-branding-updated", {
+        detail: {
+          name: body.studio.name,
+          logoObjectPath: body.studio.logoObjectPath,
+          primaryColor: body.studio.primaryColor,
+          accentColor: body.studio.accentColor,
+          brandingUpdatedAt: body.studio.brandingUpdatedAt,
+        },
+      }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save studio branding.");
+    } finally {
+      setBrandingSaving(false);
+    }
+  }
+
   if (loading) {
     return <div className="flex flex-1 items-center justify-center bg-slate-50 text-slate-500"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading studio storage…</div>;
   }
@@ -156,9 +265,63 @@ export default function StudioSettings() {
       <div className="mx-auto max-w-5xl space-y-6">
         <header>
           <p className="text-sm font-semibold text-teal-700">{context.studio.name}</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Storage</h1>
-          <p className="mt-2 max-w-2xl text-slate-600">Choose where this studio’s original JPEG and RAW files are backed up.</p>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Studio settings</h1>
+          <p className="mt-2 max-w-2xl text-slate-600">Manage your studio identity and where original JPEG and RAW files are backed up.</p>
         </header>
+
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 p-5">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-teal-50 p-2 text-teal-700"><Palette className="h-5 w-5" /></div>
+              <div><h2 className="font-semibold text-slate-950">Studio branding</h2><p className="mt-1 text-sm text-slate-600">Customize the identity your team sees across the studio workspace.</p></div>
+            </div>
+          </div>
+          <form onSubmit={(event) => void saveBranding(event)} className="grid gap-6 p-5 lg:grid-cols-[1.25fr_0.75fr]">
+            <div className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block"><span className="text-sm font-medium text-slate-700">Studio name</span><input required minLength={2} maxLength={120} value={branding.name} onChange={(event) => setBranding((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-10 w-full rounded-md border border-slate-300 px-3 text-sm" /></label>
+                <label className="block"><span className="text-sm font-medium text-slate-700">Tagline</span><input maxLength={120} value={branding.tagline} onChange={(event) => setBranding((current) => ({ ...current, tagline: event.target.value }))} placeholder="School portraits, beautifully organized" className="mt-1 h-10 w-full rounded-md border border-slate-300 px-3 text-sm" /></label>
+                <label className="block"><span className="text-sm font-medium text-slate-700">Website</span><input type="url" maxLength={200} value={branding.website} onChange={(event) => setBranding((current) => ({ ...current, website: event.target.value }))} placeholder="https://yourstudio.com" className="mt-1 h-10 w-full rounded-md border border-slate-300 px-3 text-sm" /></label>
+                <label className="block"><span className="text-sm font-medium text-slate-700">Contact email</span><input type="email" maxLength={200} value={branding.contactEmail} onChange={(event) => setBranding((current) => ({ ...current, contactEmail: event.target.value }))} placeholder="hello@yourstudio.com" className="mt-1 h-10 w-full rounded-md border border-slate-300 px-3 text-sm" /></label>
+              </div>
+              <div>
+                <span className="text-sm font-medium text-slate-700">Studio logo</span>
+                <div className="mt-2 flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center">
+                  <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100">
+                    {logoPreview || branding.logoObjectPath ? <img src={logoPreview ?? `/api/studio/branding/logo?rev=${encodeURIComponent(context.studio.brandingUpdatedAt ?? "")}`} alt="Studio logo preview" className="h-full w-full object-contain p-2" /> : <ImageIcon className="h-6 w-6 text-slate-400" />}
+                  </div>
+                  <div className="flex-1"><p className="text-sm text-slate-600">PNG, JPEG, or WebP. Maximum 2 MB. A wide transparent logo works best.</p><div className="mt-3 flex flex-wrap gap-2"><label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Upload className="h-4 w-4" />{logoUploading ? "Uploading…" : "Choose logo"}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={logoUploading || !canManage} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadLogo(file); event.currentTarget.value = ""; }} className="sr-only" /></label>{branding.logoObjectPath && <button type="button" onClick={() => { if (logoPreview) URL.revokeObjectURL(logoPreview); setLogoPreview(null); setBranding((current) => ({ ...current, logoObjectPath: null })); }} className="inline-flex items-center gap-2 rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-700"><X className="h-4 w-4" />Remove</button>}</div></div>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block"><span className="text-sm font-medium text-slate-700">Primary color</span><div className="mt-1 flex gap-2"><input type="color" value={branding.primaryColor} onChange={(event) => setBranding((current) => ({ ...current, primaryColor: event.target.value.toUpperCase() }))} className="h-10 w-12 rounded border border-slate-300 bg-white p-1" /><input pattern="#[0-9A-Fa-f]{6}" value={branding.primaryColor} onChange={(event) => setBranding((current) => ({ ...current, primaryColor: event.target.value }))} className="h-10 flex-1 rounded-md border border-slate-300 px-3 font-mono text-sm uppercase" /></div></label>
+                <label className="block"><span className="text-sm font-medium text-slate-700">Accent color</span><div className="mt-1 flex gap-2"><input type="color" value={branding.accentColor} onChange={(event) => setBranding((current) => ({ ...current, accentColor: event.target.value.toUpperCase() }))} className="h-10 w-12 rounded border border-slate-300 bg-white p-1" /><input pattern="#[0-9A-Fa-f]{6}" value={branding.accentColor} onChange={(event) => setBranding((current) => ({ ...current, accentColor: event.target.value }))} className="h-10 flex-1 rounded-md border border-slate-300 px-3 font-mono text-sm uppercase" /></div></label>
+              </div>
+              {brandingMessage && <p className="text-sm font-medium text-emerald-700">{brandingMessage}</p>}
+              {canManage ? <button disabled={brandingSaving || logoUploading} className="inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold disabled:opacity-50" style={{ backgroundColor: branding.primaryColor, color: contrastColor(branding.primaryColor) }}><Save className="h-4 w-4" />{brandingSaving ? "Saving…" : "Save branding"}</button> : <p className="text-sm text-slate-600">Only the studio owner or an administrator can change branding.</p>}
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Live preview</p>
+              <div className="mt-4 overflow-hidden rounded-xl border bg-white shadow-sm">
+                <div className="h-2" style={{ backgroundColor: branding.accentColor }} />
+                <div className="p-5">
+                  <div className="flex h-14 w-24 items-center justify-center overflow-hidden rounded-lg bg-slate-50">
+                    {logoPreview || branding.logoObjectPath ? <img src={logoPreview ?? `/api/studio/branding/logo?rev=${encodeURIComponent(context.studio.brandingUpdatedAt ?? "")}`} alt="" className="h-full w-full object-contain p-1" /> : <ImageIcon className="h-6 w-6 text-slate-300" />}
+                  </div>
+                  <h3 className="mt-4 text-xl font-bold text-slate-950">{branding.name || "Your studio"}</h3>
+                  <p className="mt-1 text-sm text-slate-500">{branding.tagline || "Your studio tagline will appear here."}</p>
+                  <div className="mt-5 rounded-lg px-4 py-3 text-sm font-semibold" style={{ backgroundColor: branding.primaryColor, color: contrastColor(branding.primaryColor) }}>Open project</div>
+                  <div className="mt-3 h-1 rounded-full" style={{ backgroundColor: branding.accentColor }} />
+                </div>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <div>
+          <h2 className="text-xl font-semibold text-slate-950">Photo storage</h2>
+          <p className="mt-1 text-sm text-slate-600">Choose where this studio’s original JPEG and RAW files are protected.</p>
+        </div>
 
         {callbackStatus === "connected" && (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900">

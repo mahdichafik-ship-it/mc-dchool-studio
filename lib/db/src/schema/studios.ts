@@ -4,8 +4,13 @@ export const studiosTable = pgTable("studios", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
+  tagline: text("tagline"),
   website: text("website"),
   contactEmail: text("contact_email"),
+  logoObjectPath: text("logo_object_path"),
+  primaryColor: text("primary_color").notNull().default("#0F766E"),
+  accentColor: text("accent_color").notNull().default("#14B8A6"),
+  brandingUpdatedAt: timestamp("branding_updated_at", { withTimezone: true }),
   storageProvider: text("storage_provider", {
     enum: ["platform_google_drive", "google_drive", "dropbox"],
   }).notNull().default("platform_google_drive"),

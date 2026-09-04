@@ -284,6 +284,85 @@ test("keeps platform storage active while a studio-owned connection is pending",
   assert.equal(fallbackBody.activeStorageProvider, "platform_google_drive");
 });
 
+test("lets studio managers save branding while keeping viewers read-only", async () => {
+  const invalid = await request(inviteeId, "/api/studio/branding", {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: "North Star School Photography",
+      tagline: "Portrait day, beautifully organized",
+      website: "https://north-star-school.example",
+      contactEmail: "hello@north-star.example",
+      logoObjectPath: null,
+      primaryColor: "teal",
+      accentColor: "#F59E0B",
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(invalid.status, 400);
+
+  const updated = await request(inviteeId, "/api/studio/branding", {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: "North Star School Photography",
+      tagline: "Portrait day, beautifully organized",
+      website: "https://north-star-school.example",
+      contactEmail: "BRAND@NORTH-STAR.EXAMPLE",
+      logoObjectPath: null,
+      primaryColor: "#123456",
+      accentColor: "#F59E0B",
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(updated.status, 200);
+  const updatedBody = await updated.json() as {
+    studio: { tagline: string; contactEmail: string; primaryColor: string; accentColor: string };
+  };
+  assert.equal(updatedBody.studio.tagline, "Portrait day, beautifully organized");
+  assert.equal(updatedBody.studio.contactEmail, "brand@north-star.example");
+  assert.equal(updatedBody.studio.primaryColor, "#123456");
+  assert.equal(updatedBody.studio.accentColor, "#F59E0B");
+
+  const uploadRequest = await request(inviteeId, "/api/studio/branding/logo-upload-url", {
+    method: "POST",
+    body: JSON.stringify({ name: "studio-logo.png", size: 1024, contentType: "image/png" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(uploadRequest.status, 200);
+  const uploadBody = await uploadRequest.json() as { uploadUrl: string; objectPath: string };
+  assert.match(uploadBody.uploadUrl, /^https?:\/\//);
+  assert.match(uploadBody.objectPath, new RegExp(`/branding/studios/${onboardedStudioId}/`));
+
+  const invalidUpload = await request(inviteeId, "/api/studio/branding/logo-upload-url", {
+    method: "POST",
+    body: JSON.stringify({ name: "unsafe.svg", size: 1024, contentType: "image/svg+xml" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(invalidUpload.status, 400);
+
+  const persisted = await request(inviteeId, "/api/studio");
+  assert.equal(persisted.status, 200);
+  const persistedBody = await persisted.json() as {
+    studio: { tagline: string; primaryColor: string; accentColor: string };
+  };
+  assert.equal(persistedBody.studio.tagline, "Portrait day, beautifully organized");
+  assert.equal(persistedBody.studio.primaryColor, "#123456");
+
+  const forbidden = await request(studioViewerId, "/api/studio/branding", {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: "Viewer must not rename the studio",
+      tagline: "",
+      website: "",
+      contactEmail: "",
+      logoObjectPath: null,
+      primaryColor: "#000000",
+      accentColor: "#FFFFFF",
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(forbidden.status, 403);
+});
+
 test("rejects email mismatches and keeps studios isolated", async () => {
   const invalid = await request(otherUserId, "/api/platform/invites/does-not-exist");
   assert.equal(invalid.status, 404);

@@ -81,8 +81,27 @@ test("only the configured platform owner can view the platform workspace", async
 
   const allowed = await request(platformOwnerId, "/api/platform");
   assert.equal(allowed.status, 200);
-  const body = await allowed.json() as { configured: boolean; studios: unknown[]; projects: unknown[]; invites: unknown[] };
+  const body = await allowed.json() as {
+    configured: boolean;
+    healthSummary: {
+      totalStudios: number;
+      healthyStudios: number;
+      attentionStudios: number;
+      criticalStudios: number;
+      archivedStudios: number;
+    };
+    studios: unknown[];
+    projects: unknown[];
+    invites: unknown[];
+  };
   assert.equal(body.configured, true);
+  assert.equal(body.healthSummary.totalStudios, body.studios.length);
+  assert.equal(
+    body.healthSummary.healthyStudios
+      + body.healthSummary.attentionStudios
+      + body.healthSummary.criticalStudios,
+    body.healthSummary.totalStudios,
+  );
   assert.ok(Array.isArray(body.studios));
   assert.ok(Array.isArray(body.projects));
   assert.ok(Array.isArray(body.invites));
@@ -220,6 +239,21 @@ test("keeps platform storage active while a studio-owned connection is pending",
   assert.equal(requestedBody.studio.storageStatus, "connection_requested");
   assert.ok(requestedBody.studio.storageRequestedAt);
   assert.equal(requestedBody.activeStorageProvider, "platform_google_drive");
+
+  const platformHealth = await request(platformOwnerId, "/api/platform");
+  assert.equal(platformHealth.status, 200);
+  const platformHealthBody = await platformHealth.json() as {
+    studios: Array<{
+      id: number;
+      health: {
+        severity: string;
+        alerts: Array<{ code: string; label: string; severity: string }>;
+      };
+    }>;
+  };
+  const studioHealth = platformHealthBody.studios.find((studio) => studio.id === onboardedStudioId)?.health;
+  assert.equal(studioHealth?.severity, "attention");
+  assert.ok(studioHealth?.alerts.some((alert) => alert.code === "storage_pending"));
 
   await db.insert(studioMembersTable).values({
     studioId: onboardedStudioId,

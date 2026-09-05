@@ -1412,7 +1412,7 @@ function isRetryableUploadFailure(error) {
   if (!(error instanceof Error)) return false;
   return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
 }
-async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
+async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
   const db = getDb();
   const { apiUrl, connectionToken } = getUploadConfig$1();
   if (!connectionToken) {
@@ -1437,7 +1437,8 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
       method: "POST",
       headers: {
         Authorization: `Bearer ${connectionToken}`,
-        "X-MC-Upload-Id": String(photoId)
+        "X-MC-Upload-Id": String(photoId),
+        ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
       },
       body: formData,
       signal: AbortSignal.timeout(3e4)
@@ -1471,11 +1472,11 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
     throw err;
   }
 }
-function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt) {
+function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
   const existing = activePhotoUploads.get(photoId);
   if (existing) return existing;
-  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt);
+  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey);
   activePhotoUploads.set(photoId, task);
   activeUploads.add(task);
   void task.finally(() => {
@@ -1503,7 +1504,7 @@ function setCaptureFileStatus(captureId, fileId, status, fileUrl) {
   }
   notifyCaptureFileStatus(captureId, fileId, capture.studentId, file.fileRole, status);
 }
-async function performUploadCaptureFile(captureId, fileId) {
+async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
   const db = getDb();
   const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
   const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
@@ -1538,7 +1539,8 @@ async function performUploadCaptureFile(captureId, fileId) {
       method: "POST",
       headers: {
         Authorization: `Bearer ${connectionToken}`,
-        "X-MC-Upload-Id": String(file.id)
+        "X-MC-Upload-Id": String(file.id),
+        ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
       },
       body: formData,
       signal: AbortSignal.timeout(12e4)
@@ -1568,11 +1570,11 @@ async function performUploadCaptureFile(captureId, fileId) {
     throw error;
   }
 }
-function uploadCaptureFile(captureId, fileId) {
+function uploadCaptureFile(captureId, fileId, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
   const existing = activeCaptureFileUploads.get(fileId);
   if (existing) return existing;
-  const task = performUploadCaptureFile(captureId, fileId);
+  const task = performUploadCaptureFile(captureId, fileId, captureBatchKey);
   activeCaptureFileUploads.set(fileId, task);
   activeUploads.add(task);
   void task.finally(() => {
@@ -1612,7 +1614,7 @@ function getProjectSyncJobs(projectId) {
   }
   return jobs;
 }
-async function syncProjectUploads(projectId, onProgress) {
+async function syncProjectUploads(projectId, onProgress, captureBatchKey) {
   const jobs = getProjectSyncJobs(projectId);
   let completed = 0;
   let failed = 0;
@@ -1625,7 +1627,7 @@ async function syncProjectUploads(projectId, onProgress) {
         throw new Error("Cloud sync is unavailable. Local captures are safe; reconnect and try again.");
       }
       if (job.kind === "capture-file") {
-        await uploadCaptureFile(job.captureId, job.fileId);
+        await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey);
       } else {
         await uploadPhoto(
           job.projectId,
@@ -1633,7 +1635,8 @@ async function syncProjectUploads(projectId, onProgress) {
           job.photoId,
           job.filePath,
           job.fileName,
-          job.capturedAt
+          job.capturedAt,
+          captureBatchKey
         );
       }
     } catch (error) {
@@ -1646,11 +1649,51 @@ async function syncProjectUploads(projectId, onProgress) {
   }
   return { completed, total: jobs.length, failed, error: firstError };
 }
+function getProjectSyncJobCount(projectId) {
+  return getProjectSyncJobs(projectId).length;
+}
+async function beginProjectCaptureBatch(projectId, expectedFileCount) {
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project?.cloudId) throw new Error("This project needs to be re-synced before its batch can upload.");
+  const settingKey = `capture_batch:${projectId}`;
+  const batchKey = getSetting(settingKey) ?? crypto.randomUUID();
+  setSetting(settingKey, batchKey);
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!connectionToken) throw new Error("Cloud upload is not configured.");
+  const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/capture-batches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${connectionToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ batchKey, expectedFileCount }),
+    signal: AbortSignal.timeout(3e4)
+  });
+  if (!response.ok) throw new Error(`Could not start capture batch: HTTP ${response.status}: ${await response.text()}`);
+  return batchKey;
+}
+async function finishProjectCaptureBatch(projectId, batchKey, status, failedFileCount) {
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!project?.cloudId || !apiUrl || !connectionToken) throw new Error("Cloud upload is not configured.");
+  const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/capture-batches/${encodeURIComponent(batchKey)}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${connectionToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status, failedFileCount }),
+    signal: AbortSignal.timeout(3e4)
+  });
+  if (!response.ok) throw new Error(`Could not update capture batch: HTTP ${response.status}: ${await response.text()}`);
+}
 function registerUploadHandlers() {
   electron.ipcMain.handle("upload:testConnection", async () => {
     const { apiUrl, connectionToken } = getUploadConfig$1();
     if (!connectionToken) {
-      return { ok: false, error: "Sign in to MC School Studio before testing the connection" };
+      return { ok: false, error: "Sign in to Volume Capture before testing the connection" };
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/me`;
@@ -43493,7 +43536,7 @@ function registerProjectSyncHandlers() {
             completed: 0,
             total: 0,
             failed: 0,
-            error: "Connect to MC School Studio before finishing this project. Local captures remain safe."
+            error: "Connect to Volume Capture before finishing this project. Local captures remain safe."
           };
         }
         await stopProjectWatcher(projectId, { drain: true, clearTarget: true });
@@ -43504,18 +43547,41 @@ function registerProjectSyncHandlers() {
           total: 0,
           failed: 0
         });
+        const expectedFileCount = getProjectSyncJobCount(projectId);
+        const captureBatchKey = await beginProjectCaptureBatch(projectId, expectedFileCount);
         const progress = await syncProjectUploads(projectId, (current) => {
           emitProgress({
             projectId,
             phase: "syncing",
             ...current
           });
-        });
+        }, captureBatchKey);
         if (progress.failed > 0) {
+          let batchStatusError;
+          try {
+            await finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed);
+          } catch (error) {
+            batchStatusError = ` Batch status could not be updated: ${String(error)}`;
+          }
           const result2 = {
             ok: false,
             ...progress,
-            error: progress.error ?? "One or more local files could not be uploaded."
+            error: `${progress.error ?? "One or more local files could not be uploaded."}${batchStatusError ?? ""}`
+          };
+          emitProgress({
+            projectId,
+            phase: "error",
+            ...result2
+          });
+          return result2;
+        }
+        try {
+          await finishProjectCaptureBatch(projectId, captureBatchKey, "complete", 0);
+        } catch (error) {
+          const result2 = {
+            ok: false,
+            ...progress,
+            error: `Files uploaded, but the photographer batch could not be confirmed. Retry Upload & Finish. ${String(error)}`
           };
           emitProgress({
             projectId,
@@ -43579,7 +43645,7 @@ function registerCloudHandlers() {
   electron.ipcMain.handle("cloud:listProjects", async () => {
     const { apiUrl, connectionToken } = getUploadConfig$1();
     if (!connectionToken) {
-      return { ok: false, error: "Sign in to MC School Studio before syncing projects." };
+      return { ok: false, error: "Sign in to Volume Capture before syncing projects." };
     }
     if (!isCloudSessionVerified()) {
       return { ok: false, error: "Cloud sync needs an internet connection. Local projects remain available offline." };
@@ -43612,7 +43678,7 @@ function registerCloudHandlers() {
       }
       const { apiUrl, connectionToken } = getUploadConfig$1();
       if (!connectionToken) {
-        return { ok: false, error: "Sign in to MC School Studio before pulling projects." };
+        return { ok: false, error: "Sign in to Volume Capture before pulling projects." };
       }
       if (!isCloudSessionVerified()) {
         return { ok: false, error: "Cloud sync needs an internet connection. Local projects remain available offline." };
@@ -43783,7 +43849,7 @@ async function performCurrentSessionCheck() {
     });
     return cachedSession ?? {
       signedIn: false,
-      error: "Could not reach MC School Studio. Connect to the internet once to finish setting up this desktop."
+      error: "Could not reach Volume Capture. Connect to the internet once to finish setting up this desktop."
     };
   };
   try {
@@ -43829,7 +43895,7 @@ async function performCurrentSessionCheck() {
       return getOfflineSession();
     }
     markCloudSessionUnavailable();
-    return { signedIn: false, error: payload.error ?? `Could not reach MC School Studio (${response.status})` };
+    return { signedIn: false, error: payload.error ?? `Could not reach Volume Capture (${response.status})` };
   } catch {
     markCloudSessionUnavailable();
     return getOfflineSession();
@@ -43847,7 +43913,7 @@ function registerAuthHandlers() {
   electron.ipcMain.handle("auth:getSession", fetchCurrentSession);
   electron.ipcMain.handle("auth:refresh", async () => {
     const { apiUrl, connectionToken } = getUploadConfig();
-    if (!connectionToken) return { signedIn: false, error: "Sign in to MC School Studio first." };
+    if (!connectionToken) return { signedIn: false, error: "Sign in to Volume Capture first." };
     try {
       const response = await fetch(`${apiUrl}/api/desktop/auth/refresh`, {
         method: "POST",
@@ -43918,7 +43984,7 @@ function registerAuthHandlers() {
     } catch {
       return {
         signedIn: false,
-        error: "Could not connect to MC School Studio. Check your internet connection and try again."
+        error: "Could not connect to Volume Capture. Check your internet connection and try again."
       };
     }
   });
@@ -43948,7 +44014,7 @@ async function promptToDownload(info) {
     const result = await electron.dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Update available",
-      message: `MC School Studio ${info.version} is available.`,
+      message: `Volume Capture ${info.version} is available.`,
       detail: "Download the update now. The app will ask before restarting to install it.",
       buttons: ["Download update", "Later"],
       defaultId: 0,
@@ -43974,7 +44040,7 @@ async function promptToInstall() {
     const result = await electron.dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Update ready to install",
-      message: "The latest version of MC School Studio has finished downloading.",
+      message: "The latest version of Volume Capture has finished downloading.",
       detail: "Restart the app now to install the update, or choose Later to install it when the app closes.",
       buttons: ["Restart and install", "Later"],
       defaultId: 0,
@@ -44115,7 +44181,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: "MC School Studio",
+    title: "Volume Capture",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#0f172a",
@@ -44135,13 +44201,13 @@ function createWindow() {
   mainWindow2.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
     const message = `The app interface could not load (${errorCode}: ${errorDescription}).`;
     console.error(message);
-    electron.dialog.showErrorBox("MC School Studio could not open", message);
+    electron.dialog.showErrorBox("Volume Capture could not open", message);
     showWindow();
   });
   mainWindow2.webContents.on("render-process-gone", (_event, details) => {
     const message = `The app interface stopped unexpectedly: ${details.reason}.`;
     console.error(message);
-    electron.dialog.showErrorBox("MC School Studio could not open", message);
+    electron.dialog.showErrorBox("Volume Capture could not open", message);
     showWindow();
   });
   mainWindow2.on("ready-to-show", () => {
@@ -44192,8 +44258,8 @@ electron.app.whenReady().then(() => {
   });
 }).catch((error) => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
-  console.error("Failed to start MC School Studio:", message);
-  electron.dialog.showErrorBox("MC School Studio could not open", message);
+  console.error("Failed to start Volume Capture:", message);
+  electron.dialog.showErrorBox("Volume Capture could not open", message);
   electron.app.quit();
 });
 electron.app.on("window-all-closed", () => {

@@ -4,7 +4,7 @@ import fs from "node:fs";
 const CONNECTOR_NAME = "google-drive";
 const ROOT_FOLDER_KEY = "mcSchoolStudioRoot";
 const ROOT_FOLDER_VALUE = "backups-v1";
-const ROOT_FOLDER_NAME = "MC School Studio Backups";
+const ROOT_FOLDER_NAME = "Volume Capture Backups";
 
 type DriveFile = {
   id: string;

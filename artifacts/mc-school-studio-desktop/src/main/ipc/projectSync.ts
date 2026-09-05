@@ -54,7 +54,7 @@ export function registerProjectSyncHandlers(): void {
             completed: 0,
             total: 0,
             failed: 0,
-            error: 'Connect to MC School Studio before finishing this project. Local captures remain safe.',
+            error: 'Connect to Volume Capture before finishing this project. Local captures remain safe.',
           }
         }
 

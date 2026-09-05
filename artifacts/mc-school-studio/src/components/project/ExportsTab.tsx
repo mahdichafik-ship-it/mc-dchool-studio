@@ -67,7 +67,7 @@ export function ExportsTab({ project }: { project: Project }) {
               Export for Desktop App
             </h4>
             <p className="text-sm text-slate-600">
-              Download a JSON file to import into the MC School Studio desktop app. Use this on photo day to automatically match tethered photos to students via QR code.
+              Download a JSON file to import into the Volume Capture desktop app. Use this on photo day to automatically match tethered photos to students via QR code.
             </p>
           </div>
           <Button onClick={downloadDesktopJson} className="shrink-0">

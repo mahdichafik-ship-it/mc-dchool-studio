@@ -76,7 +76,7 @@ async function ensureDropboxFolder(accessToken: string, path: string): Promise<v
 
 async function backupToDropbox(input: DriveBackupInput, accessToken: string): Promise<void> {
   const parts = [
-    "MC School Studio Backups",
+    "Volume Capture Backups",
     safePathPart(input.studioName, `Studio ${input.studioId}`),
     safePathPart(`${input.schoolName} (Project ${input.projectId})`, `Project ${input.projectId}`),
     safePathPart(input.className, `Class ${input.classId}`),

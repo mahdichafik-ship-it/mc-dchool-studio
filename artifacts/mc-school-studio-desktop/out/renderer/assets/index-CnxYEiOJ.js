@@ -15850,9 +15850,9 @@ function AppLayout({ children, currentPage, onNavigate, projectName, offline = f
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "h-16 flex items-center px-5 border-b border-white/10", style: { paddingTop: "env(titlebar-area-height, 0)" }, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-4 text-white" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-white font-semibold text-sm leading-tight", children: [
-          "MC School",
+          "Volume",
           /* @__PURE__ */ jsxRuntimeExports.jsx("br", {}),
-          "Studio"
+          "Capture"
         ] })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "flex-1 px-3 py-4 space-y-1", children: [
@@ -15887,7 +15887,7 @@ function AppLayout({ children, currentPage, onNavigate, projectName, offline = f
           }
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-500 mt-3 px-2", children: [
-          "MC School Studio v",
+          "Volume Capture v",
           version || "—"
         ] })
       ] })
@@ -18323,7 +18323,7 @@ function Settings({
           /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-5 text-teal-600" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-900", children: "App updates" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-4", children: "Check whether a newer signed version of MC School Studio is available." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-4", children: "Check whether a newer signed version of Volume Capture is available." }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Button,
@@ -18386,7 +18386,7 @@ function Settings({
 function SignInScreen({ onSignIn, error, busy }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-slate-50 flex items-center justify-center px-6", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-sm p-8 text-center", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mx-auto mb-5 w-14 h-14 rounded-2xl bg-teal-600 flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-2xl", children: "📷" }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-slate-900", children: "Sign in to MC School Studio" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-slate-900", children: "Sign in to Volume Capture" }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 text-sm leading-6 text-slate-500", children: "Sign in securely in your browser. Your studio projects and permissions will be loaded automatically." }),
     error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-left text-sm text-red-700", children: error }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(

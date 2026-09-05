@@ -729,7 +729,7 @@ export function registerUploadHandlers() {
   ipcMain.handle('upload:testConnection', async () => {
     const { apiUrl, connectionToken } = getUploadConfig()
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: 'Sign in to MC School Studio before testing the connection' }
+      return { ok: false, error: 'Sign in to Volume Capture before testing the connection' }
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/me`

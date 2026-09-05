@@ -49,7 +49,7 @@ export function registerCloudHandlers() {
   ipcMain.handle('cloud:listProjects', async (): Promise<{ ok: boolean; projects?: CloudProject[]; error?: string }> => {
     const { apiUrl, connectionToken } = getUploadConfig()
     if (!apiUrl || !connectionToken) {
-       return { ok: false, error: 'Sign in to MC School Studio before syncing projects.' }
+       return { ok: false, error: 'Sign in to Volume Capture before syncing projects.' }
     }
     if (!isCloudSessionVerified()) {
       return { ok: false, error: 'Cloud sync needs an internet connection. Local projects remain available offline.' }
@@ -92,7 +92,7 @@ export function registerCloudHandlers() {
       }
       const { apiUrl, connectionToken } = getUploadConfig()
       if (!apiUrl || !connectionToken) {
-         return { ok: false, error: 'Sign in to MC School Studio before pulling projects.' }
+         return { ok: false, error: 'Sign in to Volume Capture before pulling projects.' }
       }
       if (!isCloudSessionVerified()) {
         return { ok: false, error: 'Cloud sync needs an internet connection. Local projects remain available offline.' }

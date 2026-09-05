@@ -11,7 +11,7 @@ export default function Landing() {
       <header className="flex items-center justify-between px-8 py-6 bg-white border-b border-slate-200">
         <div className="flex items-center gap-3 text-slate-900">
           <Camera className="w-7 h-7 text-teal-600" />
-          <span className="font-bold text-xl tracking-tight">MC School Studio</span>
+          <span className="font-bold text-xl tracking-tight">Volume Capture</span>
         </div>
         <div className="flex items-center gap-4">
           <Link href="/sign-in" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
@@ -105,7 +105,7 @@ export default function Landing() {
       </main>
 
       <footer className="py-8 text-center text-slate-500 text-sm border-t border-slate-200 bg-white">
-        &copy; {new Date().getFullYear()} MC School Studio. All rights reserved.
+        &copy; {new Date().getFullYear()} Volume Capture. All rights reserved.
       </footer>
     </div>
   );

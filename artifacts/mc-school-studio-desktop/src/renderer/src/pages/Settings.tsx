@@ -212,7 +212,7 @@ export function Settings({
               <h3 className="font-semibold text-slate-900">App updates</h3>
             </div>
             <p className="text-sm text-slate-500 mb-4">
-              Check whether a newer signed version of MC School Studio is available.
+              Check whether a newer signed version of Volume Capture is available.
             </p>
             <div className="flex items-center gap-3">
               <Button

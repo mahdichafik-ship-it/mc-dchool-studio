@@ -78,7 +78,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="w-64 bg-sidebar text-sidebar-foreground flex flex-col flex-shrink-0 sticky top-0 h-[100dvh]">
         <div className="h-16 flex items-center px-6 border-b border-sidebar-border/50" style={{ borderTop: studioBrand ? `3px solid ${studioBrand.accentColor}` : undefined }}>
           {studioBrand?.logoObjectPath ? <img src={`/api/studio/branding/logo?rev=${encodeURIComponent(studioBrand.brandingUpdatedAt ?? "")}`} alt="" className="mr-3 h-9 w-9 rounded-md bg-white object-contain p-1" /> : <Camera className="w-6 h-6 mr-3" style={{ color: studioBrand?.accentColor }} />}
-          <span className="truncate font-semibold text-lg tracking-tight">{studioBrand?.name ?? "MC Studio"}</span>
+          <span className="truncate font-semibold text-lg tracking-tight">{studioBrand?.name ?? "Volume Capture"}</span>
         </div>
         
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">

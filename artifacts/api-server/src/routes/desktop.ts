@@ -158,7 +158,7 @@ router.post("/auth/exchange", async (req, res): Promise<void> => {
     const [connection] = await tx.insert(desktopConnectionsTable).values({
       studioId: member.studioId,
       memberId: member.id,
-      deviceName: "MC School Studio desktop",
+      deviceName: "Volume Capture desktop",
       tokenHash: credentials.tokenHash,
       tokenPrefix: credentials.tokenPrefix,
     }).returning({ id: desktopConnectionsTable.id });

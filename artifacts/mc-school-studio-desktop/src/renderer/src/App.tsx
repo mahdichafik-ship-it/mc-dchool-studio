@@ -19,7 +19,7 @@ function SignInScreen({ onSignIn, error, busy }: { onSignIn: () => void; error?:
         <div className="mx-auto mb-5 w-14 h-14 rounded-2xl bg-teal-600 flex items-center justify-center">
           <span className="text-2xl">📷</span>
         </div>
-        <h1 className="text-2xl font-bold text-slate-900">Sign in to MC School Studio</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Sign in to Volume Capture</h1>
         <p className="mt-3 text-sm leading-6 text-slate-500">
           Sign in securely in your browser. Your studio projects and permissions will be loaded automatically.
         </p>

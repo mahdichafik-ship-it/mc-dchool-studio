@@ -14,8 +14,19 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
-const appExecutable = process.env.MC_SCHOOL_STUDIO_APP_PATH
+let appExecutable = process.env.MC_SCHOOL_STUDIO_APP_PATH
 if (!appExecutable) throw new Error('MC_SCHOOL_STUDIO_APP_PATH must point to the packaged app executable')
+if (!existsSync(appExecutable)) {
+  const executableDirectory = dirname(appExecutable)
+  const packagedExecutables = existsSync(executableDirectory)
+    ? readdirSync(executableDirectory, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => join(executableDirectory, entry.name))
+    : []
+  if (packagedExecutables.length === 1) {
+    appExecutable = packagedExecutables[0]
+  }
+}
 if (!existsSync(appExecutable)) throw new Error(`Packaged app executable not found: ${appExecutable}`)
 const expectedArchitecture = required('MC_SCHOOL_STUDIO_EXPECTED_ARCH')
 const nativeArchitecture = {

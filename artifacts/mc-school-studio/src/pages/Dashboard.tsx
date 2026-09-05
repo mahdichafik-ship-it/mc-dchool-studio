@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { StudioStoragePrompt } from '@/components/studio/StudioStoragePrompt';
 
-const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.43';
-const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.43-arm64.dmg`;
+const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.44';
+const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.44-arm64.dmg`;
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();

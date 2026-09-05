@@ -1,5 +1,8 @@
 appId: com.mcschoolstudio.desktop
-productName: Volume Capture
+# Keep the macOS bundle and executable identity stable so existing installs can
+# update in place. Customer-facing branding is controlled by the renderer,
+# window titles, dialogs, and website copy.
+productName: MC School Studio
 copyright: Copyright © 2026 Volume Capture
 
 directories:

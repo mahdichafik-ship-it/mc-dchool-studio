@@ -7,9 +7,9 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { db, desktopAuthSessionsTable, desktopConnectionsTable, studioMembersTable } from "@workspace/db";
+import { captureBatchesTable, captureFilesTable, db, desktopAuthSessionsTable, desktopConnectionsTable, studentPhotosTable, studioMembersTable } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, count, eq, gt, inArray, sql } from "drizzle-orm";
 import {
   getDesktopConnection,
   hashDesktopToken,
@@ -25,6 +25,10 @@ import { isPlatformOwner } from "../lib/platformAccess";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
+
+function validCaptureBatchKey(value: unknown): value is string {
+  return typeof value === "string" && /^[a-zA-Z0-9:_-]{8,200}$/.test(value);
+}
 
 function validClientSecret(secret: unknown): secret is string {
   return typeof secret === "string" && secret.length >= 32 && secret.length <= 200;
@@ -195,6 +199,126 @@ router.post("/auth/refresh", requireDesktopConnection, async (req, res): Promise
     token: credentials.token,
     member: { email: connection.memberEmail, role: connection.memberRole },
   });
+});
+
+router.post("/projects/:projectId/capture-batches", requireDesktopConnection, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const batchKey = req.body?.batchKey;
+  const expectedFileCount = Number(req.body?.expectedFileCount);
+  const connection = getDesktopConnection(req);
+  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey) || !Number.isInteger(expectedFileCount) || expectedFileCount < 0) {
+    res.status(400).json({ error: "A valid project, batch key, and expected file count are required" });
+    return;
+  }
+  if (!(await canAccessDesktopProject({
+    id: connection.memberId,
+    studioId: connection.studioId,
+    role: connection.memberRole,
+    status: "active",
+    userId: connection.memberUserId,
+  }, projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(captureBatchesTable)
+    .where(and(
+      eq(captureBatchesTable.projectId, projectId),
+      eq(captureBatchesTable.batchKey, batchKey),
+    ))
+    .limit(1);
+  if (existing && existing.desktopConnectionId !== connection.connectionId) {
+    res.status(409).json({ error: "Capture batch belongs to another desktop connection" });
+    return;
+  }
+  const [batch] = existing
+    ? await db
+      .update(captureBatchesTable)
+      .set({
+        status: "uploading",
+        expectedFileCount: sql`greatest(${captureBatchesTable.expectedFileCount}, ${expectedFileCount})`,
+        failedFileCount: 0,
+        lastSyncAt: new Date(),
+        completedAt: null,
+      })
+      .where(eq(captureBatchesTable.id, existing.id))
+      .returning()
+    : await db
+      .insert(captureBatchesTable)
+      .values({
+        batchKey,
+        projectId,
+        memberId: connection.memberId,
+        desktopConnectionId: connection.connectionId,
+        status: "uploading",
+        expectedFileCount,
+        failedFileCount: 0,
+        lastSyncAt: new Date(),
+        completedAt: null,
+      })
+      .returning();
+  res.status(201).json(batch);
+});
+
+router.patch("/projects/:projectId/capture-batches/:batchKey", requireDesktopConnection, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const batchKey = req.params.batchKey;
+  const failedFileCount = Number(req.body?.failedFileCount ?? 0);
+  const requestedStatus = req.body?.status;
+  const connection = getDesktopConnection(req);
+  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey) || !Number.isInteger(failedFileCount) || failedFileCount < 0 || !["failed", "complete"].includes(requestedStatus)) {
+    res.status(400).json({ error: "Invalid capture batch update" });
+    return;
+  }
+  if (!(await canAccessDesktopProject({
+    id: connection.memberId,
+    studioId: connection.studioId,
+    role: connection.memberRole,
+    status: "active",
+    userId: connection.memberUserId,
+  }, projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [batch] = await db
+    .select()
+    .from(captureBatchesTable)
+    .where(and(
+      eq(captureBatchesTable.projectId, projectId),
+      eq(captureBatchesTable.batchKey, batchKey),
+      eq(captureBatchesTable.desktopConnectionId, connection.connectionId),
+    ))
+    .limit(1);
+  if (!batch) {
+    res.status(404).json({ error: "Capture batch not found" });
+    return;
+  }
+  const [{ captureFileCount }] = await db
+    .select({ captureFileCount: count() })
+    .from(captureFilesTable)
+    .where(eq(captureFilesTable.captureBatchId, batch.id));
+  const [{ legacyPhotoCount }] = await db
+    .select({ legacyPhotoCount: count() })
+    .from(studentPhotosTable)
+    .where(eq(studentPhotosTable.captureBatchId, batch.id));
+  const uploadedFileCount = Number(captureFileCount) + Number(legacyPhotoCount);
+  const status = requestedStatus === "complete" && failedFileCount === 0 && uploadedFileCount >= batch.expectedFileCount
+    ? "complete"
+    : "failed";
+  const [updated] = await db
+    .update(captureBatchesTable)
+    .set({
+      status,
+      uploadedFileCount,
+      failedFileCount,
+      lastSyncAt: new Date(),
+      completedAt: status === "complete" ? new Date() : null,
+    })
+    .where(eq(captureBatchesTable.id, batch.id))
+    .returning();
+  res.json(updated);
 });
 
 function memberForAccess(connection: ReturnType<typeof getDesktopConnection>) {

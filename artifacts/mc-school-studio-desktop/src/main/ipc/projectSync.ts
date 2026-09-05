@@ -5,6 +5,9 @@ import { projectsTable } from '../db/schema'
 import { stopProjectWatcher } from './watcher'
 import {
   getUploadConfig,
+  beginProjectCaptureBatch,
+  finishProjectCaptureBatch,
+  getProjectSyncJobCount,
   isCloudSessionVerified,
   syncProjectUploads,
 } from './upload'
@@ -67,19 +70,43 @@ export function registerProjectSyncHandlers(): void {
           failed: 0,
         })
 
+        const expectedFileCount = getProjectSyncJobCount(projectId)
+        const captureBatchKey = await beginProjectCaptureBatch(projectId, expectedFileCount)
         const progress = await syncProjectUploads(projectId, (current) => {
           emitProgress({
             projectId,
             phase: 'syncing',
             ...current,
           })
-        })
+        }, captureBatchKey)
 
         if (progress.failed > 0) {
+          let batchStatusError: string | undefined
+          try {
+            await finishProjectCaptureBatch(projectId, captureBatchKey, 'failed', progress.failed)
+          } catch (error) {
+            batchStatusError = ` Batch status could not be updated: ${String(error)}`
+          }
           const result: ProjectSyncResult = {
             ok: false,
             ...progress,
-            error: progress.error ?? 'One or more local files could not be uploaded.',
+            error: `${progress.error ?? 'One or more local files could not be uploaded.'}${batchStatusError ?? ''}`,
+          }
+          emitProgress({
+            projectId,
+            phase: 'error',
+            ...result,
+          })
+          return result
+        }
+
+        try {
+          await finishProjectCaptureBatch(projectId, captureBatchKey, 'complete', 0)
+        } catch (error) {
+          const result: ProjectSyncResult = {
+            ok: false,
+            ...progress,
+            error: `Files uploaded, but the photographer batch could not be confirmed. Retry Upload & Finish. ${String(error)}`,
           }
           emitProgress({
             projectId,

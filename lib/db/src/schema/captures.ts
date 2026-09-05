@@ -9,6 +9,30 @@ import {
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import { studentsTable } from "./students";
+import { desktopConnectionsTable, studioMembersTable } from "./studios";
+
+export const captureBatchesTable = pgTable("capture_batches", {
+  id: serial("id").primaryKey(),
+  batchKey: text("batch_key").notNull(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projectsTable.id, { onDelete: "cascade" }),
+  memberId: integer("member_id")
+    .notNull()
+    .references(() => studioMembersTable.id, { onDelete: "cascade" }),
+  desktopConnectionId: integer("desktop_connection_id")
+    .notNull()
+    .references(() => desktopConnectionsTable.id, { onDelete: "cascade" }),
+  status: text("status", { enum: ["uploading", "failed", "complete"] }).notNull().default("uploading"),
+  expectedFileCount: integer("expected_file_count").notNull().default(0),
+  uploadedFileCount: integer("uploaded_file_count").notNull().default(0),
+  failedFileCount: integer("failed_file_count").notNull().default(0),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSyncAt: timestamp("last_sync_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("capture_batches_project_key_unique").on(table.projectId, table.batchKey),
+]);
 
 export const capturesTable = pgTable("captures", {
   id: serial("id").primaryKey(),
@@ -44,6 +68,8 @@ export const captureFilesTable = pgTable("capture_files", {
   fileUrl: text("file_url").notNull(),
   mimeType: text("mime_type").notNull(),
   fileSize: integer("file_size"),
+  captureBatchId: integer("capture_batch_id")
+    .references(() => captureBatchesTable.id, { onDelete: "set null" }),
   desktopConnectionId: integer("desktop_connection_id"),
   clientUploadId: text("client_upload_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -56,3 +82,4 @@ export const captureFilesTable = pgTable("capture_files", {
 
 export type Capture = typeof capturesTable.$inferSelect;
 export type CaptureFile = typeof captureFilesTable.$inferSelect;
+export type CaptureBatch = typeof captureBatchesTable.$inferSelect;

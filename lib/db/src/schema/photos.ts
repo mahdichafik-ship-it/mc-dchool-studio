@@ -1,6 +1,7 @@
 import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import { studentsTable } from "./students";
+import { captureBatchesTable } from "./captures";
 
 export const studentPhotosTable = pgTable("student_photos", {
   id: serial("id").primaryKey(),
@@ -14,6 +15,8 @@ export const studentPhotosTable = pgTable("student_photos", {
   fileUrl: text("file_url").notNull(),
   mimeType: text("mime_type").notNull().default("image/jpeg"),
   capturedAt: text("captured_at"),
+  captureBatchId: integer("capture_batch_id")
+    .references(() => captureBatchesTable.id, { onDelete: "set null" }),
   desktopConnectionId: integer("desktop_connection_id"),
   clientUploadId: text("client_upload_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

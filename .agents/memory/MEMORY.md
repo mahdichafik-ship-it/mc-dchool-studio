@@ -22,3 +22,4 @@
 - [Apple notarization timeouts](apple-notarization-timeouts.md) — distinguish transient notary API polling timeouts from Intel architecture or packaged-launch failures.
 - [Studio storage fallback](studio-storage-fallback.md) — platform Drive stays active until a studio-owned provider is fully connected; provider requests never create a backup gap.
 - [Platform studio oversight](platform-studio-oversight.md) — owner-equivalent support access is explicit and audited; archive blocks access without deleting studio data.
+- [Collaborative capture batches](collaborative-capture-batches.md) — each photographer finishes a retry-stable batch inside one canonical cloud project.

@@ -5,6 +5,7 @@ import fs from "fs";
 import { db } from "@workspace/db";
 import {
   capturesTable,
+  captureBatchesTable,
   captureFilesTable,
   classesTable,
   projectsTable,
@@ -103,6 +104,24 @@ async function verifyStudent(studentId: number, projectId: number): Promise<bool
     .from(studentsTable)
     .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)));
   return !!student;
+}
+
+async function resolveCaptureBatch(
+  projectId: number,
+  batchKey: string | undefined,
+  connectionId: number,
+) {
+  if (!batchKey) return null;
+  const [batch] = await db
+    .select()
+    .from(captureBatchesTable)
+    .where(and(
+      eq(captureBatchesTable.projectId, projectId),
+      eq(captureBatchesTable.batchKey, batchKey),
+      eq(captureBatchesTable.desktopConnectionId, connectionId),
+    ))
+    .limit(1);
+  return batch ?? undefined;
 }
 
 function validRouteId(value: string | string[] | undefined): value is string {
@@ -504,6 +523,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
     const fileUrl = `/uploads/${relPath}`;
     const capturedAt = (req.body as Record<string, string>).capturedAt ?? null;
     const clientUploadId = req.get("X-MC-Upload-Id");
+    const captureBatchKey = req.get("X-MC-Capture-Batch")?.trim();
     if (clientUploadId && !/^[1-9]\d*$/.test(clientUploadId)) {
       discardUploadedFile(req);
       res.status(400).json({ error: "Invalid desktop upload identifier" });
@@ -511,6 +531,12 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
     }
 
     const savePhoto = async () => {
+      const connection = getDesktopConnection(req);
+      const captureBatch = await resolveCaptureBatch(projectId, captureBatchKey, connection.connectionId);
+      if (captureBatchKey && !captureBatch) {
+        discardUploadedFile(req);
+        throw new Error("Capture batch was not found for this desktop connection");
+      }
       if (!clientUploadId) {
         const [photo] = await db
           .insert(studentPhotosTable)
@@ -521,13 +547,13 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             fileUrl,
             mimeType: req.file!.mimetype,
             capturedAt: capturedAt || null,
+            captureBatchId: captureBatch?.id ?? null,
           })
           .returning();
         return { photo, reused: false };
       }
 
       return db.transaction(async (tx) => {
-        const connection = getDesktopConnection(req);
         const lockKey = `${connection.connectionId}:${clientUploadId}`;
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
 
@@ -557,6 +583,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             fileUrl,
             mimeType: req.file!.mimetype,
             capturedAt: capturedAt || null,
+            captureBatchId: captureBatch?.id ?? null,
             desktopConnectionId: connection.connectionId,
             clientUploadId,
           })
@@ -628,6 +655,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     const requestedRole = body.fileRole;
     const captureKey = body.captureKey?.trim();
     const clientUploadId = req.get("X-MC-Upload-Id")?.trim() || null;
+    const captureBatchKey = req.get("X-MC-Capture-Batch")?.trim();
     if (!role || (requestedRole && requestedRole !== role)) {
       discardUploadedFile(req);
       res.status(400).json({ error: "Capture file role does not match its filename" });
@@ -649,6 +677,12 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       .replace(/\\/g, "/");
     const fileUrl = `/uploads/${relPath}`;
     const connection = getDesktopConnection(req);
+    const captureBatch = await resolveCaptureBatch(projectId, captureBatchKey, connection.connectionId);
+    if (captureBatchKey && !captureBatch) {
+      discardUploadedFile(req);
+      res.status(409).json({ error: "Capture batch was not found for this desktop connection" });
+      return;
+    }
     const capturedAt = body.capturedAt?.trim() || null;
     const sequence = body.sequence ? Number(body.sequence) : null;
     const parsedSequence = sequence !== null && Number.isInteger(sequence) ? sequence : null;
@@ -722,6 +756,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
           fileUrl,
           mimeType: uploadedFile.mimetype || (role === "JPEG" ? "image/jpeg" : "application/octet-stream"),
           fileSize: uploadedFile.size,
+          captureBatchId: captureBatch?.id ?? null,
           desktopConnectionId: connection.connectionId,
           clientUploadId,
         })

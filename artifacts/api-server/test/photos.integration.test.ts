@@ -10,6 +10,7 @@ import express from "express";
 import { and, eq } from "drizzle-orm";
 import {
   classesTable,
+  captureBatchesTable,
   capturesTable,
   captureFilesTable,
   db,
@@ -24,6 +25,7 @@ import {
 } from "@workspace/db";
 import photosRouter, { recoverPhotoDeleteBackups } from "../src/routes/photos";
 import desktopRouter from "../src/routes/desktop";
+import projectsRouter from "../src/routes/projects";
 import { createDesktopToken } from "../src/lib/desktopAuth";
 
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
@@ -62,6 +64,7 @@ const otherDesktopCredentials = createDesktopToken();
 const adminDesktopCredentials = createDesktopToken();
 
 const app = express();
+app.use(express.json());
 const authHandler = Object.assign(
   () => ({
     tokenType: "session_token",
@@ -78,6 +81,7 @@ app.use((req, _res, next) => {
   next();
 });
 app.use("/api/projects/:projectId/students", photosRouter);
+app.use("/api/projects", projectsRouter);
 app.use("/api/desktop", desktopRouter);
 
 before(async () => {
@@ -215,6 +219,16 @@ after(async () => {
 
 test("uploads paired JPEG and RAW members idempotently and serves the RAW member", async () => {
   const captureKey = `capture-integration-${process.pid}-${Date.now()}`;
+  const batchKey = `batch-integration-${process.pid}-${Date.now()}`;
+  const batchStart = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${desktopCredentials.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ batchKey, expectedFileCount: 2 }),
+  });
+  assert.equal(batchStart.status, 201);
   const jpegForm = new (globalThis as any).FormData();
   jpegForm.append(
     "file",
@@ -234,6 +248,7 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
       headers: {
         Authorization: `Bearer ${desktopCredentials.token}`,
         "X-MC-Upload-Id": `${captureKey}-jpeg`,
+        "X-MC-Capture-Batch": batchKey,
       },
       body: jpegForm,
     },
@@ -263,6 +278,7 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
       headers: {
         Authorization: `Bearer ${desktopCredentials.token}`,
         "X-MC-Upload-Id": `${captureKey}-jpeg`,
+        "X-MC-Capture-Batch": batchKey,
       },
       body: retryForm,
     },
@@ -291,6 +307,7 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
       headers: {
         Authorization: `Bearer ${desktopCredentials.token}`,
         "X-MC-Upload-Id": `${captureKey}-raw`,
+        "X-MC-Capture-Batch": batchKey,
       },
       body: rawForm,
     },
@@ -324,6 +341,45 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
     files.map((file) => file.fileRole).sort(),
     ["JPEG", "RAW"],
   );
+  assert(files.every((file) => file.captureBatchId !== null));
+
+  const batchFinish = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches/${batchKey}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${desktopCredentials.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: "complete", failedFileCount: 0 }),
+  });
+  assert.equal(batchFinish.status, 200);
+  const completedBatch = await batchFinish.json() as { status: string; uploadedFileCount: number };
+  assert.equal(completedBatch.status, "complete");
+  assert.equal(completedBatch.uploadedFileCount, 2);
+  const [storedBatch] = await db.select().from(captureBatchesTable).where(eq(captureBatchesTable.batchKey, batchKey));
+  assert.equal(storedBatch.status, "complete");
+
+  const collaborationResponse = await fetch(`${baseUrl}/api/projects/${projectId}/collaboration`);
+  assert.equal(collaborationResponse.status, 200);
+  const collaboration = await collaborationResponse.json() as {
+    summary: { photographedStudents: number; totalCaptures: number; pairing: { complete: number } };
+    batches: Array<{ batchKey: string; status: string; uploadedFileCount: number }>;
+  };
+  assert.equal(collaboration.summary.photographedStudents, 1);
+  assert(collaboration.summary.totalCaptures >= 1);
+  assert(collaboration.summary.pairing.complete >= 1);
+  const visibleBatch = collaboration.batches.find((batch) => batch.batchKey === batchKey);
+  assert.equal(visibleBatch?.status, "complete");
+  assert.equal(visibleBatch?.uploadedFileCount, 2);
+
+  const conflictingBatchStart = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${otherDesktopCredentials.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ batchKey, expectedFileCount: 2 }),
+  });
+  assert.equal(conflictingBatchStart.status, 409);
 
   const rawFileResponse = await fetch(
     `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures/${capture.id}/files/${rawUploaded.file.id}/file`,

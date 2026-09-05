@@ -15848,7 +15848,7 @@ function AppLayout({ children, currentPage, onNavigate, projectName, offline = f
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-screen bg-slate-50 overflow-hidden", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "w-60 flex-shrink-0 bg-[#0f172a] flex flex-col", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "h-16 flex items-center px-5 border-b border-white/10", style: { paddingTop: "env(titlebar-area-height, 0)" }, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-4 text-white" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-black", children: /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: "./volume-capture-logo.png", alt: "", className: "h-full w-full object-cover" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-white font-semibold text-sm leading-tight", children: [
           "Volume",
           /* @__PURE__ */ jsxRuntimeExports.jsx("br", {}),
@@ -18385,7 +18385,7 @@ function Settings({
 }
 function SignInScreen({ onSignIn, error, busy }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-slate-50 flex items-center justify-center px-6", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-sm p-8 text-center", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mx-auto mb-5 w-14 h-14 rounded-2xl bg-teal-600 flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-2xl", children: "📷" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mx-auto mb-5 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-black", children: /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: "./volume-capture-logo.png", alt: "Volume Capture", className: "h-full w-full object-cover" }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-slate-900", children: "Sign in to Volume Capture" }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 text-sm leading-6 text-slate-500", children: "Sign in securely in your browser. Your studio projects and permissions will be loaded automatically." }),
     error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-left text-sm text-red-700", children: error }),

@@ -10,7 +10,9 @@ export default function Landing() {
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="flex items-center justify-between px-8 py-6 bg-white border-b border-slate-200">
         <div className="flex items-center gap-3 text-slate-900">
-          <Camera className="w-7 h-7 text-teal-600" />
+          <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-black">
+            <img src="/volume-capture-logo.png" alt="" className="h-full w-full object-cover" />
+          </div>
           <span className="font-bold text-xl tracking-tight">Volume Capture</span>
         </div>
         <div className="flex items-center gap-4">

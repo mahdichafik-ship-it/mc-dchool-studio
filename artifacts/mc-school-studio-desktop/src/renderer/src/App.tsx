@@ -16,8 +16,8 @@ function SignInScreen({ onSignIn, error, busy }: { onSignIn: () => void; error?:
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
       <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-sm p-8 text-center">
-        <div className="mx-auto mb-5 w-14 h-14 rounded-2xl bg-teal-600 flex items-center justify-center">
-          <span className="text-2xl">📷</span>
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-black">
+          <img src="./volume-capture-logo.png" alt="Volume Capture" className="h-full w-full object-cover" />
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Sign in to Volume Capture</h1>
         <p className="mt-3 text-sm leading-6 text-slate-500">

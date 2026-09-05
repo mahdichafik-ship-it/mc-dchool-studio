@@ -4,16 +4,18 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   rmSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const appPath = required('MC_SCHOOL_STUDIO_APP_PATH')
 const sourceVersion = required('MC_SCHOOL_STUDIO_SOURCE_VERSION')
 const targetVersion = required('MC_SCHOOL_STUDIO_TARGET_VERSION')
 const lifecycleLogPath = required('MC_SCHOOL_STUDIO_UPDATE_SMOKE_LOG')
-const appExecutable = join(appPath, 'Contents', 'MacOS', 'MC School Studio')
+const appExecutable = findAppExecutable(appPath)
+const installDirectory = dirname(appPath)
 const debugPort = Number(process.env.MC_SCHOOL_STUDIO_UPDATE_SMOKE_DEBUG_PORT ?? 9337)
 const mainDebugPort = debugPort + 1
 const root = join(tmpdir(), `mc-school-studio-update-smoke-${process.pid}`)
@@ -43,6 +45,7 @@ let cdp
 let mainCdp
 let appOutput = ''
 let restartedPid
+let updatedAppPath
 
 function required(name) {
   const value = process.env[name]?.trim()
@@ -70,6 +73,32 @@ function bundleVersion(bundlePath) {
     '-',
     join(bundlePath, 'Contents', 'Info.plist'),
   ], { encoding: 'utf8' }).trim()
+}
+
+function findAppExecutable(bundlePath) {
+  const executableDirectory = join(bundlePath, 'Contents', 'MacOS')
+  const executables = readdirSync(executableDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(executableDirectory, entry.name))
+  assert.equal(
+    executables.length,
+    1,
+    `expected one packaged app executable in ${executableDirectory}, found ${executables.length}`,
+  )
+  return executables[0]
+}
+
+function findBundleByVersion(expectedVersion) {
+  const candidates = readdirSync(installDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith('.app'))
+    .map((entry) => join(installDirectory, entry.name))
+  return candidates.find((candidate) => {
+    try {
+      return bundleVersion(candidate) === expectedVersion
+    } catch {
+      return false
+    }
+  })
 }
 
 function wait(ms) {
@@ -186,9 +215,13 @@ function runningAppPids() {
   return output
     .split('\n')
     .map((line) => /^ *(\d+) +(.*)$/.exec(line))
-    .filter((match) =>
-      match &&
-      (match[2] === appExecutable || match[2].startsWith(`${appExecutable} `)))
+    .filter((match) => {
+      if (!match) return false
+      return ['MC School Studio', 'Volume Capture'].some((processName) => {
+        const executable = `/Contents/MacOS/${processName}`
+        return match[2].endsWith(executable) || match[2].includes(`${executable} `)
+      })
+    })
     .map((match) => Number(match[1]))
 }
 
@@ -310,13 +343,11 @@ try {
   mainCdp.close()
   mainCdp = undefined
   await waitFor('older app to exit after restart request', () => !processIsRunning(appProcess.pid))
-  await waitFor('updated app bundle', () => {
-    try {
-      return bundleVersion(appPath) === targetVersion
-    } catch {
-      return false
-    }
-  }, 120_000)
+  updatedAppPath = await waitFor(
+    'updated app bundle',
+    () => findBundleByVersion(targetVersion),
+    120_000,
+  )
   restartedPid = await waitFor('updated app process to relaunch', () => {
     return runningAppPids().find((pid) => pid !== sourcePid)
   }, 120_000)
@@ -325,8 +356,8 @@ try {
     processIsRunning(restartedPid),
     `updated app process ${restartedPid} exited before the restart smoke completed`,
   )
-  verifySignedBundle(appPath)
-  record('restarted', { version: bundleVersion(appPath), pid: restartedPid })
+  verifySignedBundle(updatedAppPath)
+  record('restarted', { version: bundleVersion(updatedAppPath), pid: restartedPid })
   console.log(`Updater smoke passed: ${sourceVersion} -> ${targetVersion}`)
 } catch (error) {
   record('failed', {
@@ -346,10 +377,12 @@ try {
       5_000,
     ).catch(() => {})
   }
-  try {
-    execFileSync('/usr/bin/pkill', ['-TERM', '-x', 'MC School Studio'])
-  } catch {
-    // The app may already have exited after a failed or completed smoke.
+  for (const processName of ['MC School Studio', 'Volume Capture']) {
+    try {
+      execFileSync('/usr/bin/pkill', ['-TERM', '-x', processName])
+    } catch {
+      // This product name may not be running.
+    }
   }
   try {
     rmSync(root, {

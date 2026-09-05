@@ -290,3 +290,17 @@ export function mirrorPhotoAsCapture(db: DesktopDb, photo: PhotoRow, sourcePath 
     createdAt: photo.createdAt,
   }).run()
 }
+
+/**
+ * Reconcile legacy photo rows with the capture model.
+ *
+ * This is intentionally safe to run whenever a gallery or summary is loaded:
+ * mirrorPhotoAsCapture is idempotent and never moves or deletes photo files.
+ */
+export function reconcileLegacyPhotosAsCaptures(
+  db: DesktopDb,
+  photos: PhotoRow[],
+  mirror: (db: DesktopDb, photo: PhotoRow, sourcePath?: string) => void = mirrorPhotoAsCapture,
+): void {
+  for (const photo of photos) mirror(db, photo)
+}

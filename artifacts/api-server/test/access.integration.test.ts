@@ -56,6 +56,7 @@ let adminMemberId: number;
 let assignedProjectId: number;
 let unassignedProjectId: number;
 let crossStudioProjectId: number;
+let crossStudioStudentId: number;
 let assignedStudentId: number;
 let readablePhotoId: number;
 let deletablePhotoId: number;
@@ -148,6 +149,22 @@ before(async () => {
     })
     .returning({ id: projectsTable.id });
   crossStudioProjectId = crossStudioProject.id;
+
+  const [crossStudioClass] = await db
+    .insert(classesTable)
+    .values({ projectId: crossStudioProjectId, className: `Cross-studio Class ${suffix}` })
+    .returning({ id: classesTable.id });
+  const [crossStudioStudent] = await db
+    .insert(studentsTable)
+    .values({
+      projectId: crossStudioProjectId,
+      classId: crossStudioClass.id,
+      firstName: "Cross",
+      lastName: "Studio",
+      generatedStudentId: `CROSS${String(process.pid).slice(-3)}${Date.now().toString().slice(-4)}`,
+    })
+    .returning({ id: studentsTable.id });
+  crossStudioStudentId = crossStudioStudent.id;
 
   const [studentClass] = await db
     .insert(classesTable)
@@ -533,6 +550,21 @@ test("lets a connected platform owner pull projects from every studio", async ()
   const bundle = await readJson<{ project: { id: number } }>(bundleResponse);
   assert.equal(bundle.project.id, crossStudioProjectId);
 
+  for (const endpoint of ["photos", "captures"]) {
+    const uploadResponse = await fetch(
+      `${baseUrl}/api/projects/${crossStudioProjectId}/students/${crossStudioStudentId}/${endpoint}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${platformCredentials.token}` },
+      },
+    );
+    assert.equal(
+      uploadResponse.status,
+      400,
+      `the platform owner should pass cross-studio authorization for ${endpoint} uploads`,
+    );
+  }
+
   const regularOwnerCredentials = createDesktopToken();
   await db.insert(desktopConnectionsTable).values({
     studioId,
@@ -548,6 +580,14 @@ test("lets a connected platform owner pull projects from every studio", async ()
   const regularOwnerProjectIds = (await readJson<{ id: number }[]>(regularOwnerProjectsResponse))
     .map((project) => project.id);
   assert(!regularOwnerProjectIds.includes(crossStudioProjectId), "ordinary studio owners must remain isolated");
+  const regularOwnerUploadResponse = await fetch(
+    `${baseUrl}/api/projects/${crossStudioProjectId}/students/${crossStudioStudentId}/captures`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${regularOwnerCredentials.token}` },
+    },
+  );
+  assert.equal(regularOwnerUploadResponse.status, 404, "ordinary owners must not upload across studios");
 });
 
 test("rejects access to an unassigned or unknown project", async () => {

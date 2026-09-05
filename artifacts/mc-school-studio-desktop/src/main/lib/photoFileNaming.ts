@@ -24,3 +24,20 @@ export function extractStudentReference(fileName: string, studentIds: string[]):
   })
   return matches.sort((a, b) => b.length - a.length)[0] ?? null
 }
+
+export function formatStudentFolderName(
+  firstName: string,
+  lastName: string,
+  studentId: string,
+): string {
+  return `${firstName}_${lastName}_${studentId}`
+}
+
+export function formatStudentPhotoName(
+  firstName: string,
+  lastName: string,
+  studentId: string,
+  sourceFileName: string,
+): string {
+  return `${formatStudentFolderName(firstName, lastName, studentId)}${extname(sourceFileName)}`
+}

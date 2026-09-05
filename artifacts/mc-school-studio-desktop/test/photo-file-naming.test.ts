@@ -1,8 +1,18 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
-import { extractStudentReference } from '../src/main/lib/photoFileNaming.ts'
+import {
+  extractStudentReference,
+  formatStudentPhotoName,
+} from '../src/main/lib/photoFileNaming.ts'
 
 const studentIds = ['001234', '00123', 'AB12', '7WCXGO8']
+
+test('formats a destination photo name from the selected student and source extension', () => {
+  assert.equal(
+    formatStudentPhotoName('John', 'Smith', '001234', 'camera-frame.NEF'),
+    'John_Smith_001234.NEF',
+  )
+})
 
 test('extracts the Smart Shooter student reference from a renamed JPEG', () => {
   assert.equal(

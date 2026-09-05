@@ -35,7 +35,7 @@ function createWindow(): BrowserWindow {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'MC School Studio',
+    title: 'Volume Capture',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#0f172a',
@@ -59,14 +59,14 @@ function createWindow(): BrowserWindow {
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
     const message = `The app interface could not load (${errorCode}: ${errorDescription}).`
     console.error(message)
-    dialog.showErrorBox('MC School Studio could not open', message)
+    dialog.showErrorBox('Volume Capture could not open', message)
     showWindow()
   })
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     const message = `The app interface stopped unexpectedly: ${details.reason}.`
     console.error(message)
-    dialog.showErrorBox('MC School Studio could not open', message)
+    dialog.showErrorBox('Volume Capture could not open', message)
     showWindow()
   })
 
@@ -127,8 +127,8 @@ app.whenReady().then(() => {
   })
 }).catch((error: unknown) => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error)
-  console.error('Failed to start MC School Studio:', message)
-  dialog.showErrorBox('MC School Studio could not open', message)
+  console.error('Failed to start Volume Capture:', message)
+  dialog.showErrorBox('Volume Capture could not open', message)
   app.quit()
 })
 

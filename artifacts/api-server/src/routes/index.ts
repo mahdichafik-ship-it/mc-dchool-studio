@@ -10,6 +10,7 @@ import photosRouter from "./photos";
 import desktopRouter from "./desktop";
 import teamRouter from "./team";
 import platformRouter from "./platform";
+import studioRouter from "./studio";
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use("/projects/:projectId/students", photosRouter);
 router.use("/desktop", desktopRouter);
 router.use("/team", teamRouter);
 router.use("/platform", platformRouter);
+router.use("/studio", studioRouter);
 
 export default router;

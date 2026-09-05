@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "MC School Studio"
+title = "Volume Capture"
 version = "1.0.0"
 id = "artifacts/mc-school-studio"
 router = "path"

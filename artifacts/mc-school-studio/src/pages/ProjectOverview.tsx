@@ -13,6 +13,7 @@ import { ClassesTab } from '@/components/project/ClassesTab';
 import { StudentsTab } from '@/components/project/StudentsTab';
 import { ExportsTab } from '@/components/project/ExportsTab';
 import { PhotosTab } from '@/components/project/PhotosTab';
+import { CollaborationTab } from '@/components/project/CollaborationTab';
 
 export default function ProjectOverview() {
   const [match, params] = useRoute('/projects/:projectId');
@@ -85,6 +86,7 @@ export default function ProjectOverview() {
               <TabsTrigger value="students" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Students</TabsTrigger>
               <TabsTrigger value="classes" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Classes</TabsTrigger>
               <TabsTrigger value="photos" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Photos</TabsTrigger>
+              <TabsTrigger value="collaboration" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Collaboration</TabsTrigger>
               <TabsTrigger value="exports" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Exports</TabsTrigger>
               <TabsTrigger value="info" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Project Info</TabsTrigger>
             </TabsList>
@@ -101,6 +103,9 @@ export default function ProjectOverview() {
               </TabsContent>
               <TabsContent value="photos" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
                 <PhotosTab projectId={project.id} />
+              </TabsContent>
+              <TabsContent value="collaboration" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
+                <CollaborationTab projectId={project.id} />
               </TabsContent>
               <TabsContent value="exports" className="m-0 p-6 flex-1 overflow-auto">
                 <ExportsTab project={project} />

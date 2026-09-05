@@ -16,6 +16,8 @@ import Team from "./pages/Team";
 import DesktopConnect from "./pages/DesktopConnect";
 import Platform from "./pages/Platform";
 import StudioInvite from "./pages/StudioInvite";
+import StudioSettings from "./pages/StudioSettings";
+import PlatformStudio from "./pages/PlatformStudio";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -173,7 +175,9 @@ function Router() {
       <Route path="/projects/:projectId/import" component={() => <AuthenticatedRoute component={ProjectImport} />} />
       <Route path="/projects/:projectId/qr-preview" component={() => <AuthenticatedRoute component={ProjectQrPreview} />} />
       <Route path="/team" component={() => <AuthenticatedRoute component={Team} />} />
+      <Route path="/studio/settings" component={() => <AuthenticatedRoute component={StudioSettings} />} />
       <Route path="/platform" component={() => <AuthenticatedRoute component={Platform} />} />
+      <Route path="/platform/studios/:studioId" component={() => <AuthenticatedRoute component={PlatformStudio} />} />
       
       <Route>
         <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">

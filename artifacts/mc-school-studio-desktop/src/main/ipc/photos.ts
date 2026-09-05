@@ -1,4 +1,4 @@
-import { ipcMain, shell, BrowserWindow } from 'electron'
+import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { copyFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { and, eq, count, or } from 'drizzle-orm'
@@ -6,6 +6,7 @@ import { getDb, getPhotosDir } from '../db'
 import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable } from '../db/schema'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
+import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
 import type {
   CaptureCompletenessSummary,
   CaptureReview,
@@ -99,6 +100,13 @@ export function registerPhotoHandlers() {
   ipcMain.handle(
     'captures:list',
     async (_e, { studentId }: { studentId: number }): Promise<StudentCaptureReview> => {
+      const legacyPhotos = db
+        .select()
+        .from(photosTable)
+        .where(eq(photosTable.studentId, studentId))
+        .all()
+      reconcileLegacyPhotosAsCaptures(db, legacyPhotos)
+
       const rows = db
         .select({ capture: capturesTable, photo: photosTable })
         .from(capturesTable)
@@ -179,6 +187,13 @@ export function registerPhotoHandlers() {
   ipcMain.handle(
     'captures:summary',
     (_e, { projectId }: { projectId: number }): CaptureCompletenessSummary => {
+      const legacyPhotos = db
+        .select()
+        .from(photosTable)
+        .where(eq(photosTable.projectId, projectId))
+        .all()
+      reconcileLegacyPhotosAsCaptures(db, legacyPhotos)
+
       const rows = db
         .select()
         .from(capturesTable)

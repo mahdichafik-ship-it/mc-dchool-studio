@@ -22,10 +22,10 @@ export function AppLayout({ children, currentPage, onNavigate, projectName, offl
         {/* Logo area — with macOS traffic light padding */}
         <div className="h-16 flex items-center px-5 border-b border-white/10" style={{ paddingTop: 'env(titlebar-area-height, 0)' }}>
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center">
-              <Camera className="size-4 text-white" />
+            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-black">
+              <img src="./volume-capture-logo.png" alt="" className="h-full w-full object-cover" />
             </div>
-            <span className="text-white font-semibold text-sm leading-tight">MC School<br />Studio</span>
+            <span className="text-white font-semibold text-sm leading-tight">Volume<br />Capture</span>
           </div>
         </div>
 
@@ -60,7 +60,7 @@ export function AppLayout({ children, currentPage, onNavigate, projectName, offl
             <Settings className="size-4" />
             Settings
           </Button>
-          <p className="text-xs text-slate-500 mt-3 px-2">MC School Studio v{version || '—'}</p>
+          <p className="text-xs text-slate-500 mt-3 px-2">Volume Capture v{version || '—'}</p>
         </div>
       </aside>
 

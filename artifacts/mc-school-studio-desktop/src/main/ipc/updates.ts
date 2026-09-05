@@ -48,7 +48,7 @@ async function promptToDownload(info: UpdateInfo) {
     const result = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Update available',
-      message: `MC School Studio ${info.version} is available.`,
+      message: `Volume Capture ${info.version} is available.`,
       detail: 'Download the update now. The app will ask before restarting to install it.',
       buttons: ['Download update', 'Later'],
       defaultId: 0,
@@ -77,7 +77,7 @@ async function promptToInstall() {
     const result = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Update ready to install',
-      message: 'The latest version of MC School Studio has finished downloading.',
+      message: 'The latest version of Volume Capture has finished downloading.',
       detail: 'Restart the app now to install the update, or choose Later to install it when the app closes.',
       buttons: ['Restart and install', 'Later'],
       defaultId: 0,

@@ -192,6 +192,8 @@ export type CaptureExportMode =
   | 'favorite'
   | 'final_selection'
 
+export type CaptureExportLayout = 'capture_folders' | 'lightroom_watch_folder'
+
 export interface CaptureFileUploadStatusChangedEvent {
   captureId: number
   fileId: number
@@ -206,6 +208,7 @@ export interface CaptureExportResult {
   exportedCaptureCount?: number
   exportedFileCount?: number
   skippedMissingFiles?: number
+  skippedExistingFiles?: number
   error?: string
 }
 

@@ -108,7 +108,7 @@ async function performCurrentSessionCheck(): Promise<AuthSession> {
     })
     return cachedSession ?? {
       signedIn: false,
-      error: 'Could not reach MC School Studio. Connect to the internet once to finish setting up this desktop.',
+      error: 'Could not reach Volume Capture. Connect to the internet once to finish setting up this desktop.',
     }
   }
 
@@ -158,7 +158,7 @@ async function performCurrentSessionCheck(): Promise<AuthSession> {
       return getOfflineSession()
     }
     markCloudSessionUnavailable()
-    return { signedIn: false, error: payload.error ?? `Could not reach MC School Studio (${response.status})` }
+    return { signedIn: false, error: payload.error ?? `Could not reach Volume Capture (${response.status})` }
   } catch {
     markCloudSessionUnavailable()
     return getOfflineSession()
@@ -180,7 +180,7 @@ export function registerAuthHandlers() {
 
   ipcMain.handle('auth:refresh', async (): Promise<AuthSession> => {
     const { apiUrl, connectionToken } = getUploadConfig()
-    if (!connectionToken) return { signedIn: false, error: 'Sign in to MC School Studio first.' }
+    if (!connectionToken) return { signedIn: false, error: 'Sign in to Volume Capture first.' }
     try {
       const response = await fetch(`${apiUrl}/api/desktop/auth/refresh`, {
         method: 'POST',
@@ -261,7 +261,7 @@ export function registerAuthHandlers() {
     } catch {
       return {
         signedIn: false,
-        error: 'Could not connect to MC School Studio. Check your internet connection and try again.',
+        error: 'Could not connect to Volume Capture. Check your internet connection and try again.',
       }
     }
   })

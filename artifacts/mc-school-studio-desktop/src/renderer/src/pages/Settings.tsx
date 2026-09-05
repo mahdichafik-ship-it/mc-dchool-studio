@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { FolderOpen, UserCircle, Info, Loader, AlertTriangle, RefreshCw, LogOut } from 'lucide-react'
+import { FolderOpen, UserCircle, Info, Loader, AlertTriangle, RefreshCw, LogOut, Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useGlobalErrorCount } from '@/hooks/useApi'
 
@@ -21,10 +21,17 @@ interface UpdateState {
 
 interface SettingsProps {
   member?: { email: string; role: string }
+  captureNotificationsEnabled: boolean
+  onCaptureNotificationsChange: (enabled: boolean) => void
   onSignedOut: () => void
 }
 
-export function Settings({ member, onSignedOut }: SettingsProps) {
+export function Settings({
+  member,
+  captureNotificationsEnabled,
+  onCaptureNotificationsChange,
+  onSignedOut,
+}: SettingsProps) {
   const [photosDir, setPhotosDir] = useState<string>('')
   const [spoolDir, setSpoolDir] = useState<string>('')
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'unsupported' })
@@ -151,6 +158,38 @@ export function Settings({ member, onSignedOut }: SettingsProps) {
             </div>
           </div>
 
+          {/* Capture notifications */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <Bell className="size-5 text-teal-600" />
+              <h3 className="font-semibold text-slate-900">Capture notifications</h3>
+            </div>
+            <div className="flex items-center justify-between gap-5">
+              <p className="text-sm text-slate-500">
+                Show the temporary photo matched, QR marker, and unmatched-photo messages.
+                Important upload and watcher errors remain visible.
+              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={captureNotificationsEnabled}
+                onClick={() => onCaptureNotificationsChange(!captureNotificationsEnabled)}
+                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+                  captureNotificationsEnabled ? 'bg-teal-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${
+                    captureNotificationsEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+                <span className="sr-only">
+                  {captureNotificationsEnabled ? 'Turn capture notifications off' : 'Turn capture notifications on'}
+                </span>
+              </button>
+            </div>
+          </div>
+
           {/* Failed uploads summary */}
           {globalErrorCount > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
@@ -173,7 +212,7 @@ export function Settings({ member, onSignedOut }: SettingsProps) {
               <h3 className="font-semibold text-slate-900">App updates</h3>
             </div>
             <p className="text-sm text-slate-500 mb-4">
-              Check whether a newer signed version of MC School Studio is available.
+              Check whether a newer signed version of Volume Capture is available.
             </p>
             <div className="flex items-center gap-3">
               <Button
@@ -222,7 +261,7 @@ export function Settings({ member, onSignedOut }: SettingsProps) {
               <li>Prepare the school project in the web app and export it as JSON</li>
               <li>Import the JSON file here using the "Import Project" button</li>
               <li>Open the project and set the watch folder (SmartShooter output folder)</li>
-              <li>Start the watcher — the green "Live" indicator appears</li>
+              <li>Open the project — watching starts automatically and the green "Live" indicator appears</li>
               <li>Select a student to display their QR code on screen</li>
                <li>Photograph the QR code first — this marks the start of that student’s capture sequence</li>
                <li>Photograph the student; every following portrait is assigned to that student until the next QR marker</li>

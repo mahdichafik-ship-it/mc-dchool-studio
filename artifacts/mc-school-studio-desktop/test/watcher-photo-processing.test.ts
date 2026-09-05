@@ -56,7 +56,12 @@ function createFixture(fileName: string) {
   const sourcePath = join(root, 'smart-shooter', fileName)
   mkdirSync(dirname(sourcePath), { recursive: true })
   writeFileSync(sourcePath, jpegBytes)
-  return { root, sourcePath, photosDir: join(root, 'organized') }
+  return {
+    root,
+    sourcePath,
+    photosDir: join(root, 'organized'),
+    projectJpegOriginalsDir: join(root, 'job', 'Images', 'JPEG', 'Originals'),
+  }
 }
 
 function cleanup(root: string) {
@@ -71,6 +76,7 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
     const result = await processWatchedPhoto(1, fixture.sourcePath, {
       store,
       photosDir: fixture.photosDir,
+      projectJpegOriginalsDir: fixture.projectJpegOriginalsDir,
       readQr: async () => {
         throw new Error('filename match should not need QR fallback')
       },
@@ -84,11 +90,17 @@ test('copies a Smart Shooter JPEG to project/class/student folders and keeps the
       fixture.photosDir,
       'Example School',
       'Class 3',
-      '001234_Smith_John',
-      'Smith_John_class_school-001234.jpg',
+      'John_Smith_001234',
+      'John_Smith_001234.jpg',
     )
     assert.equal(existsSync(destination), true)
     assert.deepEqual(readFileSync(destination), jpegBytes)
+    assert.equal(
+      readFileSync(
+        join(fixture.projectJpegOriginalsDir, 'John_Smith_001234.jpg'),
+      ).equals(jpegBytes),
+      true,
+    )
     assert.equal(existsSync(fixture.sourcePath), true)
     assert.deepEqual(readFileSync(fixture.sourcePath), jpegBytes)
     assert.equal(photos[0]?.studentId, 1)
@@ -106,8 +118,8 @@ test('emits a local preview before the managed copy and database persistence', a
     fixture.photosDir,
     'Example School',
     'Class 3',
-    'AB12_Zaki_Dina',
-    'DSC_8290.jpg',
+    'Dina_Zaki_AB12',
+    'Dina_Zaki_AB12.jpg',
   )
   const stages: string[] = []
 
@@ -141,8 +153,8 @@ test('can defer original persistence until after the preview is ready', async ()
     fixture.photosDir,
     'Example School',
     'Class 3',
-    'AB12_Zaki_Dina',
-    'DSC_8292.jpg',
+    'Dina_Zaki_AB12',
+    'Dina_Zaki_AB12.jpg',
   )
 
   try {
@@ -195,8 +207,8 @@ test('matches a barcode-renamed JPEG with a numeric frame suffix without QR fall
       fixture.photosDir,
       'Example School',
       'Class 3',
-      '001234_Smith_John',
-      'Smith_John_class_school_001234_595.JPG',
+      'John_Smith_001234',
+      'John_Smith_001234.JPG',
     )
     assert.equal(existsSync(destination), true)
     assert.equal(existsSync(fixture.sourcePath), true)
@@ -291,7 +303,7 @@ test('routes a JPEG without a filename or QR identity to the selected student', 
     assert.equal(photos[0]?.studentId, 3)
     assert.equal(
       photos[0]?.filePath,
-      join(fixture.photosDir, 'Example School', 'Class 3', 'AB12_Zaki_Dina', 'DSC_8291.jpg'),
+      join(fixture.photosDir, 'Example School', 'Class 3', 'Dina_Zaki_AB12', 'Dina_Zaki_AB12.jpg'),
     )
     assert.equal(existsSync(fixture.sourcePath), true)
   } finally {
@@ -299,7 +311,7 @@ test('routes a JPEG without a filename or QR identity to the selected student', 
   }
 })
 
-test('leaves a known filename conflict unmatched instead of overriding the selected student', async () => {
+test('uses the selected student instead of a conflicting Smart Shooter filename', async () => {
   const fixture = createFixture('Smith_John_class_school-001234.jpg')
   const { store, photos } = createStore()
 
@@ -311,10 +323,14 @@ test('leaves a known filename conflict unmatched instead of overriding the selec
       targetStudentId: 3,
     })
 
-    assert.equal(result.kind, 'unmatched')
-    if (result.kind !== 'unmatched') return
-    assert.match(result.reason, /conflicts with the selected student/)
-    assert.equal(photos[0]?.studentId, null)
+    assert.equal(result.kind, 'matched')
+    if (result.kind !== 'matched') return
+    assert.equal(result.student.id, 3)
+    assert.equal(photos[0]?.studentId, 3)
+    assert.equal(
+      photos[0]?.filePath,
+      join(fixture.photosDir, 'Example School', 'Class 3', 'Dina_Zaki_AB12', 'Dina_Zaki_AB12.jpg'),
+    )
     assert.equal(existsSync(fixture.sourcePath), true)
   } finally {
     cleanup(fixture.root)

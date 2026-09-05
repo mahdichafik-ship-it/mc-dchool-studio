@@ -2,16 +2,18 @@ import React from 'react';
 import { Link } from 'wouter';
 import { Camera, ArrowRight, ShieldCheck, Zap, Users, Monitor, Apple } from 'lucide-react';
 
-const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.28';
-const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.28-arm64.dmg`;
+const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.43';
+const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.43-arm64.dmg`;
 
 export default function Landing() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="flex items-center justify-between px-8 py-6 bg-white border-b border-slate-200">
         <div className="flex items-center gap-3 text-slate-900">
-          <Camera className="w-7 h-7 text-teal-600" />
-          <span className="font-bold text-xl tracking-tight">MC School Studio</span>
+          <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-black">
+            <img src="/volume-capture-logo.png" alt="" className="h-full w-full object-cover" />
+          </div>
+          <span className="font-bold text-xl tracking-tight">Volume Capture</span>
         </div>
         <div className="flex items-center gap-4">
           <Link href="/sign-in" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
@@ -105,7 +107,7 @@ export default function Landing() {
       </main>
 
       <footer className="py-8 text-center text-slate-500 text-sm border-t border-slate-200 bg-white">
-        &copy; {new Date().getFullYear()} MC School Studio. All rights reserved.
+        &copy; {new Date().getFullYear()} Volume Capture. All rights reserved.
       </footer>
     </div>
   );

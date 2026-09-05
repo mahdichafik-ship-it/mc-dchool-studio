@@ -1,6 +1,6 @@
-import { app, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import { readFileSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { eq, count } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
@@ -11,6 +11,7 @@ import {
   getPhotoSystemLayout,
   getProjectStorageLayout,
 } from '../lib/storageLayout'
+import { formatStudentFolderName } from '../lib/photoFileNaming'
 
 function now() {
   return new Date().toISOString()
@@ -59,7 +60,14 @@ export function prepareProjectFolders(
     const students = projectDb.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
     for (const student of students) {
       mkdirSync(
-        join(classDir, safeProjectFolderName(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`)),
+        join(
+          classDir,
+          safeProjectFolderName(formatStudentFolderName(
+            student.firstName,
+            student.lastName,
+            student.generatedStudentId,
+          )),
+        ),
         { recursive: true },
       )
     }
@@ -67,7 +75,7 @@ export function prepareProjectFolders(
 
   ensureProjectStorageLayout(
     getProjectStorageLayout(
-      getPhotoSystemLayout(app.getPath('home')),
+      getPhotoSystemLayout(dirname(getPhotosDir())),
       project.id,
       project.schoolName,
     ),

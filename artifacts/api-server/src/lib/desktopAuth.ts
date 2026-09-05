@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
-import { and, eq, inArray } from "drizzle-orm";
-import { db, desktopConnectionsTable, studioMembersTable } from "@workspace/db";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { db, desktopConnectionsTable, studioMembersTable, studiosTable } from "@workspace/db";
 
 export type DesktopConnection = {
   connectionId: number;
@@ -14,6 +14,7 @@ export type DesktopConnection = {
   status: "active" | "retired";
   retiredAt: Date | null;
   retirementAcknowledgedAt: Date | null;
+  expiresAt: Date | null;
 };
 
 type DesktopConnectionRow = DesktopConnection & {
@@ -51,13 +52,17 @@ export async function findDesktopConnection(
       status: desktopConnectionsTable.status,
       retiredAt: desktopConnectionsTable.retiredAt,
       retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
+      expiresAt: desktopConnectionsTable.expiresAt,
       tokenHash: desktopConnectionsTable.tokenHash,
     })
     .from(desktopConnectionsTable)
     .innerJoin(studioMembersTable, eq(desktopConnectionsTable.memberId, studioMembersTable.id))
+    .innerJoin(studiosTable, eq(desktopConnectionsTable.studioId, studiosTable.id))
     .where(and(
       inArray(desktopConnectionsTable.status, statuses),
       eq(studioMembersTable.status, "active"),
+      isNull(studiosTable.archivedAt),
+      or(isNull(desktopConnectionsTable.expiresAt), gt(desktopConnectionsTable.expiresAt, new Date())),
       eq(desktopConnectionsTable.tokenHash, tokenHash),
     ))
     .limit(1);
@@ -89,13 +94,17 @@ export async function refreshDesktopConnection(connectionId: number): Promise<De
       status: desktopConnectionsTable.status,
       retiredAt: desktopConnectionsTable.retiredAt,
       retirementAcknowledgedAt: desktopConnectionsTable.retirementAcknowledgedAt,
+      expiresAt: desktopConnectionsTable.expiresAt,
     })
     .from(desktopConnectionsTable)
     .innerJoin(studioMembersTable, eq(desktopConnectionsTable.memberId, studioMembersTable.id))
+    .innerJoin(studiosTable, eq(desktopConnectionsTable.studioId, studiosTable.id))
     .where(and(
       eq(desktopConnectionsTable.id, connectionId),
       eq(desktopConnectionsTable.status, "active"),
       eq(studioMembersTable.status, "active"),
+      isNull(studiosTable.archivedAt),
+      or(isNull(desktopConnectionsTable.expiresAt), gt(desktopConnectionsTable.expiresAt, new Date())),
     ))
     .limit(1);
 

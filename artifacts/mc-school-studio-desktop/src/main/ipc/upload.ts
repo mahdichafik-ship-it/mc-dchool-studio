@@ -311,6 +311,7 @@ async function performUploadPhoto(
   filePath: string,
   fileName: string,
   capturedAt: string,
+  captureBatchKey?: string,
 ): Promise<void> {
   const db = getDb()
   const { apiUrl, connectionToken } = getUploadConfig()
@@ -347,6 +348,7 @@ async function performUploadPhoto(
       headers: {
         Authorization: `Bearer ${connectionToken}`,
         'X-MC-Upload-Id': String(photoId),
+        ...(captureBatchKey ? { 'X-MC-Capture-Batch': captureBatchKey } : {}),
       },
       body: formData,
       signal: AbortSignal.timeout(30000),
@@ -401,12 +403,13 @@ export function uploadPhoto(
   filePath: string,
   fileName: string,
   capturedAt: string,
+  captureBatchKey?: string,
 ): Promise<void> {
   if (!isCloudSessionVerified()) return Promise.resolve()
   const existing = activePhotoUploads.get(photoId)
   if (existing) return existing
 
-  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt)
+  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey)
   activePhotoUploads.set(photoId, task)
   activeUploads.add(task)
   void task.finally(() => {
@@ -448,7 +451,7 @@ function setCaptureFileStatus(
   notifyCaptureFileStatus(captureId, fileId, capture.studentId, file.fileRole, status)
 }
 
-async function performUploadCaptureFile(captureId: number, fileId: number): Promise<void> {
+async function performUploadCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
   const db = getDb()
   const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
   const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, fileId)).get()
@@ -491,6 +494,7 @@ async function performUploadCaptureFile(captureId: number, fileId: number): Prom
       headers: {
         Authorization: `Bearer ${connectionToken}`,
         'X-MC-Upload-Id': String(file.id),
+        ...(captureBatchKey ? { 'X-MC-Capture-Batch': captureBatchKey } : {}),
       },
       body: formData,
       signal: AbortSignal.timeout(120_000),
@@ -523,12 +527,12 @@ async function performUploadCaptureFile(captureId: number, fileId: number): Prom
   }
 }
 
-export function uploadCaptureFile(captureId: number, fileId: number): Promise<void> {
+export function uploadCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
   if (!isCloudSessionVerified()) return Promise.resolve()
   const existing = activeCaptureFileUploads.get(fileId)
   if (existing) return existing
 
-  const task = performUploadCaptureFile(captureId, fileId)
+  const task = performUploadCaptureFile(captureId, fileId, captureBatchKey)
   activeCaptureFileUploads.set(fileId, task)
   activeUploads.add(task)
   void task.finally(() => {
@@ -629,6 +633,7 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
 export async function syncProjectUploads(
   projectId: number,
   onProgress?: (progress: ProjectSyncProgress) => void,
+  captureBatchKey?: string,
 ): Promise<ProjectSyncProgress> {
   const jobs = getProjectSyncJobs(projectId)
   let completed = 0
@@ -643,7 +648,7 @@ export async function syncProjectUploads(
         throw new Error('Cloud sync is unavailable. Local captures are safe; reconnect and try again.')
       }
       if (job.kind === 'capture-file') {
-        await uploadCaptureFile(job.captureId, job.fileId)
+        await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey)
       } else {
         await uploadPhoto(
           job.projectId,
@@ -652,6 +657,7 @@ export async function syncProjectUploads(
           job.filePath,
           job.fileName,
           job.capturedAt,
+          captureBatchKey,
         )
       }
     } catch (error) {
@@ -666,6 +672,54 @@ export async function syncProjectUploads(
   return { completed, total: jobs.length, failed, error: firstError }
 }
 
+export function getProjectSyncJobCount(projectId: number): number {
+  return getProjectSyncJobs(projectId).length
+}
+
+export async function beginProjectCaptureBatch(projectId: number, expectedFileCount: number): Promise<string> {
+  const db = getDb()
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  if (!project?.cloudId) throw new Error('This project needs to be re-synced before its batch can upload.')
+  const settingKey = `capture_batch:${projectId}`
+  const batchKey = getSetting(settingKey) ?? crypto.randomUUID()
+  setSetting(settingKey, batchKey)
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!apiUrl || !connectionToken) throw new Error('Cloud upload is not configured.')
+  const response = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/capture-batches`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${connectionToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ batchKey, expectedFileCount }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!response.ok) throw new Error(`Could not start capture batch: HTTP ${response.status}: ${await response.text()}`)
+  return batchKey
+}
+
+export async function finishProjectCaptureBatch(
+  projectId: number,
+  batchKey: string,
+  status: 'failed' | 'complete',
+  failedFileCount: number,
+): Promise<void> {
+  const db = getDb()
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!project?.cloudId || !apiUrl || !connectionToken) throw new Error('Cloud upload is not configured.')
+  const response = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/capture-batches/${encodeURIComponent(batchKey)}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${connectionToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ status, failedFileCount }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!response.ok) throw new Error(`Could not update capture batch: HTTP ${response.status}: ${await response.text()}`)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // IPC handlers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -675,7 +729,7 @@ export function registerUploadHandlers() {
   ipcMain.handle('upload:testConnection', async () => {
     const { apiUrl, connectionToken } = getUploadConfig()
     if (!apiUrl || !connectionToken) {
-      return { ok: false, error: 'Sign in to MC School Studio before testing the connection' }
+      return { ok: false, error: 'Sign in to Volume Capture before testing the connection' }
     }
     try {
       const url = `${apiUrl.replace(/\/+$/, '')}/api/desktop/me`

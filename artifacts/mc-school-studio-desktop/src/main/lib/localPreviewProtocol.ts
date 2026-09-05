@@ -1,5 +1,5 @@
-import { net, protocol } from 'electron'
-import { pathToFileURL } from 'node:url'
+import { protocol } from 'electron'
+import { readFile } from 'node:fs/promises'
 
 const previewFiles = new Map<string, string>()
 const PREVIEW_TTL_MS = 5 * 60_000
@@ -23,7 +23,14 @@ export function registerLocalPreviewProtocol(): void {
     if (!filePath) return new Response('Preview not found', { status: 404 })
 
     try {
-      return await net.fetch(pathToFileURL(filePath).toString())
+      const bytes = await readFile(filePath)
+      return new Response(bytes, {
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Length': String(bytes.byteLength),
+          'Content-Type': 'image/jpeg',
+        },
+      })
     } catch {
       return new Response('Preview unavailable', { status: 404 })
     }

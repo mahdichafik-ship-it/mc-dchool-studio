@@ -11,6 +11,7 @@ import type {
   CaptureUpdatedEvent,
   CaptureFileUploadStatusChangedEvent,
   CaptureFileReview,
+  CaptureExportLayout,
   CaptureExportMode,
   CaptureExportResult,
   PhotoMatchedEvent,
@@ -25,6 +26,7 @@ import type {
   ActiveCaptureTargetEvent,
   ImagePipelineRendererStage,
 } from '../../../shared/types'
+import { mergeMatchedPhoto } from '../lib/captureEventReconciliation'
 
 // Re-export types for convenience
 export type {
@@ -39,6 +41,7 @@ export type {
   CaptureUpdatedEvent,
   CaptureFileUploadStatusChangedEvent,
   CaptureFileReview,
+  CaptureExportLayout,
   CaptureExportMode,
   CaptureExportResult,
   PhotoMatchedEvent,
@@ -292,14 +295,35 @@ export function useCaptures(studentId: number | null) {
   const [data, setData] = useState<StudentCaptureReview>({ captures: [], qrMarkers: [] })
   const [livePreview, setLivePreview] = useState<PhotoMatchedEvent | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const liveTraceRef = useRef<PhotoMatchedEvent['pipeline']>(undefined)
 
   const load = useCallback(async () => {
     if (!studentId) return
     setLoading(true)
+    setError(null)
     try {
       const result = await api.invoke('captures:list', { studentId })
-      setData(result as StudentCaptureReview)
+      const loaded = result as StudentCaptureReview
+      setData((current) => {
+        // An initial/reconciliation load can finish after the fast preview
+        // event. Keep a temporary capture visible until its persisted event
+        // replaces it, instead of briefly reverting to a file-only tile.
+        const loadedSourcePaths = new Set(
+          loaded.captures
+            .map((capture) => capture.legacyPhoto?.filePath)
+            .filter((filePath): filePath is string => Boolean(filePath)),
+        )
+        const pending = current.captures.filter((capture) => {
+          const photo = capture.legacyPhoto
+          return capture.id < 0 && Boolean(photo) && !loadedSourcePaths.has(photo!.filePath)
+        })
+        return pending.length > 0
+          ? { ...loaded, captures: [...loaded.captures, ...pending] }
+          : loaded
+      })
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError))
     } finally {
       setLoading(false)
     }
@@ -351,12 +375,12 @@ export function useCaptures(studentId: number | null) {
           || capture.legacyPhoto?.id === event.photo.id)
         if (existingIndex >= 0 && !event.preview) {
           const captures = [...current.captures]
+          const previous = captures[existingIndex]
           captures[existingIndex] = {
-            ...captures[existingIndex],
+            ...previous,
             id: event.captureId ?? captures[existingIndex].id,
             thumbnailData: event.photo.thumbnailData,
-            legacyPhoto: event.photo,
-              previewPipeline: captures[existingIndex].previewPipeline,
+            legacyPhoto: mergeMatchedPhoto(previous.legacyPhoto, event),
           }
           return { ...current, captures }
         }
@@ -376,10 +400,7 @@ export function useCaptures(studentId: number | null) {
           fileUrl: null,
         }
         const galleryPhoto: Photo = {
-          ...event.photo,
-          previewUrl: undefined,
-          previewKey: undefined,
-          thumbnailData: null,
+          ...mergeMatchedPhoto(null, event),
         }
         const optimisticCapture: CaptureReview = {
           id: event.captureId ?? -event.photo.id,
@@ -397,6 +418,7 @@ export function useCaptures(studentId: number | null) {
           files: [jpegFile],
           thumbnailData: null,
           legacyPhoto: galleryPhoto,
+          previewPipeline: event.pipeline,
         }
         return {
           ...current,
@@ -419,7 +441,7 @@ export function useCaptures(studentId: number | null) {
     }
   }, [studentId, load])
 
-  return { data, loading, reload: load, livePreview }
+  return { data, loading, error, reload: load, livePreview }
 }
 
 export function useCaptureSummary(projectId: number | null) {

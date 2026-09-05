@@ -32,6 +32,7 @@ router.get("/", requireAuth, async (req, res): Promise<void> => {
         status: desktopConnectionsTable.status,
         lastUsedAt: desktopConnectionsTable.lastUsedAt,
         createdAt: desktopConnectionsTable.createdAt,
+        expiresAt: desktopConnectionsTable.expiresAt,
         revokedAt: desktopConnectionsTable.revokedAt,
         memberId: desktopConnectionsTable.memberId,
         memberEmail: studioMembersTable.email,
@@ -141,6 +142,7 @@ router.post("/desktop-connections", requireAuth, async (req, res): Promise<void>
     deviceName,
     tokenHash: credentials.tokenHash,
     tokenPrefix: credentials.tokenPrefix,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
   }).returning({
     id: desktopConnectionsTable.id,
     deviceName: desktopConnectionsTable.deviceName,
@@ -148,6 +150,7 @@ router.post("/desktop-connections", requireAuth, async (req, res): Promise<void>
     memberId: desktopConnectionsTable.memberId,
     status: desktopConnectionsTable.status,
     createdAt: desktopConnectionsTable.createdAt,
+    expiresAt: desktopConnectionsTable.expiresAt,
   });
 
   res.status(201).json({ connection, token: credentials.token });

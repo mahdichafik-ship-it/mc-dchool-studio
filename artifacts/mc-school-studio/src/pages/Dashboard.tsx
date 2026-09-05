@@ -5,9 +5,10 @@ import { Plus, Building2, Layers, Users, FolderKanban, Calendar, ChevronRight, M
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
+import { StudioStoragePrompt } from '@/components/studio/StudioStoragePrompt';
 
-const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.28';
-const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.28-arm64.dmg`;
+const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.43';
+const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.43-arm64.dmg`;
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
@@ -16,6 +17,7 @@ export default function Dashboard() {
   return (
     <div className="flex-1 overflow-auto bg-slate-50 p-8">
       <div className="max-w-6xl mx-auto space-y-8">
+        <StudioStoragePrompt />
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
           <Link href="/projects/new" className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 bg-teal-600 hover:bg-teal-700 text-white shadow-sm h-10 px-4 py-2">

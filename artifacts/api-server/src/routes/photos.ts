@@ -5,16 +5,22 @@ import fs from "fs";
 import { db } from "@workspace/db";
 import {
   capturesTable,
+  captureBatchesTable,
   captureFilesTable,
+  classesTable,
+  projectsTable,
   studentsTable,
   studentPhotosTable,
+  studiosTable,
 } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
-import { canAccessAssignedDesktopProject, canAccessProject } from "../lib/studioAccess";
+import { canAccessDesktopProject, canAccessProject } from "../lib/studioAccess";
 import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
+import { GoogleDriveBackupError } from "../lib/googleDriveBackup";
+import { backupFileForStudio } from "../lib/studioStorageBackup";
 
 const router = Router({ mergeParams: true });
 
@@ -100,6 +106,24 @@ async function verifyStudent(studentId: number, projectId: number): Promise<bool
   return !!student;
 }
 
+async function resolveCaptureBatch(
+  projectId: number,
+  batchKey: string | undefined,
+  connectionId: number,
+) {
+  if (!batchKey) return null;
+  const [batch] = await db
+    .select()
+    .from(captureBatchesTable)
+    .where(and(
+      eq(captureBatchesTable.projectId, projectId),
+      eq(captureBatchesTable.batchKey, batchKey),
+      eq(captureBatchesTable.desktopConnectionId, connectionId),
+    ))
+    .limit(1);
+  return batch ?? undefined;
+}
+
 function validRouteId(value: string | string[] | undefined): value is string {
   return typeof value === "string" && /^[1-9]\d*$/.test(value);
 }
@@ -117,13 +141,14 @@ function connectionAccessMember(connection: ReturnType<typeof getDesktopConnecti
     id: connection.memberId,
     studioId: connection.studioId,
     role: connection.memberRole,
+    userId: connection.memberUserId,
   };
 }
 
 async function authorizeDesktopUploadTarget(req: Request, res: Response, next: NextFunction): Promise<void> {
   const projectId = Number(req.params.projectId);
   const studentId = Number(req.params.studentId);
-  if (!(await canAccessAssignedDesktopProject(connectionAccessMember(getDesktopConnection(req)), projectId))) {
+  if (!(await canAccessDesktopProject(connectionAccessMember(getDesktopConnection(req)), projectId))) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -407,6 +432,56 @@ function captureFileToResponse(file: typeof captureFilesTable.$inferSelect) {
   };
 }
 
+async function backupUploadedFile(
+  projectId: number,
+  studentId: number,
+  filePath: string,
+  fileName: string,
+  fileRole: "JPEG" | "RAW",
+  fileFormat: string,
+  backupKey: string,
+): Promise<void> {
+  const [context] = await db
+    .select({
+      studioId: studiosTable.id,
+      studioName: studiosTable.name,
+      schoolName: projectsTable.schoolName,
+      classId: classesTable.id,
+      className: classesTable.className,
+      generatedStudentId: studentsTable.generatedStudentId,
+      firstName: studentsTable.firstName,
+      lastName: studentsTable.lastName,
+    })
+    .from(studentsTable)
+    .innerJoin(projectsTable, eq(projectsTable.id, studentsTable.projectId))
+    .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
+    .innerJoin(classesTable, eq(classesTable.id, studentsTable.classId))
+    .where(and(
+      eq(studentsTable.id, studentId),
+      eq(studentsTable.projectId, projectId),
+    ));
+
+  if (!context) {
+    throw new GoogleDriveBackupError("Could not resolve the project, class, or student for Drive backup.");
+  }
+
+  await backupFileForStudio({
+    studioId: context.studioId,
+    studioName: context.studioName,
+    projectId,
+    schoolName: context.schoolName,
+    classId: context.classId,
+    className: context.className,
+    studentId,
+    studentFolderName: `${context.generatedStudentId}_${context.lastName}_${context.firstName}`,
+    filePath,
+    fileName,
+    fileRole,
+    fileFormat,
+    backupKey,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -427,7 +502,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       res.status(401).json({ error: "Desktop connection was revoked while uploading" });
       return;
     }
-    if (!(await canAccessAssignedDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
+    if (!(await canAccessDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
       discardUploadedFile(req);
       res.status(404).json({ error: "Project not found" });
       return;
@@ -448,6 +523,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
     const fileUrl = `/uploads/${relPath}`;
     const capturedAt = (req.body as Record<string, string>).capturedAt ?? null;
     const clientUploadId = req.get("X-MC-Upload-Id");
+    const captureBatchKey = req.get("X-MC-Capture-Batch")?.trim();
     if (clientUploadId && !/^[1-9]\d*$/.test(clientUploadId)) {
       discardUploadedFile(req);
       res.status(400).json({ error: "Invalid desktop upload identifier" });
@@ -455,6 +531,12 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
     }
 
     const savePhoto = async () => {
+      const connection = getDesktopConnection(req);
+      const captureBatch = await resolveCaptureBatch(projectId, captureBatchKey, connection.connectionId);
+      if (captureBatchKey && !captureBatch) {
+        discardUploadedFile(req);
+        throw new Error("Capture batch was not found for this desktop connection");
+      }
       if (!clientUploadId) {
         const [photo] = await db
           .insert(studentPhotosTable)
@@ -465,13 +547,13 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             fileUrl,
             mimeType: req.file!.mimetype,
             capturedAt: capturedAt || null,
+            captureBatchId: captureBatch?.id ?? null,
           })
           .returning();
         return { photo, reused: false };
       }
 
       return db.transaction(async (tx) => {
-        const connection = getDesktopConnection(req);
         const lockKey = `${connection.connectionId}:${clientUploadId}`;
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
 
@@ -501,6 +583,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             fileUrl,
             mimeType: req.file!.mimetype,
             capturedAt: capturedAt || null,
+            captureBatchId: captureBatch?.id ?? null,
             desktopConnectionId: connection.connectionId,
             clientUploadId,
           })
@@ -510,6 +593,27 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
     };
 
     const result = await savePhoto();
+    try {
+      await backupUploadedFile(
+        projectId,
+        studentId,
+        resolveFilePath(result.photo.fileUrl),
+        result.photo.fileName,
+        "JPEG",
+        "JPG",
+        `photo:${result.photo.id}`,
+      );
+    } catch (error) {
+      if (error instanceof GoogleDriveBackupError) {
+        logger.error({ err: error, projectId, studentId, photoId: result.photo.id }, "Google Drive photo backup failed");
+        res.status(503).json({
+          error: "Photo saved locally, but Google Drive backup failed. Retry the upload.",
+          code: "GOOGLE_DRIVE_BACKUP_FAILED",
+        });
+        return;
+      }
+      throw error;
+    }
     res.status(result.reused ? 200 : 201).json(photoToResponse(result.photo));
   } catch (error) {
     discardUploadedFile(req);
@@ -530,7 +634,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       res.status(401).json({ error: "Desktop connection was revoked while uploading" });
       return;
     }
-    if (!(await canAccessAssignedDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
+    if (!(await canAccessDesktopProject(connectionAccessMember(refreshedConnection), projectId))) {
       discardUploadedFile(req);
       res.status(404).json({ error: "Project not found" });
       return;
@@ -551,6 +655,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     const requestedRole = body.fileRole;
     const captureKey = body.captureKey?.trim();
     const clientUploadId = req.get("X-MC-Upload-Id")?.trim() || null;
+    const captureBatchKey = req.get("X-MC-Capture-Batch")?.trim();
     if (!role || (requestedRole && requestedRole !== role)) {
       discardUploadedFile(req);
       res.status(400).json({ error: "Capture file role does not match its filename" });
@@ -572,6 +677,12 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       .replace(/\\/g, "/");
     const fileUrl = `/uploads/${relPath}`;
     const connection = getDesktopConnection(req);
+    const captureBatch = await resolveCaptureBatch(projectId, captureBatchKey, connection.connectionId);
+    if (captureBatchKey && !captureBatch) {
+      discardUploadedFile(req);
+      res.status(409).json({ error: "Capture batch was not found for this desktop connection" });
+      return;
+    }
     const capturedAt = body.capturedAt?.trim() || null;
     const sequence = body.sequence ? Number(body.sequence) : null;
     const parsedSequence = sequence !== null && Number.isInteger(sequence) ? sequence : null;
@@ -645,6 +756,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
           fileUrl,
           mimeType: uploadedFile.mimetype || (role === "JPEG" ? "image/jpeg" : "application/octet-stream"),
           fileSize: uploadedFile.size,
+          captureBatchId: captureBatch?.id ?? null,
           desktopConnectionId: connection.connectionId,
           clientUploadId,
         })
@@ -661,6 +773,44 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         .returning();
       return { capture, file, reused: false };
     });
+
+    const fileRole = result.file.fileRole === "RAW"
+      ? "RAW"
+      : result.file.fileRole === "JPEG"
+        ? "JPEG"
+        : null;
+    if (!fileRole) {
+      throw new Error(`Unsupported capture file role "${result.file.fileRole}"`);
+    }
+
+    try {
+      await backupUploadedFile(
+        projectId,
+        studentId,
+        resolveFilePath(result.file.fileUrl),
+        result.file.originalFilename,
+        fileRole,
+        result.file.fileFormat,
+        `capture:${result.capture.id}:${fileRole}`,
+      );
+    } catch (error) {
+      if (error instanceof GoogleDriveBackupError) {
+        logger.error({
+          err: error,
+          projectId,
+          studentId,
+          captureId: result.capture.id,
+          fileId: result.file.id,
+          fileRole,
+        }, "Google Drive capture backup failed");
+        res.status(503).json({
+          error: "Capture saved locally, but Google Drive backup failed. Retry the upload.",
+          code: "GOOGLE_DRIVE_BACKUP_FAILED",
+        });
+        return;
+      }
+      throw error;
+    }
 
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,

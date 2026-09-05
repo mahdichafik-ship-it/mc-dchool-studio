@@ -20,6 +20,7 @@ import type {
   CaptureUpdatedEvent,
   ActiveCaptureTargetEvent,
   CaptureExportMode,
+  CaptureExportLayout,
   CaptureExportResult,
   CaptureFileUploadStatusChangedEvent,
   ProjectSyncProgressEvent,
@@ -126,6 +127,7 @@ interface ElectronAPI {
     projectId: number
     destinationDir: string
     mode: CaptureExportMode
+    layout?: CaptureExportLayout
   }): Promise<CaptureExportResult>
   // Desktop updates
   invoke(channel: 'update:getState'): Promise<UpdateState>

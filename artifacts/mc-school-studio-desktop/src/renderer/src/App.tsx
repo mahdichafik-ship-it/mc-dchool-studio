@@ -16,10 +16,10 @@ function SignInScreen({ onSignIn, error, busy }: { onSignIn: () => void; error?:
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
       <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-sm p-8 text-center">
-        <div className="mx-auto mb-5 w-14 h-14 rounded-2xl bg-teal-600 flex items-center justify-center">
-          <span className="text-2xl">📷</span>
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-black">
+          <img src="./volume-capture-logo.png" alt="Volume Capture" className="h-full w-full object-cover" />
         </div>
-        <h1 className="text-2xl font-bold text-slate-900">Sign in to MC School Studio</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Sign in to Volume Capture</h1>
         <p className="mt-3 text-sm leading-6 text-slate-500">
           Sign in securely in your browser. Your studio projects and permissions will be loaded automatically.
         </p>
@@ -50,6 +50,9 @@ export default function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' })
   const [authBusy, setAuthBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  const [captureNotificationsEnabled, setCaptureNotificationsEnabled] = useState(
+    () => window.localStorage.getItem('capture-notifications-enabled') !== 'false',
+  )
 
   const loadAuth = useCallback(async () => {
     const result = await window.api.invoke('auth:getSession')
@@ -138,28 +141,36 @@ export default function App() {
   }, [])
 
   const handleMatched = useCallback((data: PhotoMatchedEvent) => {
+    if (!captureNotificationsEnabled) return
     if (data.preview) return
     addToast({
       type: 'success',
       title: `Photo matched: ${data.student.firstName} ${data.student.lastName}`,
       description: data.photo.fileName,
     })
-  }, [])
+  }, [captureNotificationsEnabled])
 
   const handleUnmatched = useCallback((data: PhotoUnmatchedEvent) => {
+    if (!captureNotificationsEnabled) return
     addToast({
       type: 'error',
       title: 'Photo could not be matched',
       description: data.reason,
     })
-  }, [])
+  }, [captureNotificationsEnabled])
 
   const handleMarker = useCallback((data: PhotoMarkerEvent) => {
+    if (!captureNotificationsEnabled) return
     addToast({
       type: 'info',
       title: `Now photographing: ${data.student.firstName} ${data.student.lastName}`,
       description: 'The next portraits will be assigned to this student until the next QR marker.',
     })
+  }, [captureNotificationsEnabled])
+
+  const changeCaptureNotifications = useCallback((enabled: boolean) => {
+    setCaptureNotificationsEnabled(enabled)
+    window.localStorage.setItem('capture-notifications-enabled', String(enabled))
   }, [])
 
   usePhotoEvents(handleMatched, handleUnmatched, handleMarker)
@@ -200,7 +211,14 @@ export default function App() {
           offline={auth.offline === true}
         />
       )}
-      {currentPage === 'settings' && <Settings member={auth.member} onSignedOut={() => setAuth({ status: 'signed-out', error: 'You have signed out of this desktop.' })} />}
+      {currentPage === 'settings' && (
+        <Settings
+          member={auth.member}
+          captureNotificationsEnabled={captureNotificationsEnabled}
+          onCaptureNotificationsChange={changeCaptureNotifications}
+          onSignedOut={() => setAuth({ status: 'signed-out', error: 'You have signed out of this desktop.' })}
+        />
+      )}
       <Toaster />
     </AppLayout>
   )

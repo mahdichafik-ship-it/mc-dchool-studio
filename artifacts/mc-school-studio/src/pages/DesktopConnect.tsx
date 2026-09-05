@@ -56,14 +56,14 @@ export default function DesktopConnect() {
           <>
             <h1 className="text-2xl font-bold text-slate-900">Desktop app connected</h1>
             <p className="mt-3 text-sm leading-6 text-slate-500">
-              You can close this browser tab and return to MC School Studio. The Mac app will finish signing in automatically.
+              You can close this browser tab and return to Volume Capture. The Mac app will finish signing in automatically.
             </p>
           </>
         ) : state === "signed-out" ? (
           <>
             <h1 className="text-2xl font-bold text-slate-900">Sign in to connect your Mac</h1>
             <p className="mt-3 text-sm leading-6 text-slate-500">
-              Use your normal MC School Studio account. The desktop app will only receive the studio access allowed for that account.
+              Use your normal Volume Capture account. The desktop app will only receive the studio access allowed for that account.
             </p>
             <a href={signInPath} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-700">
               Sign in securely

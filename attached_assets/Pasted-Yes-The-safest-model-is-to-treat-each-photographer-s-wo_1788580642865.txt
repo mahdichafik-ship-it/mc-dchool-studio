@@ -1,0 +1,175 @@
+Yes. The safest model is to treat each photographer’s work as a **capture batch inside one shared project**, instead of trying to merge two folders directly.
+
+## Recommended workflow
+
+### 1. Owner creates one project
+
+Example:
+
+> Oak Valley School — Photo Day 2026
+
+The project contains all classes, students, expected photos, and the canonical student IDs.
+
+### 2. Owner assigns classes to photographers
+
+For example:
+
+- Photographer A → Grade 1A, Grade 1B, Grade 2A
+- Photographer B → Grade 2B, Grade 3A, Grade 3B
+
+Each photographer sees only their assigned classes if they are an assistant or photographer. Owners and admins can see the full project.
+
+The existing project-assignment system is a good foundation for this.
+
+### 3. Each photographer works locally
+
+Each Mac keeps its own local capture data while offline or during the shoot.
+
+Every capture should carry:
+
+- Project ID
+- Student ID
+- Photographer/member ID
+- Desktop connection ID
+- Capture ID
+- Capture batch ID
+- JPEG/RAW type
+- Original filename
+- File hash
+
+This means two photographers can use similar filenames without overwriting each other.
+
+### 4. Photographer selects “Upload & Finish”
+
+Their Mac uploads the completed batch to the shared project.
+
+The server should not immediately mark the whole project complete. Instead, it records:
+
+- Photographer A: upload complete
+- Photographer B: still working
+- 42 of 50 assigned students captured
+- 38 JPEG/RAW pairs complete
+- 4 files waiting for retry
+
+Uploads remain retryable and idempotent.
+
+### 5. The project consolidates automatically
+
+Once uploaded, the captures are combined into the same project based on:
+
+```text
+projectId + studentId + captureId
+```
+
+Not just by filename.
+
+The project dashboard would then show a combined view:
+
+> **Oak Valley School — 82% complete**
+>
+> - 240 students expected
+> - 198 students photographed
+> - 185 complete JPEG/RAW pairs
+> - 9 JPEG-only captures
+> - 4 RAW-only captures
+> - 6 duplicate student captures
+> - Photographer A: 120 assigned, 112 complete
+> - Photographer B: 120 assigned, 86 complete
+
+## What happens when both photographers photograph the same student?
+
+The system should never silently overwrite one photo.
+
+Instead, it should create a duplicate review item:
+
+> Student: Sarah Johnson  
+> Captured by: Photographer A and Photographer B  
+> Status: Choose primary capture
+
+The owner can:
+
+- Select Photographer A’s capture
+- Select Photographer B’s capture
+- Keep both
+- Mark one as a retake
+- Compare JPEG previews
+- Keep the associated RAW file with the selected JPEG
+
+The original managed files remain untouched. The “primary” choice only controls which capture appears in the final student gallery or delivery set.
+
+## JPEG and RAW pairing
+
+Pair files inside each capture batch using the stable capture identity whenever possible.
+
+For example:
+
+```text
+captureId: cap_8f31
+JPEG: cap_8f31.jpg
+RAW: cap_8f31.CR3
+```
+
+If the camera does not provide a shared capture ID, use a fallback combination such as:
+
+- Photographer/device ID
+- Original filename stem
+- Capture timestamp
+- File hash
+- Student assignment
+
+This prevents Photographer A’s `IMG_0042.JPG` from being confused with Photographer B’s `IMG_0042.JPG`.
+
+## Owner-facing controls to add
+
+### Project collaboration panel
+
+On each project, add:
+
+- Assigned photographers
+- Assigned classes
+- Batch status per photographer
+- Last sync time
+- Upload progress
+- Failed files
+- Duplicate captures
+- Missing JPEG/RAW pairs
+- “Request retry”
+- “Mark photographer batch complete”
+
+### Consolidated project view
+
+Add filters for:
+
+- All captures
+- Photographer A
+- Photographer B
+- Missing students
+- Duplicate students
+- JPEG/RAW conflicts
+- Upload failures
+- Needs review
+
+### Project completion gate
+
+The owner should only be able to mark the project complete when:
+
+- All photographer batches are finished
+- Failed uploads are resolved or explicitly skipped
+- Duplicate captures are reviewed
+- Required JPEG/RAW pairs are complete
+- Missing students are acknowledged
+
+## Important design decision
+
+I would **not** require the photographers to manually combine folders on their Macs.
+
+The better model is:
+
+1. Each photographer captures locally.
+2. Each photographer uploads their own batch.
+3. The server consolidates captures into the shared project.
+4. The owner reviews conflicts from one place.
+
+That is safer, works offline, avoids filename collisions, and preserves a full audit trail.
+
+The next feature should be called **Collaborative Project Uploads** or **Multi-Photographer Project Consolidation**.

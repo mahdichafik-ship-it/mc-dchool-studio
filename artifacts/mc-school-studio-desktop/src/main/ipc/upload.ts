@@ -134,7 +134,13 @@ type DesktopProjectSummary = {
 type DesktopProjectBundle = {
   project: { id: number }
   classes: Array<{ id: number; className: string }>
-  students: Array<{ id: number; classId: number; generatedStudentId: string }>
+  students: Array<{
+    id: number
+    classId: number
+    generatedStudentId: string
+    simpleQr?: string | null
+    jsonQr?: string | null
+  }>
 }
 
 export function disableCloudSyncForRetirement(): void {
@@ -216,11 +222,45 @@ async function repairCloudIdentity(
     throw new Error(`Could not refresh student identity (HTTP ${bundleResponse.status}: ${text})`)
   }
   const bundle = await bundleResponse.json() as DesktopProjectBundle
-  const cloudStudent = bundle.students.find((candidate) =>
+  let cloudStudent = bundle.students.find((candidate) =>
     candidate.generatedStudentId.trim().toLocaleLowerCase()
       === student.generatedStudentId.trim().toLocaleLowerCase())
   if (!cloudStudent) {
-    throw new Error(`Student "${student.generatedStudentId}" was not found in the cloud project.`)
+    const localClass = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).get()
+    const cloudClass = bundle.classes.find((candidate) =>
+      candidate.id === localClass?.cloudId
+      || candidate.className.trim().toLocaleLowerCase()
+        === localClass?.className.trim().toLocaleLowerCase())
+    if (!localClass || !cloudClass) {
+      throw new Error(`The class for student "${student.generatedStudentId}" was not found in the cloud project.`)
+    }
+
+    const createResponse = await fetch(
+      `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProject.id}/students`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${connectionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          classId: cloudClass.id,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          generatedStudentId: student.generatedStudentId,
+        }),
+        signal: AbortSignal.timeout(30000),
+      },
+    )
+    if (!createResponse.ok) {
+      const text = await createResponse.text()
+      if (createResponse.status === 401) invalidateDesktopCredentials(true)
+      if (createResponse.status === 429 || createResponse.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${createResponse.status}: ${text}`)
+      }
+      throw new Error(`Could not add the student to the cloud project (HTTP ${createResponse.status}: ${text})`)
+    }
+    cloudStudent = await createResponse.json() as DesktopProjectBundle['students'][number]
   }
 
   db.transaction((tx) => {
@@ -252,7 +292,12 @@ async function repairCloudIdentity(
       .get()
     if (localStudent) {
       tx.update(studentsTable)
-        .set({ cloudId: cloudStudent.id })
+        .set({
+          cloudId: cloudStudent.id,
+          simpleQr: cloudStudent.simpleQr ?? localStudent.simpleQr,
+          jsonQr: cloudStudent.jsonQr ?? localStudent.jsonQr,
+          updatedAt: new Date().toISOString(),
+        })
         .where(eq(studentsTable.id, studentId))
         .run()
     }
@@ -277,6 +322,22 @@ async function ensureCloudIdentity(
     await repair
   } finally {
     cloudIdentityRepairs.delete(repairKey)
+  }
+}
+
+export async function syncStudentCloudIdentity(
+  projectId: number,
+  studentId: number,
+): Promise<{ synced: boolean; error?: string }> {
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!apiUrl || !connectionToken || !isCloudSessionVerified()) {
+    return { synced: false }
+  }
+  try {
+    await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken)
+    return { synced: true }
+  } catch (error) {
+    return { synced: false, error: error instanceof Error ? error.message : String(error) }
   }
 }
 

@@ -22,6 +22,7 @@ import { assignedDesktopProjectIds, canAccessDesktopProject } from "../lib/studi
 import { getStudioMember } from "../lib/studioAccess";
 import { getUserId, requireAuth } from "../lib/auth";
 import { isPlatformOwner } from "../lib/platformAccess";
+import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
@@ -528,6 +529,98 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
       createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt,
       updatedAt: s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
     })),
+  });
+});
+
+// POST /api/desktop/projects/:projectId/students — add a late/new student
+// from the capture workstation. The generated student ID is supplied by the
+// desktop so an offline-created record can be reconciled idempotently later.
+router.post("/projects/:projectId/students", requireDesktopConnection, async (req, res) => {
+  const connection = getDesktopConnection(req);
+  const rawProjectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId;
+  const projectId = parseInt(rawProjectId, 10);
+  const classId = Number(req.body?.classId);
+  const firstName = typeof req.body?.firstName === "string" ? req.body.firstName.trim() : "";
+  const lastName = typeof req.body?.lastName === "string" ? req.body.lastName.trim() : "";
+  const generatedStudentId = typeof req.body?.generatedStudentId === "string"
+    ? req.body.generatedStudentId.trim().toUpperCase()
+    : "";
+
+  if (
+    !Number.isInteger(projectId)
+    || !Number.isInteger(classId)
+    || !firstName
+    || !lastName
+    || firstName.length > 100
+    || lastName.length > 100
+    || !/^[A-Z0-9]{7}$/.test(generatedStudentId)
+  ) {
+    res.status(400).json({ error: "A class, first name, last name, and valid student code are required." });
+    return;
+  }
+
+  if (!(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  const [cls] = await db
+    .select()
+    .from(classesTable)
+    .where(and(eq(classesTable.id, classId), eq(classesTable.projectId, projectId)));
+  if (!project || !cls) {
+    res.status(400).json({ error: "Class not found in this project." });
+    return;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(studentsTable)
+    .where(and(
+      eq(studentsTable.projectId, projectId),
+      eq(studentsTable.generatedStudentId, generatedStudentId),
+    ));
+  if (existing) {
+    res.json({
+      id: existing.id,
+      classId: existing.classId,
+      className: cls.className,
+      firstName: existing.firstName,
+      lastName: existing.lastName,
+      generatedStudentId: existing.generatedStudentId,
+      simpleQr: existing.simpleQr,
+      jsonQr: existing.jsonQr,
+    });
+    return;
+  }
+
+  const [simpleQr, jsonQr] = await Promise.all([
+    generateSimpleQr(firstName, lastName, generatedStudentId),
+    generateJsonQr(project.schoolName, cls.className, firstName, lastName, generatedStudentId),
+  ]);
+  const [student] = await db
+    .insert(studentsTable)
+    .values({
+      projectId,
+      classId,
+      firstName,
+      lastName,
+      generatedStudentId,
+      simpleQr,
+      jsonQr,
+    })
+    .returning();
+
+  res.status(201).json({
+    id: student.id,
+    classId: student.classId,
+    className: cls.className,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    generatedStudentId: student.generatedStudentId,
+    simpleQr: student.simpleQr,
+    jsonQr: student.jsonQr,
   });
 });
 

@@ -42,6 +42,12 @@ export interface Student {
   updatedAt: string
 }
 
+export interface CreateStudentResult {
+  student: Student
+  cloudSynced: boolean
+  syncError?: string
+}
+
 export interface Photo {
   id: number
   projectId: number

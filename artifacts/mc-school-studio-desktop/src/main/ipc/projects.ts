@@ -1,10 +1,11 @@
 import { ipcMain } from 'electron'
 import { readFileSync, mkdirSync } from 'fs'
+import { randomBytes } from 'crypto'
 import { dirname, join } from 'path'
-import { eq, count } from 'drizzle-orm'
+import { eq, count, and } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
-import type { Project, Class, Student, ImportResult } from '../../shared/types'
+import type { Project, Class, Student, ImportResult, CreateStudentResult } from '../../shared/types'
 import { safeProjectFolderName } from '../lib/retirement'
 import {
   ensureProjectStorageLayout,
@@ -12,9 +13,51 @@ import {
   getProjectStorageLayout,
 } from '../lib/storageLayout'
 import { formatStudentFolderName } from '../lib/photoFileNaming'
+import { syncStudentCloudIdentity } from './upload'
 
 function now() {
   return new Date().toISOString()
+}
+
+function generateUniqueLocalStudentId(projectId: number): string {
+  const db = getDb()
+  const existing = new Set(
+    db.select({ id: studentsTable.generatedStudentId })
+      .from(studentsTable)
+      .where(eq(studentsTable.projectId, projectId))
+      .all()
+      .map((row) => row.id.toUpperCase()),
+  )
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const candidate = randomBytes(8)
+      .toString('base64url')
+      .replace(/[^A-Z0-9]/gi, '')
+      .slice(0, 7)
+      .toUpperCase()
+    if (candidate.length === 7 && !existing.has(candidate)) return candidate
+  }
+  throw new Error('Could not generate a unique student code.')
+}
+
+function toStudent(
+  student: typeof studentsTable.$inferSelect,
+  className: string,
+  photoCount = 0,
+): Student {
+  return {
+    id: student.id,
+    projectId: student.projectId,
+    classId: student.classId,
+    className,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    generatedStudentId: student.generatedStudentId,
+    simpleQr: student.simpleQr,
+    jsonQr: student.jsonQr,
+    photoCount,
+    createdAt: student.createdAt,
+    updatedAt: student.updatedAt,
+  }
 }
 
 function enrichProject(
@@ -252,6 +295,51 @@ export function registerProjectHandlers() {
 
   // Students
   ipcMain.handle(
+    'students:create',
+    async (
+      _e,
+      input: { projectId: number; classId: number; firstName: string; lastName: string },
+    ): Promise<CreateStudentResult> => {
+      const firstName = input.firstName.trim()
+      const lastName = input.lastName.trim()
+      if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) {
+        throw new Error('Enter a first and last name (maximum 100 characters each).')
+      }
+
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      if (project.finishedAt) throw new Error('This project is finished and its roster can no longer be changed.')
+
+      const cls = db
+        .select()
+        .from(classesTable)
+        .where(and(eq(classesTable.id, input.classId), eq(classesTable.projectId, input.projectId)))
+        .get()
+      if (!cls) throw new Error('Choose a class from this project.')
+
+      const timestamp = now()
+      const student = db.insert(studentsTable).values({
+        projectId: input.projectId,
+        classId: input.classId,
+        firstName,
+        lastName,
+        generatedStudentId: generateUniqueLocalStudentId(input.projectId),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }).returning().get()
+
+      prepareProjectFolders(db, input.projectId)
+      const sync = await syncStudentCloudIdentity(input.projectId, student.id)
+      const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, student.id)).get() ?? student
+      return {
+        student: toStudent(refreshed, cls.className),
+        cloudSynced: sync.synced,
+        ...(sync.error ? { syncError: sync.error } : {}),
+      }
+    },
+  )
+
+  ipcMain.handle(
     'students:list',
     async (
       _e,
@@ -275,20 +363,7 @@ export function registerProjectHandlers() {
           .from(photosTable)
           .where(eq(photosTable.studentId, s.id))
           .all()
-        return {
-          id: s.id,
-          projectId: s.projectId,
-          classId: s.classId,
-          className: className ?? '',
-          firstName: s.firstName,
-          lastName: s.lastName,
-          generatedStudentId: s.generatedStudentId,
-          simpleQr: s.simpleQr,
-          jsonQr: s.jsonQr,
-          photoCount,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
-        }
+        return toStudent(s, className ?? '', photoCount)
       })
     },
   )

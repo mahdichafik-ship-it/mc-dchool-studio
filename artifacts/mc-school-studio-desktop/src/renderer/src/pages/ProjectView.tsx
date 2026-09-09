@@ -20,10 +20,12 @@ import {
   RefreshCw,
   Star,
   Check,
+  Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   useProject,
@@ -53,6 +55,7 @@ import type {
   CaptureExportMode,
   CaptureExportLayout,
   ProjectSyncProgressEvent,
+  CreateStudentResult,
 } from '@/hooks/useApi'
 
 interface Props {
@@ -74,7 +77,7 @@ const captureFilterOptions: Array<{ value: CaptureFilter; label: string }> = [
 export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
   const { data: captureSummary } = useCaptureSummary(projectId)
-  const { data: classes } = useClasses(projectId)
+  const { data: classes, reload: reloadClasses } = useClasses(projectId)
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const {
@@ -91,6 +94,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   } = useActiveCaptureTarget(projectId)
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
   const [search, setSearch] = useState('')
+  const [addStudentOpen, setAddStudentOpen] = useState(false)
   const [settingFolder, setSettingFolder] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
@@ -175,6 +179,32 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         description: String(error),
       })
     }
+  }
+
+  async function handleStudentCreated(result: CreateStudentResult) {
+    await Promise.all([reloadStudents(), reloadClasses(), reloadProject()])
+    setSelectedClassId(result.student.classId)
+    setSelectedStudent(result.student)
+    let selectedForCapture = false
+    try {
+      await setActiveCaptureTarget(result.student.id)
+      selectedForCapture = true
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Student added, but not selected for capture',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+    addToast({
+      type: 'success',
+      title: `${result.student.firstName} ${result.student.lastName} added`,
+      description: [
+        result.student.className,
+        result.cloudSynced ? 'synced to cloud' : 'saved locally; cloud sync will retry during Upload & Finish',
+        selectedForCapture ? 'selected for capture' : null,
+      ].filter(Boolean).join(' · '),
+    })
   }
 
   async function handleSetWatchFolder() {
@@ -494,15 +524,27 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
           {/* Search */}
           <div className="px-3 py-2 border-b border-slate-100">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2 size-3.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search students…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md bg-slate-50 focus:outline-none focus:ring-1 focus:ring-teal-500"
-              />
+            <div className="flex gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute left-2.5 top-2 size-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search students…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md bg-slate-50 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddStudentOpen(true)}
+                disabled={classes.length === 0 || Boolean(project?.finishedAt)}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md bg-teal-600 text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
+                title={project?.finishedAt ? 'This project is finished' : 'Add student'}
+                aria-label="Add student"
+              >
+                <Plus className="size-4" />
+              </button>
             </div>
           </div>
 
@@ -597,7 +639,130 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           }}
         />
       )}
+      <AddStudentDialog
+        open={addStudentOpen}
+        projectId={projectId}
+        classes={classes}
+        initialClassId={selectedClassId}
+        onClose={() => setAddStudentOpen(false)}
+        onCreated={handleStudentCreated}
+      />
     </div>
+  )
+}
+
+function AddStudentDialog({
+  open,
+  projectId,
+  classes,
+  initialClassId,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  projectId: number
+  classes: Class[]
+  initialClassId: number | null
+  onClose: () => void
+  onCreated: (result: CreateStudentResult) => Promise<void>
+}) {
+  const [classId, setClassId] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setClassId(String(initialClassId ?? classes[0]?.id ?? ''))
+    setFirstName('')
+    setLastName('')
+  }, [classes, initialClassId, open])
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    if (saving) return
+    setSaving(true)
+    try {
+      const result = await window.api.invoke('students:create', {
+        projectId,
+        classId: Number(classId),
+        firstName,
+        lastName,
+      }) as CreateStudentResult
+      await onCreated(result)
+      onClose()
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not add student',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Add student to class">
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div>
+          <label htmlFor="new-student-class" className="mb-1.5 block text-sm font-medium text-slate-700">
+            Class
+          </label>
+          <select
+            id="new-student-class"
+            value={classId}
+            onChange={(event) => setClassId(event.target.value)}
+            className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            required
+          >
+            {classes.map((cls) => (
+              <option key={cls.id} value={cls.id}>{cls.className}</option>
+            ))}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="new-student-first-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+              First name
+            </label>
+            <Input
+              id="new-student-first-name"
+              value={firstName}
+              onChange={(event) => setFirstName(event.target.value)}
+              maxLength={100}
+              autoFocus
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="new-student-last-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+              Last name
+            </label>
+            <Input
+              id="new-student-last-name"
+              value={lastName}
+              onChange={(event) => setLastName(event.target.value)}
+              maxLength={100}
+              required
+            />
+          </div>
+        </div>
+        <p className="text-xs leading-5 text-slate-500">
+          The student is saved on this Mac immediately and selected as the active capture target.
+          If you are offline, Volume Capture will add them to the cloud during Upload & Finish.
+        </p>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving || !classId || !firstName.trim() || !lastName.trim()}>
+            {saving ? <Loader className="size-4 animate-spin" /> : <Plus className="size-4" />}
+            {saving ? 'Adding…' : 'Add student'}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 

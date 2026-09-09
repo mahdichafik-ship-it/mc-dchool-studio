@@ -25,6 +25,7 @@ import type {
   ProjectUploadStatusRow,
   ActiveCaptureTargetEvent,
   ImagePipelineRendererStage,
+  CreateStudentResult,
 } from '../../../shared/types'
 import { mergeMatchedPhoto } from '../lib/captureEventReconciliation'
 
@@ -55,6 +56,7 @@ export type {
   ProjectUploadStatusRow,
   ActiveCaptureTargetEvent,
   ImagePipelineRendererStage,
+  CreateStudentResult,
 }
 
 const api = window.api

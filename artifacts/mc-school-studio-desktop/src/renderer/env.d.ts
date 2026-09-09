@@ -24,6 +24,7 @@ import type {
   CaptureExportResult,
   CaptureFileUploadStatusChangedEvent,
   ProjectSyncProgressEvent,
+  CreateStudentResult,
 } from '../shared/types'
 
 interface UploadConfig {
@@ -86,6 +87,12 @@ interface ElectronAPI {
   invoke(channel: 'projects:setWatchFolder', args: { projectId: number; folderPath: string }): Promise<void>
   invoke(channel: 'classes:list', args: { projectId: number }): Promise<Class[]>
   invoke(channel: 'students:list', args: { projectId: number; classId?: number }): Promise<Student[]>
+  invoke(channel: 'students:create', args: {
+    projectId: number
+    classId: number
+    firstName: string
+    lastName: string
+  }): Promise<CreateStudentResult>
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
   invoke(channel: 'captures:list', args: { studentId: number }): Promise<StudentCaptureReview>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>

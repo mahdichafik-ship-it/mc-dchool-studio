@@ -18,6 +18,8 @@ tags:
     description: Class management within a project
   - name: students
     description: Student management within a project
+  - name: groups
+    description: Editable photo groups and memberships
   - name: import
     description: Student list import operations
   - name: export
@@ -313,6 +315,117 @@ paths:
         "401":
           description: Unauthorized
 
+  /projects/{projectId}/groups:
+    get:
+      operationId: listGroups
+      tags: [groups]
+      summary: List photo groups and members
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Group" }
+    post:
+      operationId: createGroup
+      tags: [groups]
+      summary: Create a photo group
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupInput" }
+      responses:
+        "201":
+          description: Created group
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+
+  /projects/{projectId}/groups/{groupId}:
+    patch:
+      operationId: updateGroup
+      tags: [groups]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: groupId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupPatch" }
+      responses:
+        "200":
+          description: Updated group
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+    delete:
+      operationId: deleteGroup
+      tags: [groups]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /projects/{projectId}/groups/{groupId}/members:
+    put:
+      operationId: replaceGroupMembers
+      tags: [groups]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupMembersInput" }
+      responses:
+        "200": { description: Members replaced }
+    post:
+      operationId: addGroupMembers
+      tags: [groups]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupMembersInput" }
+      responses:
+        "200": { description: Members added }
+    delete:
+      operationId: removeGroupMembers
+      tags: [groups]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupMembersInput" }
+      responses:
+        "200": { description: Members removed }
   /projects/{projectId}/students/{studentId}:
     patch:
       operationId: updateStudent
@@ -995,6 +1108,49 @@ components:
         csvClassName:
           type: string
           description: Required only for CSV files — the class name to assign
+
+    Group:
+      type: object
+      required: [id, projectId, name, isDefaultClassGroup, members, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        classId: { type: [integer, "null"] }
+        name: { type: string }
+        isDefaultClassGroup: { type: boolean }
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              groupId: { type: integer }
+              studentId: { type: integer }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+
+    GroupInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        classId: { type: [integer, "null"] }
+        isDefaultClassGroup: { type: boolean }
+
+    GroupPatch:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        classId: { type: [integer, "null"] }
+        isDefaultClassGroup: { type: boolean }
+
+    GroupMembersInput:
+      type: object
+      required: [studentIds]
+      properties:
+        studentIds:
+          type: array
+          items: { type: integer }
 
     Studio:
       type: object

@@ -10,6 +10,7 @@ import {
   getProjectSyncJobCount,
   isCloudSessionVerified,
   syncProjectUploads,
+  syncGroupCloudIdentities,
 } from './upload'
 import type { ProjectSyncProgressEvent, ProjectSyncResult } from '../../shared/types'
 
@@ -61,6 +62,10 @@ export function registerProjectSyncHandlers(): void {
         // Stop accepting new files first, then finish processing anything
         // already detected in the native Watch Folder queue.
         await stopProjectWatcher(projectId, { drain: true, clearTarget: true })
+        // Group captures use a separate cloud identity contract. Reconcile
+        // every group before counting or uploading files so no group is
+        // silently skipped.
+        await syncGroupCloudIdentities(projectId)
 
         emitProgress({
           projectId,

@@ -12,6 +12,7 @@ import {
   projectsTable,
   qrMarkersTable,
   studentsTable,
+  groupsTable,
 } from '../db/schema'
 import { getSetting } from './upload'
 import {
@@ -59,6 +60,7 @@ import {
   mirrorPhotoAsCapture,
   recordQrMarker,
   recordRawCapture,
+  recordGroupCapture,
 } from '../lib/captureRepository'
 import { getCaptureFileRole } from '../lib/capturePairing'
 import {
@@ -86,6 +88,7 @@ interface WatchSession {
 // Active watchers: projectId → watcher session
 const watchers = new Map<number, WatchSession>()
 const pendingManualTargets = new Map<number, number>()
+const pendingGroupTargets = new Map<number, number>()
 let desktopRetiring = false
 
 export async function stopAllWatchersForRetirement(): Promise<void> {
@@ -492,16 +495,53 @@ export function registerWatcherHandlers() {
         const student = findProjectStudent(db, projectId, studentId)
         if (!student) throw new Error('Student does not belong to this project')
         pendingManualTargets.set(projectId, studentId)
+        pendingGroupTargets.delete(projectId)
         const session = watchers.get(projectId)
         if (session) setManualStudent(session.sequenceState, studentId)
       } else {
         pendingManualTargets.delete(projectId)
+        pendingGroupTargets.delete(projectId)
         const session = watchers.get(projectId)
         if (session) clearManualStudent(session.sequenceState)
       }
 
       emitActiveStudentChanged(projectId, studentId, studentId === null ? 'none' : 'manual')
       return studentId
+    },
+  )
+
+  ipcMain.handle(
+    'watcher:getActiveTarget',
+    (_e, { projectId }: { projectId: number }) => ({
+      studentId: pendingGroupTargets.has(projectId)
+        ? null
+        : watchers.get(projectId)?.sequenceState.activeStudentId ?? pendingManualTargets.get(projectId) ?? null,
+      groupId: pendingGroupTargets.get(projectId) ?? null,
+      targetType: pendingGroupTargets.has(projectId)
+        ? 'group'
+        : (pendingManualTargets.has(projectId) ? 'student' : 'none'),
+    }),
+  )
+
+  ipcMain.handle(
+    'watcher:setActiveGroup',
+    (_e, { projectId, groupId }: { projectId: number; groupId: number | null }): number | null => {
+      if (groupId !== null) {
+        const group = db.select().from(groupsTable).where(and(
+          eq(groupsTable.id, groupId), eq(groupsTable.projectId, projectId),
+        )).get()
+        if (!group) throw new Error('Group does not belong to this project')
+        pendingGroupTargets.set(projectId, groupId)
+        pendingManualTargets.delete(projectId)
+        const session = watchers.get(projectId)
+        if (session) clearManualStudent(session.sequenceState)
+      } else {
+        pendingGroupTargets.delete(projectId)
+      }
+      getMainWindow()?.webContents.send('watcher:activeStudentChanged', {
+        projectId, studentId: null, groupId, targetType: groupId === null ? 'none' : 'group', source: groupId === null ? 'none' : 'manual',
+      })
+      return groupId
     },
   )
 }
@@ -515,6 +555,7 @@ export async function stopProjectWatcher(
   if (!session) {
     if (clearTarget) {
       pendingManualTargets.delete(projectId)
+      pendingGroupTargets.delete(projectId)
       emitActiveStudentChanged(projectId, null, 'none')
     }
     return
@@ -592,6 +633,7 @@ async function enqueueCapture(
       // that delay.
       selectedStudentId: session.sequenceState.manualStudentId
         ?? session.sequenceState.activeStudentId,
+      selectedGroupId: pendingGroupTargets.get(projectId) ?? null,
     })
     scheduleFlush(projectId)
   } catch (error) {
@@ -653,6 +695,32 @@ async function handleNewPhoto(
     || hasProcessedCaptureSource(db, capture.filePath)
     || hasProcessedQrMarkerSource(db, capture.filePath)
   ) return
+
+  // Group targets deliberately bypass student matching/QR sequencing. Both
+  // JPEG and RAW files use the same repository pairing key and remain local
+  // until the explicit project upload boundary.
+  if (capture.selectedGroupId !== null && capture.selectedGroupId !== undefined) {
+    const group = db.select().from(groupsTable).where(and(
+      eq(groupsTable.id, capture.selectedGroupId), eq(groupsTable.projectId, projectId),
+    )).get()
+    if (!group) throw new Error('Active capture group no longer exists')
+    const classRow = group.classId === null
+      ? undefined
+      : db.select().from(classesTable).where(eq(classesTable.id, group.classId)).get()
+    const destination = join(
+      getPhotosDir(), safeFolderName(project.schoolName),
+      safeFolderName(classRow?.className ?? 'Unassigned Class'), safeFolderName(group.name),
+    )
+    mkdirSync(destination, { recursive: true })
+    const storedPath = join(destination, capture.fileName)
+    await copyFile(capture.filePath, storedPath)
+    recordGroupCapture(db, {
+      projectId, studentId: null, classId: group.classId, groupId: String(group.id),
+      filePath: capture.filePath, storedPath, fileName: capture.fileName,
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+    })
+    return
+  }
 
   if (role === 'RAW') {
     await handleNewRaw(projectId, capture, session, db)

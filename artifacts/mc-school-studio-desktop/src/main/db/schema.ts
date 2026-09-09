@@ -47,6 +47,56 @@ export const studentsTable = sqliteTable('students', {
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })
 
+/** Editable photographer groups. A default group is created for each class. */
+export const groupsTable = sqliteTable('groups', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  cloudId: integer('cloud_id'),
+  projectId: integer('project_id').notNull().references(() => projectsTable.id, { onDelete: 'cascade' }),
+  classId: integer('class_id').references(() => classesTable.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  isDefaultClassGroup: integer('is_default_class_group', { mode: 'boolean' }).notNull().default(false),
+  membershipDirty: integer('membership_dirty', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull().default(new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
+})
+
+export const groupMembersTable = sqliteTable('group_members', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  groupId: integer('group_id').notNull().references(() => groupsTable.id, { onDelete: 'cascade' }),
+  studentId: integer('student_id').notNull().references(() => studentsTable.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').notNull().default(new Date().toISOString()),
+})
+
+// Kept separate from the legacy captures model for forward-compatible group
+// review/upload APIs. The existing captures.group_id remains a compatibility
+// column and is intentionally not removed.
+export const groupCapturesTable = sqliteTable('group_captures', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  captureKey: text('capture_key').notNull().unique(),
+  projectId: integer('project_id').notNull().references(() => projectsTable.id, { onDelete: 'cascade' }),
+  classId: integer('class_id').references(() => classesTable.id, { onDelete: 'set null' }),
+  groupId: integer('group_id').notNull().references(() => groupsTable.id, { onDelete: 'cascade' }),
+  baseFilename: text('base_filename').notNull(),
+  capturedAt: text('captured_at').notNull(),
+  pairingStatus: text('pairing_status').notNull().default('pending'),
+  createdAt: text('created_at').notNull().default(new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
+})
+
+export const groupCaptureFilesTable = sqliteTable('group_capture_files', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  captureId: integer('capture_id').notNull().references(() => groupCapturesTable.id, { onDelete: 'cascade' }),
+  fileRole: text('file_role').$type<'JPEG' | 'RAW'>().notNull(),
+  fileFormat: text('file_format').notNull(),
+  originalFilename: text('original_filename').notNull(),
+  storedPath: text('stored_path').notNull(),
+  sourcePath: text('source_path'),
+  fileSize: integer('file_size'),
+  uploadStatus: text('upload_status').$type<'pending' | 'uploading' | 'done' | 'error' | null>(),
+  fileUrl: text('file_url'),
+  createdAt: text('created_at').notNull().default(new Date().toISOString()),
+})
+
 export const photosTable = sqliteTable('photos', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   projectId: integer('project_id')

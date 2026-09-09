@@ -7,6 +7,7 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { generateUniqueStudentId } from "../lib/studentId";
 import { canAccessProject } from "../lib/studioAccess";
+import { reconcileDefaultGroups } from "../lib/groupReconciliation";
 
 const router = Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -172,6 +173,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
     .update(projectsTable)
     .set({ updatedAt: new Date() })
     .where(eq(projectsTable.id, projectId));
+  await reconcileDefaultGroups(projectId);
 
   res.json({ classesCreated, studentsCreated });
 });

@@ -6,6 +6,7 @@ import { requireAuth, getUserId } from "../lib/auth";
 import { generateUniqueStudentId } from "../lib/studentId";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { canAccessProject } from "../lib/studioAccess";
+import { reconcileDefaultGroups } from "../lib/groupReconciliation";
 
 const router = Router({ mergeParams: true });
 
@@ -112,6 +113,7 @@ router.post("/", requireAuth, async (req, res) => {
     .returning();
 
   res.status(201).json(formatStudent(student, cls.className));
+  await reconcileDefaultGroups(projectId);
 });
 
 // PATCH /api/projects/:projectId/students/:studentId

@@ -196,6 +196,44 @@ export interface ImportFileForm {
   csvClassName?: string;
 }
 
+export type GroupMembersItem = {
+  id?: number;
+  groupId?: number;
+  studentId?: number;
+};
+
+export interface Group {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  classId?: number | null;
+  name: string;
+  isDefaultClassGroup: boolean;
+  members: GroupMembersItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupInput {
+  /** @minLength 1 */
+  name: string;
+  /** @nullable */
+  classId?: number | null;
+  isDefaultClassGroup?: boolean;
+}
+
+export interface GroupPatch {
+  /** @minLength 1 */
+  name?: string;
+  /** @nullable */
+  classId?: number | null;
+  isDefaultClassGroup?: boolean;
+}
+
+export interface GroupMembersInput {
+  studentIds: number[];
+}
+
 export interface Studio {
   id: number;
   name: string;

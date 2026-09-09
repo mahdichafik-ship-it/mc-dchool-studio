@@ -1,9 +1,9 @@
 import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { copyFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { and, eq, count, or } from 'drizzle-orm'
+import { and, eq, count, or, isNull } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable } from '../db/schema'
+import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
@@ -55,6 +55,19 @@ function rowToCaptureFile(row: typeof imageFilesTable.$inferSelect) {
   }
 }
 
+function rowToGroupCaptureFile(row: typeof groupCaptureFilesTable.$inferSelect) {
+  return {
+    id: row.id,
+    fileRole: row.fileRole,
+    fileFormat: row.fileFormat,
+    originalFilename: row.originalFilename,
+    storedPath: row.storedPath,
+    fileSize: row.fileSize,
+    uploadStatus: row.uploadStatus,
+    fileUrl: row.fileUrl,
+  }
+}
+
 function getCaptureSummary(rows: Array<typeof capturesTable.$inferSelect>): CaptureCompletenessSummary {
   return rows.reduce<CaptureCompletenessSummary>(
     (summary, capture) => {
@@ -71,6 +84,24 @@ function getCaptureSummary(rows: Array<typeof capturesTable.$inferSelect>): Capt
 
 export function registerPhotoHandlers() {
   const db = getDb()
+
+  ipcMain.handle('groupCaptures:list', async (_e, { projectId, groupId }: { projectId: number; groupId: number }) => {
+    const rows = db.select().from(groupCapturesTable)
+      .where(and(eq(groupCapturesTable.projectId, projectId), eq(groupCapturesTable.groupId, groupId)))
+      .all()
+    return rows.map((row) => ({
+      id: row.id,
+      projectId: row.projectId,
+      groupId: row.groupId,
+      baseFilename: row.baseFilename,
+      capturedAt: row.capturedAt,
+      pairingStatus: row.pairingStatus,
+      files: db.select().from(groupCaptureFilesTable)
+        .where(eq(groupCaptureFilesTable.captureId, row.id)).all().map(rowToGroupCaptureFile),
+    }))
+  })
+  ipcMain.handle('groupCaptures:summary', async (_e, { projectId }: { projectId: number }) =>
+    db.select().from(groupCapturesTable).where(eq(groupCapturesTable.projectId, projectId)).all().length)
 
   ipcMain.handle('photos:list', async (_e, { studentId }: { studentId: number }): Promise<Photo[]> => {
     const rows = db
@@ -112,7 +143,7 @@ export function registerPhotoHandlers() {
         .from(capturesTable)
         .leftJoin(photosTable, eq(capturesTable.legacyPhotoId, photosTable.id))
         .where(or(
-          eq(capturesTable.studentId, studentId),
+          and(isNull(capturesTable.groupId), eq(capturesTable.studentId, studentId)),
           eq(photosTable.studentId, studentId),
         ))
         .orderBy(capturesTable.capturedAt)
@@ -197,7 +228,7 @@ export function registerPhotoHandlers() {
       const rows = db
         .select()
         .from(capturesTable)
-        .where(eq(capturesTable.projectId, projectId))
+        .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
         .all()
       return getCaptureSummary(rows)
     },

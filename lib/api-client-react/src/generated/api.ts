@@ -28,6 +28,10 @@ import type {
   DashboardStats,
   GenerateQrRequest,
   GenerateQrResult,
+  Group,
+  GroupInput,
+  GroupMembersInput,
+  GroupPatch,
   HealthStatus,
   ImportConfirmation,
   ImportFileForm,
@@ -1042,6 +1046,494 @@ export const useCreateStudent = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getCreateStudentMutationOptions(options));
+    }
+
+export const getListGroupsUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/groups`
+}
+
+/**
+ * @summary List photo groups and members
+ */
+export const listGroups = async (projectId: number, options?: RequestInit): Promise<Group[]> => {
+
+  return customFetch<Group[]>(getListGroupsUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGroupsQueryKey = (projectId: number,) => {
+    return [
+    `/api/projects/${projectId}/groups`
+    ] as const;
+    }
+
+
+export const getListGroupsQueryOptions = <TData = Awaited<ReturnType<typeof listGroups>>, TError = ErrorType<unknown>>(projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGroups>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGroupsQueryKey(projectId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGroups>>> = ({ signal }) => listGroups(projectId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: projectId !== null && projectId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGroups>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGroupsQueryResult = NonNullable<Awaited<ReturnType<typeof listGroups>>>
+export type ListGroupsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List photo groups and members
+ */
+
+export function useListGroups<TData = Awaited<ReturnType<typeof listGroups>>, TError = ErrorType<unknown>>(
+ projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGroups>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGroupsQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateGroupUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/groups`
+}
+
+/**
+ * @summary Create a photo group
+ */
+export const createGroup = async (projectId: number,
+    groupInput: GroupInput, options?: RequestInit): Promise<Group> => {
+
+  return customFetch<Group>(getCreateGroupUrl(projectId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(groupInput)
+  }
+);}
+
+
+
+
+
+export const getCreateGroupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGroup>>, TError,{projectId: number;data: BodyType<GroupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createGroup>>, TError,{projectId: number;data: BodyType<GroupInput>}, TContext> => {
+
+const mutationKey = ['createGroup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createGroup>>, {projectId: number;data: BodyType<GroupInput>}> = (props) => {
+          const {projectId,data} = props ?? {};
+
+          return  createGroup(projectId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateGroupMutationResult = NonNullable<Awaited<ReturnType<typeof createGroup>>>
+    export type CreateGroupMutationBody = BodyType<GroupInput>
+    export type CreateGroupMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a photo group
+ */
+export const useCreateGroup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGroup>>, TError,{projectId: number;data: BodyType<GroupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createGroup>>,
+        TError,
+        {projectId: number;data: BodyType<GroupInput>},
+        TContext
+      > => {
+      return useMutation(getCreateGroupMutationOptions(options));
+    }
+
+export const getUpdateGroupUrl = (projectId: number,
+    groupId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/groups/${groupId}`
+}
+
+export const updateGroup = async (projectId: number,
+    groupId: number,
+    groupPatch?: GroupPatch, options?: RequestInit): Promise<Group> => {
+
+  return customFetch<Group>(getUpdateGroupUrl(projectId,groupId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(groupPatch)
+  }
+);}
+
+
+
+
+
+export const getUpdateGroupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGroup>>, TError,{projectId: number;groupId: number;data?: BodyType<GroupPatch>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateGroup>>, TError,{projectId: number;groupId: number;data?: BodyType<GroupPatch>}, TContext> => {
+
+const mutationKey = ['updateGroup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateGroup>>, {projectId: number;groupId: number;data?: BodyType<GroupPatch>}> = (props) => {
+          const {projectId,groupId,data} = props ?? {};
+
+          return  updateGroup(projectId,groupId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateGroupMutationResult = NonNullable<Awaited<ReturnType<typeof updateGroup>>>
+    export type UpdateGroupMutationBody = BodyType<GroupPatch> | undefined
+    export type UpdateGroupMutationError = ErrorType<unknown>
+
+    export const useUpdateGroup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGroup>>, TError,{projectId: number;groupId: number;data?: BodyType<GroupPatch>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateGroup>>,
+        TError,
+        {projectId: number;groupId: number;data?: BodyType<GroupPatch>},
+        TContext
+      > => {
+      return useMutation(getUpdateGroupMutationOptions(options));
+    }
+
+export const getDeleteGroupUrl = (projectId: number,
+    groupId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/groups/${groupId}`
+}
+
+export const deleteGroup = async (projectId: number,
+    groupId: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteGroupUrl(projectId,groupId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteGroupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGroup>>, TError,{projectId: number;groupId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteGroup>>, TError,{projectId: number;groupId: number}, TContext> => {
+
+const mutationKey = ['deleteGroup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteGroup>>, {projectId: number;groupId: number}> = (props) => {
+          const {projectId,groupId} = props ?? {};
+
+          return  deleteGroup(projectId,groupId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteGroupMutationResult = NonNullable<Awaited<ReturnType<typeof deleteGroup>>>
+
+    export type DeleteGroupMutationError = ErrorType<unknown>
+
+    export const useDeleteGroup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGroup>>, TError,{projectId: number;groupId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteGroup>>,
+        TError,
+        {projectId: number;groupId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteGroupMutationOptions(options));
+    }
+
+export const getReplaceGroupMembersUrl = (projectId: number,
+    groupId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/groups/${groupId}/members`
+}
+
+export const replaceGroupMembers = async (projectId: number,
+    groupId: number,
+    groupMembersInput: GroupMembersInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getReplaceGroupMembersUrl(projectId,groupId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(groupMembersInput)
+  }
+);}
+
+
+
+
+
+export const getReplaceGroupMembersMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof replaceGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext> => {
+
+const mutationKey = ['replaceGroupMembers'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceGroupMembers>>, {projectId: number;groupId: number;data: BodyType<GroupMembersInput>}> = (props) => {
+          const {projectId,groupId,data} = props ?? {};
+
+          return  replaceGroupMembers(projectId,groupId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceGroupMembersMutationResult = NonNullable<Awaited<ReturnType<typeof replaceGroupMembers>>>
+    export type ReplaceGroupMembersMutationBody = BodyType<GroupMembersInput>
+    export type ReplaceGroupMembersMutationError = ErrorType<unknown>
+
+    export const useReplaceGroupMembers = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof replaceGroupMembers>>,
+        TError,
+        {projectId: number;groupId: number;data: BodyType<GroupMembersInput>},
+        TContext
+      > => {
+      return useMutation(getReplaceGroupMembersMutationOptions(options));
+    }
+
+export const getAddGroupMembersUrl = (projectId: number,
+    groupId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/groups/${groupId}/members`
+}
+
+export const addGroupMembers = async (projectId: number,
+    groupId: number,
+    groupMembersInput: GroupMembersInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getAddGroupMembersUrl(projectId,groupId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(groupMembersInput)
+  }
+);}
+
+
+
+
+
+export const getAddGroupMembersMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof addGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext> => {
+
+const mutationKey = ['addGroupMembers'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addGroupMembers>>, {projectId: number;groupId: number;data: BodyType<GroupMembersInput>}> = (props) => {
+          const {projectId,groupId,data} = props ?? {};
+
+          return  addGroupMembers(projectId,groupId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddGroupMembersMutationResult = NonNullable<Awaited<ReturnType<typeof addGroupMembers>>>
+    export type AddGroupMembersMutationBody = BodyType<GroupMembersInput>
+    export type AddGroupMembersMutationError = ErrorType<unknown>
+
+    export const useAddGroupMembers = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof addGroupMembers>>,
+        TError,
+        {projectId: number;groupId: number;data: BodyType<GroupMembersInput>},
+        TContext
+      > => {
+      return useMutation(getAddGroupMembersMutationOptions(options));
+    }
+
+export const getRemoveGroupMembersUrl = (projectId: number,
+    groupId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/groups/${groupId}/members`
+}
+
+export const removeGroupMembers = async (projectId: number,
+    groupId: number,
+    groupMembersInput: GroupMembersInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getRemoveGroupMembersUrl(projectId,groupId),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(groupMembersInput)
+  }
+);}
+
+
+
+
+
+export const getRemoveGroupMembersMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext> => {
+
+const mutationKey = ['removeGroupMembers'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeGroupMembers>>, {projectId: number;groupId: number;data: BodyType<GroupMembersInput>}> = (props) => {
+          const {projectId,groupId,data} = props ?? {};
+
+          return  removeGroupMembers(projectId,groupId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveGroupMembersMutationResult = NonNullable<Awaited<ReturnType<typeof removeGroupMembers>>>
+    export type RemoveGroupMembersMutationBody = BodyType<GroupMembersInput>
+    export type RemoveGroupMembersMutationError = ErrorType<unknown>
+
+    export const useRemoveGroupMembers = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeGroupMembers>>, TError,{projectId: number;groupId: number;data: BodyType<GroupMembersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeGroupMembers>>,
+        TError,
+        {projectId: number;groupId: number;data: BodyType<GroupMembersInput>},
+        TContext
+      > => {
+      return useMutation(getRemoveGroupMembersMutationOptions(options));
     }
 
 export const getUpdateStudentUrl = (projectId: number,

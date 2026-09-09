@@ -25,6 +25,8 @@ import type {
   CaptureFileUploadStatusChangedEvent,
   ProjectSyncProgressEvent,
   CreateStudentResult,
+  StudentGroup,
+  GroupCaptureReview,
 } from '../shared/types'
 
 interface UploadConfig {
@@ -93,6 +95,12 @@ interface ElectronAPI {
     firstName: string
     lastName: string
   }): Promise<CreateStudentResult>
+  invoke(channel: 'groups:list', args: { projectId: number; classId?: number }): Promise<StudentGroup[]>
+  invoke(channel: 'groups:create', args: { projectId: number; classId?: number | null; name: string; memberStudentIds?: number[] }): Promise<StudentGroup>
+  invoke(channel: 'groups:update', args: { projectId: number; groupId: number; name?: string; memberStudentIds?: number[] }): Promise<StudentGroup>
+  invoke(channel: 'groups:delete', args: { projectId: number; groupId: number }): Promise<void>
+  invoke(channel: 'groupCaptures:list', args: { projectId: number; groupId: number }): Promise<GroupCaptureReview[]>
+  invoke(channel: 'groupCaptures:summary', args: { projectId: number }): Promise<number>
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
   invoke(channel: 'captures:list', args: { studentId: number }): Promise<StudentCaptureReview>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>
@@ -112,6 +120,8 @@ interface ElectronAPI {
   invoke(channel: 'watcher:isRunning', args: { projectId: number }): Promise<boolean>
   invoke(channel: 'watcher:getActiveStudent', args: { projectId: number }): Promise<number | null>
   invoke(channel: 'watcher:setActiveStudent', args: { projectId: number; studentId: number | null }): Promise<number | null>
+  invoke(channel: 'watcher:getActiveTarget', args: { projectId: number }): Promise<{ studentId: number | null; groupId: number | null; targetType: 'student' | 'group' | 'none' }>
+  invoke(channel: 'watcher:setActiveGroup', args: { projectId: number; groupId: number | null }): Promise<number | null>
   invoke(channel: 'dialog:openFile', args?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>
@@ -127,6 +137,7 @@ interface ElectronAPI {
   invoke(channel: 'auth:signOut'): Promise<{ ok: boolean }>
   invoke(channel: 'upload:retry', args: { photoId: number }): Promise<UploadResult>
   invoke(channel: 'upload:retryFile', args: { fileId: number }): Promise<UploadResult>
+  invoke(channel: 'upload:retryGroupFile', args: { fileId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
   invoke(channel: 'project:uploadAndFinish', args: { projectId: number }): Promise<import('../shared/types').ProjectSyncResult>

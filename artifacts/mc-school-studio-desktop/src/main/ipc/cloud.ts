@@ -7,8 +7,8 @@
 import { ipcMain } from 'electron'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
-import { projectsTable, classesTable, studentsTable } from '../db/schema'
-import { prepareProjectFolders } from './projects'
+import { projectsTable, classesTable, studentsTable, groupsTable, groupMembersTable, settingsTable } from '../db/schema'
+import { prepareProjectFolders, reconcileDefaultGroups } from './projects'
 import {
   getUploadConfig,
   getSetting,
@@ -18,6 +18,7 @@ import {
   markCloudSessionVerified,
 } from './upload'
 import { WorkBarrier } from '../lib/workBarrier'
+import { serializeDefaultGroupRosterSnapshot } from '../lib/groupRoster'
 
 function now() {
   return new Date().toISOString()
@@ -125,6 +126,8 @@ export function registerCloudHandlers() {
             email?: string | null; phone?: string | null
             simpleQr?: string | null; jsonQr?: string | null
           }[]
+          groups?: { id: number; projectId?: number; classId?: number | null; name: string; isDefaultClassGroup?: boolean; memberStudentIds?: number[] }[]
+          groupMembers?: { groupId: number; studentId: number }[]
         }
         markCloudSessionVerified()
 
@@ -223,10 +226,74 @@ export function registerCloudHandlers() {
             studentsImported++
           }
 
-          return { projectId: localProject.id, classesImported: classes.length, studentsImported }
+           const localGroups = tx.select().from(groupsTable).where(eq(groupsTable.projectId, localProject.id)).all()
+           const localStudentRows = tx.select().from(studentsTable).where(eq(studentsTable.projectId, localProject.id)).all()
+           for (const cloudGroup of bundle.groups ?? []) {
+             const localClassId = cloudGroup.classId == null
+               ? null
+               : classIdMap.get(cloudGroup.classId) ?? null
+             const existingGroup = localGroups.find((row) => row.cloudId === cloudGroup.id)
+               ?? localGroups.find((row) => row.name === cloudGroup.name && row.classId === localClassId)
+              const keepLocalEdits = Boolean(existingGroup?.membershipDirty)
+              const localGroup = keepLocalEdits ? existingGroup! : existingGroup
+               ? tx.update(groupsTable).set({
+                 cloudId: cloudGroup.id,
+                 name: cloudGroup.name,
+                 classId: localClassId,
+                 isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup),
+                 updatedAt: now(),
+               }).where(eq(groupsTable.id, existingGroup.id)).returning().get()
+               : tx.insert(groupsTable).values({
+                 cloudId: cloudGroup.id,
+                 projectId: localProject.id,
+                 classId: localClassId,
+                 name: cloudGroup.name,
+                 isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup),
+               }).returning().get()
+              // A local group with pending edits is authoritative until the
+              // photographer explicitly uploads it; cloud pulls must not
+              // overwrite its name or membership.
+              // In particular, preserve a dirty default group's prior roster
+              // snapshot. reconcileDefaultGroups runs after this transaction
+              // and uses that old snapshot to recognize cloud-late students
+              // without restoring prior manual removals.
+              if (keepLocalEdits) continue
+             const memberIds = [
+               ...(cloudGroup.memberStudentIds ?? []).map((studentId) => ({ groupId: cloudGroup.id, studentId })),
+               ...(bundle.groupMembers ?? []),
+             ]
+               .filter((member) => member.groupId === cloudGroup.id)
+               .map((member) => localStudentRows.find((student) => student.cloudId === member.studentId)?.id)
+               .filter((id): id is number => id !== undefined)
+              if (cloudGroup.memberStudentIds || bundle.groupMembers) {
+               tx.delete(groupMembersTable).where(eq(groupMembersTable.groupId, localGroup.id)).run()
+             }
+             if (memberIds.length > 0) {
+               for (const studentId of memberIds) {
+                 tx.insert(groupMembersTable).values({ groupId: localGroup.id, studentId }).onConflictDoNothing().run()
+               }
+             }
+              if (localGroup.isDefaultClassGroup && localGroup.classId !== null) {
+                const fullClassRoster = localStudentRows
+                  .filter((student) => student.classId === localGroup.classId)
+                  .map((student) => student.id)
+                tx.insert(settingsTable)
+                  .values({
+                    key: `default_group_initialized:${localGroup.id}`,
+                    value: serializeDefaultGroupRosterSnapshot(fullClassRoster),
+                  })
+                  .onConflictDoUpdate({
+                    target: settingsTable.key,
+                    set: { value: serializeDefaultGroupRosterSnapshot(fullClassRoster) },
+                  })
+                  .run()
+              }
+           }
+           return { projectId: localProject.id, classesImported: classes.length, studentsImported }
         })
 
-        prepareProjectFolders(db, imported.projectId)
+         reconcileDefaultGroups(imported.projectId)
+         prepareProjectFolders(db, imported.projectId)
         return { ok: true, ...imported }
       } catch (err) {
         return { ok: false, error: String(err) }

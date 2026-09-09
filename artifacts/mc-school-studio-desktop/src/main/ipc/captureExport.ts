@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { copyFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { eq } from 'drizzle-orm'
+import { eq, and, isNull } from 'drizzle-orm'
 import { getDb } from '../db'
 import {
   capturesTable,
@@ -80,7 +80,7 @@ export function registerCaptureExportHandlers(): void {
         const captures = db
           .select()
           .from(capturesTable)
-          .where(eq(capturesTable.projectId, projectId))
+           .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
           .all()
           .filter((capture) => shouldExport(mode, capture))
 

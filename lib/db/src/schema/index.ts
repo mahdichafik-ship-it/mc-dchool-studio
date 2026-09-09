@@ -6,3 +6,4 @@ export * from "./captures";
 export * from "./studios";
 export * from "./storage";
 export * from "./platformAudit";
+export * from "./groups";

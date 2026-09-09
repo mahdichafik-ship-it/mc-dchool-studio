@@ -26,6 +26,8 @@ import type {
   ActiveCaptureTargetEvent,
   ImagePipelineRendererStage,
   CreateStudentResult,
+  StudentGroup,
+  GroupCaptureReview,
 } from '../../../shared/types'
 import { mergeMatchedPhoto } from '../lib/captureEventReconciliation'
 
@@ -57,6 +59,8 @@ export type {
   ActiveCaptureTargetEvent,
   ImagePipelineRendererStage,
   CreateStudentResult,
+  StudentGroup,
+  GroupCaptureReview,
 }
 
 const api = window.api
@@ -234,6 +238,26 @@ export function useStudents(projectId: number | null, classId?: number) {
   }, [projectId, load])
 
   return { data, loading, reload: load }
+}
+
+export function useGroups(projectId: number | null, classId?: number) {
+  const [data, setData] = useState<StudentGroup[]>([])
+  const load = useCallback(async () => {
+    if (!projectId) return
+    setData(await api.invoke('groups:list', { projectId, classId }))
+  }, [projectId, classId])
+  useEffect(() => { void load() }, [load])
+  return { data, reload: load }
+}
+
+export function useGroupCaptures(projectId: number | null, groupId: number | null) {
+  const [data, setData] = useState<GroupCaptureReview[]>([])
+  const load = useCallback(async () => {
+    if (!projectId || !groupId) { setData([]); return }
+    setData(await api.invoke('groupCaptures:list', { projectId, groupId }))
+  }, [projectId, groupId])
+  useEffect(() => { void load() }, [load])
+  return { data, reload: load }
 }
 
 export function usePhotos(studentId: number | null) {
@@ -513,17 +537,20 @@ export function useWatcherStatus(projectId: number | null) {
 
 export function useActiveCaptureTarget(projectId: number | null) {
   const [studentId, setStudentId] = useState<number | null>(null)
+  const [groupId, setGroupId] = useState<number | null>(null)
   const [source, setSource] = useState<ActiveCaptureTargetEvent['source']>('none')
 
   const load = useCallback(async () => {
     if (!projectId) {
       setStudentId(null)
+      setGroupId(null)
       setSource('none')
       return
     }
-    const result = await api.invoke('watcher:getActiveStudent', { projectId }) as number | null
-    setStudentId(result)
-    setSource(result === null ? 'none' : 'manual')
+    const result = await api.invoke('watcher:getActiveTarget', { projectId })
+    setStudentId(result.studentId)
+    setGroupId(result.groupId)
+    setSource(result.targetType === 'none' ? 'none' : 'manual')
   }, [projectId])
 
   useEffect(() => { void load() }, [load])
@@ -533,6 +560,7 @@ export function useActiveCaptureTarget(projectId: number | null) {
     return api.on('watcher:activeStudentChanged', (event: ActiveCaptureTargetEvent) => {
       if (event.projectId !== projectId) return
       setStudentId(event.studentId)
+      setGroupId(event.groupId ?? null)
       setSource(event.source)
     })
   }, [projectId])
@@ -547,7 +575,15 @@ export function useActiveCaptureTarget(projectId: number | null) {
     setSource(result === null ? 'none' : 'manual')
   }, [projectId])
 
-  return { studentId, source, setTarget, reload: load }
+  const setGroupTarget = useCallback(async (nextGroupId: number | null) => {
+    if (!projectId) return
+    const result = await api.invoke('watcher:setActiveGroup', { projectId, groupId: nextGroupId })
+    setGroupId(result)
+    setStudentId(null)
+    setSource(result === null ? 'none' : 'manual')
+  }, [projectId])
+
+  return { studentId, groupId, source, setTarget, setGroupTarget, reload: load }
 }
 
 // Toast notifications for photo events

@@ -21,6 +21,8 @@ import {
   Star,
   Check,
   Plus,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +33,8 @@ import {
   useProject,
   useClasses,
   useStudents,
+  useGroups,
+  useGroupCaptures,
   useCaptures,
   useCaptureSummary,
   useUnmatchedPhotos,
@@ -56,6 +60,7 @@ import type {
   CaptureExportLayout,
   ProjectSyncProgressEvent,
   CreateStudentResult,
+  StudentGroup,
 } from '@/hooks/useApi'
 
 interface Props {
@@ -77,9 +82,13 @@ const captureFilterOptions: Array<{ value: CaptureFilter; label: string }> = [
 export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
   const { data: captureSummary } = useCaptureSummary(projectId)
+  const [groupCaptureCount, setGroupCaptureCount] = useState(0)
   const { data: classes, reload: reloadClasses } = useClasses(projectId)
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
+  const { data: groups, reload: reloadGroups } = useGroups(projectId, selectedClassId ?? undefined)
+  const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
+  const { data: groupCaptures } = useGroupCaptures(projectId, selectedGroup?.id ?? null)
   const {
     data: unmatchedPhotos,
     loading: unmatchedLoading,
@@ -89,8 +98,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId)
   const {
     studentId: activeStudentId,
+    groupId: activeGroupId,
     source: activeStudentSource,
     setTarget: setActiveCaptureTarget,
+    setGroupTarget: setActiveGroupTarget,
   } = useActiveCaptureTarget(projectId)
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
   const [search, setSearch] = useState('')
@@ -101,10 +112,16 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
   const [exporting, setExporting] = useState<CaptureExportLayout | null>(null)
   const [finishing, setFinishing] = useState(false)
+  const [renamingGroupId, setRenamingGroupId] = useState<number | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
   const autoStartAttemptedRef = useRef<number | null>(null)
   const pendingUploadCount = [...uploadStatusMap.values()]
     .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
+
+  useEffect(() => {
+    void window.api.invoke('groupCaptures:summary', { projectId }).then(setGroupCaptureCount)
+  }, [projectId, groupCaptures])
 
   useEffect(() => {
     return window.api.on('project:syncProgress', (event) => {
@@ -156,8 +173,82 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     if (activeStudent) setSelectedStudent(activeStudent)
   }, [activeStudentId, students])
 
+  useEffect(() => {
+    if (selectedGroup && !groups.some((group) => group.id === selectedGroup.id)) {
+      setSelectedGroup(null)
+      if (activeGroupId === selectedGroup.id) void setActiveGroupTarget(null)
+    }
+  }, [groups, selectedGroup, activeGroupId, setActiveGroupTarget])
+
+  async function handleSelectGroup(group: StudentGroup) {
+    setSelectedGroup(group)
+    setSelectedStudent(null)
+    try {
+      await setActiveGroupTarget(group.id)
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not select capture group', description: String(error) })
+    }
+  }
+
+  async function handleCreateGroup() {
+    const name = window.prompt('Group name')
+    if (!name?.trim()) return
+    try {
+      const group = await window.api.invoke('groups:create', {
+        projectId, classId: selectedClassId, name,
+        memberStudentIds: selectedClassId ? students.map((student) => student.id) : [],
+      })
+      await reloadGroups()
+      await handleSelectGroup(group)
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not create group', description: String(error) })
+    }
+  }
+
+  async function handleRenameGroup(group: StudentGroup) {
+    const name = renameValue.trim()
+    if (!name || name === group.name) {
+      setRenamingGroupId(null)
+      return
+    }
+    try {
+      const updated = await window.api.invoke('groups:update', {
+        projectId, groupId: group.id, name,
+      })
+      if (selectedGroup?.id === group.id) setSelectedGroup(updated)
+      setRenamingGroupId(null)
+      await reloadGroups()
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not rename group', description: String(error) })
+    }
+  }
+
+  async function handleDeleteGroup(group: StudentGroup) {
+    if (!window.confirm(`Delete the custom group "${group.name}"? Its captured files will be kept.`)) return
+    try {
+      await window.api.invoke('groups:delete', { projectId, groupId: group.id })
+      if (selectedGroup?.id === group.id) {
+        setSelectedGroup(null)
+        if (activeGroupId === group.id) await setActiveGroupTarget(null)
+      }
+      await reloadGroups()
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not delete group', description: String(error) })
+    }
+  }
+
+  async function handleGroupMembership(group: StudentGroup, studentId: number, checked: boolean) {
+    const memberStudentIds = checked
+      ? [...new Set([...group.memberStudentIds, studentId])]
+      : group.memberStudentIds.filter((id) => id !== studentId)
+    const updated = await window.api.invoke('groups:update', { projectId, groupId: group.id, memberStudentIds })
+    setSelectedGroup(updated)
+    await reloadGroups()
+  }
+
   async function handleSelectCaptureStudent(student: Student) {
     setSelectedStudent(student)
+    setSelectedGroup(null)
     try {
       await setActiveCaptureTarget(student.id)
     } catch (error) {
@@ -385,7 +476,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             <Button
               size="sm"
               onClick={() => void handleUploadAndFinish()}
-              disabled={finishing || Boolean(project?.finishedAt) || captureSummary.total === 0}
+               disabled={finishing || Boolean(project?.finishedAt) || captureSummary.total === 0 && groupCaptureCount === 0}
               className={cn(
                 'gap-1.5',
                 project?.finishedAt
@@ -521,6 +612,36 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               </button>
             ))}
           </div>
+          <div className="border-b border-slate-100 px-3 py-2">
+            <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <span>Groups</span>
+               {!project?.finishedAt && <button type="button" onClick={() => void handleCreateGroup()} className="text-teal-600 hover:text-teal-700">+ New</button>}
+            </div>
+            {groups.map((group) => (
+              <div key={group.id} className={cn('mb-1 flex w-full items-center rounded px-2 py-1.5 text-xs',
+                selectedGroup?.id === group.id ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50')}>
+                {renamingGroupId === group.id ? (
+                  <form className="flex min-w-0 flex-1 gap-1" onSubmit={(event) => { event.preventDefault(); void handleRenameGroup(group) }}>
+                    <Input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} className="h-6 min-w-0 text-xs" />
+                    <Button type="submit" size="sm" className="h-6 px-2 text-[10px]">Save</Button>
+                  </form>
+                ) : (
+                  <button type="button" onClick={() => void handleSelectGroup(group)} className="min-w-0 flex-1 text-left">
+                    <span className="truncate">{group.name}</span>
+                  </button>
+                )}
+                <span className="ml-2 text-[10px] text-slate-400">{group.memberStudentIds.length}</span>
+                {!group.isDefaultClassGroup && !project?.finishedAt && renamingGroupId !== group.id && (
+                  <>
+                    <button type="button" className="ml-2 text-slate-400 hover:text-teal-600" title="Rename group"
+                      onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }}><Pencil className="size-3" /></button>
+                    <button type="button" className="ml-1 text-slate-400 hover:text-red-600" title="Delete group"
+                      onClick={() => void handleDeleteGroup(group)}><Trash2 className="size-3" /></button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
 
           {/* Search */}
           <div className="px-3 py-2 border-b border-slate-100">
@@ -584,11 +705,42 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               <div className="text-center text-slate-400 text-xs py-8">No students found</div>
             )}
           </div>
+          {selectedGroup && (
+            <div className="max-h-48 overflow-y-auto border-t border-slate-200 bg-slate-50 p-2">
+              <div className="mb-1 text-[10px] font-semibold uppercase text-slate-400">Group members</div>
+              {students.map((student) => (
+                <label key={student.id} className="flex items-center gap-2 py-1 text-xs text-slate-600">
+                  <input type="checkbox" checked={selectedGroup.memberStudentIds.includes(student.id)}
+                    onChange={(event) => void handleGroupMembership(selectedGroup, student.id, event.target.checked)} />
+                  {student.firstName} {student.lastName}
+                </label>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right panel: QR code + photos */}
         <div className="flex-1 overflow-y-auto bg-slate-50">
-          {selectedStudent ? (
+          {selectedGroup ? (
+            <div className="p-6">
+              <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 p-4">
+                <h2 className="font-semibold text-teal-900">{selectedGroup.name}</h2>
+                <p className="text-sm text-teal-700">Incoming JPEG and RAW files go to this class/group.</p>
+                {activeGroupId === selectedGroup.id && <p className="mt-1 text-xs font-medium text-teal-800">Active capture target</p>}
+              </div>
+              <div className="space-y-2">
+                {groupCaptures.map((capture) => (
+                  <div key={capture.id} className="rounded border border-slate-200 bg-white p-3 text-sm">
+                    <div className="flex items-center justify-between"><span className="font-medium">{capture.baseFilename}</span><Badge>{capture.pairingStatus}</Badge></div>
+                    <div className="mt-2 flex gap-2 text-xs text-slate-500">
+                      {capture.files.map((file) => <button key={file.id} type="button" onClick={() => void window.api.invoke('photos:openInSystem', { filePath: file.storedPath })} className="underline">{file.fileRole} · open</button>)}
+                    </div>
+                  </div>
+                ))}
+                {groupCaptures.length === 0 && <p className="text-sm text-slate-400">No group captures yet.</p>}
+              </div>
+            </div>
+          ) : selectedStudent ? (
             <StudentDetail
               student={selectedStudent}
               projectId={projectId}

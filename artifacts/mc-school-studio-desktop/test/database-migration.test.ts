@@ -40,27 +40,38 @@ test('upgrades an older local database without replacing existing rows', () => {
 
 test('capture migration is repeatable and keeps legacy rows as the compatibility source', () => {
   const statements: string[] = []
+  const columns = new Map<string, Set<string>>([
+    ['groups', new Set()],
+  ])
   const sqlite = {
-    pragma() {
-      return []
+    pragma(source: string) {
+      const table = source.match(/^table_info\((\w+)\)$/)?.[1]
+      return [...(columns.get(table ?? '') ?? [])].map((name) => ({ name }))
     },
     exec(source: string) {
       statements.push(source)
+      const match = source.match(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (.+)$/)
+      if (match) columns.get(match[1])?.add(match[2])
     },
   }
 
   ensureCaptureTables(sqlite)
   ensureCaptureTables(sqlite)
 
-  assert.equal(statements.length, 4)
-  assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS captures/)
-  assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS image_files/)
-  assert.match(statements[0] ?? '', /CREATE TABLE IF NOT EXISTS qr_markers/)
-  assert.match(statements[0] ?? '', /source_path TEXT NOT NULL UNIQUE/)
-  assert.match(statements[1] ?? '', /INSERT OR IGNORE INTO captures/)
-  assert.match(statements[1] ?? '', /FROM photos p/)
-  assert.match(statements[1] ?? '', /INSERT OR IGNORE INTO image_files/)
-  assert.match(statements[1] ?? '', /WHERE NOT EXISTS/)
+  const migrationSql = statements.join('\n')
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS captures/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS image_files/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS qr_markers/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS groups/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_members/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_captures/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_capture_files/)
+  assert.match(migrationSql, /source_path TEXT NOT NULL UNIQUE/)
+  assert.match(migrationSql, /INSERT OR IGNORE INTO captures/)
+  assert.match(migrationSql, /FROM photos p/)
+  assert.match(migrationSql, /INSERT OR IGNORE INTO image_files/)
+  assert.match(migrationSql, /WHERE NOT EXISTS/)
+  assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN membership_dirty')).length, 1)
 })
 
 test('gallery reconciliation retries every legacy photo without deleting or moving it', () => {

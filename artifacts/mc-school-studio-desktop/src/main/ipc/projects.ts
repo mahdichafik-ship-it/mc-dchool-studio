@@ -4,8 +4,8 @@ import { randomBytes } from 'crypto'
 import { dirname, join } from 'path'
 import { eq, count, and } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { projectsTable, classesTable, studentsTable, photosTable } from '../db/schema'
-import type { Project, Class, Student, ImportResult, CreateStudentResult } from '../../shared/types'
+import { projectsTable, classesTable, studentsTable, photosTable, groupsTable, groupMembersTable } from '../db/schema'
+import type { Project, Class, Student, ImportResult, CreateStudentResult, StudentGroup } from '../../shared/types'
 import { safeProjectFolderName } from '../lib/retirement'
 import {
   ensureProjectStorageLayout,
@@ -14,9 +14,48 @@ import {
 } from '../lib/storageLayout'
 import { formatStudentFolderName } from '../lib/photoFileNaming'
 import { syncStudentCloudIdentity } from './upload'
+import { getSetting, setSetting } from './upload'
+import { getNewDefaultGroupMemberIds, serializeDefaultGroupRosterSnapshot } from '../lib/groupRoster'
 
 function now() {
   return new Date().toISOString()
+}
+
+/** Create missing class defaults and add only newly seen students. */
+export function reconcileDefaultGroups(projectId: number): void {
+  const db = getDb()
+  const classes = db.select().from(classesTable).where(eq(classesTable.projectId, projectId)).all()
+  for (const cls of classes) {
+    let group = db.select().from(groupsTable).where(and(
+      eq(groupsTable.projectId, projectId),
+      eq(groupsTable.classId, cls.id),
+      eq(groupsTable.isDefaultClassGroup, true),
+    )).get()
+    if (!group) {
+      group = db.insert(groupsTable).values({
+        projectId, classId: cls.id, name: cls.className, isDefaultClassGroup: true,
+      }).returning().get()
+    }
+    const markerKey = `default_group_initialized:${group.id}`
+    const marker = getSetting(markerKey)
+    const members = db.select().from(groupMembersTable).where(eq(groupMembersTable.groupId, group.id)).all()
+    const students = db.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
+    const snapshot = (marker ? marker.split(',') : []).map(Number).filter(Number.isFinite)
+    const additions = getNewDefaultGroupMemberIds(
+      members.map((member) => member.studentId),
+      snapshot,
+      students.map((student) => student.id),
+      marker !== null,
+    )
+    for (const studentId of additions) {
+      db.insert(groupMembersTable).values({ groupId: group.id, studentId }).onConflictDoNothing().run()
+    }
+    setSetting(markerKey, serializeDefaultGroupRosterSnapshot([...snapshot, ...students.map((student) => student.id)]))
+  }
+}
+
+function toGroup(row: typeof groupsTable.$inferSelect, memberStudentIds: number[]): StudentGroup {
+  return { ...row, memberStudentIds }
 }
 
 function generateUniqueLocalStudentId(projectId: number): string {
@@ -157,6 +196,7 @@ export function registerProjectHandlers() {
     const [{ studentCount }] = db.select({ studentCount: count() }).from(studentsTable).where(eq(studentsTable.projectId, p.id)).all()
     const [{ photoCount }] = db.select({ photoCount: count() }).from(photosTable).where(eq(photosTable.projectId, p.id)).all()
     prepareProjectFolders(db, projectId)
+    reconcileDefaultGroups(projectId)
     return enrichProject(p, classCount, studentCount, photoCount)
   })
 
@@ -173,7 +213,7 @@ export function registerProjectHandlers() {
   ipcMain.handle('projects:import', async (_e, { filePath }: { filePath: string }): Promise<ImportResult> => {
     const raw = readFileSync(filePath, 'utf-8')
     const bundle = JSON.parse(raw)
-    const { project: p, classes, students } = bundle
+    const { project: p, classes, students, groups = [], groupMembers = [] } = bundle
 
     // Upsert project by schoolName
     const existing = db
@@ -257,14 +297,104 @@ export function registerProjectHandlers() {
         .run()
       studentsImported++
     }
+    reconcileDefaultGroups(projectId)
+    for (const group of groups as Array<{ id?: number; classId?: number | null; name: string; isDefaultClassGroup?: boolean; memberStudentIds?: number[] }>) {
+      const classId = group.classId == null ? null : classIdMap.get(group.classId) ?? null
+      const existingGroup = Number.isInteger(group.id)
+        ? db.select().from(groupsTable).where(and(eq(groupsTable.projectId, projectId), eq(groupsTable.cloudId, group.id))).get()
+        : undefined
+      const defaultByClass = group.isDefaultClassGroup
+        ? db.select().from(groupsTable).where(and(eq(groupsTable.projectId, projectId), eq(groupsTable.classId, classId), eq(groupsTable.isDefaultClassGroup, true))).get()
+        : undefined
+      const local = existingGroup ?? defaultByClass ?? db.insert(groupsTable).values({
+        cloudId: Number.isInteger(group.id) ? group.id : null,
+        projectId, classId, name: group.name, isDefaultClassGroup: Boolean(group.isDefaultClassGroup),
+      }).returning().get()
+      if (existingGroup || defaultByClass) {
+        db.update(groupsTable).set({
+          ...(Number.isInteger(group.id) ? { cloudId: group.id } : {}),
+          classId, name: group.name, isDefaultClassGroup: Boolean(group.isDefaultClassGroup), updatedAt: now(),
+        }).where(eq(groupsTable.id, local.id)).run()
+      }
+      const memberIds = [
+        ...(group.memberStudentIds ?? []),
+        ...(groupMembers as Array<{ groupId: number; studentId: number }>)
+          .filter((item) => item.groupId === group.id).map((item) => item.studentId),
+      ]
+      for (const studentId of [...new Set(memberIds)]) {
+        const student = db.select().from(studentsTable).where(and(eq(studentsTable.projectId, projectId), eq(studentsTable.cloudId, studentId))).get()
+        if (student) db.insert(groupMembersTable).values({ groupId: local.id, studentId: student.id }).onConflictDoNothing().run()
+      }
+    }
 
     const proj = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()!
     prepareProjectFolders(db, projectId)
+    reconcileDefaultGroups(projectId)
     return {
       project: enrichProject(proj, classes.length, studentsImported, 0),
       classesImported: classes.length,
       studentsImported,
     }
+  })
+
+  ipcMain.handle('groups:list', async (_e, { projectId, classId }: { projectId: number; classId?: number }): Promise<StudentGroup[]> => {
+    reconcileDefaultGroups(projectId)
+    const rows = db.select().from(groupsTable).where(eq(groupsTable.projectId, projectId)).all()
+      .filter((group) => classId === undefined || group.classId === classId)
+    return rows.map((group) => toGroup(group, db.select({ studentId: groupMembersTable.studentId })
+      .from(groupMembersTable).where(eq(groupMembersTable.groupId, group.id)).all().map((member) => member.studentId)))
+  })
+
+  ipcMain.handle('groups:create', async (_e, input: {
+    projectId: number; classId?: number | null; name: string; memberStudentIds?: number[]
+  }): Promise<StudentGroup> => {
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+    if (project?.finishedAt) throw new Error('This project is finished and its groups can no longer be changed.')
+    const name = input.name.trim()
+    if (!name) throw new Error('Group name is required.')
+    const group = db.insert(groupsTable).values({
+      projectId: input.projectId, classId: input.classId ?? null, name, isDefaultClassGroup: false,
+      membershipDirty: true,
+    }).returning().get()
+    for (const studentId of input.memberStudentIds ?? []) {
+      db.insert(groupMembersTable).values({ groupId: group.id, studentId }).onConflictDoNothing().run()
+    }
+    return toGroup(group, input.memberStudentIds ?? [])
+  })
+
+  ipcMain.handle('groups:update', async (_e, input: {
+    projectId: number; groupId: number; name?: string; memberStudentIds?: number[]
+  }): Promise<StudentGroup> => {
+    const group = db.select().from(groupsTable).where(and(
+      eq(groupsTable.id, input.groupId), eq(groupsTable.projectId, input.projectId),
+    )).get()
+    if (!group) throw new Error('Group not found.')
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+    if (project?.finishedAt) throw new Error('This project is finished and its groups can no longer be changed.')
+    if (group.isDefaultClassGroup && input.name !== undefined && input.name.trim() !== group.name) {
+      throw new Error('The default class group cannot be renamed.')
+    }
+    const updated = input.name === undefined ? group : db.update(groupsTable)
+      .set({ name: input.name.trim(), membershipDirty: true, updatedAt: now() }).where(eq(groupsTable.id, group.id)).returning().get()
+    if (input.memberStudentIds) {
+      db.delete(groupMembersTable).where(eq(groupMembersTable.groupId, group.id)).run()
+      for (const studentId of input.memberStudentIds) {
+        db.insert(groupMembersTable).values({ groupId: group.id, studentId }).onConflictDoNothing().run()
+      }
+      db.update(groupsTable).set({ membershipDirty: true, updatedAt: now() }).where(eq(groupsTable.id, group.id)).run()
+    }
+    const members = db.select({ studentId: groupMembersTable.studentId }).from(groupMembersTable)
+      .where(eq(groupMembersTable.groupId, group.id)).all().map((member) => member.studentId)
+    return toGroup(updated, members)
+  })
+
+  ipcMain.handle('groups:delete', async (_e, { projectId, groupId }: { projectId: number; groupId: number }) => {
+    const group = db.select().from(groupsTable).where(and(eq(groupsTable.id, groupId), eq(groupsTable.projectId, projectId))).get()
+    if (!group) throw new Error('Group not found.')
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (project?.finishedAt) throw new Error('This project is finished and its groups can no longer be changed.')
+    if (group.isDefaultClassGroup) throw new Error('The default class group cannot be deleted.')
+    db.delete(groupsTable).where(eq(groupsTable.id, groupId)).run()
   })
 
   // Classes
@@ -329,6 +459,7 @@ export function registerProjectHandlers() {
       }).returning().get()
 
       prepareProjectFolders(db, input.projectId)
+      reconcileDefaultGroups(input.projectId)
       const sync = await syncStudentCloudIdentity(input.projectId, student.id)
       const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, student.id)).get() ?? student
       return {

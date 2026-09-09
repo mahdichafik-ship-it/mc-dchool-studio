@@ -10,6 +10,7 @@ export interface CaptureFile {
    * queue; `null` means there was no active target.
    */
   selectedStudentId?: number | null
+  selectedGroupId?: number | null
 }
 
 export interface SequenceState {

@@ -23,6 +23,8 @@ import { getStudioMember } from "../lib/studioAccess";
 import { getUserId, requireAuth } from "../lib/auth";
 import { isPlatformOwner } from "../lib/platformAccess";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
+import { reconcileDefaultGroups } from "../lib/groupReconciliation";
+import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable } from "@workspace/db";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
@@ -304,7 +306,11 @@ router.patch("/projects/:projectId/capture-batches/:batchKey", requireDesktopCon
     .select({ legacyPhotoCount: count() })
     .from(studentPhotosTable)
     .where(eq(studentPhotosTable.captureBatchId, batch.id));
-  const uploadedFileCount = Number(captureFileCount) + Number(legacyPhotoCount);
+  const [{ groupCaptureFileCount }] = await db
+    .select({ groupCaptureFileCount: count() })
+    .from(groupCaptureFilesTable)
+    .where(eq(groupCaptureFilesTable.captureBatchId, batch.id));
+  const uploadedFileCount = Number(captureFileCount) + Number(legacyPhotoCount) + Number(groupCaptureFileCount);
   const status = requestedStatus === "complete" && failedFileCount === 0 && uploadedFileCount >= batch.expectedFileCount
     ? "complete"
     : "failed";
@@ -331,6 +337,94 @@ function memberForAccess(connection: ReturnType<typeof getDesktopConnection>) {
     userId: connection.memberUserId,
   };
 }
+
+router.get("/projects/:projectId/groups", requireDesktopConnection, async (req, res): Promise<void> => {
+  const connection = getDesktopConnection(req);
+  const projectId = Number(req.params.projectId);
+  if (!Number.isSafeInteger(projectId) || projectId <= 0 || !(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  await reconcileDefaultGroups(projectId);
+  const groups = await db.select().from(groupsTable).where(eq(groupsTable.projectId, projectId));
+  const members = groups.length
+    ? await db.select().from(groupMembersTable).where(inArray(groupMembersTable.groupId, groups.map((g) => g.id)))
+    : [];
+  res.json(groups.map((group) => ({
+    ...group,
+    memberStudentIds: members.filter((member) => member.groupId === group.id).map((member) => member.studentId),
+  })));
+});
+
+router.post("/projects/:projectId/groups", requireDesktopConnection, async (req, res): Promise<void> => {
+  const connection = getDesktopConnection(req);
+  const projectId = Number(req.params.projectId);
+  if (!Number.isSafeInteger(projectId) || projectId <= 0 || !(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const clientGroupId = typeof req.body?.clientGroupId === "string" ? req.body.clientGroupId.trim() : "";
+  const classId = req.body?.classId == null ? null : Number(req.body.classId);
+  const memberStudentIds = Array.isArray(req.body?.memberStudentIds) ? req.body.memberStudentIds : [];
+  if (classId !== null) {
+    const [cls] = await db.select({ id: classesTable.id }).from(classesTable).where(and(eq(classesTable.id, classId), eq(classesTable.projectId, projectId)));
+    if (!cls) { res.status(400).json({ error: "Class not found in this project" }); return; }
+  }
+  if (memberStudentIds.some((id: unknown) => !Number.isInteger(id))) { res.status(400).json({ error: "Invalid memberStudentIds" }); return; }
+  const validStudents = await db.select({ id: studentsTable.id }).from(studentsTable).where(and(eq(studentsTable.projectId, projectId), inArray(studentsTable.id, memberStudentIds)));
+  if (validStudents.length !== memberStudentIds.length) { res.status(400).json({ error: "Students must belong to this project" }); return; }
+  if (!name) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+  if (!clientGroupId || clientGroupId.length > 200) { res.status(400).json({ error: "clientGroupId is required" }); return; }
+  const result = await db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(groupsTable).where(and(eq(groupsTable.projectId, projectId), eq(groupsTable.desktopConnectionId, connection.connectionId), eq(groupsTable.clientGroupId, clientGroupId))).limit(1);
+    if (existing) return { group: existing, reused: true };
+    const [group] = await tx.insert(groupsTable).values({ projectId, name, classId, isDefaultClassGroup: false, desktopConnectionId: connection.connectionId, clientGroupId }).returning();
+    if (memberStudentIds.length) await tx.insert(groupMembersTable).values(memberStudentIds.map((studentId: number) => ({ groupId: group.id, studentId }))).onConflictDoNothing();
+    return { group, reused: false };
+  });
+  if (result.reused) {
+    await db.delete(groupMembersTable).where(eq(groupMembersTable.groupId, result.group.id));
+    if (memberStudentIds.length) await db.insert(groupMembersTable).values(memberStudentIds.map((studentId: number) => ({ groupId: result.group.id, studentId }))).onConflictDoNothing();
+    if (result.group.isDefaultClassGroup) {
+      await db.delete(groupMemberExclusionsTable).where(eq(groupMemberExclusionsTable.groupId, result.group.id));
+    }
+  }
+  res.status(result.reused ? 200 : 201).json({ ...result.group, memberStudentIds });
+});
+
+router.patch("/projects/:projectId/groups/:groupId", requireDesktopConnection, async (req, res): Promise<void> => {
+  const connection = getDesktopConnection(req), projectId = Number(req.params.projectId), groupId = Number(req.params.groupId);
+  if (!Number.isSafeInteger(projectId) || projectId <= 0 || !Number.isSafeInteger(groupId) || groupId <= 0 || !(await canAccessDesktopProject(memberForAccess(connection), projectId))) return void res.status(404).json({ error: "Project not found" });
+  const [existing] = await db.select().from(groupsTable).where(and(eq(groupsTable.id, groupId), eq(groupsTable.projectId, projectId)));
+  if (!existing) return void res.status(404).json({ error: "Group not found" });
+  const { name, classId, memberStudentIds } = req.body ?? {};
+  if (existing.isDefaultClassGroup && (name !== undefined || classId !== undefined || req.body?.isDefaultClassGroup !== undefined)) return void res.status(409).json({ error: "Default group identity is protected" });
+  if (name !== undefined && (typeof name !== "string" || !name.trim())) return void res.status(400).json({ error: "name must be nonempty" });
+  if (classId !== undefined && classId !== null) {
+    const [cls] = await db.select({ id: classesTable.id }).from(classesTable).where(and(eq(classesTable.id, Number(classId)), eq(classesTable.projectId, projectId)));
+    if (!cls) return void res.status(400).json({ error: "Class not found in this project" });
+  }
+  if (memberStudentIds !== undefined) {
+    if (!Array.isArray(memberStudentIds) || memberStudentIds.some((id: unknown) => !Number.isInteger(id))) return void res.status(400).json({ error: "Invalid memberStudentIds" });
+    const valid = await db.select({ id: studentsTable.id }).from(studentsTable).where(and(eq(studentsTable.projectId, projectId), inArray(studentsTable.id, memberStudentIds)));
+    if (valid.length !== memberStudentIds.length) return void res.status(400).json({ error: "Students must belong to this project" });
+     const oldMembers = await db.select({ studentId: groupMembersTable.studentId }).from(groupMembersTable).where(eq(groupMembersTable.groupId, groupId));
+     await db.delete(groupMembersTable).where(eq(groupMembersTable.groupId, groupId));
+    if (memberStudentIds.length) await db.insert(groupMembersTable).values(memberStudentIds.map((studentId: number) => ({ groupId, studentId }))).onConflictDoNothing();
+     if (existing.isDefaultClassGroup) {
+       const removed = oldMembers.map((row) => row.studentId).filter((id) => !memberStudentIds.includes(id));
+       if (removed.length) await db.insert(groupMemberExclusionsTable).values(removed.map((studentId) => ({ groupId, studentId }))).onConflictDoNothing();
+       if (memberStudentIds.length) await db.delete(groupMemberExclusionsTable).where(and(eq(groupMemberExclusionsTable.groupId, groupId), inArray(groupMemberExclusionsTable.studentId, memberStudentIds)));
+     }
+  }
+  const [group] = await db.update(groupsTable).set({ ...(name !== undefined ? { name: name.trim() } : {}), ...(classId !== undefined ? { classId } : {}), updatedAt: new Date() }).where(eq(groupsTable.id, groupId)).returning();
+  const currentMembers = await db.select({ studentId: groupMembersTable.studentId }).from(groupMembersTable).where(eq(groupMembersTable.groupId, groupId));
+  res.json({ ...group, memberStudentIds: currentMembers.map((member) => member.studentId) });
+});
 
 async function desktopProjectIds(connection: ReturnType<typeof getDesktopConnection>) {
   if (await isPlatformOwner(connection.memberUserId)) {
@@ -492,6 +586,11 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
     .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
     .where(eq(studentsTable.projectId, projectId))
     .orderBy(classesTable.className, studentsTable.lastName, studentsTable.firstName);
+  await reconcileDefaultGroups(projectId);
+  const groups = await db.select().from(groupsTable).where(eq(groupsTable.projectId, projectId));
+  const groupMembers = groups.length
+    ? await db.select().from(groupMembersTable).where(inArray(groupMembersTable.groupId, groups.map((g) => g.id)))
+    : [];
 
   if (!(await requireStillActiveBeforeDataResponse(connection, res))) return;
   res.json({
@@ -528,6 +627,16 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
       jsonQr: s.jsonQr,
       createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt,
       updatedAt: s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
+    })),
+    groups: groups.map((g) => ({
+      id: g.id,
+      projectId: g.projectId,
+      classId: g.classId,
+      name: g.name,
+      isDefaultClassGroup: g.isDefaultClassGroup,
+      createdAt: g.createdAt.toISOString(),
+      updatedAt: g.updatedAt.toISOString(),
+      memberStudentIds: groupMembers.filter((m) => m.groupId === g.id).map((m) => m.studentId),
     })),
   });
 });
@@ -611,6 +720,7 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
       jsonQr,
     })
     .returning();
+  await reconcileDefaultGroups(projectId);
 
   res.status(201).json({
     id: student.id,

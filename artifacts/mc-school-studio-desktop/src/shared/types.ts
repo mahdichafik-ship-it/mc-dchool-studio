@@ -42,6 +42,39 @@ export interface Student {
   updatedAt: string
 }
 
+export interface StudentGroup {
+  id: number
+  cloudId?: number | null
+  projectId: number
+  classId: number | null
+  name: string
+  isDefaultClassGroup: boolean
+  memberStudentIds: number[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GroupCaptureFileReview {
+  id: number
+  fileRole: 'JPEG' | 'RAW'
+  fileFormat: string
+  originalFilename: string
+  storedPath: string
+  fileSize: number | null
+  uploadStatus: UploadStatus
+  fileUrl: string | null
+}
+
+export interface GroupCaptureReview {
+  id: number
+  projectId: number
+  groupId: number
+  baseFilename: string
+  capturedAt: string
+  pairingStatus: CapturePairingStatus
+  files: GroupCaptureFileReview[]
+}
+
 export interface CreateStudentResult {
   student: Student
   cloudSynced: boolean
@@ -186,6 +219,8 @@ export interface CaptureUpdatedEvent {
 export interface ActiveCaptureTargetEvent {
   projectId: number
   studentId: number | null
+  groupId?: number | null
+  targetType?: 'student' | 'group' | 'none'
   source: 'manual' | 'qr' | 'none'
 }
 

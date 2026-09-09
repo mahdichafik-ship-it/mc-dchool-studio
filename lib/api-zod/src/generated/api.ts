@@ -291,6 +291,136 @@ export const CreateStudentResponse = zod.object({
 
 
 /**
+ * @summary List photo groups and members
+ */
+export const ListGroupsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const ListGroupsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "classId": zod.number().nullish(),
+  "name": zod.string(),
+  "isDefaultClassGroup": zod.boolean(),
+  "members": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "groupId": zod.number().optional(),
+  "studentId": zod.number().optional()
+})),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+export const ListGroupsResponse = zod.array(ListGroupsResponseItem)
+
+
+/**
+ * @summary Create a photo group
+ */
+export const CreateGroupParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+
+
+
+export const CreateGroupBody = zod.object({
+  "name": zod.string().min(1),
+  "classId": zod.number().nullish(),
+  "isDefaultClassGroup": zod.boolean().optional()
+})
+
+export const CreateGroupResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "classId": zod.number().nullish(),
+  "name": zod.string(),
+  "isDefaultClassGroup": zod.boolean(),
+  "members": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "groupId": zod.number().optional(),
+  "studentId": zod.number().optional()
+})),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+export const UpdateGroupParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "groupId": zod.coerce.number()
+})
+
+
+
+
+export const UpdateGroupBody = zod.object({
+  "name": zod.string().min(1).optional(),
+  "classId": zod.number().nullish(),
+  "isDefaultClassGroup": zod.boolean().optional()
+})
+
+export const UpdateGroupResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "classId": zod.number().nullish(),
+  "name": zod.string(),
+  "isDefaultClassGroup": zod.boolean(),
+  "members": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "groupId": zod.number().optional(),
+  "studentId": zod.number().optional()
+})),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+export const DeleteGroupParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "groupId": zod.coerce.number()
+})
+
+export const DeleteGroupResponse = zod.void()
+
+
+export const ReplaceGroupMembersParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "groupId": zod.coerce.number()
+})
+
+export const ReplaceGroupMembersBody = zod.object({
+  "studentIds": zod.array(zod.number())
+})
+
+export const ReplaceGroupMembersResponse = zod.unknown()
+
+
+export const AddGroupMembersParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "groupId": zod.coerce.number()
+})
+
+export const AddGroupMembersBody = zod.object({
+  "studentIds": zod.array(zod.number())
+})
+
+export const AddGroupMembersResponse = zod.unknown()
+
+
+export const RemoveGroupMembersParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "groupId": zod.coerce.number()
+})
+
+export const RemoveGroupMembersBody = zod.object({
+  "studentIds": zod.array(zod.number())
+})
+
+export const RemoveGroupMembersResponse = zod.unknown()
+
+
+/**
  * @summary Update a student record
  */
 export const UpdateStudentParams = zod.object({

@@ -17,9 +17,14 @@ import {
   photosTable,
   projectsTable,
   studentsTable,
+  groupCapturesTable,
+  groupCaptureFilesTable,
+  groupsTable,
+  groupMembersTable,
 } from '../db/schema'
 import { eq, and, or, isNull } from 'drizzle-orm'
 import type { UploadStatus } from '../../shared/types'
+import { assertCaptureBatchComplete } from '../lib/captureBatch'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
@@ -341,6 +346,97 @@ export async function syncStudentCloudIdentity(
   }
 }
 
+/** Reconcile local group identity and membership before any group upload. */
+export async function syncGroupCloudIdentities(projectId: number): Promise<void> {
+  const db = getDb()
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!project?.cloudId || !apiUrl || !connectionToken || !isCloudSessionVerified()) {
+    throw new Error('Cloud upload is not configured or this project has not been synced.')
+  }
+  const groups = db.select().from(groupsTable).where(eq(groupsTable.projectId, projectId)).all()
+  const bundleResponse = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/bundle`, {
+    headers: { Authorization: `Bearer ${connectionToken}` }, signal: AbortSignal.timeout(30_000),
+  })
+  if (!bundleResponse.ok) throw new Error(`Could not refresh cloud group identities (HTTP ${bundleResponse.status}: ${await bundleResponse.text()})`)
+  const bundle = await bundleResponse.json() as {
+    groups?: Array<{ id: number; classId?: number | null; isDefaultClassGroup?: boolean; name: string }>
+  }
+  for (const group of groups) {
+    const members = db.select().from(groupMembersTable).where(eq(groupMembersTable.groupId, group.id)).all()
+    for (const member of members) {
+      const result = await syncStudentCloudIdentity(projectId, member.studentId)
+      if (!result.synced) throw new Error(result.error ?? 'Could not synchronize a group member.')
+    }
+    const refreshedProject = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    const refreshedGroup = db.select().from(groupsTable).where(eq(groupsTable.id, group.id)).get()
+    const cls = refreshedGroup?.classId == null ? null
+      : db.select().from(classesTable).where(eq(classesTable.id, refreshedGroup.classId)).get()
+    const refreshedMembers = db.select().from(groupMembersTable).where(eq(groupMembersTable.groupId, group.id)).all()
+    const students = refreshedMembers.map((member) => db.select().from(studentsTable).where(eq(studentsTable.id, member.studentId)).get())
+    const memberStudentIds = students.map((student) => student?.cloudId).filter((id): id is number => id !== null && id !== undefined)
+    if (memberStudentIds.length !== students.length) throw new Error(`Group "${group.name}" has a member without a cloud identity.`)
+    let cloudGroupId = refreshedGroup?.cloudId ?? null
+    if (cloudGroupId == null && refreshedGroup?.isDefaultClassGroup) {
+      cloudGroupId = bundle.groups?.find((candidate) =>
+        candidate.isDefaultClassGroup
+        && (candidate.classId == null || candidate.classId === cls?.cloudId)
+        && candidate.name.trim().toLocaleLowerCase() === refreshedGroup.name.trim().toLocaleLowerCase())?.id ?? null
+      if (cloudGroupId != null) {
+        db.update(groupsTable).set({ cloudId: cloudGroupId }).where(eq(groupsTable.id, group.id)).run()
+      }
+    }
+    const dirty = Boolean(refreshedGroup?.membershipDirty)
+    // A pull owns clean cloud-backed groups. Avoid echoing stale local values
+    // back over newer cloud edits. Clean local defaults also wait for a cloud
+    // identity rather than creating an unintended custom group.
+    if (!dirty) continue
+    const body = refreshedGroup?.isDefaultClassGroup
+      ? { memberStudentIds }
+      : {
+        name: refreshedGroup?.name ?? group.name,
+        classId: cls?.cloudId ?? null,
+        memberStudentIds,
+      }
+    let response: Response
+    if (cloudGroupId != null) {
+      response = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${refreshedProject?.cloudId}/groups/${cloudGroupId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${connectionToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      })
+    } else {
+      response = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${refreshedProject?.cloudId}/groups`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${connectionToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientGroupId: `desktop-${projectId}-${group.id}`,
+          ...body,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      })
+    }
+    if (!response.ok) {
+      if (response.status === 401) invalidateDesktopCredentials(true)
+      throw new Error(`Could not synchronize group "${group.name}" (HTTP ${response.status}: ${await response.text()})`)
+    }
+    const payload = await response.json().catch(() => ({})) as { id?: number; groupId?: number; cloudId?: number }
+    const cloudId = payload.id ?? payload.groupId ?? payload.cloudId
+    if (cloudGroupId == null && Number.isInteger(cloudId)) {
+      db.update(groupsTable).set({ cloudId, updatedAt: new Date().toISOString() })
+        .where(eq(groupsTable.id, group.id)).run()
+    }
+    // A successful explicit Upload & Finish commits the local group edits.
+    // Keep this persisted so a restart cannot re-submit an already committed
+    // membership as a pending local override.
+    db.update(groupsTable)
+      .set({ membershipDirty: false, updatedAt: new Date().toISOString() })
+      .where(eq(groupsTable.id, group.id))
+      .run()
+  }
+}
+
 export function invalidateDesktopCredentials(notifyRenderer = false): void {
   markCloudSessionUnavailable()
   deleteSetting('desktop_connection_token')
@@ -588,6 +684,56 @@ async function performUploadCaptureFile(captureId: number, fileId: number, captu
   }
 }
 
+async function performUploadGroupCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
+  const db = getDb()
+  const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get()
+  const file = db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, fileId)).get()
+  if (!capture || !file || file.captureId !== captureId) throw new Error('Group capture file was not found.')
+  const group = db.select().from(groupsTable).where(eq(groupsTable.id, capture.groupId)).get()
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, capture.projectId)).get()
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!group?.cloudId || !project?.cloudId || !apiUrl || !connectionToken) {
+    throw new Error('This group needs to be re-synced before its captures can upload.')
+  }
+  db.update(groupCaptureFilesTable).set({ uploadStatus: 'uploading' }).where(eq(groupCaptureFilesTable.id, fileId)).run()
+  try {
+    const formData = new FormData()
+    formData.append('file', new Blob([readFileSync(file.storedPath)], {
+      type: file.fileRole === 'JPEG' ? 'image/jpeg' : 'application/octet-stream',
+    }), file.originalFilename)
+    formData.append('captureKey', capture.captureKey)
+    formData.append('baseFilename', capture.baseFilename)
+    formData.append('capturedAt', capture.capturedAt)
+    const response = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/groups/${group.cloudId}/captures`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        'X-MC-Upload-Id': String(file.id),
+        ...(captureBatchKey ? { 'X-MC-Capture-Batch': captureBatchKey } : {}),
+      },
+      body: formData,
+      signal: AbortSignal.timeout(120_000),
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      if (response.status === 401) invalidateDesktopCredentials(true)
+      if (response.status === 429 || response.status >= 500) throw new RetryableUploadError(`HTTP ${response.status}: ${text}`)
+      throw new Error(`HTTP ${response.status}: ${text}`)
+    }
+    const payload = await response.json().catch(() => ({})) as { file?: { fileUrl?: unknown } }
+    db.update(groupCaptureFilesTable).set({
+      uploadStatus: 'done',
+      fileUrl: typeof payload.file?.fileUrl === 'string' ? toServerFileUrl(payload.file.fileUrl) : null,
+    }).where(eq(groupCaptureFilesTable.id, fileId)).run()
+  } catch (error) {
+    const retryable = isRetryableUploadFailure(error)
+    if (retryable) markCloudSessionUnavailable()
+    db.update(groupCaptureFilesTable).set({ uploadStatus: retryable ? 'pending' : 'error' })
+      .where(eq(groupCaptureFilesTable.id, fileId)).run()
+    throw error
+  }
+}
+
 export function uploadCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
   if (!isCloudSessionVerified()) return Promise.resolve()
   const existing = activeCaptureFileUploads.get(fileId)
@@ -600,6 +746,14 @@ export function uploadCaptureFile(captureId: number, fileId: number, captureBatc
     activeUploads.delete(task)
     activeCaptureFileUploads.delete(fileId)
   }).catch(() => {})
+  return task
+}
+
+function uploadGroupCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
+  if (!isCloudSessionVerified()) return Promise.resolve()
+  const task = performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
+  activeUploads.add(task)
+  void task.finally(() => activeUploads.delete(task)).catch(() => {})
   return task
 }
 
@@ -633,6 +787,7 @@ type ProjectSyncJob =
     fileName: string
     capturedAt: string
   }
+  | { kind: 'group-capture-file'; captureId: number; fileId: number }
 
 function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
   const db = getDb()
@@ -643,6 +798,12 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
     .all()
   const jobs: ProjectSyncJob[] = []
   const mirroredPhotoIds = new Set<number>()
+  const groupCaptures = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.projectId, projectId)).all()
+  for (const capture of groupCaptures) {
+    for (const file of db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.captureId, capture.id)).all()) {
+      if (file.uploadStatus !== 'done') jobs.push({ kind: 'group-capture-file', captureId: capture.id, fileId: file.id })
+    }
+  }
 
   for (const capture of captures) {
     if (capture.legacyPhotoId !== null) mirroredPhotoIds.add(capture.legacyPhotoId)
@@ -710,6 +871,8 @@ export async function syncProjectUploads(
       }
       if (job.kind === 'capture-file') {
         await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey)
+      } else if (job.kind === 'group-capture-file') {
+        await uploadGroupCaptureFile(job.captureId, job.fileId, captureBatchKey)
       } else {
         await uploadPhoto(
           job.projectId,
@@ -779,6 +942,8 @@ export async function finishProjectCaptureBatch(
     signal: AbortSignal.timeout(30_000),
   })
   if (!response.ok) throw new Error(`Could not update capture batch: HTTP ${response.status}: ${await response.text()}`)
+  const payload = await response.json().catch(() => null)
+  assertCaptureBatchComplete(payload)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -862,6 +1027,19 @@ export function registerUploadHandlers() {
     }
     try {
       await uploadCaptureFile(capture.id, file.id)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('upload:retryGroupFile', async (_e, { fileId }: { fileId: number }) => {
+    const db = getDb()
+    const file = db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, fileId)).get()
+    if (!file) return { ok: false, error: 'Group capture file not found' }
+    if (!isCloudSessionVerified()) return { ok: false, error: 'Upload is waiting for an internet connection and a verified studio session.' }
+    try {
+      await uploadGroupCaptureFile(file.captureId, file.id)
       return { ok: true }
     } catch (error) {
       return { ok: false, error: String(error) }

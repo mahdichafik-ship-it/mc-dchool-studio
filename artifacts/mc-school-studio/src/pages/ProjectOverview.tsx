@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 
 // We'll separate out the tabs into their own components to keep things clean
+import { GroupsTab } from '@/components/project/GroupsTab';
 import { InfoTab } from '@/components/project/InfoTab';
 import { ClassesTab } from '@/components/project/ClassesTab';
 import { StudentsTab } from '@/components/project/StudentsTab';
@@ -85,6 +86,7 @@ export default function ProjectOverview() {
             <TabsList className="bg-slate-100/50 p-1 border border-slate-200 w-full justify-start rounded-lg self-start">
               <TabsTrigger value="students" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Students</TabsTrigger>
               <TabsTrigger value="classes" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Classes</TabsTrigger>
+              <TabsTrigger value="groups" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Groups</TabsTrigger>
               <TabsTrigger value="photos" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Photos</TabsTrigger>
               <TabsTrigger value="collaboration" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Collaboration</TabsTrigger>
               <TabsTrigger value="exports" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Exports</TabsTrigger>
@@ -97,6 +99,9 @@ export default function ProjectOverview() {
               </TabsContent>
               <TabsContent value="classes" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
                 <ClassesTab projectId={project.id} />
+              </TabsContent>
+              <TabsContent value="groups" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
+                <GroupsTab projectId={project.id} />
               </TabsContent>
               <TabsContent value="students" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
                 <StudentsTab projectId={project.id} />

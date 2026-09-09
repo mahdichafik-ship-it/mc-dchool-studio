@@ -12,8 +12,11 @@ import {
   studentsTable,
   studentPhotosTable,
   studiosTable,
+  groupCapturesTable,
+  groupCaptureFilesTable,
+  groupsTable,
 } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray, isNull } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
@@ -87,6 +90,26 @@ const captureUpload = multer({
   },
 });
 
+const groupCaptureUpload = multer({
+  storage: multer.diskStorage({
+    destination(req, _file, cb) {
+      const dir = path.join(UPLOADS_ROOT, String(req.params.projectId), `group-${String(req.params.groupId)}`);
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename(_req, file, cb) {
+      const ext = path.extname(file.originalname) || ".jpg";
+      const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, "_");
+      cb(null, `${Date.now()}_${base}${ext}`);
+    },
+  }),
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    if (captureFileRole(file.originalname)) cb(null, true);
+    else cb(new Error("Only JPEG and supported RAW camera files are accepted"));
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -104,6 +127,12 @@ async function verifyStudent(studentId: number, projectId: number): Promise<bool
     .from(studentsTable)
     .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)));
   return !!student;
+}
+
+async function verifyGroup(groupId: number, projectId: number): Promise<boolean> {
+  const [group] = await db.select({ id: groupsTable.id }).from(groupsTable)
+    .where(and(eq(groupsTable.id, groupId), eq(groupsTable.projectId, projectId)));
+  return !!group;
 }
 
 async function resolveCaptureBatch(
@@ -136,6 +165,14 @@ function validateDesktopUploadPath(req: Request, res: Response, next: NextFuncti
   next();
 }
 
+function validateGroupUploadPath(req: Request, res: Response, next: NextFunction): void {
+  if (!validRouteId(req.params.projectId) || !validRouteId(req.params.groupId)) {
+    res.status(400).json({ error: "Invalid projectId or groupId" });
+    return;
+  }
+  next();
+}
+
 function connectionAccessMember(connection: ReturnType<typeof getDesktopConnection>) {
   return {
     id: connection.memberId,
@@ -154,6 +191,21 @@ async function authorizeDesktopUploadTarget(req: Request, res: Response, next: N
   }
   if (!(await verifyStudent(studentId, projectId))) {
     res.status(404).json({ error: "Student not found in this project" });
+    return;
+  }
+  next();
+}
+
+async function authorizeDesktopGroupUploadTarget(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const projectId = Number(req.params.projectId);
+  const groupId = Number(req.params.groupId);
+  const connection = getDesktopConnection(req);
+  if (!(await canAccessDesktopProject(connectionAccessMember(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (!(await verifyGroup(groupId, projectId))) {
+    res.status(404).json({ error: "Group not found in this project" });
     return;
   }
   next();
@@ -482,9 +534,135 @@ async function backupUploadedFile(
   });
 }
 
+async function backupGroupUploadedFile(projectId: number, groupId: number, filePath: string, fileName: string, role: "JPEG" | "RAW", format: string, key: string) {
+  const [context] = await db.select({
+    studioId: studiosTable.id, studioName: studiosTable.name, schoolName: projectsTable.schoolName,
+    classId: classesTable.id, className: classesTable.className,
+  }).from(groupsTable)
+    .innerJoin(projectsTable, eq(projectsTable.id, groupsTable.projectId))
+    .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
+    .leftJoin(classesTable, eq(classesTable.id, groupsTable.classId))
+    .where(and(eq(groupsTable.id, groupId), eq(groupsTable.projectId, projectId)));
+  if (!context) throw new GoogleDriveBackupError("Could not resolve group for Drive backup.");
+  await backupFileForStudio({
+    studioId: context.studioId, studioName: context.studioName, projectId,
+    schoolName: context.schoolName, classId: context.classId ?? 0,
+    className: context.className ?? "Groups", studentId: groupId,
+    studentFolderName: `Group_${groupId}`, filePath, fileName, fileRole: role,
+    fileFormat: format, backupKey: key,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+
+// POST /api/desktop/projects/:projectId/groups/:groupId/captures
+router.get("/projects/:projectId/groups/:groupId/captures", requireDesktopConnection, async (req, res) => {
+  const projectId = Number(req.params.projectId), groupId = Number(req.params.groupId);
+  const connection = getDesktopConnection(req);
+  if (!(await canAccessDesktopProject(connectionAccessMember(connection), projectId)) || !(await verifyGroup(groupId, projectId))) {
+    res.status(404).json({ error: "Project or group not found" }); return;
+  }
+  const captures = await db.select().from(groupCapturesTable).where(eq(groupCapturesTable.groupId, groupId)).orderBy(groupCapturesTable.createdAt);
+  const files = captures.length ? await db.select().from(groupCaptureFilesTable).where(inArray(groupCaptureFilesTable.captureId, captures.map(c => c.id))) : [];
+  res.json(captures.map(c => ({ ...c, files: files.filter(f => f.captureId === c.id) })));
+});
+
+router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConnection, validateGroupUploadPath, authorizeDesktopGroupUploadTarget, groupCaptureUpload.single("file"), async (req, res, next) => {
+  const projectId = Number(req.params.projectId), groupId = Number(req.params.groupId);
+  const connection = getDesktopConnection(req);
+  try {
+  if (!Number.isSafeInteger(projectId) || projectId <= 0 || !Number.isSafeInteger(groupId) || groupId <= 0
+      || !(await canAccessDesktopProject(connectionAccessMember(connection), projectId))
+      || !(await verifyGroup(groupId, projectId))) {
+      discardUploadedFile(req); res.status(404).json({ error: "Project or group not found" }); return;
+    }
+    const refreshed = await refreshDesktopConnection(connection.connectionId);
+    if (!refreshed) { discardUploadedFile(req); res.status(401).json({ error: "Desktop connection was revoked while uploading" }); return; }
+    if (!req.file) { res.status(400).json({ error: "No capture file uploaded (use field name 'file')" }); return; }
+    const body = req.body as Record<string, string | undefined>;
+    const role = captureFileRole(req.file.originalname);
+    const captureKey = body.captureKey?.trim();
+    const clientUploadId = req.get("X-MC-Upload-Id")?.trim() || null;
+    if (!role || !captureKey || captureKey.length > 500 || (clientUploadId && !/^[a-zA-Z0-9:_-]{1,200}$/.test(clientUploadId))) {
+      discardUploadedFile(req); res.status(400).json({ error: "Valid captureKey, file role, and upload identifier are required" }); return;
+    }
+     const captureBatchKey = req.get("X-MC-Capture-Batch")?.trim();
+     const captureBatch = await resolveCaptureBatch(projectId, captureBatchKey, connection.connectionId);
+     if (captureBatchKey && !captureBatch) {
+       discardUploadedFile(req); res.status(409).json({ error: "Capture batch was not found for this desktop connection" }); return;
+     }
+    const relPath = path.relative(path.resolve(process.cwd(), "uploads"), req.file.path).replace(/\\/g, "/");
+    const fileUrl = `/uploads/${relPath}`;
+    const result = await db.transaction(async (tx) => {
+      if (clientUploadId) {
+        const [existing] = await tx.select({ file: groupCaptureFilesTable, capture: groupCapturesTable })
+          .from(groupCaptureFilesTable).innerJoin(groupCapturesTable, eq(groupCaptureFilesTable.captureId, groupCapturesTable.id))
+          .where(and(eq(groupCaptureFilesTable.desktopConnectionId, connection.connectionId), eq(groupCaptureFilesTable.clientUploadId, clientUploadId))).limit(1);
+        if (existing) {
+          discardUploadedFile(req);
+          if (existing.capture.projectId !== projectId || existing.capture.groupId !== groupId) throw new Error("Desktop upload identifier was reused for a different group");
+          if (captureBatch && existing.file.captureBatchId === null) {
+            const [attached] = await tx.update(groupCaptureFilesTable)
+              .set({ captureBatchId: captureBatch.id })
+              .where(and(
+                eq(groupCaptureFilesTable.id, existing.file.id),
+                isNull(groupCaptureFilesTable.captureBatchId),
+              ))
+              .returning();
+            if (attached) return { capture: existing.capture, file: attached, reused: true };
+            const [current] = await tx.select().from(groupCaptureFilesTable)
+              .where(eq(groupCaptureFilesTable.id, existing.file.id)).limit(1);
+            return { capture: existing.capture, file: current ?? existing.file, reused: true };
+          }
+          return { ...existing, reused: true };
+        }
+      }
+      let [capture] = await tx.select().from(groupCapturesTable).where(and(eq(groupCapturesTable.projectId, projectId), eq(groupCapturesTable.captureKey, captureKey))).limit(1);
+      if (capture && capture.groupId !== groupId) throw new Error("Capture key was already assigned to a different group");
+      if (!capture) [capture] = await tx.insert(groupCapturesTable).values({
+        projectId, groupId, captureKey, baseFilename: body.baseFilename?.trim() || path.basename(req.file!.originalname, path.extname(req.file!.originalname)),
+        capturedAt: body.capturedAt?.trim() || null, sequence: body.sequence ? Number(body.sequence) : null,
+        pairingStatus: role === "JPEG" ? "jpeg_only" : "raw_only",
+      }).returning();
+      const [existingRole] = await tx.select().from(groupCaptureFilesTable).where(and(eq(groupCaptureFilesTable.captureId, capture.id), eq(groupCaptureFilesTable.fileRole, role))).limit(1);
+      if (existingRole) {
+        discardUploadedFile(req);
+        if (
+          captureBatch
+          && existingRole.captureBatchId === null
+          && existingRole.desktopConnectionId === connection.connectionId
+        ) {
+          const [attached] = await tx.update(groupCaptureFilesTable)
+            .set({ captureBatchId: captureBatch.id })
+            .where(and(
+              eq(groupCaptureFilesTable.id, existingRole.id),
+              isNull(groupCaptureFilesTable.captureBatchId),
+            ))
+            .returning();
+          if (attached) return { capture, file: attached, reused: true };
+          const [current] = await tx.select().from(groupCaptureFilesTable)
+            .where(eq(groupCaptureFilesTable.id, existingRole.id)).limit(1);
+          return { capture, file: current ?? existingRole, reused: true };
+        }
+        return { capture, file: existingRole, reused: true };
+      }
+      const [file] = await tx.insert(groupCaptureFilesTable).values({
+        captureId: capture.id, fileRole: role, fileFormat: captureFileFormat(req.file!.originalname),
+        originalFilename: req.file!.originalname, fileUrl, mimeType: req.file!.mimetype || "application/octet-stream", fileSize: req.file!.size,
+        desktopConnectionId: connection.connectionId, clientUploadId,
+         captureBatchId: captureBatch?.id ?? null,
+      }).returning();
+      const files = await tx.select({ fileRole: groupCaptureFilesTable.fileRole }).from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.captureId, capture.id));
+      [capture] = await tx.update(groupCapturesTable).set({ pairingStatus: captureStatusForFiles(files), updatedAt: new Date() }).where(eq(groupCapturesTable.id, capture.id)).returning();
+      return { capture, file, reused: false };
+    });
+    try { await backupGroupUploadedFile(projectId, groupId, resolveFilePath(result.file.fileUrl), result.file.originalFilename, result.file.fileRole as "JPEG" | "RAW", result.file.fileFormat, `group-capture:${result.capture.id}:${result.file.fileRole}`); }
+    catch (error) { if (error instanceof GoogleDriveBackupError) { res.status(503).json({ error: "Capture saved locally, but Google Drive backup failed. Retry the upload.", code: "GOOGLE_DRIVE_BACKUP_FAILED" }); return; } throw error; }
+    res.status(result.reused ? 200 : 201).json({ captureId: result.capture.id, captureKey: result.capture.captureKey, pairingStatus: result.capture.pairingStatus, file: result.file, reused: result.reused });
+  } catch (error) { discardUploadedFile(req); next(error); }
+});
 
 // POST /api/projects/:projectId/students/:studentId/photos
 // Desktop app → server: validate and authorize identifiers before Multer

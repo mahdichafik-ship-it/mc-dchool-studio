@@ -38,6 +38,49 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
  */
 export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      is_default_class_group INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS group_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(group_id, student_id)
+    );
+    CREATE TABLE IF NOT EXISTS group_captures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      capture_key TEXT NOT NULL UNIQUE,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      base_filename TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      pairing_status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS group_capture_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      capture_id INTEGER NOT NULL REFERENCES group_captures(id) ON DELETE CASCADE,
+      file_role TEXT NOT NULL,
+      file_format TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      source_path TEXT,
+      file_size INTEGER,
+      upload_status TEXT,
+      file_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(capture_id, file_role)
+    );
     CREATE TABLE IF NOT EXISTS captures (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       capture_key TEXT NOT NULL UNIQUE,
@@ -97,7 +140,17 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_image_files_source ON image_files(source_path);
     CREATE INDEX IF NOT EXISTS idx_qr_markers_student ON qr_markers(student_id, captured_at);
     CREATE INDEX IF NOT EXISTS idx_qr_markers_project ON qr_markers(project_id);
+    CREATE INDEX IF NOT EXISTS idx_groups_project ON groups(project_id);
+    CREATE INDEX IF NOT EXISTS idx_groups_class ON groups(class_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_unique ON group_members(group_id, student_id);
+    CREATE INDEX IF NOT EXISTS idx_group_members_student ON group_members(student_id);
+    CREATE INDEX IF NOT EXISTS idx_group_captures_group ON group_captures(group_id);
+    CREATE INDEX IF NOT EXISTS idx_group_captures_project ON group_captures(project_id);
+    CREATE INDEX IF NOT EXISTS idx_group_capture_files_capture ON group_capture_files(capture_id);
   `)
+  // This column was added after groups shipped; run it after CREATE TABLE so
+  // fresh databases and existing installations follow the same path.
+  ensureColumn(sqlite, 'groups', 'membership_dirty', 'INTEGER NOT NULL DEFAULT 0')
 
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (

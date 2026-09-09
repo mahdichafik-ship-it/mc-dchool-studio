@@ -3,6 +3,8 @@ import { and, eq } from 'drizzle-orm'
 import type { getDb } from '../db'
 import {
   capturesTable,
+  groupCapturesTable,
+  groupCaptureFilesTable,
   classesTable,
   imageFilesTable,
   photosTable,
@@ -23,6 +25,7 @@ interface CaptureFileInput {
   storedPath: string
   fileName: string
   capturedAt: string
+  groupId?: string | null
 }
 
 function timestampMs(value: string): number {
@@ -62,10 +65,59 @@ function findPairCandidate(db: DesktopDb, input: CaptureFileInput) {
     .all()
     .map((capture) => ({ capture, files: getCaptureFiles(db, capture.id) }))
     .filter(({ capture, files }) =>
-      sameCaptureWindow(input.capturedAt, capture.capturedAt)
+       sameCaptureWindow(input.capturedAt, capture.capturedAt)
+       && (input.groupId === undefined || capture.groupId === input.groupId)
       && !files.some((file) => file.fileRole === role),
     )
     .sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0]
+}
+
+/** Persist a group JPEG/RAW without creating a legacy student photo row. */
+export function recordGroupCapture(db: DesktopDb, input: CaptureFileInput & { groupId: string }): {
+  kind: 'created' | 'paired' | 'duplicate'; captureId: number
+} {
+  const duplicate = findDuplicateFile(db, input.filePath)
+  if (duplicate) return { kind: 'duplicate', captureId: duplicate.captureId }
+  const candidate = findPairCandidate(db, input)
+  if (candidate) {
+    insertImageFile(db, candidate.capture.id, input)
+    const files = getCaptureFiles(db, candidate.capture.id)
+    db.update(capturesTable).set({ pairingStatus: statusForFiles(files), updatedAt: input.capturedAt })
+      .where(eq(capturesTable.id, candidate.capture.id)).run()
+    const groupCapture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.captureKey, candidate.capture.captureKey)).get()
+    if (groupCapture) {
+      db.insert(groupCaptureFilesTable).values({
+        captureId: groupCapture.id, fileRole: getCaptureFileRole(input.fileName)!,
+        fileFormat: getCaptureFileFormat(input.fileName), originalFilename: input.fileName,
+        storedPath: input.storedPath, sourcePath: input.filePath, createdAt: input.capturedAt,
+      }).onConflictDoNothing().run()
+      db.update(groupCapturesTable).set({ pairingStatus: statusForFiles(files), updatedAt: input.capturedAt })
+        .where(eq(groupCapturesTable.id, groupCapture.id)).run()
+    }
+    return { kind: 'paired', captureId: candidate.capture.id }
+  }
+  const role = getCaptureFileRole(input.fileName)
+  if (!role) throw new Error(`Unsupported capture file type: ${input.fileName}`)
+  const capture = db.insert(capturesTable).values({
+    captureKey: ['group', input.projectId, input.groupId, normalizeBaseFilename(input.fileName), input.capturedAt, input.filePath]
+      .map((part) => encodeURIComponent(String(part))).join(':'),
+    projectId: input.projectId, studentId: null, classId: input.classId, groupId: input.groupId,
+    baseFilename: normalizeBaseFilename(input.fileName), capturedAt: input.capturedAt,
+    assignmentLocked: true, pairingStatus: role === 'JPEG' ? 'jpeg_only' : 'raw_only',
+    createdAt: input.capturedAt, updatedAt: input.capturedAt,
+  }).returning().get()
+  insertImageFile(db, capture.id, input)
+  const groupRow = db.insert(groupCapturesTable).values({
+    captureKey: capture.captureKey, projectId: input.projectId, classId: input.classId,
+    groupId: Number(input.groupId), baseFilename: capture.baseFilename, capturedAt: input.capturedAt,
+    pairingStatus: capture.pairingStatus, createdAt: input.capturedAt, updatedAt: input.capturedAt,
+  }).onConflictDoNothing().returning().get()
+  if (groupRow) db.insert(groupCaptureFilesTable).values({
+    captureId: groupRow.id, fileRole: role, fileFormat: getCaptureFileFormat(input.fileName),
+    originalFilename: input.fileName, storedPath: input.storedPath, sourcePath: input.filePath,
+    createdAt: input.capturedAt,
+  }).onConflictDoNothing().run()
+  return { kind: 'created', captureId: capture.id }
 }
 
 function statusForFiles(files: Array<{ fileRole: 'JPEG' | 'RAW' }>) {

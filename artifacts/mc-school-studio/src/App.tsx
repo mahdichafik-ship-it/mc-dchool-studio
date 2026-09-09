@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk } from '@clerk/react';
 import { publishableKeyFromHost } from '@clerk/react/internal';
 import { shadcn } from '@clerk/themes';
-import { Switch, Route, useLocation, Router as WouterRouter, Redirect } from 'wouter';
+import { Switch, Route, Link, useLocation, Router as WouterRouter, Redirect } from 'wouter';
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 
@@ -18,6 +18,8 @@ import Platform from "./pages/Platform";
 import StudioInvite from "./pages/StudioInvite";
 import StudioSettings from "./pages/StudioSettings";
 import PlatformStudio from "./pages/PlatformStudio";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -91,21 +93,33 @@ const clerkAppearance = {
 function SignInPage() {
   const redirectUrl = new URLSearchParams(window.location.search).get("redirect_url");
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 px-4">
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-slate-50 px-4 py-8">
       <SignIn
         routing="path"
         path={`${basePath}/sign-in`}
         signUpUrl={`${basePath}/sign-up`}
         fallbackRedirectUrl={redirectUrl || `${basePath}/dashboard`}
       />
+      <LegalLinks />
     </div>
   );
 }
 
 function SignUpPage() {
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 px-4">
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-slate-50 px-4 py-8">
       <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
+      <LegalLinks />
+    </div>
+  );
+}
+
+function LegalLinks() {
+  return (
+    <div className="flex items-center gap-4 text-xs text-slate-500">
+      <Link href="/privacy" className="hover:text-teal-700">Privacy Policy</Link>
+      <Link href="/terms" className="hover:text-teal-700">Terms of Service</Link>
+      <a href="mailto:info@mehdichafik.ma" className="hover:text-teal-700">Contact</a>
     </div>
   );
 }
@@ -166,6 +180,8 @@ function Router() {
       <Route path="/" component={HomeRedirect} />
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
+      <Route path="/privacy" component={Privacy} />
+      <Route path="/terms" component={Terms} />
       <Route path="/desktop/connect" component={DesktopConnect} />
       <Route path="/studio-invite/:code" component={StudioInvite} />
       

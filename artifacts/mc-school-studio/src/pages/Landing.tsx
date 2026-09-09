@@ -106,8 +106,15 @@ export default function Landing() {
         </section>
       </main>
 
-      <footer className="py-8 text-center text-slate-500 text-sm border-t border-slate-200 bg-white">
-        &copy; {new Date().getFullYear()} Volume Capture. All rights reserved.
+      <footer className="border-t border-slate-200 bg-white px-8 py-8 text-sm text-slate-500">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 sm:flex-row">
+          <span>&copy; {new Date().getFullYear()} Volume Capture. All rights reserved.</span>
+          <nav aria-label="Legal" className="flex items-center gap-5">
+            <Link href="/privacy" className="hover:text-teal-700">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-teal-700">Terms of Service</Link>
+            <a href="mailto:info@mehdichafik.ma" className="hover:text-teal-700">Contact</a>
+          </nav>
+        </div>
       </footer>
     </div>
   );

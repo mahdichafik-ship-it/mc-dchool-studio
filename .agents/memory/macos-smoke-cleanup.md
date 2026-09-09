@@ -7,4 +7,4 @@ Native packaged Electron smoke tests can finish their assertions while backgroun
 
 **Why:** A teardown-only filesystem race can incorrectly block a release after all application assertions succeed.
 
-**How to apply:** Treat temporary Electron directory cleanup as retryable teardown work after the app process and test server are stopped; keep the release gate strict for assertion and process failures.
+**How to apply:** Treat temporary Electron directory cleanup as retryable teardown work after the app process and test server are stopped. If all release assertions and process checks passed, report exhausted cleanup as a warning rather than failing the release; keep the gate strict for assertion and process failures.

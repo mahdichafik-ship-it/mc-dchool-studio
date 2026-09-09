@@ -542,10 +542,16 @@ try {
   cdp?.close()
   await stopAppProcess(appProcess)
   await closeSmokeServer()
-  rmSync(root, {
-    recursive: true,
-    force: true,
-    maxRetries: 20,
-    retryDelay: 100,
-  })
+  try {
+    rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 100,
+    })
+  } catch (error) {
+    console.warn(
+      `[smoke] Could not remove temporary directory after all release assertions passed: ${error}`,
+    )
+  }
 }

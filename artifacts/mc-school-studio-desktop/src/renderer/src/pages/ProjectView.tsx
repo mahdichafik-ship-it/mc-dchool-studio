@@ -1,28 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
-  ArrowLeft,
-  Folder,
-  Play,
-  Square,
-  Search,
-  Image,
-  User,
-  ChevronRight,
-  Camera,
-  AlertCircle,
-  ExternalLink,
-  Download,
-  Upload,
-  CloudUpload,
-  CheckCircle,
-  XCircle,
-  Loader,
-  RefreshCw,
-  Star,
-  Check,
-  Plus,
-  Pencil,
-  Trash2,
+  ArrowLeft, Folder, Play, Square, Search, Image, User,
+  ChevronRight, Camera, AlertCircle, ExternalLink, Download,
+  Upload, CloudUpload, CheckCircle, XCircle, Loader,
+  RefreshCw, Star, Check, Plus, Pencil, Trash2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -61,6 +42,7 @@ import type {
   ProjectSyncProgressEvent,
   CreateStudentResult,
   StudentGroup,
+  GroupCaptureReview,
 } from '@/hooks/useApi'
 
 interface Props {
@@ -88,7 +70,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const { data: groups, reload: reloadGroups } = useGroups(projectId, selectedClassId ?? undefined)
   const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
-  const { data: groupCaptures } = useGroupCaptures(projectId, selectedGroup?.id ?? null)
+  const { data: groupCaptures, reload: reloadGroupCaptures } = useGroupCaptures(projectId, selectedGroup?.id ?? null)
   const {
     data: unmatchedPhotos,
     loading: unmatchedLoading,
@@ -106,7 +88,6 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
   const [search, setSearch] = useState('')
   const [addStudentOpen, setAddStudentOpen] = useState(false)
-  const [settingFolder, setSettingFolder] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
@@ -129,17 +110,12 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     })
   }, [projectId])
 
-  // Closing the project ends the capture session. The native stop handler
-  // drains any queued files before clearing the active student target.
   useEffect(() => {
     return () => {
       void stopWatcher()
     }
   }, [stopWatcher])
 
-  // Opening an unfinished project with a configured folder starts its capture
-  // session automatically. A manual stop remains respected until the project
-  // is closed and opened again.
   useEffect(() => {
     if (
       !project?.watchFolder
@@ -159,7 +135,6 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     })
   }, [isRunning, project?.finishedAt, project?.watchFolder, projectId, startWatcher])
 
-  // Re-select the student when students refresh (to get updated photoCount)
   useEffect(() => {
     if (selectedStudent) {
       const refreshed = students.find((s) => s.id === selectedStudent.id)
@@ -426,173 +401,137 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   })
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full font-sans bg-slate-50">
       {/* Header bar */}
-      <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-4">
-        <button onClick={onBack} className="text-slate-400 hover:text-slate-700 transition-colors">
-          <ArrowLeft className="size-5" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-bold text-slate-900 truncate">{project?.schoolName ?? '…'}</h1>
-          <p className="text-xs text-slate-500">
-            {project?.classCount} classes · {project?.studentCount} students · {
-              captureSummary.total > 0
-                ? `${captureSummary.total} captures`
-                : `${project?.photoCount ?? 0} photos taken`
-            }
-          </p>
-          {captureSummary.total > 0 && (
-            <p className="mt-0.5 text-[11px] text-slate-400">
-              {captureSummary.complete} paired · {captureSummary.jpegOnly} JPEG only · {captureSummary.rawOnly} RAW only
-            </p>
-          )}
-           {pendingUploadCount > 0 && (
-             <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
-               <Upload className="size-3" />
-               {pendingUploadCount} photo{pendingUploadCount === 1 ? '' : 's'} waiting for upload
-             </p>
-           )}
-            {project?.finishedAt ? (
-              <p className="mt-1 flex items-center gap-1 text-xs text-green-700">
-                <CheckCircle className="size-3" />
-                Project finished · local capture is closed
-              </p>
-            ) : (
-              <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-                <Folder className="size-3" />
-                Local capture is live · upload starts only when you finish the project
-              </p>
-            )}
-            {syncProgress?.phase === 'error' && (
-              <p className="mt-1 flex items-center gap-1 text-xs text-red-700">
-                <AlertCircle className="size-3" />
-                {syncProgress.failed} file{syncProgress.failed === 1 ? '' : 's'} failed · local project remains unfinished
-              </p>
-            )}
-        </div>
-
-        {/* Watch folder controls */}
-        <div className="flex items-center gap-2 shrink-0">
-            <Button
-              size="sm"
-              onClick={() => void handleUploadAndFinish()}
-               disabled={finishing || Boolean(project?.finishedAt) || captureSummary.total === 0 && groupCaptureCount === 0}
-              className={cn(
-                'gap-1.5',
-                project?.finishedAt
-                  ? 'bg-green-600 hover:bg-green-600'
-                  : 'bg-teal-600 hover:bg-teal-700',
-              )}
-              title={
-                project?.finishedAt
-                  ? 'This project has already been finished'
-                  : 'Stop local capture, upload the local project, and finish it'
-              }
-            >
-              {finishing ? (
-                <Loader className="size-3.5 animate-spin" />
-              ) : project?.finishedAt ? (
-                <CheckCircle className="size-3.5" />
-              ) : (
-                <CloudUpload className="size-3.5" />
-              )}
-              {finishing
-                ? syncProgress && syncProgress.total > 0
-                  ? `Uploading ${syncProgress.completed}/${syncProgress.total}`
-                  : 'Preparing…'
-                : project?.finishedAt
-                  ? 'Project finished'
-                  : syncProgress?.phase === 'error'
-                    ? 'Retry Upload & Finish'
-                    : 'Upload & Finish Project'}
-            </Button>
-           {captureSummary.total > 0 && (
-             <div className="flex items-center gap-1.5">
-               <select
-                 value={exportMode}
-                 onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
-                 className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                 aria-label="Capture export mode"
-               >
-                 <option value="all">Export all captures</option>
-                 <option value="paired">Export paired JPEG + RAW</option>
-                 <option value="jpeg_only">Export JPEG-only</option>
-                 <option value="raw_only">Export RAW-only</option>
-                 <option value="selected">Export selected</option>
-                 <option value="favorite">Export favorites</option>
-                 <option value="final_selection">Export final selection</option>
-               </select>
-               <Button
-                 variant="outline"
-                 size="sm"
-                 onClick={() => void handleExportCaptures('capture_folders')}
-                 disabled={exporting !== null}
-               >
-                  {exporting === 'capture_folders' ? <Loader className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
-                  {exporting === 'capture_folders' ? 'Exporting…' : 'Export'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleExportCaptures('lightroom_watch_folder')}
-                  disabled={exporting !== null}
-                  title="Choose the folder configured as Lightroom Classic's Auto Import watched folder"
-                >
-                  {exporting === 'lightroom_watch_folder' ? <Loader className="size-3.5 animate-spin" /> : <Image className="size-3.5" />}
-                  {exporting === 'lightroom_watch_folder' ? 'Sending…' : 'Send to Lightroom'}
-               </Button>
-             </div>
-           )}
-          {project?.watchFolder ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 max-w-[200px] truncate hidden lg:block">
-                {project.watchFolder}
+      <header className="bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
+        <div className="flex items-center gap-5 min-w-0">
+          <button onClick={onBack} aria-label="Back to projects" className="text-slate-400 hover:text-white transition-colors bg-slate-900 hover:bg-slate-800 p-1.5 rounded-md shrink-0">
+            <ArrowLeft className="size-4" />
+          </button>
+          <div className="min-w-0">
+            <h1 className="font-extrabold text-white text-base tracking-tight truncate">
+              {project?.schoolName ?? '…'}
+            </h1>
+            <div className="flex items-center gap-2.5 text-[11px] font-medium text-slate-400 mt-0.5 whitespace-nowrap">
+              <span>{project?.classCount} classes</span>
+              <span className="w-1 h-1 rounded-full bg-slate-700" />
+              <span>{project?.studentCount} students</span>
+              <span className="w-1 h-1 rounded-full bg-slate-700" />
+              <span className="text-slate-300">
+                {captureSummary.total > 0 ? `${captureSummary.total} captures` : `${project?.photoCount ?? 0} photos`}
               </span>
-              <Button variant="outline" size="sm" onClick={handleSetWatchFolder}>
-                <Folder className="size-3.5" />
-                Change folder
-              </Button>
-              <Button
-                size="sm"
-                variant={isRunning ? 'destructive' : 'default'}
-                onClick={handleToggleWatcher}
-                className="gap-1.5"
-              >
-                {isRunning ? (
-                  <><Square className="size-3" fill="currentColor" /> Stop watching</>
-                ) : (
-                  <><Play className="size-3" fill="currentColor" /> Start watching</>
-                )}
-              </Button>
-              {isRunning && (
-                <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  Live
-                </span>
+              {pendingUploadCount > 0 && (
+                <>
+                  <span className="w-1 h-1 rounded-full bg-amber-500/50" />
+                  <span className="text-amber-400 flex items-center gap-1">
+                    <Upload className="size-3" /> {pendingUploadCount} pending
+                  </span>
+                </>
+              )}
+              {syncProgress?.phase === 'error' && (
+                 <>
+                   <span className="w-1 h-1 rounded-full bg-red-500/50" />
+                   <span className="text-red-400 flex items-center gap-1">
+                     <AlertCircle className="size-3" /> {syncProgress.failed} failed
+                   </span>
+                 </>
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 shrink-0">
+          {/* Watch Folder Control */}
+          {project?.watchFolder ? (
+            <div className={cn(
+              "flex items-center h-8 rounded-md border transition-colors overflow-hidden",
+              isRunning ? "bg-teal-500/10 border-teal-500/20" : "bg-slate-900 border-slate-800"
+            )}>
+               <div className="flex items-center gap-2 px-3">
+                 <div className={cn("w-2 h-2 rounded-full", isRunning ? "bg-teal-400 animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.6)]" : "bg-slate-600")} />
+                 <span className={cn("text-[10px] font-bold uppercase tracking-wider", isRunning ? "text-teal-400" : "text-slate-400")}>
+                   {isRunning ? "Live" : "Paused"}
+                 </span>
+               </div>
+               <div className={cn("w-px h-full", isRunning ? "bg-teal-500/20" : "bg-slate-800")} />
+               <button onClick={handleToggleWatcher} className={cn("px-3 h-full text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1", isRunning ? "text-teal-400 hover:text-white hover:bg-teal-500/20" : "text-slate-300 hover:text-white hover:bg-slate-800")}>
+                 {isRunning ? <Square className="size-3 fill-current" /> : <Play className="size-3 fill-current" />}
+                 {isRunning ? "Stop" : "Start"}
+               </button>
+               <div className={cn("w-px h-full", isRunning ? "bg-teal-500/20" : "bg-slate-800")} />
+               <button onClick={handleSetWatchFolder} aria-label="Change watch folder" className={cn("px-2 h-full transition-colors", isRunning ? "text-teal-600 hover:text-teal-300 hover:bg-teal-500/20" : "text-slate-400 hover:text-white hover:bg-slate-800")} title="Change folder">
+                 <Folder className="size-3" />
+               </button>
+            </div>
           ) : (
-            <Button variant="outline" size="sm" onClick={handleSetWatchFolder}>
-              <Folder className="size-3.5" />
-              Set watch folder
+            <Button size="sm" variant="outline" onClick={handleSetWatchFolder} className="h-8 bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold uppercase tracking-wider">
+              <Folder className="size-3.5 mr-1.5" /> Set Watch Folder
             </Button>
           )}
+
+          <div className="w-px h-6 bg-slate-800" />
+
+          {/* Exports & Finish */}
+          <div className="flex items-center gap-2">
+             {captureSummary.total > 0 && (
+                <div className="flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
+                   <select
+                      value={exportMode}
+                      onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
+                      className="h-full bg-transparent px-2 text-[10px] font-bold uppercase tracking-wider text-slate-300 focus:outline-none border-r border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors"
+                   >
+                     <option value="all">All</option>
+                     <option value="paired">Paired</option>
+                     <option value="jpeg_only">JPEG Only</option>
+                     <option value="raw_only">RAW Only</option>
+                     <option value="selected">Selected</option>
+                     <option value="favorite">Favorites</option>
+                     <option value="final_selection">Final</option>
+                   </select>
+                   <button onClick={() => void handleExportCaptures('capture_folders')} disabled={exporting !== null} className="px-3 h-full text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5 disabled:opacity-50">
+                      {exporting === 'capture_folders' ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
+                      Export
+                   </button>
+                   <div className="w-px h-full bg-slate-800" />
+                   <button onClick={() => void handleExportCaptures('lightroom_watch_folder')} disabled={exporting !== null} className="px-3 h-full text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5 disabled:opacity-50" title="Send to Lightroom Auto Import">
+                      {exporting === 'lightroom_watch_folder' ? <Loader className="size-3 animate-spin" /> : <Image className="size-3" />}
+                      To LR
+                   </button>
+                </div>
+             )}
+             <Button
+               size="sm"
+               onClick={() => void handleUploadAndFinish()}
+               disabled={finishing || Boolean(project?.finishedAt) || (captureSummary.total === 0 && groupCaptureCount === 0)}
+               className={cn(
+                 "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
+                 project?.finishedAt ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+               )}
+             >
+               {finishing ? (
+                 <Loader className="size-3.5 mr-1.5 animate-spin" />
+               ) : project?.finishedAt ? (
+                 <CheckCircle className="size-3.5 mr-1.5" />
+               ) : (
+                 <CloudUpload className="size-3.5 mr-1.5" />
+               )}
+               {finishing ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…') : project?.finishedAt ? 'Finished' : 'Upload & Finish'}
+             </Button>
+          </div>
         </div>
-      </div>
+      </header>
 
       {/* Body: split panel */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left panel: classes + students */}
-        <div className="w-72 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden">
+        <div className="w-[340px] flex-shrink-0 bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-10 flex flex-col">
           {/* Class tabs */}
-          <div className="flex overflow-x-auto border-b border-slate-100 shrink-0">
+          <div className="flex overflow-x-auto border-b border-slate-100 shrink-0 p-2 gap-1 hide-scrollbar">
             <button
               onClick={() => setSelectedClassId(null)}
               className={cn(
-                'px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors',
-                !selectedClassId
-                  ? 'border-teal-500 text-teal-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700',
+                "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
+                !selectedClassId ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
               )}
             >
               All ({students.length})
@@ -602,67 +541,35 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 key={c.id}
                 onClick={() => setSelectedClassId(c.id)}
                 className={cn(
-                  'px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors',
-                  selectedClassId === c.id
-                    ? 'border-teal-500 text-teal-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-700',
+                  "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
+                  selectedClassId === c.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 )}
               >
                 {c.className}
               </button>
             ))}
           </div>
-          <div className="border-b border-slate-100 px-3 py-2">
-            <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              <span>Groups</span>
-               {!project?.finishedAt && <button type="button" onClick={() => void handleCreateGroup()} className="text-teal-600 hover:text-teal-700">+ New</button>}
-            </div>
-            {groups.map((group) => (
-              <div key={group.id} className={cn('mb-1 flex w-full items-center rounded px-2 py-1.5 text-xs',
-                selectedGroup?.id === group.id ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50')}>
-                {renamingGroupId === group.id ? (
-                  <form className="flex min-w-0 flex-1 gap-1" onSubmit={(event) => { event.preventDefault(); void handleRenameGroup(group) }}>
-                    <Input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} className="h-6 min-w-0 text-xs" />
-                    <Button type="submit" size="sm" className="h-6 px-2 text-[10px]">Save</Button>
-                  </form>
-                ) : (
-                  <button type="button" onClick={() => void handleSelectGroup(group)} className="min-w-0 flex-1 text-left">
-                    <span className="truncate">{group.name}</span>
-                  </button>
-                )}
-                <span className="ml-2 text-[10px] text-slate-400">{group.memberStudentIds.length}</span>
-                {!group.isDefaultClassGroup && !project?.finishedAt && renamingGroupId !== group.id && (
-                  <>
-                    <button type="button" className="ml-2 text-slate-400 hover:text-teal-600" title="Rename group"
-                      onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }}><Pencil className="size-3" /></button>
-                    <button type="button" className="ml-1 text-slate-400 hover:text-red-600" title="Delete group"
-                      onClick={() => void handleDeleteGroup(group)}><Trash2 className="size-3" /></button>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
 
           {/* Search */}
-          <div className="px-3 py-2 border-b border-slate-100">
+          <div className="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0">
             <div className="flex gap-2">
-              <div className="relative min-w-0 flex-1">
-                <Search className="absolute left-2.5 top-2 size-3.5 text-slate-400" />
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search students…"
+                  placeholder="Search roster..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md bg-slate-50 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  className="w-full pl-9 pr-3 py-2 text-sm font-medium border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all shadow-sm placeholder:text-slate-400"
                 />
               </div>
               <button
                 type="button"
                 onClick={() => setAddStudentOpen(true)}
                 disabled={classes.length === 0 || Boolean(project?.finishedAt)}
-                className="flex size-8 shrink-0 items-center justify-center rounded-md bg-teal-600 text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
-                title={project?.finishedAt ? 'This project is finished' : 'Add student'}
                 aria-label="Add student"
+                className="size-[38px] bg-slate-900 text-white rounded-lg flex items-center justify-center hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm shrink-0"
+                title={project?.finishedAt ? 'This project is finished' : 'Add student'}
               >
                 <Plus className="size-4" />
               </button>
@@ -671,16 +578,16 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
           {/* Retry failed uploads button */}
           {errorPhotoIds.length > 0 && (
-            <div className="px-3 py-2 border-b border-red-100 bg-red-50">
+            <div className="px-3 py-2 border-b border-red-100 bg-red-50 shrink-0">
               <button
                 onClick={handleRetryFailed}
                 disabled={retrying}
-                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-60 rounded-md px-2 py-1.5 transition-colors"
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-60 rounded-md px-2 py-2 transition-colors"
               >
                 {retrying ? (
-                  <Loader className="size-3 animate-spin" />
+                  <Loader className="size-3.5 animate-spin" />
                 ) : (
-                  <RefreshCw className="size-3" />
+                  <RefreshCw className="size-3.5" />
                 )}
                 {retrying
                   ? 'Retrying…'
@@ -691,55 +598,88 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
           {/* Student list */}
           <div className="flex-1 overflow-y-auto">
-            {filteredStudents.map((s) => (
-              <StudentRow
-                key={s.id}
-                student={s}
-                isSelected={selectedStudent?.id === s.id}
-                isActive={activeStudentId === s.id}
-                onClick={() => void handleSelectCaptureStudent(s)}
-                uploadSummary={uploadStatusMap.get(s.id)}
-              />
-            ))}
-            {filteredStudents.length === 0 && (
-              <div className="text-center text-slate-400 text-xs py-8">No students found</div>
+            {groups.length > 0 && (
+              <div className="py-2 border-b border-slate-100">
+                <div className="px-4 py-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  <span>Groups</span>
+                  {!project?.finishedAt && (
+                    <button type="button" onClick={() => void handleCreateGroup()} className="text-teal-600 hover:text-teal-700 flex items-center gap-0.5">
+                      <Plus className="size-3" /> New
+                    </button>
+                  )}
+                </div>
+                {groups.map((group) => (
+                  <div key={group.id} className={cn("flex flex-col border-b border-slate-100 last:border-0", selectedGroup?.id === group.id ? "bg-teal-50/50" : "bg-white")}>
+                    {renamingGroupId === group.id ? (
+                      <div className="px-4 py-2">
+                        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void handleRenameGroup(group) }}>
+                          <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="flex-1 h-7 px-2 text-xs font-medium border border-slate-300 rounded focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+                          <Button type="submit" size="sm" className="h-7 px-2 bg-teal-600 hover:bg-teal-700 text-white text-[10px] uppercase font-bold tracking-wider">Save</Button>
+                        </form>
+                      </div>
+                    ) : (
+                      <div className={cn("flex items-center px-4 py-2 group/group transition-colors border-l-4", selectedGroup?.id === group.id ? "border-teal-500" : "border-transparent hover:bg-slate-50")}>
+                        <button type="button" onClick={() => void handleSelectGroup(group)} className="flex-1 flex items-center justify-between text-left min-w-0 mr-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className={cn("w-6 h-6 rounded-md flex items-center justify-center shrink-0", selectedGroup?.id === group.id ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-500")}>
+                              <User className="size-3.5" />
+                            </div>
+                            <span className={cn("text-sm font-bold truncate", selectedGroup?.id === group.id ? "text-teal-950" : "text-slate-800")}>{group.name}</span>
+                          </div>
+                          <Badge className="bg-slate-200 hover:bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0 rounded font-bold shadow-none">
+                            {group.memberStudentIds.length}
+                          </Badge>
+                        </button>
+                        {!group.isDefaultClassGroup && !project?.finishedAt && (
+                          <div className="flex items-center gap-1 opacity-0 group-hover/group:opacity-100 transition-opacity">
+                            <button type="button" onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }} className="p-1 text-slate-400 hover:text-teal-600 transition-colors" title="Rename group">
+                              <Pencil className="size-3.5" />
+                            </button>
+                            <button type="button" onClick={() => void handleDeleteGroup(group)} className="p-1 text-slate-400 hover:text-red-600 transition-colors" title="Delete group">
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
-          </div>
-          {selectedGroup && (
-            <div className="max-h-48 overflow-y-auto border-t border-slate-200 bg-slate-50 p-2">
-              <div className="mb-1 text-[10px] font-semibold uppercase text-slate-400">Group members</div>
-              {students.map((student) => (
-                <label key={student.id} className="flex items-center gap-2 py-1 text-xs text-slate-600">
-                  <input type="checkbox" checked={selectedGroup.memberStudentIds.includes(student.id)}
-                    onChange={(event) => void handleGroupMembership(selectedGroup, student.id, event.target.checked)} />
-                  {student.firstName} {student.lastName}
-                </label>
+
+            <div className="py-2">
+              <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Students
+              </div>
+              {filteredStudents.map((s) => (
+                <StudentRow
+                  key={s.id}
+                  student={s}
+                  isSelected={selectedStudent?.id === s.id}
+                  isActive={activeStudentId === s.id}
+                  onClick={() => void handleSelectCaptureStudent(s)}
+                  uploadSummary={uploadStatusMap.get(s.id)}
+                />
               ))}
+              {filteredStudents.length === 0 && (
+                <div className="p-8 text-center text-slate-400 text-xs font-medium">No subjects found</div>
+              )}
             </div>
-          )}
+          </div>
         </div>
 
         {/* Right panel: QR code + photos */}
-        <div className="flex-1 overflow-y-auto bg-slate-50">
+        <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
           {selectedGroup ? (
-            <div className="p-6">
-              <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 p-4">
-                <h2 className="font-semibold text-teal-900">{selectedGroup.name}</h2>
-                <p className="text-sm text-teal-700">Incoming JPEG and RAW files go to this class/group.</p>
-                {activeGroupId === selectedGroup.id && <p className="mt-1 text-xs font-medium text-teal-800">Active capture target</p>}
-              </div>
-              <div className="space-y-2">
-                {groupCaptures.map((capture) => (
-                  <div key={capture.id} className="rounded border border-slate-200 bg-white p-3 text-sm">
-                    <div className="flex items-center justify-between"><span className="font-medium">{capture.baseFilename}</span><Badge>{capture.pairingStatus}</Badge></div>
-                    <div className="mt-2 flex gap-2 text-xs text-slate-500">
-                      {capture.files.map((file) => <button key={file.id} type="button" onClick={() => void window.api.invoke('photos:openInSystem', { filePath: file.storedPath })} className="underline">{file.fileRole} · open</button>)}
-                    </div>
-                  </div>
-                ))}
-                {groupCaptures.length === 0 && <p className="text-sm text-slate-400">No group captures yet.</p>}
-              </div>
-            </div>
+            <GroupDetail
+              group={selectedGroup}
+              students={students}
+              groupCaptures={groupCaptures}
+              isActiveCaptureTarget={activeGroupId === selectedGroup.id}
+              onMembershipChange={handleGroupMembership}
+              onClearCaptureTarget={() => void setActiveGroupTarget(null)}
+              onRefreshCaptures={() => void reloadGroupCaptures()}
+            />
           ) : selectedStudent ? (
             <StudentDetail
               student={selectedStudent}
@@ -758,21 +698,14 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               onOpen={(filePath) => window.api.invoke('photos:openInSystem', { filePath })}
               onReassign={setReassignDialogPhoto}
             />
-          ) : unmatchedPhotos.length > 0 ? (
-            <UnmatchedPhotosPanel
-              photos={unmatchedPhotos}
-              loading={unmatchedLoading}
-              onOpen={(filePath) => window.api.invoke('photos:openInSystem', { filePath })}
-              onReassign={setReassignDialogPhoto}
-            />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center p-8">
-              <div className="w-20 h-20 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">
-                <User className="size-10 text-slate-400" />
+            <div className="flex flex-col items-center justify-center h-full p-12 text-center bg-slate-50">
+              <div className="w-24 h-24 bg-white shadow-sm rounded-3xl flex items-center justify-center mb-6 border border-slate-200">
+                <User className="size-12 text-slate-300" />
               </div>
-              <h3 className="font-semibold text-slate-600 mb-1">No student selected</h3>
-              <p className="text-sm text-slate-400 max-w-xs">
-                Click a student on the left to display their QR code for the photographer.
+              <h3 className="text-2xl font-extrabold text-slate-900 mb-2 tracking-tight">Select a subject</h3>
+              <p className="text-slate-500 max-w-md text-base font-medium leading-relaxed">
+                Click a student or group in the roster to set them as the active target and display their QR code for the camera.
               </p>
             </div>
           )}
@@ -855,17 +788,17 @@ function AddStudentDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Add student to class">
-      <form className="space-y-4" onSubmit={handleSubmit}>
+    <Dialog open={open} onClose={onClose} title="Add Student to Class" className="max-w-md">
+      <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
-          <label htmlFor="new-student-class" className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="new-student-class" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
             Class
           </label>
           <select
             id="new-student-class"
             value={classId}
             onChange={(event) => setClassId(event.target.value)}
-            className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 shadow-sm"
             required
           >
             {classes.map((cls) => (
@@ -873,9 +806,9 @@ function AddStudentDialog({
             ))}
           </select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <label htmlFor="new-student-first-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label htmlFor="new-student-first-name" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
               First name
             </label>
             <Input
@@ -885,10 +818,11 @@ function AddStudentDialog({
               maxLength={100}
               autoFocus
               required
+              className="h-10 font-medium"
             />
           </div>
           <div>
-            <label htmlFor="new-student-last-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label htmlFor="new-student-last-name" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
               Last name
             </label>
             <Input
@@ -897,19 +831,20 @@ function AddStudentDialog({
               onChange={(event) => setLastName(event.target.value)}
               maxLength={100}
               required
+              className="h-10 font-medium"
             />
           </div>
         </div>
-        <p className="text-xs leading-5 text-slate-500">
+        <p className="text-xs font-medium leading-relaxed text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100">
           The student is saved on this Mac immediately and selected as the active capture target.
           If you are offline, Volume Capture will add them to the cloud during Upload & Finish.
         </p>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving} className="text-xs font-bold uppercase tracking-wider h-10 px-5">
             Cancel
           </Button>
-          <Button type="submit" disabled={saving || !classId || !firstName.trim() || !lastName.trim()}>
-            {saving ? <Loader className="size-4 animate-spin" /> : <Plus className="size-4" />}
+          <Button type="submit" disabled={saving || !classId || !firstName.trim() || !lastName.trim()} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider h-10 px-5 shadow-sm">
+            {saving ? <Loader className="size-4 mr-2 animate-spin" /> : <Plus className="size-4 mr-2" />}
             {saving ? 'Adding…' : 'Add student'}
           </Button>
         </div>
@@ -930,60 +865,73 @@ function UnmatchedPhotosPanel({
   onReassign: (photo: Photo) => void
 }) {
   return (
-    <div className="p-8">
-      <div className="mb-5">
-        <h2 className="text-lg font-bold text-slate-900">Photos needing assignment</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          These captures were saved, but no student QR or filename match was found. Assign them manually or photograph the student QR before the next portraits.
-        </p>
-      </div>
-      {loading ? (
-        <div className="flex h-40 items-center justify-center text-sm text-slate-400">
-          <Loader className="mr-2 size-4 animate-spin" /> Loading captures…
+    <div className="flex-1 overflow-y-auto p-8">
+      <div className="max-w-[1400px] mx-auto">
+        <div className="mb-6 flex items-start gap-4 bg-white p-6 rounded-2xl border border-amber-200 shadow-sm">
+          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+            <AlertCircle className="size-6" />
+          </div>
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Photos needing assignment</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500 leading-relaxed max-w-2xl">
+              These captures were saved, but no student QR or filename match was found. Assign them manually or photograph the student QR before the next portraits.
+            </p>
+          </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-3 gap-3">
-          {photos.map((photo) => (
-            <div key={photo.id} className="overflow-hidden rounded-lg border border-amber-200 bg-white">
-              <div className="aspect-square bg-slate-100">
-                {photo.thumbnailData ? (
-                  <img
-                    src={photo.thumbnailData}
-                    alt={photo.fileName}
-                    className="h-full w-full object-cover"
-                    draggable={false}
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center">
-                    <Image className="size-8 text-slate-400" />
+        {loading ? (
+          <div className="flex h-64 flex-col items-center justify-center bg-white border border-slate-200 rounded-2xl shadow-sm text-slate-400">
+            <Loader className="mb-3 size-6 animate-spin text-amber-500" />
+            <span className="text-sm font-bold">Loading captures...</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+            {photos.map((photo) => (
+              <div key={photo.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col group transition-shadow hover:shadow-md">
+                <div className="aspect-square bg-slate-100 relative">
+                  {photo.thumbnailData ? (
+                    <img
+                      src={photo.thumbnailData}
+                      alt={photo.fileName}
+                      className="h-full w-full object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center">
+                      <Image className="size-8 text-slate-400" />
+                    </div>
+                  )}
+                  <div className="absolute top-2 left-2">
+                    <span className="bg-amber-500 text-white text-[9px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded shadow-sm">
+                      Unassigned
+                    </span>
                   </div>
-                )}
-              </div>
-              <div className="space-y-2 p-2">
-                <p className="truncate text-[11px] text-slate-600" title={photo.fileName}>
-                  {photo.fileName}
-                </p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void onOpen(photo.filePath)}
-                    className="rounded bg-slate-100 px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-200"
-                  >
-                    Open
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onReassign(photo)}
-                    className="rounded bg-teal-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-teal-700"
-                  >
-                    Assign
-                  </button>
+                </div>
+                <div className="space-y-3 p-4 flex-1 flex flex-col justify-between">
+                  <p className="truncate text-xs font-mono font-medium text-slate-500" title={photo.fileName}>
+                    {photo.fileName}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void onOpen(photo.filePath)}
+                      className="rounded-lg bg-slate-100 px-2 py-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-700 hover:bg-slate-200 transition-colors flex items-center justify-center gap-1"
+                    >
+                      <ExternalLink className="size-3" /> Open
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onReassign(photo)}
+                      className="rounded-lg bg-teal-600 px-2 py-2 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-teal-700 transition-colors flex items-center justify-center gap-1 shadow-sm"
+                    >
+                      Assign
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -991,29 +939,29 @@ function UnmatchedPhotosPanel({
 function UploadBadge({ summary }: { summary: StudentUploadSummary }) {
   if (summary.uploading > 0) {
     return (
-      <span title="Uploading…" className="flex items-center gap-0.5 text-[10px] text-blue-600">
-        <Loader className="size-3 animate-spin" />
+      <span title="Uploading…" className="flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+        <Loader className="size-3 animate-spin" /> {summary.uploading}
       </span>
     )
   }
   if (summary.error > 0) {
     return (
-      <span title={`${summary.error} upload(s) failed`} className="flex items-center gap-0.5 text-[10px] text-red-500">
-        <XCircle className="size-3" />
+      <span title={`${summary.error} upload(s) failed`} className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+        <XCircle className="size-3" /> {summary.error}
       </span>
     )
   }
   if (summary.pending > 0) {
     return (
-      <span title={`${summary.pending} upload(s) queued`} className="flex items-center gap-0.5 text-[10px] text-amber-500">
-        <Upload className="size-3" />
+      <span title={`${summary.pending} upload(s) queued`} className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+        <Upload className="size-3" /> {summary.pending}
       </span>
     )
   }
   if (summary.done > 0) {
     return (
-      <span title={`${summary.done} photo(s) uploaded`} className="flex items-center gap-0.5 text-[10px] text-green-600">
-        <CheckCircle className="size-3" />
+      <span title={`${summary.done} photo(s) uploaded`} className="flex items-center gap-1 text-[10px] font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded">
+        <CheckCircle className="size-3" /> {summary.done}
       </span>
     )
   }
@@ -1037,38 +985,39 @@ function StudentRow({
     <button
       onClick={onClick}
       className={cn(
-        'w-full px-3 py-2.5 text-left flex items-center gap-2 transition-colors border-b border-slate-50',
-        isActive
-          ? 'bg-blue-100 border-l-4 border-l-blue-600 ring-1 ring-inset ring-blue-200'
-          : isSelected
-            ? 'bg-slate-100 border-l-2 border-l-slate-400'
-          : 'hover:bg-slate-50',
+        "text-left w-full p-3 border-b transition-colors flex items-center gap-3",
+        isActive ? "bg-teal-50/50 border-l-4 border-l-teal-500" : isSelected ? "bg-slate-50 border-l-4 border-l-transparent" : "hover:bg-slate-50 border-l-4 border-l-transparent border-b-slate-100"
       )}
       aria-pressed={isActive}
       title={isActive ? 'Active capture student' : 'Select as active capture student'}
     >
       <div className="flex-1 min-w-0">
-        <p className={cn('text-sm font-medium truncate', isActive ? 'text-blue-800' : 'text-slate-800')}>
-          {s.lastName}, {s.firstName}
-        </p>
-        <p className={cn('text-xs font-mono', isActive ? 'text-blue-600' : 'text-slate-400')}>
-          {s.generatedStudentId}
-        </p>
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        {isActive && (
-          <Badge className="border-blue-200 bg-blue-600 text-[9px] text-white">
-            <Camera className="mr-0.5 size-2.5" />
-            ACTIVE
-          </Badge>
-        )}
-        {uploadSummary && <UploadBadge summary={uploadSummary} />}
-        {s.photoCount > 0 ? (
-          <Badge variant="success" className="text-[10px] px-1.5 py-0">
-            <Camera className="size-2.5 mr-0.5" />
-            {s.photoCount}
-          </Badge>
-        ) : null}
+        <div className="flex items-center justify-between mb-1">
+           <span className={cn("font-bold text-sm truncate", isActive ? "text-teal-950" : "text-slate-900")}>
+             {s.lastName}, {s.firstName}
+           </span>
+           <div className="flex items-center gap-1.5 shrink-0">
+             {isActive && (
+               <Badge className="bg-teal-600 hover:bg-teal-600 text-white text-[9px] font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded-sm shadow-sm">
+                 <Camera className="size-2.5 mr-1" />
+                 Active
+               </Badge>
+             )}
+             {s.photoCount > 0 && !isActive && (
+               <Badge className="bg-slate-200 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-none">
+                 {s.photoCount}
+               </Badge>
+             )}
+           </div>
+        </div>
+        <div className="flex items-center justify-between">
+           <span className={cn("text-[10px] font-mono font-medium", isActive ? "text-teal-700" : "text-slate-500")}>
+             {s.generatedStudentId}
+           </span>
+           <div className="flex items-center gap-1">
+             {uploadSummary && <UploadBadge summary={uploadSummary} />}
+           </div>
+        </div>
       </div>
     </button>
   )
@@ -1147,7 +1096,7 @@ function StudentDetail({
       addToast({ type: 'error', title: 'Photo upload failed', description: String(error) })
     } finally {
       setRetryingPhotoId(null)
-       reloadCaptures()
+      reloadCaptures()
       onReassign()
     }
   }
@@ -1188,169 +1137,186 @@ function StudentDetail({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative bg-slate-50">
       {/* Student info header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">
-            {student.firstName} {student.lastName}
-          </h2>
-          <div className="flex items-center gap-3 mt-1">
-            <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+      <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
+        {isActiveCaptureTarget && (
+          <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
+        )}
+        <div className="flex flex-col min-w-0">
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            {isActiveCaptureTarget && (
+              <Badge className="bg-teal-500 hover:bg-teal-500 text-white font-extrabold uppercase tracking-widest text-[10px] px-2.5 py-0.5 shadow-sm">
+                <Camera className="size-3 mr-1.5" /> Active Target
+              </Badge>
+            )}
+            <span className="text-[11px] font-mono font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 truncate">
               {student.generatedStudentId}
             </span>
-            <span className="text-xs text-slate-500">{student.className}</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400 truncate">
+              {student.className}
+            </span>
           </div>
-          {isActiveCaptureTarget && (
-            <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-blue-700">
-              <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1">
-                <Camera className="size-3.5" />
-                Active capture student{activeStudentSource === 'qr' ? ' · selected by QR' : ''}
-              </span>
-              <span className="font-normal text-blue-600">
-                New JPEG and RAW captures will be assigned here
-              </span>
-            </div>
-          )}
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
+            {student.firstName} {student.lastName}
+          </h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-end gap-3 justify-center shrink-0">
           {isActiveCaptureTarget && (
-            <Button variant="outline" size="sm" onClick={onClearCaptureTarget}>
-              <XCircle className="size-3.5" />
-              Clear target
+            <Button variant="outline" size="sm" onClick={onClearCaptureTarget} className="text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm">
+              <XCircle className="size-3.5 mr-1.5" /> Clear Target
             </Button>
           )}
-            {captures.length > 0 || qrMarkers.length > 0 ? (
-              <Badge variant="success">
-                {captures.length} capture{captures.length !== 1 ? 's' : ''} recorded
-                {qrMarkers.length > 0 && ` · ${qrMarkers.length} QR marker${qrMarkers.length !== 1 ? 's' : ''}`}
-              </Badge>
-          ) : (
-            <Badge variant="warning">Not yet photographed</Badge>
-          )}
+          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
+            {captures.length} Capture{captures.length !== 1 ? 's' : ''} recorded
+          </div>
         </div>
       </div>
 
-      <div className="flex gap-8 p-8">
-        {/* QR code panel */}
-        <div className="flex flex-col items-center">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
-            QR Code — show to camera
-          </p>
-          {student.simpleQr ? (
-            <div className="bg-white border-4 border-slate-900 rounded-2xl p-4 shadow-lg">
-              <img
-                src={student.simpleQr}
-                alt="Student QR Code"
-                className="w-64 h-64"
-                draggable={false}
+      <div className="flex-1 overflow-y-auto p-8">
+        <div className="max-w-[1400px] mx-auto flex flex-col-reverse xl:flex-row gap-8">
+          {/* Photo gallery */}
+          <div className="flex-1 min-w-0 flex flex-col gap-6">
+            {livePreview?.photo.previewUrl && (
+              <LivePreview
+                photo={livePreview.photo}
+                traceId={livePreview.pipeline?.traceId}
               />
-            </div>
-          ) : (
-            <div className="w-72 h-72 bg-slate-100 rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-slate-300">
-              <AlertCircle className="size-8 text-slate-400 mb-2" />
-              <p className="text-sm text-slate-500 font-medium">QR not generated yet</p>
-              <p className="text-xs text-slate-400 mt-1">Generate QR codes in the web app first</p>
-            </div>
-          )}
-          <p className="text-xs text-slate-400 mt-3 font-mono">
-            {student.firstName}.{student.lastName}.{student.generatedStudentId}
-          </p>
-        </div>
+            )}
 
-        {/* Photo gallery */}
-        <div className="flex-1 min-w-0">
-          {livePreview?.photo.previewUrl && (
-            <LivePreview
-              photo={livePreview.photo}
-              traceId={livePreview.pipeline?.traceId}
-            />
-          )}
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
-             Capture review ({filteredCaptures.length + qrMarkers.length})
-          </p>
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {captureFilterOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setPairingFilter(option.value)}
-                className={cn(
-                  'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-                  pairingFilter === option.value
-                    ? 'border-teal-200 bg-teal-50 text-teal-700'
-                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700',
-                )}
-              >
-                {option.label} ({option.value === 'all' ? captures.length : captureCounts[option.value]})
-              </button>
-            ))}
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
+                  2. Live Captures
+                </div>
+                <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+                  {captureFilterOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setPairingFilter(option.value)}
+                      className={cn(
+                        'rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5',
+                        pairingFilter === option.value
+                          ? 'bg-slate-900 text-white shadow-md'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100',
+                      )}
+                    >
+                      {option.label}
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded text-[9px] font-extrabold",
+                        pairingFilter === option.value ? "bg-slate-700 text-white" : "bg-slate-200 text-slate-600"
+                      )}>
+                        {option.value === 'all' ? captures.length : captureCounts[option.value]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {capturesLoading && captures.length === 0 && qrMarkers.length === 0 ? (
+                <div className="h-64 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-3xl text-slate-400 shadow-sm">
+                  <Loader className="size-8 animate-spin mb-4 text-teal-500" />
+                  <span className="text-sm font-bold uppercase tracking-wider">Loading captures...</span>
+                </div>
+              ) : capturesError ? (
+                <div className="h-64 flex flex-col items-center justify-center border border-red-200 bg-red-50 rounded-3xl px-6 text-center shadow-sm">
+                  <AlertCircle className="size-10 text-red-400 mb-3" />
+                  <p className="text-base font-extrabold text-red-700">Could not load these captures</p>
+                  <p className="text-xs font-medium text-red-600 mt-1">{capturesError}</p>
+                  <button
+                    type="button"
+                    onClick={() => void reloadCaptures()}
+                    className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-red-700 shadow-sm"
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : captures.length === 0 && qrMarkers.length === 0 ? (
+                <div className="h-72 flex flex-col items-center justify-center bg-white border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center shadow-sm">
+                  <div className="w-20 h-20 bg-teal-50 text-teal-600 rounded-3xl flex items-center justify-center mb-5 shadow-sm border border-teal-100">
+                    <Camera className="size-10" />
+                  </div>
+                  <h3 className="text-xl font-extrabold text-slate-900 mb-2 tracking-tight">Ready for photos</h3>
+                  <p className="text-slate-500 max-w-sm text-sm font-medium leading-relaxed">
+                    Show the QR code to the camera, then start shooting. Captures will appear here instantly.
+                  </p>
+                </div>
+              ) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? (
+                <div className="h-64 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-3xl shadow-sm text-center">
+                  <AlertCircle className="size-10 text-slate-300 mb-3" />
+                  <p className="text-sm font-extrabold text-slate-500 uppercase tracking-wider">No captures match filter</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+                  {qrMarkers.map((marker) => (
+                    <QrMarkerTile
+                      key={marker.id}
+                      marker={marker}
+                      onOpen={() => handleOpenPhoto(marker.filePath)}
+                    />
+                  ))}
+                  {filteredCaptures.map((capture) => (
+                    <CaptureTile
+                      key={capture.id}
+                      capture={capture}
+                      uploadStatus={capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : undefined}
+                      onOpen={() => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? '')}
+                      onDelete={capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto!.id) : undefined}
+                      onRetry={capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto!.id) : undefined}
+                      retrying={capture.legacyPhoto?.id === retryingPhotoId}
+                      onRetryFile={handleRetryFile}
+                      retryingFileId={retryingFileId}
+                      onUpdateReview={handleUpdateCaptureReview}
+                      onReassign={capture.legacyPhoto ? () => {
+                        setReassignPhoto(capture.legacyPhoto)
+                        setReassignOpen(true)
+                      } : undefined}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {capturesLoading && captures.length === 0 && qrMarkers.length === 0 ? (
-            <div className="h-40 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400">
-              <Loader className="mr-2 size-4 animate-spin" />
-              Loading captures…
-            </div>
-          ) : capturesError ? (
-            <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-red-200 bg-red-50 rounded-xl px-6 text-center">
-              <AlertCircle className="size-8 text-red-400 mb-2" />
-              <p className="text-sm font-medium text-red-700">Could not load these captures</p>
-              <p className="text-xs text-red-600 mt-1">{capturesError}</p>
-              <button
-                type="button"
-                onClick={() => void reloadCaptures()}
-                className="mt-3 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-200"
-              >
-                Try again
-              </button>
-            </div>
-          ) : captures.length === 0 && qrMarkers.length === 0 ? (
-            <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
-              <Image className="size-8 text-slate-300 mb-2" />
-              <p className="text-sm text-slate-400">No captures yet</p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                JPEG and RAW files will appear here automatically when captured
+          {/* QR code panel */}
+          <div className="w-full xl:w-[300px] shrink-0">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 flex flex-col sm:flex-row xl:flex-col items-center sm:items-stretch xl:items-center gap-6">
+              <div className="flex flex-col flex-1 justify-center items-center sm:items-start xl:items-center min-w-0 w-full">
+                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-4 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm">
+                  1. Scan to link
+                </div>
+                <p className="text-[11px] text-slate-500 font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center sm:text-left xl:text-center border border-slate-100 hidden sm:block xl:hidden mb-4">
+                  {student.firstName}.{student.lastName}.{student.generatedStudentId}
+                </p>
+                <div className="hidden sm:block xl:hidden text-xs text-slate-400 font-medium max-w-[200px]">
+                  Present this code to the camera before capturing portraits.
+                </div>
+              </div>
+              <div className="shrink-0 w-48 sm:w-40 xl:w-full flex flex-col items-center">
+                {student.simpleQr ? (
+                  <img
+                    src={student.simpleQr}
+                    alt="Student QR Code"
+                    className="w-full aspect-square bg-slate-50 rounded-2xl border-2 border-slate-100 p-3 shadow-inner"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="w-full aspect-square bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-4">
+                    <AlertCircle className="size-8 text-slate-300 mb-2" />
+                    <p className="text-xs font-bold text-slate-500 text-center">QR not generated</p>
+                    <p className="text-[10px] font-medium text-slate-400 text-center mt-1">Generate in the web app</p>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2 sm:hidden xl:block font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center border border-slate-100">
+                {student.firstName}.{student.lastName}.{student.generatedStudentId}
               </p>
             </div>
-          ) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? (
-            <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl">
-              <AlertCircle className="size-8 text-slate-300 mb-2" />
-              <p className="text-sm text-slate-400">No captures match this filter</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-3">
-              {qrMarkers.map((marker) => (
-                <QrMarkerTile
-                  key={marker.id}
-                  marker={marker}
-                  onOpen={() => handleOpenPhoto(marker.filePath)}
-                />
-              ))}
-              {filteredCaptures.map((capture) => (
-                <CaptureTile
-                  key={capture.id}
-                  capture={capture}
-                  uploadStatus={capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : undefined}
-                  onOpen={() => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? '')}
-                  onDelete={capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto!.id) : undefined}
-                  onRetry={capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto!.id) : undefined}
-                  retrying={capture.legacyPhoto?.id === retryingPhotoId}
-                   onRetryFile={handleRetryFile}
-                   retryingFileId={retryingFileId}
-                   onUpdateReview={handleUpdateCaptureReview}
-                  onReassign={capture.legacyPhoto ? () => {
-                    setReassignPhoto(capture.legacyPhoto)
-                    setReassignOpen(true)
-                  } : undefined}
-                />
-              ))}
-            </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* Reassign dialog */}
       {reassignOpen && reassignPhoto && (
         <ReassignDialog
           photo={reassignPhoto}
@@ -1363,6 +1329,136 @@ function StudentDetail({
           }}
         />
       )}
+    </div>
+  )
+}
+
+function GroupDetail({
+  group,
+  students,
+  groupCaptures,
+  isActiveCaptureTarget,
+  onMembershipChange,
+  onClearCaptureTarget,
+  onRefreshCaptures,
+}: {
+  group: StudentGroup
+  students: Student[]
+  groupCaptures: GroupCaptureReview[]
+  isActiveCaptureTarget: boolean
+  onMembershipChange: (group: StudentGroup, studentId: number, checked: boolean) => void
+  onClearCaptureTarget: () => void
+  onRefreshCaptures: () => void
+}) {
+  return (
+    <div className="flex flex-col h-full relative bg-slate-50">
+      <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
+        {isActiveCaptureTarget && (
+          <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
+        )}
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-3 mb-2">
+            {isActiveCaptureTarget && (
+              <Badge className="bg-teal-500 hover:bg-teal-500 text-white font-extrabold uppercase tracking-widest text-[10px] px-2.5 py-0.5 shadow-sm">
+                <Camera className="size-3 mr-1.5" /> Active Target
+              </Badge>
+            )}
+            <span className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Custom Group</span>
+          </div>
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
+            {group.name}
+          </h2>
+        </div>
+        <div className="flex flex-col items-end gap-3 justify-center shrink-0">
+          {isActiveCaptureTarget && (
+            <Button variant="outline" size="sm" onClick={onClearCaptureTarget} className="text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm">
+              <XCircle className="size-3.5 mr-1.5" /> Clear Target
+            </Button>
+          )}
+          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
+            {groupCaptures.length} Capture{groupCaptures.length !== 1 ? 's' : ''} recorded
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-8">
+        <div className="max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8">
+          {/* Members Column */}
+          <div className="w-full xl:w-[340px] shrink-0">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[300px] xl:max-h-[calc(100vh-250px)]">
+              <div className="p-6 border-b border-slate-100 bg-slate-50 shrink-0">
+                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-3 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 w-fit shadow-sm">
+                  1. Roster
+                </div>
+                <p className="text-base font-extrabold text-slate-900">Select group members</p>
+                <p className="text-xs font-medium text-slate-500 mt-1.5 leading-relaxed">Photos will be assigned to all selected students.</p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3">
+                {students.map(student => {
+                  const isSelected = group.memberStudentIds.includes(student.id);
+                  return (
+                    <label key={student.id} className={cn("flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border", isSelected ? "bg-teal-50/50 border-teal-200 shadow-sm" : "border-transparent hover:bg-slate-50")}>
+                      <input type="checkbox" className="rounded border-slate-300 text-teal-600 focus:ring-teal-600 size-4" checked={isSelected} onChange={e => onMembershipChange(group, student.id, e.target.checked)} />
+                      <div className="flex-1 min-w-0">
+                        <p className={cn("text-sm font-bold truncate", isSelected ? "text-teal-950" : "text-slate-700")}>{student.lastName}, {student.firstName}</p>
+                        <p className="text-[10px] font-mono font-medium text-slate-500 truncate mt-0.5">{student.generatedStudentId}</p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Captures Column */}
+          <div className="flex-1 min-w-0 flex flex-col gap-4">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
+                2. Group Captures
+              </div>
+              <Button size="sm" variant="outline" onClick={onRefreshCaptures} className="h-8 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                <RefreshCw className="size-3.5 mr-1.5" /> Refresh
+              </Button>
+            </div>
+
+            {groupCaptures.length === 0 ? (
+              <div className="h-72 flex flex-col items-center justify-center bg-white border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center shadow-sm">
+                <div className="w-20 h-20 bg-teal-50 text-teal-600 rounded-3xl flex items-center justify-center mb-5 shadow-sm border border-teal-100">
+                  <Camera className="size-10" />
+                </div>
+                <h3 className="text-xl font-extrabold text-slate-900 mb-2 tracking-tight">Ready for group photos</h3>
+                <p className="text-slate-500 max-w-sm text-sm font-medium leading-relaxed mb-4">
+                  Make sure all subjects are framed, then start shooting.
+                </p>
+                <Button onClick={onRefreshCaptures} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider px-6 shadow-sm">
+                  <RefreshCw className="size-4 mr-2" /> Check for Captures
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
+                {groupCaptures.map(capture => (
+                  <div key={capture.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col gap-4 relative overflow-hidden group/tile transition-shadow hover:shadow-md">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-teal-500" />
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-extrabold text-base text-slate-900 truncate">{capture.baseFilename}</span>
+                      </div>
+                      <Badge className="bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none">{capture.pairingStatus}</Badge>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      {capture.files.map(file => (
+                        <button key={file.id} type="button" onClick={() => void window.api.invoke('photos:openInSystem', { filePath: file.storedPath })} className="hover:text-teal-700 hover:bg-teal-50 transition-colors flex items-center justify-center gap-1.5 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 flex-1">
+                          <ExternalLink className="size-3" /> {file.fileRole}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1452,38 +1548,47 @@ function LivePreview({
   }, [photo.filePath, photo.previewUrl, traceId])
 
   return (
-    <div className="mb-4 overflow-hidden rounded-xl border border-blue-200 bg-slate-950 shadow-sm">
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-200">
-          Live preview · latest capture
-        </p>
-        <span className="text-[10px] text-slate-400">Prioritizing newest image</span>
-      </div>
-      <canvas
-        ref={canvasRef}
-        role="img"
-        aria-label={`Latest capture ${photo.fileName}`}
-        className={cn(
-          'block max-h-96 w-full object-contain',
-          (!canvasPainted || showImageFallback) && 'hidden',
-        )}
-      />
-      {(!canvasPainted || showImageFallback) && !previewFailed && (
-        <img
-          src={photo.previewUrl}
-          alt={`Latest capture ${photo.fileName}`}
-          className="block max-h-96 w-full object-contain"
-          draggable={false}
-          onError={() => setPreviewFailed(true)}
-        />
-      )}
-      {previewFailed && !canvasPainted && (
-        <div className="flex h-40 flex-col items-center justify-center px-6 text-center">
-          <AlertCircle className="mb-2 size-7 text-amber-300" />
-          <p className="text-sm font-medium text-white">Latest preview could not be displayed</p>
-          <p className="mt-1 text-xs text-slate-400">The original photograph remains safely stored.</p>
+    <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group">
+      <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-5 z-10 flex justify-between items-start pointer-events-none transition-opacity duration-300">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-2 bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded shadow-sm">
+            <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+            Live Preview
+          </span>
+          <span className="text-xs font-mono font-medium text-white/80 drop-shadow-md bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">{photo.fileName}</span>
         </div>
-      )}
+        <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest bg-black/40 px-2.5 py-1 rounded backdrop-blur-sm hidden md:block">
+          Prioritizing newest capture
+        </span>
+      </div>
+
+      <div className="flex-1 w-full bg-black relative flex items-center justify-center p-4">
+        <canvas
+          ref={canvasRef}
+          role="img"
+          aria-label={`Latest capture ${photo.fileName}`}
+          className={cn(
+            'block max-h-full max-w-full object-contain',
+            (!canvasPainted || showImageFallback) && 'hidden',
+          )}
+        />
+        {(!canvasPainted || showImageFallback) && !previewFailed && (
+          <img
+            src={photo.previewUrl}
+            alt={`Latest capture ${photo.fileName}`}
+            className="block max-h-full max-w-full object-contain"
+            draggable={false}
+            onError={() => setPreviewFailed(true)}
+          />
+        )}
+        {previewFailed && !canvasPainted && (
+          <div className="flex h-40 flex-col items-center justify-center px-6 text-center">
+            <AlertCircle className="mb-3 size-10 text-amber-500" />
+            <p className="text-base font-bold text-white">Preview could not be displayed</p>
+            <p className="mt-1.5 text-xs text-slate-400 font-medium">The original photograph remains safely stored.</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1537,8 +1642,8 @@ function GalleryThumbnail({
   const imageSource = fallback ?? generatedSource
   if (!imageSource) {
     return (
-      <div className="flex h-full w-full items-center justify-center">
-        <Image className="size-8 text-slate-400" />
+      <div className="flex h-full w-full items-center justify-center bg-slate-100">
+        <Image className="size-8 text-slate-300" />
       </div>
     )
   }
@@ -1546,9 +1651,32 @@ function GalleryThumbnail({
     <img
       src={imageSource}
       alt={alt}
-      className="h-full w-full object-cover"
+      className="h-full w-full object-cover transition-opacity duration-300 ease-in-out"
       draggable={false}
     />
+  )
+}
+
+function CaptureCompleteness({ capture }: { capture: CaptureReview }) {
+  const hasJpeg = capture.pairingStatus === 'complete' || capture.pairingStatus === 'jpeg_only' || capture.pairingStatus === 'unpaired' || capture.files.some(f => f.fileFormat === 'JPG' || f.fileFormat === 'JPEG') || !!capture.legacyPhoto
+  const hasRaw = capture.pairingStatus === 'complete' || capture.pairingStatus === 'raw_only' || capture.files.some(f => f.fileRole === 'RAW')
+
+  return (
+    <div className="flex flex-col gap-1.5 z-10">
+      <div className="flex items-center gap-[1px] bg-black/70 backdrop-blur-md rounded px-[2px] py-[2px] w-fit shadow-sm border border-white/10">
+        <div className={cn("text-[9px] font-extrabold uppercase px-1.5 py-[1px] rounded-[2px] tracking-widest", hasJpeg ? "bg-white text-slate-900 shadow-sm" : "text-white/40")} title={hasJpeg ? "JPEG captured" : "Waiting for JPEG"}>
+          JPG
+        </div>
+        <div className={cn("text-[9px] font-extrabold uppercase px-1.5 py-[1px] rounded-[2px] tracking-widest", hasRaw ? "bg-white text-slate-900 shadow-sm" : "text-white/40")} title={hasRaw ? "RAW captured" : "Waiting for RAW"}>
+          RAW
+        </div>
+      </div>
+      {capture.pairingStatus === 'unpaired' && (
+         <div className="bg-red-600/90 backdrop-blur-md text-white text-[9px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm border border-red-500/50 w-fit">
+           Needs Review
+         </div>
+      )}
+    </div>
   )
 }
 
@@ -1569,11 +1697,8 @@ function PhotoTile({
   onRetry: () => void
   retrying: boolean
 }) {
-  const status = getUploadStatusMeta(uploadStatus?.uploadStatus)
-  const StatusIcon = status.icon
-
   return (
-    <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
+    <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
       {photo.thumbnailData || photo.previewUrl ? (
         <GalleryThumbnail
           source={photo.previewUrl}
@@ -1582,51 +1707,41 @@ function PhotoTile({
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
-          <Image className="size-8 text-slate-400" />
+          <Image className="size-8 text-slate-300" />
         </div>
       )}
 
-      {/* Cloud upload state */}
-      <div
-        className={cn(
-          'absolute top-1.5 right-1.5 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm',
-          status.badgeClass,
-        )}
-        title={`Upload status: ${status.label}`}
-      >
-        <StatusIcon className={cn('size-3', status.iconClass)} />
-        <span className="sr-only">{status.label}</span>
-      </div>
-
       {/* Hover overlay */}
-      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-2">
-        <div className={cn('text-[11px] font-medium flex items-center gap-1 mb-1', status.textClass)}>
-          <StatusIcon className="size-3" />
-          {status.label}
-        </div>
+      <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex flex-col items-center justify-center gap-2.5 p-4 duration-200 z-20">
+        <p className="text-white text-[11px] font-mono font-medium truncate w-full text-center mb-1 bg-black/40 px-2 py-1 rounded border border-white/10">{photo.fileName}</p>
+
         <button
           onClick={onOpen}
-          className="w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1 flex items-center justify-center gap-1"
+          className="w-full bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-[10px] uppercase tracking-widest py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
         >
-          <ExternalLink className="size-3" /> Open
+          <ExternalLink className="size-3.5" /> Open
         </button>
-        <button
-          onClick={onReassign}
-          className="w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1"
-        >
-          Reassign
-        </button>
-        <button
-          onClick={onDelete}
-          className="w-full text-white text-xs bg-red-500/70 hover:bg-red-500 rounded px-2 py-1"
-        >
-          Delete
-        </button>
+
+        <div className="grid grid-cols-2 gap-2 w-full">
+          <button
+            onClick={onReassign}
+            className="w-full bg-white/10 text-white hover:bg-white/20 font-extrabold text-[10px] uppercase tracking-widest py-2 rounded-lg transition-colors border border-white/10"
+          >
+            Reassign
+          </button>
+          <button
+            onClick={onDelete}
+            className="w-full bg-red-500/80 text-white hover:bg-red-500 font-extrabold text-[10px] uppercase tracking-widest py-2 rounded-lg transition-colors border border-red-500/30"
+          >
+            Delete
+          </button>
+        </div>
+
         {uploadStatus?.uploadStatus === 'error' && (
           <button
             onClick={onRetry}
             disabled={retrying}
-            className="w-full text-white text-xs bg-red-500/70 hover:bg-red-500 disabled:opacity-60 rounded px-2 py-1 flex items-center justify-center gap-1"
+            className="w-full text-white text-[10px] font-extrabold uppercase tracking-widest bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-lg py-2 flex items-center justify-center gap-1 mt-1 shadow-sm"
           >
             {retrying && <Loader className="size-3 animate-spin" />}
             {retrying ? 'Retrying…' : 'Retry upload'}
@@ -1638,16 +1753,16 @@ function PhotoTile({
             download={photo.fileName}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full text-white text-xs bg-teal-500/80 hover:bg-teal-500 rounded px-2 py-1 flex items-center justify-center gap-1"
+            className="w-full text-teal-900 text-[10px] font-extrabold uppercase tracking-widest bg-teal-100 hover:bg-teal-200 rounded-lg py-2 flex items-center justify-center gap-1 mt-1 shadow-sm transition-colors"
             title="Download uploaded photo"
           >
-            <Download className="size-3" /> Download
+            <Download className="size-3.5" /> Download
           </a>
         )}
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5">
-        <p className="text-white text-[10px] truncate">{photo.fileName}</p>
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-6 z-0 pointer-events-none">
+        <p className="text-white text-[10px] font-mono font-medium truncate">{photo.fileName}</p>
       </div>
     </div>
   )
@@ -1666,7 +1781,7 @@ function QrMarkerTile({
   onOpen: () => void
 }) {
   return (
-    <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
+    <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
         {marker.thumbnailData || marker.previewUrl ? (
           <GalleryThumbnail
             source={marker.previewUrl}
@@ -1675,26 +1790,26 @@ function QrMarkerTile({
           />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
-          <Image className="size-8 text-slate-400" />
+          <Image className="size-8 text-slate-300" />
         </div>
       )}
 
-      <div className="absolute top-1.5 left-1.5 rounded-full bg-teal-700/90 px-2 py-1 text-[10px] font-semibold text-white shadow-sm">
+      <div className="absolute top-2 left-2 rounded bg-teal-600/90 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-widest text-white shadow-sm border border-teal-500/50 backdrop-blur-sm z-10">
         QR MARKER
       </div>
 
-      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-3">
+      <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex items-center justify-center p-4 z-20">
         <button
           type="button"
           onClick={onOpen}
-          className="w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1 flex items-center justify-center gap-1"
+          className="w-full bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-[10px] uppercase tracking-widest py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
         >
-          <ExternalLink className="size-3" /> Open marker
+          <ExternalLink className="size-3.5" /> Open Marker
         </button>
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
-        <p className="text-white text-[10px] truncate">{marker.fileName}</p>
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-6 z-0 pointer-events-none">
+        <p className="text-white text-[10px] font-mono font-medium truncate">{marker.fileName}</p>
       </div>
     </div>
   )
@@ -1725,9 +1840,10 @@ function CaptureTile({
 }) {
   const photo = capture.legacyPhoto
   const rawFile = capture.files.find((file) => file.fileRole === 'RAW')
+
   if (photo) {
     return (
-      <div className="group relative">
+      <div className="group relative rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full w-full bg-slate-100">
         <PhotoTile
           photo={photo}
           uploadStatus={uploadStatus}
@@ -1737,15 +1853,18 @@ function CaptureTile({
           onRetry={onRetry!}
           retrying={retrying}
         />
-        <CaptureStatusBadge status={capture.pairingStatus} />
+        <div className="absolute top-2 left-2 z-10 pointer-events-none">
+          <CaptureCompleteness capture={capture} />
+        </div>
         <CaptureUploadBadge capture={capture} />
         <CaptureReviewControls capture={capture} onUpdateReview={onUpdateReview} />
+
         {rawFile?.uploadStatus === 'error' && onRetryFile && (
           <button
             type="button"
             onClick={() => onRetryFile(rawFile.id)}
             disabled={retryingFileId === rawFile.id}
-            className="absolute bottom-8 right-1.5 z-10 rounded bg-red-600/90 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-60"
+            className="absolute bottom-10 right-2 z-30 rounded-lg bg-red-600 px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest text-white opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-60 shadow-sm"
           >
             {retryingFileId === rawFile.id ? 'Retrying…' : 'Retry RAW'}
           </button>
@@ -1755,41 +1874,50 @@ function CaptureTile({
   }
 
   return (
-    <div className="group relative bg-slate-100 rounded-lg overflow-hidden aspect-square">
-      <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400">
-        <Image className="size-10" />
-        <span className="text-xs font-semibold tracking-wide">RAW ORIGINAL</span>
-        <span className="text-[10px] text-slate-400">{capture.files[0]?.fileFormat ?? 'RAW'}</span>
+    <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
+      <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-400 bg-white">
+        <div className="w-16 h-16 rounded-2xl bg-slate-50 flex flex-col items-center justify-center border border-slate-100 shadow-inner">
+          <Image className="size-6 mb-1 text-slate-300" />
+          <span className="text-[9px] font-extrabold tracking-widest uppercase text-slate-400">{capture.files[0]?.fileFormat ?? 'RAW'}</span>
+        </div>
+        <span className="text-[10px] font-bold tracking-widest uppercase">RAW Original</span>
       </div>
-      <CaptureStatusBadge status={capture.pairingStatus} />
-       <CaptureUploadBadge capture={capture} />
-       <CaptureReviewControls capture={capture} onUpdateReview={onUpdateReview} />
-      <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-3">
-        <p className="text-center text-xs text-white">
-          RAW file recorded without a JPEG partner
+
+      <div className="absolute top-2 left-2 z-10 pointer-events-none">
+        <CaptureCompleteness capture={capture} />
+      </div>
+      <CaptureUploadBadge capture={capture} />
+      <CaptureReviewControls capture={capture} onUpdateReview={onUpdateReview} />
+
+      <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex flex-col items-center justify-center gap-3 p-4 z-20">
+        <p className="text-center text-[10px] font-bold uppercase tracking-widest text-white/80 bg-black/40 px-3 py-1.5 rounded-lg border border-white/10 mb-2 leading-relaxed">
+          RAW recorded without JPEG
         </p>
+
         {rawFile && (
           <button
             type="button"
             onClick={onOpen}
-            className="w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1"
+            className="w-full bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-[10px] uppercase tracking-widest py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
           >
-            <ExternalLink className="size-3 inline mr-1" /> Open RAW
+            <ExternalLink className="size-3.5" /> Open RAW
           </button>
         )}
-         {rawFile?.uploadStatus === 'error' && onRetryFile && (
-           <button
-             type="button"
-             onClick={() => onRetryFile(rawFile.id)}
-             disabled={retryingFileId === rawFile.id}
-             className="w-full text-white text-xs bg-red-500/70 hover:bg-red-500 disabled:opacity-60 rounded px-2 py-1"
-           >
-             {retryingFileId === rawFile.id ? 'Retrying…' : 'Retry RAW upload'}
-           </button>
-         )}
+
+        {rawFile?.uploadStatus === 'error' && onRetryFile && (
+          <button
+            type="button"
+            onClick={() => onRetryFile(rawFile.id)}
+            disabled={retryingFileId === rawFile.id}
+            className="w-full bg-red-600 text-white hover:bg-red-700 disabled:opacity-60 font-extrabold text-[10px] uppercase tracking-widest py-2.5 rounded-lg transition-colors shadow-sm mt-1"
+          >
+            {retryingFileId === rawFile.id ? 'Retrying…' : 'Retry RAW Upload'}
+          </button>
+        )}
       </div>
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
-        <p className="text-white text-[10px] truncate">{capture.baseFilename}</p>
+
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-6 z-0 pointer-events-none">
+        <p className="text-white text-[10px] font-mono font-medium truncate">{capture.baseFilename}</p>
       </div>
     </div>
   )
@@ -1803,21 +1931,27 @@ function CaptureReviewControls({
   onUpdateReview?: (captureId: number, values: { favorite?: boolean; rejected?: boolean; selected?: boolean }) => void
 }) {
   if (!onUpdateReview) return null
+  const hasActiveState = capture.favorite || capture.selected || capture.rejected
   return (
-    <div className="absolute bottom-1.5 left-1.5 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+    <div className={cn(
+      "absolute bottom-2 left-2 z-30 flex gap-1.5 transition-all duration-200",
+      hasActiveState
+        ? "opacity-100 translate-y-0"
+        : "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0"
+    )}>
       <button
         type="button"
         aria-label={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
         title={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
         onClick={() => onUpdateReview(capture.id, { favorite: !capture.favorite })}
         className={cn(
-          'rounded-full border p-1.5 shadow-sm',
+          'rounded-full p-2 shadow-sm transition-colors border',
           capture.favorite
             ? 'border-amber-300 bg-amber-100 text-amber-600'
-            : 'border-white/70 bg-black/50 text-white hover:bg-black/70',
+            : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',
         )}
       >
-        <Star className="size-3" fill={capture.favorite ? 'currentColor' : 'none'} />
+        <Star className="size-3.5" fill={capture.favorite ? 'currentColor' : 'none'} />
       </button>
       <button
         type="button"
@@ -1825,13 +1959,13 @@ function CaptureReviewControls({
         title={capture.selected ? 'Remove from selection' : 'Add to selection'}
         onClick={() => onUpdateReview(capture.id, { selected: !capture.selected, rejected: false })}
         className={cn(
-          'rounded-full border p-1.5 shadow-sm',
+          'rounded-full p-2 shadow-sm transition-colors border',
           capture.selected
             ? 'border-teal-300 bg-teal-100 text-teal-700'
-            : 'border-white/70 bg-black/50 text-white hover:bg-black/70',
+            : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',
         )}
       >
-        <Check className="size-3" />
+        <Check className="size-3.5" />
       </button>
       <button
         type="button"
@@ -1839,13 +1973,13 @@ function CaptureReviewControls({
         title={capture.rejected ? 'Restore capture' : 'Reject capture'}
         onClick={() => onUpdateReview(capture.id, { rejected: !capture.rejected, selected: false })}
         className={cn(
-          'rounded-full border p-1.5 shadow-sm',
+          'rounded-full p-2 shadow-sm transition-colors border',
           capture.rejected
             ? 'border-red-300 bg-red-100 text-red-700'
-            : 'border-white/70 bg-black/50 text-white hover:bg-black/70',
+            : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',
         )}
       >
-        <XCircle className="size-3" />
+        <XCircle className="size-3.5" />
       </button>
     </div>
   )
@@ -1853,9 +1987,8 @@ function CaptureReviewControls({
 
 function CaptureUploadBadge({ capture }: { capture: CaptureReview }) {
   const statuses = capture.files
-    .filter((file) => file.fileRole === 'RAW')
     .map((file) => file.uploadStatus)
-    .filter(Boolean)
+    .filter((status): status is UploadStatus => Boolean(status))
   if (statuses.length === 0) return null
   const status = statuses.includes('error')
     ? 'error'
@@ -1869,34 +2002,13 @@ function CaptureUploadBadge({ capture }: { capture: CaptureReview }) {
   return (
     <span
       className={cn(
-        'absolute top-1.5 right-1.5 z-10 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm',
+        'absolute top-2 right-2 z-10 flex items-center justify-center rounded-full p-1.5 shadow-sm border backdrop-blur-md',
         meta.badgeClass,
       )}
       title={`Capture upload: ${meta.label}`}
     >
-      <StatusIcon className={cn('size-3', meta.iconClass)} />
+      <StatusIcon className={cn('size-3.5', meta.iconClass)} />
       <span className="sr-only">{meta.label}</span>
-    </span>
-  )
-}
-
-function CaptureStatusBadge({ status }: { status: CaptureReview['pairingStatus'] }) {
-  const meta = {
-    complete: { label: 'JPEG + RAW', className: 'bg-green-100/95 text-green-700 border-green-200' },
-    jpeg_only: { label: 'JPEG only', className: 'bg-amber-100/95 text-amber-700 border-amber-200' },
-    raw_only: { label: 'RAW only', className: 'bg-blue-100/95 text-blue-700 border-blue-200' },
-    unpaired: { label: 'Needs review', className: 'bg-red-100/95 text-red-700 border-red-200' },
-    pending: { label: 'Pending', className: 'bg-slate-100/95 text-slate-600 border-slate-200' },
-  }[status]
-
-  return (
-    <span
-      className={cn(
-        'absolute top-1.5 left-1.5 z-10 rounded-full border px-1.5 py-1 text-[9px] font-semibold shadow-sm',
-        meta.className,
-      )}
-    >
-      {meta.label}
     </span>
   )
 }
@@ -1907,41 +2019,41 @@ function getUploadStatusMeta(status: UploadStatus | undefined) {
       return {
         label: 'Waiting for upload',
         icon: Upload,
-        badgeClass: 'bg-amber-50/95 border-amber-200',
-        iconClass: 'text-amber-600',
+        badgeClass: 'bg-black/60 border-white/10',
+        iconClass: 'text-amber-400',
         textClass: 'text-amber-200',
       }
     case 'uploading':
       return {
         label: 'Uploading…',
         icon: Loader,
-        badgeClass: 'bg-blue-50/95 border-blue-200',
-        iconClass: 'text-blue-600 animate-spin',
+        badgeClass: 'bg-black/60 border-white/10',
+        iconClass: 'text-blue-400 animate-spin',
         textClass: 'text-blue-200',
       }
     case 'done':
       return {
         label: 'Uploaded',
         icon: CheckCircle,
-        badgeClass: 'bg-green-50/95 border-green-200',
-        iconClass: 'text-green-600',
+        badgeClass: 'bg-black/60 border-white/10',
+        iconClass: 'text-green-400',
         textClass: 'text-green-200',
       }
     case 'error':
       return {
         label: 'Upload failed',
         icon: XCircle,
-        badgeClass: 'bg-red-50/95 border-red-200',
-        iconClass: 'text-red-600',
-        textClass: 'text-red-200',
+        badgeClass: 'bg-red-500/90 border-red-400',
+        iconClass: 'text-white',
+        textClass: 'text-white',
       }
     default:
       return {
         label: 'Not uploaded',
         icon: CloudUpload,
-        badgeClass: 'bg-slate-50/95 border-slate-200',
-        iconClass: 'text-slate-500',
-        textClass: 'text-slate-200',
+        badgeClass: 'bg-black/60 border-white/10',
+        iconClass: 'text-white/60',
+        textClass: 'text-white/60',
       }
   }
 }
@@ -1986,35 +2098,54 @@ function ReassignDialog({
   }
 
   return (
-    <Dialog open title="Reassign photo to student" onClose={onClose} className="max-w-sm">
-      <p className="text-sm text-slate-500 mb-3">Select the student this photo belongs to:</p>
-      <input
-        type="text"
-        placeholder="Search students…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg mb-2 focus:outline-none focus:ring-1 focus:ring-teal-500"
-      />
-      <div className="h-48 overflow-y-auto border border-slate-200 rounded-lg mb-4">
-        {filtered.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setSelectedId(s.id)}
-            className={cn(
-              'w-full px-3 py-2 text-left text-sm border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors',
-              selectedId === s.id ? 'bg-teal-50 text-teal-700 font-medium' : 'text-slate-700',
-            )}
-          >
-            {s.lastName}, {s.firstName}
-            <span className="ml-2 font-mono text-xs text-slate-400">{s.generatedStudentId}</span>
-          </button>
-        ))}
-      </div>
-      <div className="flex gap-2 justify-end">
-        <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-        <Button size="sm" onClick={handleSave} disabled={!selectedId || saving}>
-          {saving ? 'Saving…' : 'Reassign'}
-        </Button>
+    <Dialog open title="Reassign Photo" onClose={onClose} className="max-w-md">
+      <div className="space-y-4 mt-2">
+        <p className="text-sm font-medium text-slate-500">
+          Select the correct subject for this photo:
+        </p>
+        <div className="relative">
+          <Search className="absolute left-3 top-3 size-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search roster…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-4 py-2.5 text-sm font-medium border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 shadow-sm"
+          />
+        </div>
+        <div className="h-64 overflow-y-auto border border-slate-200 rounded-xl bg-slate-50 p-1.5 shadow-inner">
+          {filtered.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSelectedId(s.id)}
+              className={cn(
+                'w-full px-3 py-2.5 text-left text-sm rounded-lg transition-colors flex items-center justify-between mb-1 last:mb-0',
+                selectedId === s.id ? 'bg-teal-100 text-teal-900 border border-teal-200 shadow-sm' : 'text-slate-700 hover:bg-white border border-transparent'
+              )}
+            >
+              <span className="font-bold truncate mr-2">
+                {s.lastName}, {s.firstName}
+              </span>
+              <span className="font-mono text-[11px] font-medium text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 shrink-0">
+                {s.generatedStudentId}
+              </span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="h-full flex items-center justify-center text-xs font-bold uppercase tracking-wider text-slate-400">
+              No subjects found
+            </div>
+          )}
+        </div>
+        <div className="flex gap-3 justify-end pt-2">
+          <Button variant="outline" onClick={onClose} className="text-xs font-bold uppercase tracking-wider h-10 px-5">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={!selectedId || saving} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider h-10 px-5 shadow-sm">
+            {saving ? <Loader className="size-4 animate-spin mr-2" /> : null}
+            {saving ? 'Saving…' : 'Reassign'}
+          </Button>
+        </div>
       </div>
     </Dialog>
   )

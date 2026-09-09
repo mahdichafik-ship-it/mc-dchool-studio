@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert'
 import test from 'node:test'
 import {
   extractStudentReference,
+  formatGroupPhotoName,
   formatStudentPhotoName,
 } from '../src/main/lib/photoFileNaming.ts'
 
@@ -12,6 +13,49 @@ test('formats a destination photo name from the selected student and source exte
     formatStudentPhotoName('John', 'Smith', '001234', 'camera-frame.NEF'),
     'John_Smith_001234.NEF',
   )
+})
+
+test('tags default class-group captures with the class name and camera frame number', () => {
+  const jpegName = formatGroupPhotoName('5ème A', '5ème A', 'DSC_00595.JPG', '/Spool/JPEG/DSC_00595.JPG')
+  const rawName = formatGroupPhotoName('5ème A', '5ème A', 'DSC_00595.CR3', '/Spool/RAW/DSC_00595.CR3')
+  assert.match(jpegName, /^5ème_A_00595_[a-f0-9]{10}\.JPG$/)
+  assert.equal(rawName, jpegName.replace(/\.JPG$/, '.CR3'))
+})
+
+test('includes a custom group name without retaining the camera prefix', () => {
+  const name = formatGroupPhotoName('5ème A', 'Teachers / Staff', 'IMG-0042.jpeg')
+  assert.match(name, /^5ème_A_Teachers_Staff_0042_[a-f0-9]{10}\.jpeg$/)
+  assert.doesNotMatch(name, /IMG/i)
+})
+
+test('uses a deterministic private token when a camera filename has no frame number', () => {
+  const jpegName = formatGroupPhotoName('Class B', 'Class B', 'camera-alpha.jpg')
+  const rawName = formatGroupPhotoName('Class B', 'Class B', 'camera-alpha.nef')
+  assert.match(jpegName, /^Class_B_[a-f0-9]{10}\.jpg$/)
+  assert.equal(rawName, jpegName.replace(/\.jpg$/, '.nef'))
+  assert.doesNotMatch(jpegName, /camera|alpha/i)
+})
+
+test('does not collide when different cameras reuse the same frame number', () => {
+  const dscName = formatGroupPhotoName('Class B', 'Class B', 'DSC_0001.JPG', '/shoot/DSC_0001.JPG')
+  const imgName = formatGroupPhotoName('Class B', 'Class B', 'IMG_0001.JPG', '/shoot/IMG_0001.JPG')
+  assert.notEqual(dscName, imgName)
+})
+
+test('does not collide when a frame counter is reused in a different source folder', () => {
+  const firstSession = formatGroupPhotoName('Class B', 'Class B', 'DSC_0001.JPG', '/shoot-one/DSC_0001.JPG')
+  const secondSession = formatGroupPhotoName('Class B', 'Class B', 'DSC_0001.JPG', '/shoot-two/DSC_0001.JPG')
+  assert.notEqual(firstSession, secondSession)
+})
+
+test('bounds long multibyte class and group names below filesystem component limits', () => {
+  const name = formatGroupPhotoName(
+    `Classe ${'é'.repeat(100)}`,
+    `Groupe ${'人'.repeat(100)}`,
+    'DSC_0001.JPG',
+    '/shoot/DSC_0001.JPG',
+  )
+  assert.ok(Buffer.byteLength(name) < 255)
 })
 
 test('extracts the Smart Shooter student reference from a renamed JPEG', () => {

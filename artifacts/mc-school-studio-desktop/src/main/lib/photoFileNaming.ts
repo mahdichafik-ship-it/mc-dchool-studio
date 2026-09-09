@@ -1,4 +1,5 @@
 import { basename, extname } from 'node:path'
+import { createHash } from 'node:crypto'
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -40,4 +41,58 @@ export function formatStudentPhotoName(
   sourceFileName: string,
 ): string {
   return `${formatStudentFolderName(firstName, lastName, studentId)}${extname(sourceFileName)}`
+}
+
+function safeManagedNameSegment(value: string, fallback: string): string {
+  const cleaned = value
+    .normalize('NFKC')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+    .trim()
+    .replace(/[\s._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  const safeValue = cleaned || fallback
+  let byteLength = 0
+  let result = ''
+  for (const character of safeValue) {
+    const characterBytes = Buffer.byteLength(character)
+    if (byteLength + characterBytes > 80) break
+    result += character
+    byteLength += characterBytes
+  }
+  return result.replace(/_+$/g, '') || fallback
+}
+
+function groupCaptureToken(sourceFileName: string, sourceFilePath?: string): string {
+  const sourceStem = basename(sourceFileName, extname(sourceFileName))
+  const frameNumber = sourceStem.match(/(?:^|[-_])(\d{1,12})$/)?.[1]
+  const sourceIdentity = (() => {
+    if (!sourceFilePath) return sourceStem
+    const extensionlessPath = sourceFilePath.slice(0, -extname(sourceFilePath).length)
+      .replaceAll('\\', '/')
+    const segments = extensionlessPath.split('/')
+    const parentIndex = segments.length - 2
+    if (parentIndex >= 0 && /^(jpeg|raw)$/i.test(segments[parentIndex])) {
+      segments.splice(parentIndex, 1)
+    }
+    return segments.join('/')
+  })()
+  const identityToken = createHash('sha256')
+    .update(sourceIdentity.toLowerCase())
+    .digest('hex')
+    .slice(0, 10)
+  return frameNumber ? `${frameNumber}_${identityToken}` : identityToken
+}
+
+export function formatGroupPhotoName(
+  className: string,
+  groupName: string,
+  sourceFileName: string,
+  sourceFilePath?: string,
+): string {
+  const classSegment = safeManagedNameSegment(className, 'Unassigned_Class')
+  const groupSegment = safeManagedNameSegment(groupName, 'Group')
+  const label = classSegment.toLowerCase() === groupSegment.toLowerCase()
+    ? classSegment
+    : `${classSegment}_${groupSegment}`
+  return `${label}_${groupCaptureToken(sourceFileName, sourceFilePath)}${extname(sourceFileName)}`
 }

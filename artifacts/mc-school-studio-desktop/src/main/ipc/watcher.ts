@@ -17,9 +17,11 @@ import {
 import { getSetting } from './upload'
 import {
   extractStudentReference,
+  formatGroupPhotoName,
   formatStudentFolderName,
   formatStudentPhotoName,
 } from '../lib/photoFileNaming'
+import { copyManagedCaptureFile } from '../lib/managedCaptureCopy'
 import { readQrFromImage } from '../lib/qrReader'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
@@ -712,8 +714,13 @@ async function handleNewPhoto(
       safeFolderName(classRow?.className ?? 'Unassigned Class'), safeFolderName(group.name),
     )
     mkdirSync(destination, { recursive: true })
-    const storedPath = join(destination, capture.fileName)
-    await copyFile(capture.filePath, storedPath)
+    const storedPath = join(destination, formatGroupPhotoName(
+      classRow?.className ?? 'Unassigned Class',
+      group.name,
+      capture.fileName,
+      capture.filePath,
+    ))
+    await copyManagedCaptureFile(capture.filePath, storedPath)
     recordGroupCapture(db, {
       projectId, studentId: null, classId: group.classId, groupId: String(group.id),
       filePath: capture.filePath, storedPath, fileName: capture.fileName,

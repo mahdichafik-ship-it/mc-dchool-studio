@@ -8,6 +8,7 @@
 
 import { BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { readFileSync } from 'fs'
+import { basename } from 'node:path'
 import { getDb } from '../db'
 import {
   capturesTable,
@@ -698,9 +699,10 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
   db.update(groupCaptureFilesTable).set({ uploadStatus: 'uploading' }).where(eq(groupCaptureFilesTable.id, fileId)).run()
   try {
     const formData = new FormData()
+    const managedFilename = basename(file.storedPath)
     formData.append('file', new Blob([readFileSync(file.storedPath)], {
       type: file.fileRole === 'JPEG' ? 'image/jpeg' : 'application/octet-stream',
-    }), file.originalFilename)
+    }), managedFilename)
     formData.append('captureKey', capture.captureKey)
     formData.append('baseFilename', capture.baseFilename)
     formData.append('capturedAt', capture.capturedAt)

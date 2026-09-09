@@ -16,8 +16,17 @@ export interface DashboardStats {
   totalStudents: number;
 }
 
+export type ProjectProjectType = typeof ProjectProjectType[keyof typeof ProjectProjectType];
+
+
+export const ProjectProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export interface Project {
   id: number;
+  projectType: ProjectProjectType;
   schoolName: string;
   /** @nullable */
   photoDate?: string | null;
@@ -37,7 +46,16 @@ export interface Project {
   updatedAt: string;
 }
 
+export type ProjectInputProjectType = typeof ProjectInputProjectType[keyof typeof ProjectInputProjectType];
+
+
+export const ProjectInputProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export interface ProjectInput {
+  projectType?: ProjectInputProjectType;
   /** @minLength 1 */
   schoolName: string;
   /** @nullable */
@@ -54,7 +72,16 @@ export interface ProjectInput {
   notes?: string | null;
 }
 
+export type ProjectPatchProjectType = typeof ProjectPatchProjectType[keyof typeof ProjectPatchProjectType];
+
+
+export const ProjectPatchProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export interface ProjectPatch {
+  projectType?: ProjectPatchProjectType;
   /** @minLength 1 */
   schoolName?: string;
   /** @nullable */

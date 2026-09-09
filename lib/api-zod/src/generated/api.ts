@@ -34,6 +34,7 @@ export const GetDashboardStatsResponse = zod.object({
  */
 export const ListProjectsResponseItem = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -52,10 +53,11 @@ export const ListProjectsResponse = zod.array(ListProjectsResponseItem)
 /**
  * @summary Create a new school project
  */
-
+export const createProjectBodyProjectTypeDefault = `school`;
 
 
 export const CreateProjectBody = zod.object({
+  "projectType": zod.enum(['school', 'corporate']).default(createProjectBodyProjectTypeDefault),
   "schoolName": zod.string().min(1),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -67,6 +69,7 @@ export const CreateProjectBody = zod.object({
 
 export const CreateProjectResponse = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -90,6 +93,7 @@ export const GetProjectParams = zod.object({
 
 export const GetProjectResponse = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -115,6 +119,7 @@ export const UpdateProjectParams = zod.object({
 
 
 export const UpdateProjectBody = zod.object({
+  "projectType": zod.enum(['school', 'corporate']).optional(),
   "schoolName": zod.string().min(1).optional(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -126,6 +131,7 @@ export const UpdateProjectBody = zod.object({
 
 export const UpdateProjectResponse = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -593,6 +599,7 @@ export const GetPlatformOverviewResponse = zod.object({
 }))),
   "projects": zod.array(zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),

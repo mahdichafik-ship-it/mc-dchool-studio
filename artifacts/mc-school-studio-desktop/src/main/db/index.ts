@@ -38,6 +38,7 @@ function initializeSchema(sqlite: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cloud_id INTEGER,
       school_name TEXT NOT NULL,
+      project_type TEXT NOT NULL DEFAULT 'school',
       photo_date TEXT,
       address TEXT,
       contact_name TEXT,

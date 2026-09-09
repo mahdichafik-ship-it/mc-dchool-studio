@@ -50,6 +50,7 @@ router.get("/json", requireAuth, async (req, res) => {
     exportVersion: 1,
     project: {
       id: project.id,
+      projectType: project.projectType,
       schoolName: project.schoolName,
       photoDate: project.photoDate,
       address: project.address,

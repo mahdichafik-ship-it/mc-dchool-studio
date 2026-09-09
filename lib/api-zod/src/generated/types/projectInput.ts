@@ -5,8 +5,10 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ProjectInputProjectType } from './projectInputProjectType';
 
 export interface ProjectInput {
+  projectType?: ProjectInputProjectType;
   /** @minLength 1 */
   schoolName: string;
   /** @nullable */

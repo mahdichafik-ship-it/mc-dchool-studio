@@ -50,6 +50,8 @@ export default function ProjectOverview() {
     );
   }
 
+  const isCorporate = project.projectType === 'corporate';
+
   return (
     <div className="flex-1 overflow-auto bg-slate-50 flex flex-col min-h-0">
       <div className="px-8 py-6 bg-white border-b border-slate-200 flex-shrink-0">
@@ -63,12 +65,12 @@ export default function ProjectOverview() {
               <h1 className="text-3xl font-bold tracking-tight text-slate-900">{project.schoolName}</h1>
               <p className="text-slate-500 mt-1 flex items-center gap-3">
                 {project.photoDate && (
-                  <span>Photo Day: {format(new Date(project.photoDate), 'MMM d, yyyy')}</span>
+                  <span>{isCorporate ? 'Headshot Day' : 'Photo Day'}: {format(new Date(project.photoDate), 'MMM d, yyyy')}</span>
                 )}
                 {project.photoDate && <span className="w-1 h-1 rounded-full bg-slate-300"></span>}
-                <span>{project.classCount} Classes</span>
+                <span>{project.classCount} {isCorporate ? 'Departments' : 'Classes'}</span>
                 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                <span>{project.studentCount} Students</span>
+                <span>{project.studentCount} {isCorporate ? 'Employees' : 'Students'}</span>
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -84,8 +86,8 @@ export default function ProjectOverview() {
         <div className="max-w-6xl mx-auto h-full">
           <Tabs defaultValue="students" className="h-full flex flex-col">
             <TabsList className="bg-slate-100/50 p-1 border border-slate-200 w-full justify-start rounded-lg self-start">
-              <TabsTrigger value="students" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Students</TabsTrigger>
-              <TabsTrigger value="classes" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Classes</TabsTrigger>
+              <TabsTrigger value="students" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">{isCorporate ? 'Employees' : 'Students'}</TabsTrigger>
+              <TabsTrigger value="classes" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">{isCorporate ? 'Departments' : 'Classes'}</TabsTrigger>
               <TabsTrigger value="groups" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Groups</TabsTrigger>
               <TabsTrigger value="photos" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Photos</TabsTrigger>
               <TabsTrigger value="collaboration" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Collaboration</TabsTrigger>
@@ -98,22 +100,22 @@ export default function ProjectOverview() {
                 <InfoTab project={project} />
               </TabsContent>
               <TabsContent value="classes" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
-                <ClassesTab projectId={project.id} />
+                <ClassesTab projectId={project.id} isCorporate={isCorporate} />
               </TabsContent>
               <TabsContent value="groups" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
-                <GroupsTab projectId={project.id} />
+                <GroupsTab projectId={project.id} isCorporate={isCorporate} />
               </TabsContent>
               <TabsContent value="students" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
-                <StudentsTab projectId={project.id} />
+                <StudentsTab projectId={project.id} isCorporate={isCorporate} />
               </TabsContent>
               <TabsContent value="photos" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
-                <PhotosTab projectId={project.id} />
+                <PhotosTab projectId={project.id} isCorporate={isCorporate} />
               </TabsContent>
               <TabsContent value="collaboration" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
                 <CollaborationTab projectId={project.id} />
               </TabsContent>
               <TabsContent value="exports" className="m-0 p-6 flex-1 overflow-auto">
-                <ExportsTab project={project} />
+                <ExportsTab project={project} isCorporate={isCorporate} />
               </TabsContent>
             </div>
           </Tabs>

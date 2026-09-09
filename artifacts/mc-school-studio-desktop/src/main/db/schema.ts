@@ -4,6 +4,7 @@ export const projectsTable = sqliteTable('projects', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   cloudId: integer('cloud_id'),
   schoolName: text('school_name').notNull(),
+  projectType: text('project_type').$type<'school' | 'corporate'>().notNull().default('school'),
   photoDate: text('photo_date'),
   address: text('address'),
   contactName: text('contact_name'),

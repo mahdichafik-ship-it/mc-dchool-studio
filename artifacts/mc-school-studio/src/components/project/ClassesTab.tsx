@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
 
-export function ClassesTab({ projectId }: { projectId: number }) {
+export function ClassesTab({ projectId, isCorporate }: { projectId: number, isCorporate?: boolean }) {
   const { data: classes = [], isLoading } = useListClasses(projectId);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -45,7 +45,7 @@ export function ClassesTab({ projectId }: { projectId: number }) {
         queryClient.invalidateQueries({ queryKey: getListClassesQueryKey(projectId) });
         setIsCreateOpen(false);
         setNewClassName('');
-        toast({ title: 'Class created' });
+        toast({ title: isCorporate ? 'Department created' : 'Class created' });
       }
     });
   };
@@ -56,7 +56,7 @@ export function ClassesTab({ projectId }: { projectId: number }) {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListClassesQueryKey(projectId) });
         setEditClassId(null);
-        toast({ title: 'Class updated' });
+        toast({ title: isCorporate ? 'Department updated' : 'Class updated' });
       }
     });
   };
@@ -67,35 +67,35 @@ export function ClassesTab({ projectId }: { projectId: number }) {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListClassesQueryKey(projectId) });
         setDeleteClassId(null);
-        toast({ title: 'Class deleted' });
+        toast({ title: isCorporate ? 'Department deleted' : 'Class deleted' });
       }
     });
   };
 
   if (isLoading) {
-    return <div className="p-6">Loading classes...</div>;
+    return <div className="p-6">Loading {isCorporate ? 'departments' : 'classes'}...</div>;
   }
 
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white flex-shrink-0">
-        <h2 className="font-semibold text-slate-900">Manage Classes</h2>
+        <h2 className="font-semibold text-slate-900">Manage {isCorporate ? 'Departments' : 'Classes'}</h2>
         
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
             <Button size="sm" className="bg-teal-600 hover:bg-teal-700">
-              <Plus className="w-4 h-4 mr-2" /> Add Class
+              <Plus className="w-4 h-4 mr-2" /> Add {isCorporate ? 'Department' : 'Class'}
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create New Class</DialogTitle>
-              <DialogDescription>Enter the name of the new class.</DialogDescription>
+              <DialogTitle>Create New {isCorporate ? 'Department' : 'Class'}</DialogTitle>
+              <DialogDescription>Enter the name of the new {isCorporate ? 'department' : 'class'}.</DialogDescription>
             </DialogHeader>
             <Input 
               value={newClassName} 
               onChange={e => setNewClassName(e.target.value)} 
-              placeholder="e.g. 1st Grade - Mrs. Smith"
+              placeholder={isCorporate ? "e.g. Engineering" : "e.g. 1st Grade - Mrs. Smith"}
               autoFocus
             />
             <DialogFooter>
@@ -112,7 +112,7 @@ export function ClassesTab({ projectId }: { projectId: number }) {
       <Dialog open={!!editClassId} onOpenChange={(open) => !open && setEditClassId(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename Class</DialogTitle>
+            <DialogTitle>Rename {isCorporate ? 'Department' : 'Class'}</DialogTitle>
           </DialogHeader>
           <Input 
             value={editClassName} 
@@ -132,15 +132,15 @@ export function ClassesTab({ projectId }: { projectId: number }) {
       <Dialog open={!!deleteClassId} onOpenChange={(open) => !open && setDeleteClassId(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Class</DialogTitle>
+            <DialogTitle>Delete {isCorporate ? 'Department' : 'Class'}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this class? This will also delete all students within it. This action cannot be undone.
+              Are you sure you want to delete this {isCorporate ? 'department' : 'class'}? This will also delete all {isCorporate ? 'employees' : 'students'} within it. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteClassId(null)}>Cancel</Button>
             <Button onClick={handleDelete} variant="destructive" disabled={deleteClass.isPending}>
-              {deleteClass.isPending ? 'Deleting...' : 'Delete Class'}
+              {deleteClass.isPending ? 'Deleting...' : isCorporate ? 'Delete Department' : 'Delete Class'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -149,7 +149,7 @@ export function ClassesTab({ projectId }: { projectId: number }) {
       <div className="flex-1 overflow-auto p-4">
         {classes.length === 0 ? (
           <div className="text-center py-12 text-slate-500">
-            No classes yet. Create one manually or import from a file.
+            No {isCorporate ? 'departments' : 'classes'} yet. Create one manually or import from a file.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -157,7 +157,7 @@ export function ClassesTab({ projectId }: { projectId: number }) {
               <div key={cls.id} className="bg-slate-50 border border-slate-200 rounded-lg p-4 flex items-center justify-between group">
                 <div>
                   <h4 className="font-medium text-slate-900">{cls.className}</h4>
-                  <p className="text-sm text-slate-500">{cls.studentCount} students</p>
+                  <p className="text-sm text-slate-500">{cls.studentCount} {isCorporate ? 'employees' : 'students'}</p>
                 </div>
                 
                 <DropdownMenu>

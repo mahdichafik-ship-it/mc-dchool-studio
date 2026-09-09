@@ -825,10 +825,13 @@ components:
 
     Project:
       type: object
-      required: [id, schoolName, createdAt, updatedAt, classCount, studentCount]
+      required: [id, projectType, schoolName, createdAt, updatedAt, classCount, studentCount]
       properties:
         id:
           type: integer
+        projectType:
+          type: string
+          enum: [school, corporate]
         schoolName:
           type: string
         photoDate:
@@ -856,6 +859,10 @@ components:
       type: object
       required: [schoolName]
       properties:
+        projectType:
+          type: string
+          enum: [school, corporate]
+          default: school
         schoolName:
           type: string
           minLength: 1
@@ -875,6 +882,9 @@ components:
     ProjectPatch:
       type: object
       properties:
+        projectType:
+          type: string
+          enum: [school, corporate]
         schoolName:
           type: string
           minLength: 1

@@ -26,3 +26,4 @@
 - [Photo group membership](photo-group-membership.md) — default class groups auto-follow roster growth without undoing manual member removals across web/desktop sync.
 - [Volume Capture rebrand compatibility](volume-capture-rebrand.md) — public branding changes without renaming legacy identifiers that protect upgrades and local capture data.
 - [Desktop late-student reconciliation](desktop-late-student-reconciliation.md) — students added during a shoot stay capture-ready offline and must reconcile to cloud identity before upload.
+- [Project-type compatibility](project-type-compatibility.md) — corporate headshots reuse school data concepts internally; absent or unknown types must remain school-safe.

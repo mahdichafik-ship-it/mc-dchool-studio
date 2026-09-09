@@ -2,6 +2,7 @@
 
 export interface Project {
   id: number
+  projectType: ProjectType
   schoolName: string
   photoDate: string | null
   address: string | null
@@ -16,6 +17,12 @@ export interface Project {
   photoCount: number
   createdAt: string
   updatedAt: string
+}
+
+export type ProjectType = 'school' | 'corporate'
+
+export function normalizeProjectType(value: unknown): ProjectType {
+  return value === 'corporate' ? 'corporate' : 'school'
 }
 
 export interface Class {

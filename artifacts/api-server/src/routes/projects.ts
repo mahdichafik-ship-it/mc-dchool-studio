@@ -27,6 +27,7 @@ router.get("/", requireAuth, async (req, res) => {
   const projects = await db
     .select({
       id: projectsTable.id,
+      projectType: projectsTable.projectType,
       schoolName: projectsTable.schoolName,
       photoDate: projectsTable.photoDate,
       address: projectsTable.address,
@@ -76,11 +77,15 @@ router.post("/", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const member = await getStudioMember(userId);
   if (member.status !== "active" || !["owner", "admin", "assistant"].includes(member.role)) { res.status(403).json({ error: "You do not have permission to create projects" }); return; }
-  const { schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes } =
+  const { projectType = "school", schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes } =
     req.body;
 
   if (!schoolName) {
     res.status(400).json({ error: "schoolName is required" });
+    return;
+  }
+  if (!["school", "corporate"].includes(projectType)) {
+    res.status(400).json({ error: "projectType must be school or corporate" });
     return;
   }
 
@@ -89,6 +94,7 @@ router.post("/", requireAuth, async (req, res) => {
     .values({
       userId,
       studioId: member.studioId,
+      projectType,
       schoolName,
       photoDate: photoDate ?? null,
       address: address ?? null,
@@ -289,12 +295,17 @@ router.patch("/:projectId", requireAuth, async (req, res) => {
     return;
   }
 
-  const { schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes } =
+  const { projectType, schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes } =
     req.body;
+  if (projectType !== undefined && !["school", "corporate"].includes(projectType)) {
+    res.status(400).json({ error: "projectType must be school or corporate" });
+    return;
+  }
 
   const [updated] = await db
     .update(projectsTable)
     .set({
+      ...(projectType !== undefined && { projectType }),
       ...(schoolName !== undefined && { schoolName }),
       ...(photoDate !== undefined && { photoDate }),
       ...(address !== undefined && { address }),

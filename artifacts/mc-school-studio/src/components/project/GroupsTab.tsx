@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 
-export function GroupsTab({ projectId }: { projectId: number }) {
+export function GroupsTab({ projectId, isCorporate }: { projectId: number, isCorporate?: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
@@ -97,7 +97,7 @@ export function GroupsTab({ projectId }: { projectId: number }) {
                   <span className="truncate pr-2">{g.name}</span>
                   {g.isDefaultClassGroup && (
                     <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                      Class
+                      {isCorporate ? 'Dept' : 'Class'}
                     </span>
                   )}
                 </div>
@@ -109,7 +109,7 @@ export function GroupsTab({ projectId }: { projectId: number }) {
                   {g.classId && (
                     <>
                       <span className="text-slate-300">•</span>
-                      <span className="truncate text-slate-600">{classes.find(c => c.id === g.classId)?.className || 'Class'}</span>
+                      <span className="truncate text-slate-600">{classes.find(c => c.id === g.classId)?.className || (isCorporate ? 'Dept' : 'Class')}</span>
                     </>
                   )}
                 </div>
@@ -128,6 +128,7 @@ export function GroupsTab({ projectId }: { projectId: number }) {
             students={students} 
             classes={classes} 
             onDelete={() => setSelectedGroupId(null)}
+            isCorporate={isCorporate}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-slate-50/30">
@@ -146,7 +147,7 @@ export function GroupsTab({ projectId }: { projectId: number }) {
           <DialogHeader>
             <DialogTitle>Create Custom Group</DialogTitle>
             <DialogDescription>
-              Create a custom group to organize specific students (e.g., Debate Team, Staff).
+              Create a custom group to organize specific {isCorporate ? 'employees' : 'students'} (e.g., {isCorporate ? 'Execs, IT Support' : 'Debate Team, Staff'}).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -156,11 +157,11 @@ export function GroupsTab({ projectId }: { projectId: number }) {
                 id="name" 
                 value={newGroupName} 
                 onChange={(e) => setNewGroupName(e.target.value)} 
-                placeholder="e.g. Chess Club" 
+                placeholder={isCorporate ? "e.g. Executives" : "e.g. Chess Club"}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="class">Attach to Class (Optional)</Label>
+              <Label htmlFor="class">Attach to {isCorporate ? 'Department' : 'Class'} (Optional)</Label>
               <Select value={newGroupClassId} onValueChange={setNewGroupClassId}>
                 <SelectTrigger id="class">
                   <SelectValue placeholder="None" />
@@ -173,7 +174,7 @@ export function GroupsTab({ projectId }: { projectId: number }) {
                 </SelectContent>
               </Select>
               <p className="text-[13px] text-slate-500">
-                Attaching a class makes it easier to filter students when adding members.
+                Attaching a {isCorporate ? 'department' : 'class'} makes it easier to filter {isCorporate ? 'employees' : 'students'} when adding members.
               </p>
             </div>
           </div>
@@ -193,7 +194,7 @@ export function GroupsTab({ projectId }: { projectId: number }) {
   );
 }
 
-function GroupDetail({ projectId, group, students, classes, onDelete }: { projectId: number, group: Group, students: Student[], classes: Class[], onDelete: () => void }) {
+function GroupDetail({ projectId, group, students, classes, onDelete, isCorporate }: { projectId: number, group: Group, students: Student[], classes: Class[], onDelete: () => void, isCorporate?: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
@@ -289,7 +290,7 @@ function GroupDetail({ projectId, group, students, classes, onDelete }: { projec
             </div>
             <div className="flex items-center gap-4 mt-2 text-sm text-slate-500 font-medium">
               <span className="flex items-center gap-1.5"><Users className="w-4 h-4" /> {group.members?.length || 0} Members</span>
-              {groupClass && <span className="flex items-center gap-1.5">Class: {groupClass.className}</span>}
+              {groupClass && <span className="flex items-center gap-1.5">{isCorporate ? 'Department' : 'Class'}: {groupClass.className}</span>}
             </div>
           </div>
           {!group.isDefaultClassGroup && (
@@ -303,8 +304,8 @@ function GroupDetail({ projectId, group, students, classes, onDelete }: { projec
           <div className="bg-slate-50 text-slate-800 p-3 rounded-md text-sm flex gap-3 items-start border border-slate-200">
             <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-slate-500" />
             <div>
-              <p className="font-semibold text-slate-900">Automatic Class Group</p>
-              <p className="text-slate-600 mt-0.5">This group is maintained automatically based on class membership. You cannot rename or delete it, but you can adjust members manually if an override is required.</p>
+              <p className="font-semibold text-slate-900">Automatic {isCorporate ? 'Department' : 'Class'} Group</p>
+              <p className="text-slate-600 mt-0.5">This group is maintained automatically based on {isCorporate ? 'department' : 'class'} membership. You cannot rename or delete it, but you can adjust members manually if an override is required.</p>
             </div>
           </div>
         )}
@@ -336,9 +337,9 @@ function GroupDetail({ projectId, group, students, classes, onDelete }: { projec
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-3 font-medium">Student Name</th>
-                  <th className="px-6 py-3 font-medium">Student ID</th>
-                  <th className="px-6 py-3 font-medium">Class</th>
+                  <th className="px-6 py-3 font-medium">{isCorporate ? 'Employee Name' : 'Student Name'}</th>
+                  <th className="px-6 py-3 font-medium">{isCorporate ? 'Employee ID' : 'Student ID'}</th>
+                  <th className="px-6 py-3 font-medium">{isCorporate ? 'Department' : 'Class'}</th>
                   <th className="px-6 py-3 text-right font-medium">Action</th>
                 </tr>
               </thead>
@@ -399,7 +400,7 @@ function GroupDetail({ projectId, group, students, classes, onDelete }: { projec
             <DialogTitle>Delete Group</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete the group "{group.name}"? This action cannot be undone. 
-              Students themselves will not be deleted, only their membership in this group.
+              {isCorporate ? 'Employees' : 'Students'} themselves will not be deleted, only their membership in this group.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -419,19 +420,21 @@ function GroupDetail({ projectId, group, students, classes, onDelete }: { projec
           classes={classes}
           open={isManageMembersOpen} 
           onOpenChange={setIsManageMembersOpen} 
+          isCorporate={isCorporate}
         />
       )}
     </div>
   );
 }
 
-function ManageMembersDialog({ projectId, group, students, classes, open, onOpenChange }: { 
+function ManageMembersDialog({ projectId, group, students, classes, open, onOpenChange, isCorporate }: {
   projectId: number, 
   group: Group, 
   students: Student[], 
   classes: Class[], 
   open: boolean, 
-  onOpenChange: (open: boolean) => void 
+  onOpenChange: (open: boolean) => void,
+  isCorporate?: boolean
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -497,7 +500,7 @@ function ManageMembersDialog({ projectId, group, students, classes, open, onOpen
           <DialogHeader>
             <DialogTitle className="text-xl">Manage Members: {group.name}</DialogTitle>
             <DialogDescription className="text-slate-500">
-              Select students to include in this group. You have <strong className="text-slate-900">{selectedIds.size}</strong> students selected total.
+              Select {isCorporate ? 'employees' : 'students'} to include in this group. You have <strong className="text-slate-900">{selectedIds.size}</strong> {isCorporate ? 'employees' : 'students'} selected total.
             </DialogDescription>
           </DialogHeader>
           
@@ -505,7 +508,7 @@ function ManageMembersDialog({ projectId, group, students, classes, open, onOpen
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <Input 
-                placeholder="Search students..." 
+                placeholder={isCorporate ? "Search employees..." : "Search students..."}
                 className="pl-9 h-9"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -513,10 +516,10 @@ function ManageMembersDialog({ projectId, group, students, classes, open, onOpen
             </div>
             <Select value={classFilter} onValueChange={setClassFilter}>
               <SelectTrigger className="w-[200px] h-9">
-                <SelectValue placeholder="All Classes" />
+                <SelectValue placeholder={isCorporate ? "All Departments" : "All Classes"} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Classes</SelectItem>
+                <SelectItem value="all">{isCorporate ? "All Departments" : "All Classes"}</SelectItem>
                 {classes.map(c => (
                   <SelectItem key={c.id} value={c.id.toString()}>{c.className}</SelectItem>
                 ))}
@@ -536,14 +539,14 @@ function ManageMembersDialog({ projectId, group, students, classes, open, onOpen
                       onCheckedChange={toggleSelectAll}
                     />
                   </th>
-                  <th className="px-4 py-3 bg-slate-50 font-semibold">Student Name</th>
-                  <th className="px-4 py-3 bg-slate-50 font-semibold">Student ID</th>
-                  <th className="px-4 py-3 bg-slate-50 font-semibold">Class</th>
+                  <th className="px-4 py-3 bg-slate-50 font-semibold">{isCorporate ? 'Employee Name' : 'Student Name'}</th>
+                  <th className="px-4 py-3 bg-slate-50 font-semibold">{isCorporate ? 'Employee ID' : 'Student ID'}</th>
+                  <th className="px-4 py-3 bg-slate-50 font-semibold">{isCorporate ? 'Department' : 'Class'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredStudents.length === 0 ? (
-                  <tr><td colSpan={4} className="p-8 text-center text-slate-500">No students match your filters.</td></tr>
+                  <tr><td colSpan={4} className="p-8 text-center text-slate-500">No {isCorporate ? 'employees' : 'students'} match your filters.</td></tr>
                 ) : (
                   filteredStudents.map(student => (
                     <tr 

@@ -101,6 +101,7 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
       id: projectsTable.id,
       studioId: projectsTable.studioId,
       studioName: studiosTable.name,
+      projectType: projectsTable.projectType,
       schoolName: projectsTable.schoolName,
       photoDate: projectsTable.photoDate,
       address: projectsTable.address,

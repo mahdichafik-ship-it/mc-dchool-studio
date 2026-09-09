@@ -20,6 +20,7 @@ test('upgrades an older local database without replacing existing rows', () => {
       return [...(columns.get(table ?? '') ?? [])].map((name) => ({ name }))
     },
     exec(source: string) {
+      if (source.startsWith("UPDATE projects SET project_type = 'school'")) return
       const match = source.match(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (.+)$/)
       assert(match, `unexpected migration statement: ${source}`)
       columns.get(match[1])?.add(match[2])
@@ -35,6 +36,7 @@ test('upgrades an older local database without replacing existing rows', () => {
   })
   assert(columns.get('students')?.has('email'))
   assert(columns.get('students')?.has('phone'))
+  assert(columns.get('projects')?.has('project_type'))
   assert.equal(columns.get('students')?.size, 9)
 })
 

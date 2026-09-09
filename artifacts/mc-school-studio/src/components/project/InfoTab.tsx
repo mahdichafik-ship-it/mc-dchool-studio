@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Building, Calendar, Mail, MapPin, Phone, StickyNote, User } from 'lucide-react';
 
 export function InfoTab({ project }: { project: Project }) {
+  const isCorporate = project.projectType === 'corporate';
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
     schoolName: project.schoolName,
@@ -59,7 +60,7 @@ export function InfoTab({ project }: { project: Project }) {
       <div className="space-y-6 max-w-2xl">
         <div className="grid grid-cols-1 gap-6">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700">School Name</label>
+            <label className="text-sm font-medium text-slate-700">{isCorporate ? 'Company Name' : 'School Name'}</label>
             <Input 
               value={formData.schoolName} 
               onChange={e => setFormData({ ...formData, schoolName: e.target.value })} 
@@ -68,7 +69,7 @@ export function InfoTab({ project }: { project: Project }) {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Photo Date <span className="text-slate-400 font-normal">(Optional)</span></label>
+              <label className="text-sm font-medium text-slate-700">{isCorporate ? 'Headshot Date' : 'Photo Date'} <span className="text-slate-400 font-normal">(Optional)</span></label>
               <Input 
                 type="date"
                 value={formData.photoDate ? formData.photoDate.split('T')[0] : ''} 
@@ -76,7 +77,7 @@ export function InfoTab({ project }: { project: Project }) {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Address <span className="text-slate-400 font-normal">(Optional)</span></label>
+              <label className="text-sm font-medium text-slate-700">{isCorporate ? 'Company Address' : 'Address'} <span className="text-slate-400 font-normal">(Optional)</span></label>
               <Input 
                 value={formData.address} 
                 onChange={e => setFormData({ ...formData, address: e.target.value })} 
@@ -153,15 +154,15 @@ export function InfoTab({ project }: { project: Project }) {
           </h3>
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 text-sm">
             <div>
-              <dt className="text-slate-500 mb-1">School Name</dt>
+              <dt className="text-slate-500 mb-1">{isCorporate ? 'Company Name' : 'School Name'}</dt>
               <dd className="font-medium text-slate-900">{project.schoolName}</dd>
             </div>
             <div>
-              <dt className="text-slate-500 mb-1 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Photo Date</dt>
+              <dt className="text-slate-500 mb-1 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> {isCorporate ? 'Headshot Date' : 'Photo Date'}</dt>
               <dd className="font-medium text-slate-900">{project.photoDate ? new Date(project.photoDate).toLocaleDateString() : '—'}</dd>
             </div>
             <div className="sm:col-span-2">
-              <dt className="text-slate-500 mb-1 flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5" /> Address</dt>
+              <dt className="text-slate-500 mb-1 flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5" /> {isCorporate ? 'Company Address' : 'Address'}</dt>
               <dd className="font-medium text-slate-900">{project.address || '—'}</dd>
             </div>
           </dl>

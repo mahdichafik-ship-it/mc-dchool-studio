@@ -103,11 +103,11 @@ export default function Dashboard() {
                       <div className="flex items-center gap-4 text-sm">
                         <div className="flex items-center gap-1.5 text-slate-600">
                           <Layers className="w-4 h-4 text-slate-400" />
-                          <span className="font-medium text-slate-900">{project.classCount}</span> classes
+                          <span className="font-medium text-slate-900">{project.classCount}</span> {project.projectType === 'corporate' ? 'departments' : 'classes'}
                         </div>
                         <div className="flex items-center gap-1.5 text-slate-600">
                           <Users className="w-4 h-4 text-slate-400" />
-                          <span className="font-medium text-slate-900">{project.studentCount}</span> students
+                          <span className="font-medium text-slate-900">{project.studentCount}</span> {project.projectType === 'corporate' ? 'employees' : 'students'}
                         </div>
                       </div>
                     </CardContent>

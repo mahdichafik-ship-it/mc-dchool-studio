@@ -4,7 +4,7 @@ import { Download, FileArchive, QrCode, MonitorDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'wouter';
 
-export function ExportsTab({ project }: { project: Project }) {
+export function ExportsTab({ project, isCorporate }: { project: Project, isCorporate?: boolean }) {
   
   const downloadZip = () => {
     window.location.href = `/api/projects/${project.id}/export/zip`;
@@ -23,7 +23,7 @@ export function ExportsTab({ project }: { project: Project }) {
       <div>
         <h3 className="text-lg font-semibold text-slate-900 mb-2">Export Data</h3>
         <p className="text-sm text-slate-500 mb-6">
-          Download QR codes and student data for photo day. Make sure to generate QR codes for all students before exporting.
+          Download QR codes and {isCorporate ? 'employee' : 'student'} data for {isCorporate ? 'headshot day' : 'photo day'}. Make sure to generate QR codes for all {isCorporate ? 'employees' : 'students'} before exporting.
         </p>
       </div>
 
@@ -36,7 +36,7 @@ export function ExportsTab({ project }: { project: Project }) {
           </div>
           <h4 className="text-lg font-bold text-slate-900 mb-2">Camera Cards (PDF)</h4>
           <p className="text-sm text-slate-600 mb-6 flex-1">
-            Printable PDF documents containing 4 QR codes per page. Designed to be handed to photographers and students on photo day.
+            Printable PDF documents containing 4 QR codes per page. Designed to be handed to photographers and {isCorporate ? 'employees' : 'students'} on {isCorporate ? 'headshot day' : 'photo day'}.
           </p>
           <Button onClick={downloadPdf} className="w-full bg-slate-900 hover:bg-slate-800 text-white">
             Download PDF
@@ -50,7 +50,7 @@ export function ExportsTab({ project }: { project: Project }) {
           </div>
           <h4 className="text-lg font-bold text-slate-900 mb-2">Raw Assets (ZIP)</h4>
           <p className="text-sm text-slate-600 mb-6 flex-1">
-            A ZIP archive containing individual PNG files for every QR code, organized by class folders, plus a master CSV file.
+            A ZIP archive containing individual PNG files for every QR code, organized by {isCorporate ? 'department' : 'class'} folders, plus a master CSV file.
           </p>
           <Button onClick={downloadZip} className="w-full bg-slate-900 hover:bg-slate-800 text-white">
             Download ZIP
@@ -67,7 +67,7 @@ export function ExportsTab({ project }: { project: Project }) {
               Export for Desktop App
             </h4>
             <p className="text-sm text-slate-600">
-              Download a JSON file to import into the Volume Capture desktop app. Use this on photo day to automatically match tethered photos to students via QR code.
+              Download a JSON file to import into the Volume Capture desktop app. Use this on {isCorporate ? 'headshot day' : 'photo day'} to automatically match tethered photos to {isCorporate ? 'employees' : 'students'} via QR code.
             </p>
           </div>
           <Button onClick={downloadDesktopJson} className="shrink-0">

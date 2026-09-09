@@ -23,6 +23,7 @@ import {
   groupsTable,
   groupMembersTable,
 } from '../db/schema'
+import { normalizeProjectType } from '../../shared/types'
 import { eq, and, or, isNull } from 'drizzle-orm'
 import type { UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
@@ -138,7 +139,7 @@ type DesktopProjectSummary = {
 }
 
 type DesktopProjectBundle = {
-  project: { id: number }
+  project: { id: number; projectType?: unknown }
   classes: Array<{ id: number; className: string }>
   students: Array<{
     id: number
@@ -271,7 +272,7 @@ async function repairCloudIdentity(
 
   db.transaction((tx) => {
     tx.update(projectsTable)
-      .set({ cloudId: bundle.project.id })
+      .set({ cloudId: bundle.project.id, projectType: normalizeProjectType(bundle.project.projectType) })
       .where(eq(projectsTable.id, projectId))
       .run()
 

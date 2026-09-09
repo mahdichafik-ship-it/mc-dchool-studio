@@ -508,6 +508,7 @@ router.get("/projects", requireDesktopConnection, async (req, res) => {
   const projects = await db
     .select({
       id: projectsTable.id,
+      projectType: projectsTable.projectType,
       schoolName: projectsTable.schoolName,
       photoDate: projectsTable.photoDate,
       address: projectsTable.address,
@@ -598,6 +599,7 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
     exportVersion: 1,
     project: {
       id: project.id,
+      projectType: project.projectType,
       schoolName: project.schoolName,
       photoDate: project.photoDate,
       address: project.address,

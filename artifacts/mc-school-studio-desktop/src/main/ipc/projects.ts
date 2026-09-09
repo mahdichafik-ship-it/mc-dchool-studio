@@ -5,7 +5,7 @@ import { dirname, join } from 'path'
 import { eq, count, and } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, photosTable, groupsTable, groupMembersTable } from '../db/schema'
-import type { Project, Class, Student, ImportResult, CreateStudentResult, StudentGroup } from '../../shared/types'
+import { normalizeProjectType, type Project, type Class, type Student, type ImportResult, type CreateStudentResult, type StudentGroup } from '../../shared/types'
 import { safeProjectFolderName } from '../lib/retirement'
 import {
   ensureProjectStorageLayout,
@@ -107,6 +107,7 @@ function enrichProject(
 ): Project {
   return {
     id: p.id,
+    projectType: normalizeProjectType(p.projectType),
     schoolName: p.schoolName,
     photoDate: p.photoDate,
     address: p.address,
@@ -227,6 +228,7 @@ export function registerProjectHandlers() {
       db.update(projectsTable)
         .set({
           cloudId: Number.isInteger(p.id) ? p.id : existing.cloudId,
+           projectType: normalizeProjectType(p.projectType),
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,
@@ -246,6 +248,7 @@ export function registerProjectHandlers() {
         .insert(projectsTable)
         .values({
           cloudId: Number.isInteger(p.id) ? p.id : null,
+           projectType: normalizeProjectType(p.projectType),
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,

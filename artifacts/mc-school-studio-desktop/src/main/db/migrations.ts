@@ -24,9 +24,11 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
     ['students', 'email', 'TEXT'],
     ['students', 'phone', 'TEXT'],
     ['projects', 'finished_at', 'TEXT'],
+    ['projects', 'project_type', "TEXT NOT NULL DEFAULT 'school'"],
   ] as const) {
     ensureColumn(sqlite, ...migration)
   }
+  sqlite.exec("UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate')")
 }
 
 /**

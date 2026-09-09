@@ -36,7 +36,7 @@ function photoFileUrl(projectId: number, studentId: number, photoId: number): st
   return `/api/projects/${projectId}/students/${studentId}/photos/${photoId}/file`;
 }
 
-export function PhotosTab({ projectId }: { projectId: number }) {
+export function PhotosTab({ projectId, isCorporate }: { projectId: number, isCorporate?: boolean }) {
   const { data: students = [], isLoading: studentsLoading } = useListStudents(projectId);
   const [loading, setLoading] = useState(false);
   const [studentsWithPhotos, setStudentsWithPhotos] = useState<StudentWithPhotos[]>([]);
@@ -124,7 +124,7 @@ export function PhotosTab({ projectId }: { projectId: number }) {
         <div className="flex items-center gap-2">
           <Camera className="size-4 text-teal-600" />
           <span className="text-sm font-medium text-slate-700">
-            {totalPhotos} photo{totalPhotos !== 1 ? 's' : ''} across {studentsWithPhotos.length} student{studentsWithPhotos.length !== 1 ? 's' : ''}
+            {totalPhotos} photo{totalPhotos !== 1 ? 's' : ''} across {studentsWithPhotos.length} {isCorporate ? 'employee' : 'student'}{studentsWithPhotos.length !== 1 ? 's' : ''}
           </span>
         </div>
         <button
@@ -136,7 +136,7 @@ export function PhotosTab({ projectId }: { projectId: number }) {
         </button>
       </div>
 
-      {/* Student list */}
+      {/* Employee/Student list */}
       <div className="flex-1 overflow-auto">
         {studentsWithPhotos.map((s) => (
           <div key={s.studentId} className="border-b border-slate-100">

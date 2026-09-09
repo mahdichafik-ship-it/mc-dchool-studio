@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-export function StudentsTab({ projectId }: { projectId: number }) {
+export function StudentsTab({ projectId, isCorporate }: { projectId: number, isCorporate?: boolean }) {
   const { data: students = [], isLoading: studentsLoading } = useListStudents(projectId);
   const { data: classes = [] } = useListClasses(projectId);
   const queryClient = useQueryClient();
@@ -62,7 +62,7 @@ export function StudentsTab({ projectId }: { projectId: number }) {
         queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId) });
         setSelectedIds(new Set());
         setIsDeleteDialogOpen(false);
-        toast({ title: `Deleted ${res.deleted} students` });
+        toast({ title: `Deleted ${res.deleted} ${isCorporate ? 'employees' : 'students'}` });
       }
     });
   };
@@ -77,7 +77,7 @@ export function StudentsTab({ projectId }: { projectId: number }) {
     });
   };
 
-  if (studentsLoading) return <div className="p-6">Loading students...</div>;
+  if (studentsLoading) return <div className="p-6">Loading {isCorporate ? 'employees' : 'students'}...</div>;
 
   return (
     <div className="flex flex-col h-full">
@@ -86,7 +86,7 @@ export function StudentsTab({ projectId }: { projectId: number }) {
           <div className="relative w-full max-w-xs">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
             <Input 
-              placeholder="Search students..." 
+              placeholder={isCorporate ? "Search employees..." : "Search students..."}
               className="pl-9"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -95,10 +95,10 @@ export function StudentsTab({ projectId }: { projectId: number }) {
           <Select value={classFilter} onValueChange={setClassFilter}>
             <SelectTrigger className="w-[180px]">
               <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="All Classes" />
+              <SelectValue placeholder={isCorporate ? "All Departments" : "All Classes"} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Classes</SelectItem>
+              <SelectItem value="all">{isCorporate ? "All Departments" : "All Classes"}</SelectItem>
               {classes.map(c => (
                 <SelectItem key={c.id} value={c.id.toString()}>{c.className}</SelectItem>
               ))}
@@ -136,9 +136,9 @@ export function StudentsTab({ projectId }: { projectId: number }) {
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Students</DialogTitle>
+            <DialogTitle>Delete {isCorporate ? 'Employees' : 'Students'}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete {selectedIds.size} students? This cannot be undone.
+              Are you sure you want to delete {selectedIds.size} {isCorporate ? 'employees' : 'students'}? This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -160,10 +160,10 @@ export function StudentsTab({ projectId }: { projectId: number }) {
                   onCheckedChange={toggleSelectAll}
                 />
               </th>
-              <th className="px-4 py-3">Student ID</th>
+              <th className="px-4 py-3">{isCorporate ? 'Employee ID' : 'Student ID'}</th>
               <th className="px-4 py-3">First Name</th>
               <th className="px-4 py-3">Last Name</th>
-              <th className="px-4 py-3">Class</th>
+              <th className="px-4 py-3">{isCorporate ? 'Department' : 'Class'}</th>
               <th className="px-4 py-3 text-center">QR Code</th>
             </tr>
           </thead>
@@ -171,7 +171,7 @@ export function StudentsTab({ projectId }: { projectId: number }) {
             {filteredStudents.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                  No students found.
+                  No {isCorporate ? 'employees' : 'students'} found.
                 </td>
               </tr>
             ) : (

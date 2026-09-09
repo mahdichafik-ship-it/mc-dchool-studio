@@ -8,6 +8,7 @@ import type { Project } from '@/hooks/useApi'
 
 interface CloudProject {
   id: number
+  projectType: 'school' | 'corporate'
   schoolName: string
   photoDate: string | null
   address: string | null
@@ -56,6 +57,7 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
   }
 
   async function handlePullProject(cp: CloudProject) {
+    const isCorporate = cp.projectType === 'corporate'
     setPullingId(cp.id)
     try {
       const result = await window.api.invoke('cloud:pullProject', { cloudProjectId: cp.id }) as {
@@ -68,7 +70,7 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
         addToast({
           type: 'success',
           title: `Synced: ${cp.schoolName}`,
-          description: `${result.classesImported} classes · ${result.studentsImported} students`,
+          description: `${result.classesImported} ${isCorporate ? 'departments' : 'classes'} · ${result.studentsImported} ${isCorporate ? 'employees' : 'students'}`,
         })
         reload()
         setSyncOpen(false)
@@ -194,6 +196,7 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
                 <div className="space-y-2">
                   {cloudProjects.map((cp) => {
                     const isPulling = pullingId === cp.id
+                    const isCorporate = cp.projectType === 'corporate'
                     const alreadyLocal = projects.some(
                       (lp) => lp.schoolName === cp.schoolName,
                     )
@@ -209,7 +212,7 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
                           <div className="min-w-0">
                             <p className="font-medium text-slate-900 truncate">{cp.schoolName}</p>
                             <p className="text-xs text-slate-500 mt-0.5">
-                              {cp.classCount} classes · {cp.studentCount} students
+                              {cp.classCount} {isCorporate ? 'departments' : 'classes'} · {cp.studentCount} {isCorporate ? 'employees' : 'students'}
                               {cp.photoDate ? ` · ${cp.photoDate}` : ''}
                             </p>
                           </div>
@@ -265,6 +268,7 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
 }
 
 function ProjectCard({ project: p, onClick }: { project: Project; onClick: () => void }) {
+  const isCorporate = p.projectType === 'corporate'
   return (
     <button
       onClick={onClick}
@@ -278,7 +282,9 @@ function ProjectCard({ project: p, onClick }: { project: Project; onClick: () =>
           <div>
             <h2 className="font-semibold text-slate-900">{p.schoolName}</h2>
             <p className="text-sm text-slate-500 mt-0.5">
-              {p.photoDate ? `Photo day: ${p.photoDate}` : 'No photo date set'}
+              {p.photoDate
+                ? `${isCorporate ? 'Headshot day' : 'Photo day'}: ${p.photoDate}`
+                : `No ${isCorporate ? 'headshot' : 'photo'} date set`}
             </p>
           </div>
         </div>
@@ -288,11 +294,11 @@ function ProjectCard({ project: p, onClick }: { project: Project; onClick: () =>
       <div className="flex items-center gap-4 mt-4">
         <div className="flex items-center gap-1.5 text-sm text-slate-600">
           <BookOpen className="size-3.5" />
-          <span>{p.classCount} {p.classCount === 1 ? 'class' : 'classes'}</span>
+          <span>{p.classCount} {isCorporate ? (p.classCount === 1 ? 'department' : 'departments') : (p.classCount === 1 ? 'class' : 'classes')}</span>
         </div>
         <div className="flex items-center gap-1.5 text-sm text-slate-600">
           <Users className="size-3.5" />
-          <span>{p.studentCount} students</span>
+          <span>{p.studentCount} {isCorporate ? (p.studentCount === 1 ? 'employee' : 'employees') : (p.studentCount === 1 ? 'student' : 'students')}</span>
         </div>
         <div className="flex items-center gap-1.5 text-sm text-slate-600">
           <Image className="size-3.5" />

@@ -63,6 +63,10 @@ const captureFilterOptions: Array<{ value: CaptureFilter; label: string }> = [
 
 export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
+  const isCorporate = project?.projectType === 'corporate'
+  const departmentLabel = isCorporate ? 'Department' : 'Class'
+  const employeeLabel = isCorporate ? 'Employee' : 'Student'
+  const employeePlural = `${employeeLabel}s`
   const { data: captureSummary } = useCaptureSummary(projectId)
   const [groupCaptureCount, setGroupCaptureCount] = useState(0)
   const { data: classes, reload: reloadClasses } = useClasses(projectId)
@@ -412,10 +416,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             <h1 className="font-extrabold text-white text-base tracking-tight truncate">
               {project?.schoolName ?? '…'}
             </h1>
+            {isCorporate && <div className="text-[10px] font-bold uppercase tracking-widest text-teal-400">Headshot Session</div>}
             <div className="flex items-center gap-2.5 text-[11px] font-medium text-slate-400 mt-0.5 whitespace-nowrap">
-              <span>{project?.classCount} classes</span>
+              <span>{project?.classCount} {departmentLabel.toLowerCase()}{project?.classCount === 1 ? '' : 's'}</span>
               <span className="w-1 h-1 rounded-full bg-slate-700" />
-              <span>{project?.studentCount} students</span>
+              <span>{project?.studentCount} {employeePlural.toLowerCase()}</span>
               <span className="w-1 h-1 rounded-full bg-slate-700" />
               <span className="text-slate-300">
                 {captureSummary.total > 0 ? `${captureSummary.total} captures` : `${project?.photoCount ?? 0} photos`}
@@ -557,7 +562,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search roster..."
+                   placeholder={`Search ${employeePlural.toLowerCase()}...`}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 text-sm font-medium border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all shadow-sm placeholder:text-slate-400"
@@ -567,9 +572,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 type="button"
                 onClick={() => setAddStudentOpen(true)}
                 disabled={classes.length === 0 || Boolean(project?.finishedAt)}
-                aria-label="Add student"
+                 aria-label={`Add ${employeeLabel.toLowerCase()}`}
                 className="size-[38px] bg-slate-900 text-white rounded-lg flex items-center justify-center hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm shrink-0"
-                title={project?.finishedAt ? 'This project is finished' : 'Add student'}
+                 title={project?.finishedAt ? 'This project is finished' : `Add ${employeeLabel.toLowerCase()}`}
               >
                 <Plus className="size-4" />
               </button>
@@ -649,7 +654,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
             <div className="py-2">
               <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                Students
+                {employeePlural}
               </div>
               {filteredStudents.map((s) => (
                 <StudentRow
@@ -662,7 +667,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 />
               ))}
               {filteredStudents.length === 0 && (
-                <div className="p-8 text-center text-slate-400 text-xs font-medium">No subjects found</div>
+                <div className="p-8 text-center text-slate-400 text-xs font-medium">No {employeePlural.toLowerCase()} found</div>
               )}
             </div>
           </div>
@@ -690,6 +695,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               activeStudentSource={activeStudentSource}
               onClearCaptureTarget={() => void handleClearCaptureStudent()}
               offline={offline}
+              employeeLabel={employeeLabel}
             />
           ) : unmatchedPhotos.length > 0 ? (
             <UnmatchedPhotosPanel
@@ -731,6 +737,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         initialClassId={selectedClassId}
         onClose={() => setAddStudentOpen(false)}
         onCreated={handleStudentCreated}
+        departmentLabel={departmentLabel}
+        employeeLabel={employeeLabel}
       />
     </div>
   )
@@ -743,6 +751,8 @@ function AddStudentDialog({
   initialClassId,
   onClose,
   onCreated,
+  departmentLabel,
+  employeeLabel,
 }: {
   open: boolean
   projectId: number
@@ -750,6 +760,8 @@ function AddStudentDialog({
   initialClassId: number | null
   onClose: () => void
   onCreated: (result: CreateStudentResult) => Promise<void>
+  departmentLabel: string
+  employeeLabel: string
 }) {
   const [classId, setClassId] = useState('')
   const [firstName, setFirstName] = useState('')
@@ -788,11 +800,11 @@ function AddStudentDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Add Student to Class" className="max-w-md">
+    <Dialog open={open} onClose={onClose} title={`Add ${employeeLabel} to ${departmentLabel}`} className="max-w-md">
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="new-student-class" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            Class
+             {departmentLabel}
           </label>
           <select
             id="new-student-class"
@@ -836,7 +848,7 @@ function AddStudentDialog({
           </div>
         </div>
         <p className="text-xs font-medium leading-relaxed text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100">
-          The student is saved on this Mac immediately and selected as the active capture target.
+           The {employeeLabel.toLowerCase()} is saved on this Mac immediately and selected as the active capture target.
           If you are offline, Volume Capture will add them to the cloud during Upload & Finish.
         </p>
         <div className="flex justify-end gap-3 pt-2">
@@ -845,7 +857,7 @@ function AddStudentDialog({
           </Button>
           <Button type="submit" disabled={saving || !classId || !firstName.trim() || !lastName.trim()} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider h-10 px-5 shadow-sm">
             {saving ? <Loader className="size-4 mr-2 animate-spin" /> : <Plus className="size-4 mr-2" />}
-            {saving ? 'Adding…' : 'Add student'}
+             {saving ? 'Adding…' : `Add ${employeeLabel.toLowerCase()}`}
           </Button>
         </div>
       </form>
@@ -1032,6 +1044,7 @@ function StudentDetail({
   activeStudentSource,
   onClearCaptureTarget,
   offline,
+  employeeLabel,
 }: {
   student: Student
   projectId: number
@@ -1041,6 +1054,7 @@ function StudentDetail({
   activeStudentSource: 'manual' | 'qr' | 'none'
   onClearCaptureTarget: () => void
   offline: boolean
+  employeeLabel: string
 }) {
   const {
     data: review,
@@ -1138,7 +1152,7 @@ function StudentDetail({
 
   return (
     <div className="flex flex-col h-full relative bg-slate-50">
-      {/* Student info header */}
+       {/* Person info header */}
       <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
         {isActiveCaptureTarget && (
           <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
@@ -1157,7 +1171,7 @@ function StudentDetail({
               {student.className}
             </span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
+             <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words" aria-label={employeeLabel}>
             {student.firstName} {student.lastName}
           </h2>
         </div>

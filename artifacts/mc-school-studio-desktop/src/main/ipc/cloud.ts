@@ -19,6 +19,7 @@ import {
 } from './upload'
 import { WorkBarrier } from '../lib/workBarrier'
 import { serializeDefaultGroupRosterSnapshot } from '../lib/groupRoster'
+import { normalizeProjectType } from '../../shared/types'
 
 function now() {
   return new Date().toISOString()
@@ -26,6 +27,7 @@ function now() {
 
 export interface CloudProject {
   id: number
+  projectType: 'school' | 'corporate'
   schoolName: string
   photoDate: string | null
   address: string | null
@@ -70,7 +72,10 @@ export function registerCloudHandlers() {
         return { ok: false, error: body.error ?? `Server returned ${res.status}` }
       }
 
-      const projects = await res.json() as CloudProject[]
+       const projects = (await res.json() as Array<CloudProject & { projectType?: unknown }>).map((project) => ({
+         ...project,
+         projectType: normalizeProjectType(project.projectType),
+       }))
       markCloudSessionVerified()
       return { ok: true, projects }
     } catch (err) {
@@ -116,7 +121,7 @@ export function registerCloudHandlers() {
 
         const bundle = await res.json() as {
           project: {
-            id: number; schoolName: string; photoDate?: string; address?: string
+            id: number; projectType?: unknown; schoolName: string; photoDate?: string; address?: string
             contactName?: string; contactEmail?: string; contactPhone?: string; notes?: string
           }
           classes: { id: number; className: string }[]
@@ -145,6 +150,7 @@ export function registerCloudHandlers() {
 
           const projectValues = {
             cloudId: p.id,
+             projectType: normalizeProjectType(p.projectType),
             schoolName: p.schoolName,
             photoDate: p.photoDate ?? null,
             address: p.address ?? null,

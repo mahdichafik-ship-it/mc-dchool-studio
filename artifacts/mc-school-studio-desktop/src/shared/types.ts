@@ -278,6 +278,20 @@ export interface ProjectSyncResult {
   finishedAt?: string
 }
 
+export interface LiveUploadState {
+  projectId: number
+  enabled: boolean
+  running: boolean
+  cloudReady: boolean
+  pending: number
+  uploading: number
+  done: number
+  error: number
+  total: number
+  lastUploadedAt?: string
+  lastError?: string
+}
+
 export interface PhotoMatchedEvent {
   photo: Photo
   student: Student

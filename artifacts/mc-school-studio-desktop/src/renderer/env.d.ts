@@ -140,6 +140,10 @@ interface ElectronAPI {
   invoke(channel: 'upload:retryGroupFile', args: { fileId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
+  invoke(channel: 'upload:getLiveState', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
+  invoke(channel: 'upload:setLiveEnabled', args: { projectId: number; enabled: boolean }): Promise<import('../shared/types').LiveUploadState>
+  invoke(channel: 'upload:runNow', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
+  invoke(channel: 'upload:retryProjectFailed', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
   invoke(channel: 'project:uploadAndFinish', args: { projectId: number }): Promise<import('../shared/types').ProjectSyncResult>
   invoke(channel: 'captures:export', args: {
     projectId: number
@@ -161,6 +165,7 @@ interface ElectronAPI {
   on(channel: 'photo:deleted', listener: (data: PhotoDeletedEvent) => void): () => void
   on(channel: 'photo:reassigned', listener: (data: PhotoReassignedEvent) => void): () => void
   on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
+  on(channel: 'upload:liveStateChanged', listener: (data: import('../shared/types').LiveUploadState) => void): () => void
   on(channel: 'update:status', listener: (data: UpdateState) => void): () => void
   on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
   on(channel: 'auth:sessionInvalidated', listener: (session: AuthSession) => void): () => void

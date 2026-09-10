@@ -667,6 +667,44 @@ export function useUploadStatus(projectId: number | null) {
   return { statusMap, photoStatusMap, errorPhotoIds, reload: load }
 }
 
+export function useLiveUpload(projectId: number | null) {
+  const [state, setState] = useState<import('@shared/types').LiveUploadState | null>(null)
+
+  const load = useCallback(async () => {
+    if (!projectId) return
+    setState(await api.invoke('upload:getLiveState', { projectId }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    if (!projectId) return
+    const unsubscribe = api.on('upload:liveStateChanged', (next: import('@shared/types').LiveUploadState) => {
+      if (next.projectId === projectId) setState(next)
+    })
+    return unsubscribe
+  }, [projectId])
+
+  const setEnabled = useCallback(async (enabled: boolean) => {
+    if (!projectId) return
+    setState(await api.invoke('upload:setLiveEnabled', { projectId, enabled }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  const runNow = useCallback(async () => {
+    if (!projectId) return
+    setState(await api.invoke('upload:runNow', { projectId }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  const retryFailed = useCallback(async () => {
+    if (!projectId) return
+    setState(await api.invoke('upload:retryProjectFailed', { projectId }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  return { state, load, setEnabled, runNow, retryFailed }
+}
+
 // Total failed upload count across all projects (for Settings screen)
 export function useGlobalErrorCount() {
   const [count, setCount] = useState(0)

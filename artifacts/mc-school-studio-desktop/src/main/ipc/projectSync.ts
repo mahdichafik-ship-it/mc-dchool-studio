@@ -7,10 +7,11 @@ import {
   getUploadConfig,
   beginProjectCaptureBatch,
   finishProjectCaptureBatch,
-  getProjectSyncJobCount,
+  getProjectCaptureBatchExpectedCount,
   isCloudSessionVerified,
   syncProjectUploads,
   syncGroupCloudIdentities,
+  pauseLiveUploadForFinish,
 } from './upload'
 import type { ProjectSyncProgressEvent, ProjectSyncResult } from '../../shared/types'
 
@@ -59,8 +60,19 @@ export function registerProjectSyncHandlers(): void {
           }
         }
 
+        // Pause background transfer before creating the final capture batch.
         // Stop accepting new files first, then finish processing anything
         // already detected in the native Watch Folder queue.
+        await pauseLiveUploadForFinish(projectId)
+        if (!isCloudSessionVerified()) {
+          return {
+            ok: false,
+            completed: 0,
+            total: getProjectCaptureBatchExpectedCount(projectId),
+            failed: 0,
+            error: 'The connection was lost while waiting for background uploads. Capturing has not been stopped; reconnect and try again.',
+          }
+        }
         await stopProjectWatcher(projectId, { drain: true, clearTarget: true })
         // Group captures use a separate cloud identity contract. Reconcile
         // every group before counting or uploading files so no group is
@@ -75,7 +87,7 @@ export function registerProjectSyncHandlers(): void {
           failed: 0,
         })
 
-        const expectedFileCount = getProjectSyncJobCount(projectId)
+        const expectedFileCount = getProjectCaptureBatchExpectedCount(projectId)
         const captureBatchKey = await beginProjectCaptureBatch(projectId, expectedFileCount)
         const progress = await syncProjectUploads(projectId, (current) => {
           emitProgress({

@@ -25,7 +25,7 @@ import {
 } from '../db/schema'
 import { normalizeProjectType } from '../../shared/types'
 import { eq, and, or, isNull } from 'drizzle-orm'
-import type { UploadStatus } from '../../shared/types'
+import type { LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,6 +158,7 @@ export function disableCloudSyncForRetirement(): void {
 export function enableCloudSyncAfterSignIn(): void {
   cloudSyncDisabledForRetirement = false
   cloudSessionVerified = true
+  kickEnabledLiveUploads()
 }
 
 export function markCloudSessionUnavailable(): void {
@@ -167,6 +168,7 @@ export function markCloudSessionUnavailable(): void {
 export function markCloudSessionVerified(): void {
   if (cloudSyncDisabledForRetirement) return
   cloudSessionVerified = true
+  kickEnabledLiveUploads()
 }
 
 export function isCloudSessionVerified(): boolean {
@@ -849,6 +851,212 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
   return jobs
 }
 
+const LIVE_UPLOAD_SETTING_PREFIX = 'live_upload:'
+const CAPTURE_BATCH_FILE_KEYS_PREFIX = 'capture_batch_files:'
+const LIVE_UPLOAD_INTERVAL_MS = 2_500
+const liveUploadTimers = new Map<number, NodeJS.Timeout>()
+const activeLiveUploadRuns = new Map<number, Promise<void>>()
+const liveUploadActivity = new Map<number, { lastUploadedAt?: string; lastError?: string }>()
+
+function liveUploadSettingKey(projectId: number): string {
+  return `${LIVE_UPLOAD_SETTING_PREFIX}${projectId}`
+}
+
+function projectSyncJobKey(job: ProjectSyncJob): string {
+  if (job.kind === 'capture-file') return `capture:${job.fileId}`
+  if (job.kind === 'group-capture-file') return `group:${job.fileId}`
+  return `legacy:${job.photoId}`
+}
+
+function registerProjectBatchJobs(projectId: number, jobs: ProjectSyncJob[]): number {
+  const settingKey = `${CAPTURE_BATCH_FILE_KEYS_PREFIX}${projectId}`
+  let existing: string[] = []
+  try {
+    const stored = getSetting(settingKey)
+    if (stored) existing = JSON.parse(stored) as string[]
+  } catch {
+    existing = []
+  }
+  const keys = new Set(existing)
+  for (const job of jobs) keys.add(projectSyncJobKey(job))
+  setSetting(settingKey, JSON.stringify([...keys]))
+  return keys.size
+}
+
+export function getProjectCaptureBatchExpectedCount(projectId: number): number {
+  return registerProjectBatchJobs(projectId, getProjectSyncJobs(projectId))
+}
+
+function isLiveUploadEnabled(projectId: number): boolean {
+  return getSetting(liveUploadSettingKey(projectId)) === '1'
+}
+
+function getUploadStatusCounts(projectId: number) {
+  const db = getDb()
+  const statuses: UploadStatus[] = []
+  const captures = db.select({ id: capturesTable.id }).from(capturesTable)
+    .where(eq(capturesTable.projectId, projectId)).all()
+  for (const capture of captures) {
+    statuses.push(...db.select({ status: imageFilesTable.uploadStatus }).from(imageFilesTable)
+      .where(eq(imageFilesTable.captureId, capture.id)).all().map((row) => row.status))
+  }
+  const groupCaptures = db.select({ id: groupCapturesTable.id }).from(groupCapturesTable)
+    .where(eq(groupCapturesTable.projectId, projectId)).all()
+  for (const capture of groupCaptures) {
+    statuses.push(...db.select({ status: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable)
+      .where(eq(groupCaptureFilesTable.captureId, capture.id)).all().map((row) => row.status))
+  }
+  const mirroredPhotoIds = new Set(
+    db.select({ id: capturesTable.legacyPhotoId }).from(capturesTable)
+      .where(eq(capturesTable.projectId, projectId)).all()
+      .flatMap((row) => row.id === null ? [] : [row.id]),
+  )
+  statuses.push(...db.select({ id: photosTable.id, status: photosTable.uploadStatus }).from(photosTable)
+    .where(and(eq(photosTable.projectId, projectId), eq(photosTable.isMatched, true))).all()
+    .filter((row) => !mirroredPhotoIds.has(row.id)).map((row) => row.status))
+  return {
+    pending: statuses.filter((status) => status === 'pending' || status === null).length,
+    uploading: statuses.filter((status) => status === 'uploading').length,
+    done: statuses.filter((status) => status === 'done').length,
+    error: statuses.filter((status) => status === 'error').length,
+    total: statuses.length,
+  }
+}
+
+export function getLiveUploadState(projectId: number): LiveUploadState {
+  return {
+    projectId,
+    enabled: isLiveUploadEnabled(projectId),
+    running: activeLiveUploadRuns.has(projectId),
+    cloudReady: isCloudSessionVerified(),
+    ...getUploadStatusCounts(projectId),
+    ...liveUploadActivity.get(projectId),
+  }
+}
+
+function emitLiveUploadState(projectId: number): void {
+  BrowserWindow.getAllWindows()[0]?.webContents.send('upload:liveStateChanged', getLiveUploadState(projectId))
+}
+
+function getProjectLiveUploadJobs(projectId: number, includeErrors: boolean): ProjectSyncJob[] {
+  const db = getDb()
+  return getProjectSyncJobs(projectId).filter((job) => {
+    const status = job.kind === 'capture-file'
+      ? db.select({ value: imageFilesTable.uploadStatus }).from(imageFilesTable)
+        .where(eq(imageFilesTable.id, job.fileId)).get()?.value
+      : job.kind === 'group-capture-file'
+        ? db.select({ value: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable)
+          .where(eq(groupCaptureFilesTable.id, job.fileId)).get()?.value
+        : db.select({ value: photosTable.uploadStatus }).from(photosTable)
+          .where(eq(photosTable.id, job.photoId)).get()?.value
+    return status !== 'error' || includeErrors
+  })
+}
+
+async function uploadProjectJob(job: ProjectSyncJob, captureBatchKey: string): Promise<void> {
+  if (job.kind === 'capture-file') {
+    await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey)
+  } else if (job.kind === 'group-capture-file') {
+    await uploadGroupCaptureFile(job.captureId, job.fileId, captureBatchKey)
+  } else {
+    await uploadPhoto(
+      job.projectId,
+      job.studentId,
+      job.photoId,
+      job.filePath,
+      job.fileName,
+      job.capturedAt,
+      captureBatchKey,
+    )
+  }
+}
+
+async function runLiveUpload(projectId: number, includeErrors = false): Promise<void> {
+  const existing = activeLiveUploadRuns.get(projectId)
+  if (existing) return existing
+  if (!isCloudSessionVerified()) {
+    emitLiveUploadState(projectId)
+    return
+  }
+  const project = getDb().select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  if (!project || project.finishedAt) return
+
+  const task = (async () => {
+    try {
+      const jobs = getProjectLiveUploadJobs(projectId, includeErrors)
+      if (jobs.length === 0) return
+      await syncGroupCloudIdentities(projectId)
+      // The server keeps the greatest expected count for this retry-stable key.
+      // As a shoot grows, every live upload therefore belongs to the same batch
+      // that Finish My Shoot will eventually close.
+      const captureBatchKey = await beginProjectCaptureBatch(
+        projectId,
+        registerProjectBatchJobs(projectId, jobs),
+      )
+      for (const job of jobs) {
+        if (!isCloudSessionVerified()) break
+        try {
+          await uploadProjectJob(job, captureBatchKey)
+          liveUploadActivity.set(projectId, { lastUploadedAt: new Date().toISOString() })
+        } catch (error) {
+          liveUploadActivity.set(projectId, {
+            ...liveUploadActivity.get(projectId),
+            lastError: String(error),
+          })
+          if (!isCloudSessionVerified()) break
+        }
+        emitLiveUploadState(projectId)
+      }
+    } catch (error) {
+      liveUploadActivity.set(projectId, {
+        ...liveUploadActivity.get(projectId),
+        lastError: String(error),
+      })
+    } finally {
+      activeLiveUploadRuns.delete(projectId)
+      emitLiveUploadState(projectId)
+    }
+  })()
+  activeLiveUploadRuns.set(projectId, task)
+  emitLiveUploadState(projectId)
+  return task
+}
+
+function ensureLiveUploadTimer(projectId: number): void {
+  if (liveUploadTimers.has(projectId)) return
+  const timer = setInterval(() => {
+    if (isLiveUploadEnabled(projectId)) void runLiveUpload(projectId)
+  }, LIVE_UPLOAD_INTERVAL_MS)
+  timer.unref()
+  liveUploadTimers.set(projectId, timer)
+  void runLiveUpload(projectId)
+}
+
+function stopLiveUploadTimer(projectId: number): void {
+  const timer = liveUploadTimers.get(projectId)
+  if (timer) clearInterval(timer)
+  liveUploadTimers.delete(projectId)
+}
+
+function kickEnabledLiveUploads(): void {
+  for (const row of getDb().select().from(settingsTable).all()) {
+    if (!row.key.startsWith(LIVE_UPLOAD_SETTING_PREFIX) || row.value !== '1') continue
+    const projectId = Number(row.key.slice(LIVE_UPLOAD_SETTING_PREFIX.length))
+    if (Number.isInteger(projectId)) ensureLiveUploadTimer(projectId)
+  }
+}
+
+export function initializeLiveUploads(): void {
+  kickEnabledLiveUploads()
+}
+
+export async function pauseLiveUploadForFinish(projectId: number): Promise<void> {
+  setSetting(liveUploadSettingKey(projectId), '0')
+  stopLiveUploadTimer(projectId)
+  await activeLiveUploadRuns.get(projectId)
+  emitLiveUploadState(projectId)
+}
+
 /**
  * Upload a complete local project only when explicitly requested by the
  * photographer. This deliberately runs sequentially so progress is
@@ -897,10 +1105,6 @@ export async function syncProjectUploads(
   }
 
   return { completed, total: jobs.length, failed, error: firstError }
-}
-
-export function getProjectSyncJobCount(projectId: number): number {
-  return getProjectSyncJobs(projectId).length
 }
 
 export async function beginProjectCaptureBatch(projectId: number, expectedFileCount: number): Promise<string> {
@@ -954,6 +1158,29 @@ export async function finishProjectCaptureBatch(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerUploadHandlers() {
+  ipcMain.handle('upload:getLiveState', (_e, { projectId }: { projectId: number }) =>
+    getLiveUploadState(projectId))
+  ipcMain.handle('upload:setLiveEnabled', async (
+    _e,
+    { projectId, enabled }: { projectId: number; enabled: boolean },
+  ) => {
+    const project = getDb().select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (!project || project.finishedAt) return getLiveUploadState(projectId)
+    setSetting(liveUploadSettingKey(projectId), enabled ? '1' : '0')
+    if (enabled) ensureLiveUploadTimer(projectId)
+    else stopLiveUploadTimer(projectId)
+    emitLiveUploadState(projectId)
+    return getLiveUploadState(projectId)
+  })
+  ipcMain.handle('upload:runNow', async (_e, { projectId }: { projectId: number }) => {
+    await runLiveUpload(projectId)
+    return getLiveUploadState(projectId)
+  })
+  ipcMain.handle('upload:retryProjectFailed', async (_e, { projectId }: { projectId: number }) => {
+    await runLiveUpload(projectId, true)
+    return getLiveUploadState(projectId)
+  })
+
   // Test connection to API
   ipcMain.handle('upload:testConnection', async () => {
     const { apiUrl, connectionToken } = getUploadConfig()

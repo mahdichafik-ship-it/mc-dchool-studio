@@ -22,6 +22,7 @@ import {
   useWatcherStatus,
   useActiveCaptureTarget,
   useUploadStatus,
+  useLiveUpload,
 } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
 import {
@@ -90,6 +91,13 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     setGroupTarget: setActiveGroupTarget,
   } = useActiveCaptureTarget(projectId)
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
+  const {
+    state: liveUpload,
+    load: reloadLiveUpload,
+    setEnabled: setLiveUploadEnabled,
+    runNow: runUploadNow,
+    retryFailed: retryProjectFailed,
+  } = useLiveUpload(projectId)
   const [search, setSearch] = useState('')
   const [addStudentOpen, setAddStudentOpen] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
@@ -100,9 +108,16 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [renamingGroupId, setRenamingGroupId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [finishDialogOpen, setFinishDialogOpen] = useState(false)
+  const [uploadActionRunning, setUploadActionRunning] = useState(false)
   const autoStartAttemptedRef = useRef<number | null>(null)
-  const pendingUploadCount = [...uploadStatusMap.values()]
-    .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
+  const pendingUploadCount = liveUpload
+    ? liveUpload.pending + liveUpload.uploading
+    : [...uploadStatusMap.values()].reduce(
+      (count, summary) => count + summary.pending + summary.uploading,
+      0,
+    )
 
   useEffect(() => {
     void window.api.invoke('groupCaptures:summary', { projectId }).then(setGroupCaptureCount)
@@ -375,6 +390,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       await reloadProject()
       await reloadUploadStatus()
       if (result.ok) {
+        setFinishDialogOpen(false)
+        setUploadDialogOpen(false)
         addToast({
           type: 'success',
           title: 'Project uploaded and finished',
@@ -391,6 +408,39 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       addToast({ type: 'error', title: 'Could not finish project', description: String(error) })
     } finally {
       setFinishing(false)
+      await reloadLiveUpload()
+    }
+  }
+
+  async function handleToggleLiveUpload() {
+    if (!liveUpload || project?.finishedAt) return
+    setUploadActionRunning(true)
+    try {
+      await setLiveUploadEnabled(!liveUpload.enabled)
+      addToast({
+        type: 'success',
+        title: liveUpload.enabled ? 'Live Upload paused' : 'Live Upload enabled',
+        description: liveUpload.enabled
+          ? 'New captures stay queued locally until you resume or finish.'
+          : 'New captures will upload in the background. This does not finish the shoot.',
+      })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not change Live Upload', description: String(error) })
+    } finally {
+      setUploadActionRunning(false)
+    }
+  }
+
+  async function handleUploadNow(retryFailed = false) {
+    setUploadActionRunning(true)
+    try {
+      if (retryFailed) await retryProjectFailed()
+      else await runUploadNow()
+      await reloadUploadStatus()
+    } catch (error) {
+      addToast({ type: 'error', title: 'Upload could not continue', description: String(error) })
+    } finally {
+      setUploadActionRunning(false)
     }
   }
 
@@ -478,6 +528,31 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
           {/* Exports & Finish */}
           <div className="flex items-center gap-2">
+             <div className={cn(
+               "flex items-center h-8 rounded-md border overflow-hidden",
+               liveUpload?.enabled ? "bg-blue-500/10 border-blue-500/30" : "bg-slate-900 border-slate-800",
+             )}>
+               <button
+                 onClick={() => void handleToggleLiveUpload()}
+                 disabled={uploadActionRunning || Boolean(project?.finishedAt)}
+                 className={cn(
+                   "h-full px-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50",
+                   liveUpload?.enabled ? "text-blue-300 hover:bg-blue-500/20" : "text-slate-300 hover:bg-slate-800",
+                 )}
+                 title="Uploads captures in the background without finishing the shoot"
+               >
+                 {liveUpload?.running ? <Loader className="size-3 animate-spin" /> : <CloudUpload className="size-3" />}
+                 Live Upload {liveUpload?.enabled ? 'On' : 'Off'}
+               </button>
+               <div className={cn("w-px h-full", liveUpload?.enabled ? "bg-blue-500/30" : "bg-slate-800")} />
+               <button
+                 onClick={() => setUploadDialogOpen(true)}
+                 className="h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold"
+                 title="Open upload activity"
+               >
+                 {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}
+               </button>
+             </div>
              {captureSummary.total > 0 && (
                 <div className="flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
                    <select
@@ -506,7 +581,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
              )}
              <Button
                size="sm"
-               onClick={() => void handleUploadAndFinish()}
+               onClick={() => setFinishDialogOpen(true)}
                disabled={finishing || Boolean(project?.finishedAt) || (captureSummary.total === 0 && groupCaptureCount === 0)}
                className={cn(
                  "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
@@ -520,11 +595,136 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                ) : (
                  <CloudUpload className="size-3.5 mr-1.5" />
                )}
-               {finishing ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…') : project?.finishedAt ? 'Finished' : 'Upload & Finish'}
+               {finishing ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…') : project?.finishedAt ? 'Finished' : 'Finish My Shoot'}
              </Button>
           </div>
         </div>
       </header>
+
+      <Dialog
+        open={uploadDialogOpen}
+        onClose={() => setUploadDialogOpen(false)}
+        title="Upload Activity"
+        className="max-w-lg"
+      >
+        <div className="space-y-5">
+          <p className="text-sm text-slate-600">
+            Uploads can continue while you photograph and while this window is closed.
+            They do not finish the shoot.
+          </p>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              ['Uploaded', liveUpload?.done ?? 0, 'text-emerald-700 bg-emerald-50'],
+              ['Uploading', liveUpload?.uploading ?? 0, 'text-blue-700 bg-blue-50'],
+              ['Queued', liveUpload?.pending ?? 0, 'text-amber-700 bg-amber-50'],
+              ['Failed', liveUpload?.error ?? 0, 'text-red-700 bg-red-50'],
+            ].map(([label, value, color]) => (
+              <div key={String(label)} className={cn("rounded-lg p-3 text-center", String(color))}>
+                <div className="text-xl font-extrabold">{String(value)}</div>
+                <div className="text-[10px] font-bold uppercase tracking-wider">{String(label)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-700">Cloud connection</span>
+              <span className={cn("font-bold", liveUpload?.cloudReady ? "text-emerald-600" : "text-amber-600")}>
+                {liveUpload?.cloudReady ? 'Connected' : 'Waiting for connection'}
+              </span>
+            </div>
+            {liveUpload?.lastUploadedAt && (
+              <div className="mt-2 text-slate-500">
+                Last upload {new Date(liveUpload.lastUploadedAt).toLocaleTimeString()}
+              </div>
+            )}
+            {liveUpload?.lastError && (
+              <div className="mt-2 text-red-600 break-words">{liveUpload.lastError}</div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Button
+              variant="outline"
+              disabled={uploadActionRunning || Boolean(project?.finishedAt)}
+              onClick={() => void handleToggleLiveUpload()}
+            >
+              {liveUpload?.enabled ? 'Pause Live Upload' : 'Resume Live Upload'}
+            </Button>
+            {(liveUpload?.error ?? 0) > 0 && (
+              <Button
+                variant="outline"
+                disabled={uploadActionRunning || !liveUpload?.cloudReady}
+                onClick={() => void handleUploadNow(true)}
+              >
+                Retry Failed
+              </Button>
+            )}
+            <Button
+              disabled={uploadActionRunning || !liveUpload?.cloudReady || (liveUpload?.pending ?? 0) === 0}
+              onClick={() => void handleUploadNow()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {uploadActionRunning && <Loader className="size-4 mr-2 animate-spin" />}
+              Upload Now
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={finishDialogOpen}
+        onClose={() => !finishing && setFinishDialogOpen(false)}
+        title="Finish My Shoot?"
+        className="max-w-lg"
+      >
+        <div className="space-y-5">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex gap-3">
+              <AlertCircle className="size-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-900">This stops capture intake on this computer.</p>
+                <p className="text-sm text-amber-800 mt-1">
+                  Volume Capture will drain the watch folder, upload every remaining file,
+                  and finish this photographer’s batch. It does not close the studio’s entire project.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-slate-50 p-3">
+              <div className="text-xl font-extrabold text-slate-900">{liveUpload?.done ?? 0}</div>
+              <div className="text-[10px] font-bold uppercase text-slate-500">Uploaded</div>
+            </div>
+            <div className="rounded-lg bg-amber-50 p-3">
+              <div className="text-xl font-extrabold text-amber-700">{(liveUpload?.pending ?? 0) + (liveUpload?.uploading ?? 0)}</div>
+              <div className="text-[10px] font-bold uppercase text-amber-700">Remaining</div>
+            </div>
+            <div className="rounded-lg bg-red-50 p-3">
+              <div className="text-xl font-extrabold text-red-700">{liveUpload?.error ?? 0}</div>
+              <div className="text-[10px] font-bold uppercase text-red-700">Need retry</div>
+            </div>
+          </div>
+          {!liveUpload?.cloudReady && (
+            <p className="text-sm font-medium text-red-600">
+              Connect to Volume Capture before finishing. Your local captures remain safe.
+            </p>
+          )}
+          <div className="flex gap-3 justify-end">
+            <Button variant="outline" disabled={finishing} onClick={() => setFinishDialogOpen(false)}>
+              Keep Shooting
+            </Button>
+            <Button
+              disabled={finishing || !liveUpload?.cloudReady}
+              onClick={() => void handleUploadAndFinish()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {finishing && <Loader className="size-4 mr-2 animate-spin" />}
+              {finishing && syncProgress?.total
+                ? `Uploading ${syncProgress.completed}/${syncProgress.total}`
+                : 'Upload Remaining & Finish'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* Body: split panel */}
       <div className="flex-1 flex overflow-hidden">

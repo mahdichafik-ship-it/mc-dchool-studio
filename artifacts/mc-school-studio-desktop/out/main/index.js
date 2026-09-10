@@ -3,15 +3,16 @@ Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 const electron = require("electron");
 const path = require("path");
 const require$$0 = require("fs");
+const crypto$1 = require("crypto");
 const drizzleOrm = require("drizzle-orm");
 const Database = require("better-sqlite3");
 const betterSqlite3 = require("drizzle-orm/better-sqlite3");
 const sqliteCore = require("drizzle-orm/sqlite-core");
 const node_fs = require("node:fs");
 const node_path = require("node:path");
+const node_crypto = require("node:crypto");
 const exiftoolVendored = require("exiftool-vendored");
 const fs = require("node:fs/promises");
-const node_crypto = require("node:crypto");
 const sharp = require("sharp");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
@@ -26,6 +27,7 @@ const projectsTable = sqliteCore.sqliteTable("projects", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
   cloudId: sqliteCore.integer("cloud_id"),
   schoolName: sqliteCore.text("school_name").notNull(),
+  projectType: sqliteCore.text("project_type").$type().notNull().default("school"),
   photoDate: sqliteCore.text("photo_date"),
   address: sqliteCore.text("address"),
   contactName: sqliteCore.text("contact_name"),
@@ -59,6 +61,48 @@ const studentsTable = sqliteCore.sqliteTable("students", {
   jsonQr: sqliteCore.text("json_qr"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
   updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
+const groupsTable = sqliteCore.sqliteTable("groups", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  cloudId: sqliteCore.integer("cloud_id"),
+  projectId: sqliteCore.integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  classId: sqliteCore.integer("class_id").references(() => classesTable.id, { onDelete: "cascade" }),
+  name: sqliteCore.text("name").notNull(),
+  isDefaultClassGroup: sqliteCore.integer("is_default_class_group", { mode: "boolean" }).notNull().default(false),
+  membershipDirty: sqliteCore.integer("membership_dirty", { mode: "boolean" }).notNull().default(false),
+  createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
+  updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
+const groupMembersTable = sqliteCore.sqliteTable("group_members", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  groupId: sqliteCore.integer("group_id").notNull().references(() => groupsTable.id, { onDelete: "cascade" }),
+  studentId: sqliteCore.integer("student_id").notNull().references(() => studentsTable.id, { onDelete: "cascade" }),
+  createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
+const groupCapturesTable = sqliteCore.sqliteTable("group_captures", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  captureKey: sqliteCore.text("capture_key").notNull().unique(),
+  projectId: sqliteCore.integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  classId: sqliteCore.integer("class_id").references(() => classesTable.id, { onDelete: "set null" }),
+  groupId: sqliteCore.integer("group_id").notNull().references(() => groupsTable.id, { onDelete: "cascade" }),
+  baseFilename: sqliteCore.text("base_filename").notNull(),
+  capturedAt: sqliteCore.text("captured_at").notNull(),
+  pairingStatus: sqliteCore.text("pairing_status").notNull().default("pending"),
+  createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
+  updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
+});
+const groupCaptureFilesTable = sqliteCore.sqliteTable("group_capture_files", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  captureId: sqliteCore.integer("capture_id").notNull().references(() => groupCapturesTable.id, { onDelete: "cascade" }),
+  fileRole: sqliteCore.text("file_role").$type().notNull(),
+  fileFormat: sqliteCore.text("file_format").notNull(),
+  originalFilename: sqliteCore.text("original_filename").notNull(),
+  storedPath: sqliteCore.text("stored_path").notNull(),
+  sourcePath: sqliteCore.text("source_path"),
+  fileSize: sqliteCore.integer("file_size"),
+  uploadStatus: sqliteCore.text("upload_status").$type(),
+  fileUrl: sqliteCore.text("file_url"),
+  createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
 const photosTable = sqliteCore.sqliteTable("photos", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
@@ -129,6 +173,10 @@ const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   capturesTable,
   classesTable,
+  groupCaptureFilesTable,
+  groupCapturesTable,
+  groupMembersTable,
+  groupsTable,
   imageFilesTable,
   photosTable,
   projectsTable,
@@ -150,13 +198,58 @@ function ensureLegacyColumns(sqlite) {
     ["students", "cloud_id", "INTEGER"],
     ["students", "email", "TEXT"],
     ["students", "phone", "TEXT"],
-    ["projects", "finished_at", "TEXT"]
+    ["projects", "finished_at", "TEXT"],
+    ["projects", "project_type", "TEXT NOT NULL DEFAULT 'school'"]
   ]) {
     ensureColumn(sqlite, ...migration);
   }
+  sqlite.exec("UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate')");
 }
 function ensureCaptureTables(sqlite) {
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cloud_id INTEGER,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      is_default_class_group INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS group_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(group_id, student_id)
+    );
+    CREATE TABLE IF NOT EXISTS group_captures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      capture_key TEXT NOT NULL UNIQUE,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      base_filename TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      pairing_status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS group_capture_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      capture_id INTEGER NOT NULL REFERENCES group_captures(id) ON DELETE CASCADE,
+      file_role TEXT NOT NULL,
+      file_format TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      source_path TEXT,
+      file_size INTEGER,
+      upload_status TEXT,
+      file_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(capture_id, file_role)
+    );
     CREATE TABLE IF NOT EXISTS captures (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       capture_key TEXT NOT NULL UNIQUE,
@@ -216,7 +309,15 @@ function ensureCaptureTables(sqlite) {
     CREATE INDEX IF NOT EXISTS idx_image_files_source ON image_files(source_path);
     CREATE INDEX IF NOT EXISTS idx_qr_markers_student ON qr_markers(student_id, captured_at);
     CREATE INDEX IF NOT EXISTS idx_qr_markers_project ON qr_markers(project_id);
+    CREATE INDEX IF NOT EXISTS idx_groups_project ON groups(project_id);
+    CREATE INDEX IF NOT EXISTS idx_groups_class ON groups(class_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_unique ON group_members(group_id, student_id);
+    CREATE INDEX IF NOT EXISTS idx_group_members_student ON group_members(student_id);
+    CREATE INDEX IF NOT EXISTS idx_group_captures_group ON group_captures(group_id);
+    CREATE INDEX IF NOT EXISTS idx_group_captures_project ON group_captures(project_id);
+    CREATE INDEX IF NOT EXISTS idx_group_capture_files_capture ON group_capture_files(capture_id);
   `);
+  ensureColumn(sqlite, "groups", "membership_dirty", "INTEGER NOT NULL DEFAULT 0");
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (
       capture_key, project_id, student_id, class_id, base_filename, captured_at,
@@ -350,6 +451,7 @@ function initializeSchema(sqlite) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cloud_id INTEGER,
       school_name TEXT NOT NULL,
+      project_type TEXT NOT NULL DEFAULT 'school',
       photo_date TEXT,
       address TEXT,
       contact_name TEXT,
@@ -436,6 +538,9 @@ function setPhotosDir(dir) {
   else db.insert(settingsTable).values({ key: "storage_root", value: clean }).run();
   require$$0.mkdirSync(clean, { recursive: true });
 }
+function normalizeProjectType(value) {
+  return value === "corporate" ? "corporate" : "school";
+}
 function safeProjectFolderName(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
@@ -477,12 +582,1082 @@ function formatStudentFolderName(firstName, lastName, studentId) {
 function formatStudentPhotoName(firstName, lastName, studentId, sourceFileName) {
   return `${formatStudentFolderName(firstName, lastName, studentId)}${node_path.extname(sourceFileName)}`;
 }
+function safeManagedNameSegment(value, fallback) {
+  const cleaned = value.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ").trim().replace(/[\s._-]+/g, "_").replace(/^_+|_+$/g, "");
+  const safeValue = cleaned || fallback;
+  let byteLength = 0;
+  let result = "";
+  for (const character of safeValue) {
+    const characterBytes = Buffer.byteLength(character);
+    if (byteLength + characterBytes > 80) break;
+    result += character;
+    byteLength += characterBytes;
+  }
+  return result.replace(/_+$/g, "") || fallback;
+}
+function groupCaptureToken(sourceFileName, sourceFilePath) {
+  const sourceStem = node_path.basename(sourceFileName, node_path.extname(sourceFileName));
+  const frameNumber = sourceStem.match(/(?:^|[-_])(\d{1,12})$/)?.[1];
+  const sourceIdentity = (() => {
+    if (!sourceFilePath) return sourceStem;
+    const extensionlessPath = sourceFilePath.slice(0, -node_path.extname(sourceFilePath).length).replaceAll("\\", "/");
+    const segments = extensionlessPath.split("/");
+    const parentIndex = segments.length - 2;
+    if (parentIndex >= 0 && /^(jpeg|raw)$/i.test(segments[parentIndex])) {
+      segments.splice(parentIndex, 1);
+    }
+    return segments.join("/");
+  })();
+  const identityToken = node_crypto.createHash("sha256").update(sourceIdentity.toLowerCase()).digest("hex").slice(0, 10);
+  return frameNumber ? `${frameNumber}_${identityToken}` : identityToken;
+}
+function formatGroupPhotoName(className, groupName, sourceFileName, sourceFilePath) {
+  const classSegment = safeManagedNameSegment(className, "Unassigned_Class");
+  const groupSegment = safeManagedNameSegment(groupName, "Group");
+  const label = classSegment.toLowerCase() === groupSegment.toLowerCase() ? classSegment : `${classSegment}_${groupSegment}`;
+  return `${label}_${groupCaptureToken(sourceFileName, sourceFilePath)}${node_path.extname(sourceFileName)}`;
+}
+function assertCaptureBatchComplete(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("The server did not confirm that the capture batch completed.");
+  }
+  const root = payload;
+  const batch = root.batch && typeof root.batch === "object" ? root.batch : root;
+  if (batch.status !== "complete") {
+    throw new Error(`The capture batch is ${String(batch.status ?? "unconfirmed")}; retry Upload & Finish.`);
+  }
+  if ("completionGate" in root) {
+    const gate = root.completionGate;
+    const accepted = gate === true || Boolean(gate) && typeof gate === "object" && (gate.complete === true || gate.ready === true || gate.ok === true || gate.passed === true);
+    if (!accepted) {
+      throw new Error("The server completion gate has not passed; retry Upload & Finish.");
+    }
+  }
+}
+function getSetting(key) {
+  const db = getDb();
+  const row = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
+  return row?.value ?? null;
+}
+function setSetting(key, value) {
+  const db = getDb();
+  const existing = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
+  if (existing) {
+    db.update(settingsTable).set({ value }).where(drizzleOrm.eq(settingsTable.key, key)).run();
+  } else {
+    db.insert(settingsTable).values({ key, value }).run();
+  }
+}
+function deleteSetting(key) {
+  getDb().delete(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).run();
+}
+const DEFAULT_API_URL = "https://volumecapture.net";
+function getDesktopApiUrl() {
+  const smokeTestUrl = process.env.CI === "true" ? process.env.MC_SCHOOL_STUDIO_SMOKE_API_URL?.trim() : void 0;
+  return smokeTestUrl || getSetting("upload_api_url") || DEFAULT_API_URL;
+}
+function saveConnectionToken(token) {
+  const value = electron.safeStorage.isEncryptionAvailable() ? `safe:${electron.safeStorage.encryptString(token).toString("base64")}` : token;
+  setSetting("desktop_connection_token", value);
+  deleteSetting("desktop_retired");
+}
+function readConnectionToken() {
+  const stored = getSetting("desktop_connection_token");
+  if (!stored) return null;
+  if (!stored.startsWith("safe:")) return stored;
+  try {
+    return electron.safeStorage.decryptString(Buffer.from(stored.slice(5), "base64"));
+  } catch {
+    return null;
+  }
+}
+function getUploadConfig$1() {
+  const retired = getSetting("desktop_retired") === "1";
+  return {
+    apiUrl: getDesktopApiUrl(),
+    connectionToken: retired ? null : readConnectionToken()
+  };
+}
+function notifyUploadStatus(photoId, studentId, status) {
+  const win = electron.BrowserWindow.getAllWindows()[0];
+  win?.webContents.send("upload:statusChanged", { photoId, studentId, status });
+}
+function notifyCaptureFileStatus(captureId, fileId, studentId, fileRole, status) {
+  const win = electron.BrowserWindow.getAllWindows()[0];
+  win?.webContents.send("capture:fileUploadStatusChanged", {
+    captureId,
+    fileId,
+    studentId,
+    fileRole,
+    status
+  });
+}
+function toServerFileUrl(fileUrl) {
+  if (!fileUrl) return null;
+  if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
+  const { apiUrl } = getUploadConfig$1();
+  return `${apiUrl.replace(/\/+$/, "")}/${fileUrl.replace(/^\/+/, "")}`;
+}
+let cloudSyncDisabledForRetirement = false;
+let cloudSessionVerified = false;
+const activeUploads = /* @__PURE__ */ new Set();
+const activePhotoUploads = /* @__PURE__ */ new Map();
+const activeCaptureFileUploads = /* @__PURE__ */ new Map();
+const cloudIdentityRepairs = /* @__PURE__ */ new Map();
+class RetryableUploadError extends Error {
+}
+function disableCloudSyncForRetirement() {
+  cloudSyncDisabledForRetirement = true;
+  cloudSessionVerified = false;
+}
+function enableCloudSyncAfterSignIn() {
+  cloudSyncDisabledForRetirement = false;
+  cloudSessionVerified = true;
+  kickEnabledLiveUploads();
+}
+function markCloudSessionUnavailable() {
+  cloudSessionVerified = false;
+}
+function markCloudSessionVerified() {
+  if (cloudSyncDisabledForRetirement) return;
+  cloudSessionVerified = true;
+  kickEnabledLiveUploads();
+}
+function isCloudSessionVerified() {
+  return cloudSessionVerified && !cloudSyncDisabledForRetirement;
+}
+async function repairCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
+  if (!project || !student) throw new Error("The local project or student no longer exists.");
+  if (project.cloudId !== null && student.cloudId !== null) return;
+  const normalizedName = project.schoolName.trim().toLocaleLowerCase();
+  const projectsResponse = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`, {
+    headers: { Authorization: `Bearer ${connectionToken}` },
+    signal: AbortSignal.timeout(15e3)
+  });
+  if (!projectsResponse.ok) {
+    const text = await projectsResponse.text();
+    if (projectsResponse.status === 401) invalidateDesktopCredentials(true);
+    if (projectsResponse.status === 429 || projectsResponse.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${projectsResponse.status}: ${text}`);
+    }
+    throw new Error(`Could not refresh project identity (HTTP ${projectsResponse.status}: ${text})`);
+  }
+  const cloudProjects = await projectsResponse.json();
+  const cloudProject = project.cloudId !== null ? cloudProjects.find((candidate) => candidate.id === project.cloudId) : (() => {
+    const matches = cloudProjects.filter((candidate) => candidate.schoolName.trim().toLocaleLowerCase() === normalizedName);
+    if (matches.length > 1) {
+      throw new Error(`Several cloud projects match "${project.schoolName}". Sync this project again before uploading.`);
+    }
+    return matches[0];
+  })();
+  if (!cloudProject) {
+    throw new Error(`The cloud project "${project.schoolName}" is not assigned to this desktop.`);
+  }
+  const bundleResponse = await fetch(
+    `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProject.id}/bundle`,
+    {
+      headers: { Authorization: `Bearer ${connectionToken}` },
+      signal: AbortSignal.timeout(3e4)
+    }
+  );
+  if (!bundleResponse.ok) {
+    const text = await bundleResponse.text();
+    if (bundleResponse.status === 401) invalidateDesktopCredentials(true);
+    if (bundleResponse.status === 429 || bundleResponse.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${bundleResponse.status}: ${text}`);
+    }
+    throw new Error(`Could not refresh student identity (HTTP ${bundleResponse.status}: ${text})`);
+  }
+  const bundle = await bundleResponse.json();
+  let cloudStudent = bundle.students.find((candidate) => candidate.generatedStudentId.trim().toLocaleLowerCase() === student.generatedStudentId.trim().toLocaleLowerCase());
+  if (!cloudStudent) {
+    const localClass = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, student.classId)).get();
+    const cloudClass = bundle.classes.find((candidate) => candidate.id === localClass?.cloudId || candidate.className.trim().toLocaleLowerCase() === localClass?.className.trim().toLocaleLowerCase());
+    if (!localClass || !cloudClass) {
+      throw new Error(`The class for student "${student.generatedStudentId}" was not found in the cloud project.`);
+    }
+    const createResponse = await fetch(
+      `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProject.id}/students`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${connectionToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          classId: cloudClass.id,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          generatedStudentId: student.generatedStudentId
+        }),
+        signal: AbortSignal.timeout(3e4)
+      }
+    );
+    if (!createResponse.ok) {
+      const text = await createResponse.text();
+      if (createResponse.status === 401) invalidateDesktopCredentials(true);
+      if (createResponse.status === 429 || createResponse.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${createResponse.status}: ${text}`);
+      }
+      throw new Error(`Could not add the student to the cloud project (HTTP ${createResponse.status}: ${text})`);
+    }
+    cloudStudent = await createResponse.json();
+  }
+  db.transaction((tx) => {
+    tx.update(projectsTable).set({ cloudId: bundle.project.id, projectType: normalizeProjectType(bundle.project.projectType) }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
+    const localClasses = tx.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
+    for (const cloudClass of bundle.classes) {
+      const localClass = localClasses.find((candidate) => candidate.className.trim().toLocaleLowerCase() === cloudClass.className.trim().toLocaleLowerCase());
+      if (localClass) {
+        tx.update(classesTable).set({ cloudId: cloudClass.id }).where(drizzleOrm.eq(classesTable.id, localClass.id)).run();
+      }
+    }
+    const localStudent = tx.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
+    if (localStudent) {
+      tx.update(studentsTable).set({
+        cloudId: cloudStudent.id,
+        simpleQr: cloudStudent.simpleQr ?? localStudent.simpleQr,
+        jsonQr: cloudStudent.jsonQr ?? localStudent.jsonQr,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }).where(drizzleOrm.eq(studentsTable.id, studentId)).run();
+    }
+  });
+}
+async function ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
+  const repairKey = `${projectId}:${studentId}`;
+  const existing = cloudIdentityRepairs.get(repairKey);
+  if (existing) {
+    await existing;
+    return;
+  }
+  const repair = repairCloudIdentity(projectId, studentId, apiUrl, connectionToken);
+  cloudIdentityRepairs.set(repairKey, repair);
+  try {
+    await repair;
+  } finally {
+    cloudIdentityRepairs.delete(repairKey);
+  }
+}
+async function syncStudentCloudIdentity(projectId, studentId) {
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!connectionToken || !isCloudSessionVerified()) {
+    return { synced: false };
+  }
+  try {
+    await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken);
+    return { synced: true };
+  } catch (error) {
+    return { synced: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+async function syncGroupCloudIdentities(projectId) {
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!project?.cloudId || !apiUrl || !connectionToken || !isCloudSessionVerified()) {
+    throw new Error("Cloud upload is not configured or this project has not been synced.");
+  }
+  const groups = db.select().from(groupsTable).where(drizzleOrm.eq(groupsTable.projectId, projectId)).all();
+  const bundleResponse = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/bundle`, {
+    headers: { Authorization: `Bearer ${connectionToken}` },
+    signal: AbortSignal.timeout(3e4)
+  });
+  if (!bundleResponse.ok) throw new Error(`Could not refresh cloud group identities (HTTP ${bundleResponse.status}: ${await bundleResponse.text()})`);
+  const bundle = await bundleResponse.json();
+  for (const group of groups) {
+    const members = db.select().from(groupMembersTable).where(drizzleOrm.eq(groupMembersTable.groupId, group.id)).all();
+    for (const member of members) {
+      const result = await syncStudentCloudIdentity(projectId, member.studentId);
+      if (!result.synced) throw new Error(result.error ?? "Could not synchronize a group member.");
+    }
+    const refreshedProject = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    const refreshedGroup = db.select().from(groupsTable).where(drizzleOrm.eq(groupsTable.id, group.id)).get();
+    const cls = refreshedGroup?.classId == null ? null : db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, refreshedGroup.classId)).get();
+    const refreshedMembers = db.select().from(groupMembersTable).where(drizzleOrm.eq(groupMembersTable.groupId, group.id)).all();
+    const students = refreshedMembers.map((member) => db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, member.studentId)).get());
+    const memberStudentIds = students.map((student) => student?.cloudId).filter((id) => id !== null && id !== void 0);
+    if (memberStudentIds.length !== students.length) throw new Error(`Group "${group.name}" has a member without a cloud identity.`);
+    let cloudGroupId = refreshedGroup?.cloudId ?? null;
+    if (cloudGroupId == null && refreshedGroup?.isDefaultClassGroup) {
+      cloudGroupId = bundle.groups?.find((candidate) => candidate.isDefaultClassGroup && (candidate.classId == null || candidate.classId === cls?.cloudId) && candidate.name.trim().toLocaleLowerCase() === refreshedGroup.name.trim().toLocaleLowerCase())?.id ?? null;
+      if (cloudGroupId != null) {
+        db.update(groupsTable).set({ cloudId: cloudGroupId }).where(drizzleOrm.eq(groupsTable.id, group.id)).run();
+      }
+    }
+    const dirty = Boolean(refreshedGroup?.membershipDirty);
+    if (!dirty) continue;
+    const body = refreshedGroup?.isDefaultClassGroup ? { memberStudentIds } : {
+      name: refreshedGroup?.name ?? group.name,
+      classId: cls?.cloudId ?? null,
+      memberStudentIds
+    };
+    let response;
+    if (cloudGroupId != null) {
+      response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${refreshedProject?.cloudId}/groups/${cloudGroupId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${connectionToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(3e4)
+      });
+    } else {
+      response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${refreshedProject?.cloudId}/groups`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${connectionToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientGroupId: `desktop-${projectId}-${group.id}`,
+          ...body
+        }),
+        signal: AbortSignal.timeout(3e4)
+      });
+    }
+    if (!response.ok) {
+      if (response.status === 401) invalidateDesktopCredentials(true);
+      throw new Error(`Could not synchronize group "${group.name}" (HTTP ${response.status}: ${await response.text()})`);
+    }
+    const payload = await response.json().catch(() => ({}));
+    const cloudId = payload.id ?? payload.groupId ?? payload.cloudId;
+    if (cloudGroupId == null && Number.isInteger(cloudId)) {
+      db.update(groupsTable).set({ cloudId, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(groupsTable.id, group.id)).run();
+    }
+    db.update(groupsTable).set({ membershipDirty: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(groupsTable.id, group.id)).run();
+  }
+}
+function invalidateDesktopCredentials(notifyRenderer = false) {
+  markCloudSessionUnavailable();
+  deleteSetting("desktop_connection_token");
+  deleteSetting("desktop_cached_member");
+  if (notifyRenderer) {
+    electron.BrowserWindow.getAllWindows()[0]?.webContents.send("auth:sessionInvalidated", {
+      signedIn: false,
+      error: "Your desktop session was signed out or revoked. Sign in again."
+    });
+  }
+}
+async function waitForActiveUploads() {
+  await Promise.allSettled([...activeUploads]);
+}
+function isRetryableUploadFailure(error) {
+  if (error instanceof RetryableUploadError) return true;
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
+}
+async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
+  const db = getDb();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!connectionToken) {
+    throw new Error("Cloud upload is not configured.");
+  }
+  db.update(photosTable).set({ uploadStatus: "uploading", fileUrl: null }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+  notifyUploadStatus(photoId, studentId, "uploading");
+  try {
+    await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken);
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
+    if (!project?.cloudId || !student?.cloudId) {
+      throw new Error("This project needs to be re-synced before its photos can upload.");
+    }
+    const fileBuffer = require$$0.readFileSync(filePath);
+    const blob = new Blob([fileBuffer], { type: "image/jpeg" });
+    const formData = new FormData();
+    formData.append("photo", blob, fileName);
+    formData.append("capturedAt", capturedAt);
+    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/photos`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        "X-MC-Upload-Id": String(photoId),
+        ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
+      },
+      body: formData,
+      signal: AbortSignal.timeout(3e4)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      if (response.status === 401) {
+        invalidateDesktopCredentials(true);
+      }
+      if (response.status === 429 || response.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
+      }
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    let fileUrl = null;
+    try {
+      const payload = await response.json();
+      if (typeof payload.fileUrl === "string") fileUrl = payload.fileUrl;
+    } catch {
+      console.warn("[Upload] Upload succeeded but did not return a readable fileUrl");
+    }
+    db.update(photosTable).set({ uploadStatus: "done", fileUrl }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    notifyUploadStatus(photoId, studentId, "done");
+    console.log(`[Upload] Photo ${photoId} uploaded successfully`);
+  } catch (err) {
+    const retryable = isRetryableUploadFailure(err);
+    if (retryable) markCloudSessionUnavailable();
+    console.error(`[Upload] Upload ${retryable ? "waiting for connectivity" : "failed"}:`, err);
+    db.update(photosTable).set({ uploadStatus: retryable ? "pending" : "error" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
+    notifyUploadStatus(photoId, studentId, retryable ? "pending" : "error");
+    throw err;
+  }
+}
+function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
+  if (!isCloudSessionVerified()) return Promise.resolve();
+  const existing = activePhotoUploads.get(photoId);
+  if (existing) return existing;
+  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey);
+  activePhotoUploads.set(photoId, task);
+  activeUploads.add(task);
+  void task.finally(() => {
+    activeUploads.delete(task);
+    activePhotoUploads.delete(photoId);
+  }).catch(() => {
+  });
+  return task;
+}
+function setCaptureFileStatus(captureId, fileId, status, fileUrl) {
+  const db = getDb();
+  const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+  if (!file || !capture || file.captureId !== captureId || capture.studentId === null) return;
+  db.update(imageFilesTable).set({
+    uploadStatus: status,
+    ...fileUrl !== void 0 ? { fileUrl } : {}
+  }).where(drizzleOrm.eq(imageFilesTable.id, fileId)).run();
+  if (file.fileRole === "JPEG" && capture.legacyPhotoId !== null) {
+    db.update(photosTable).set({
+      uploadStatus: status,
+      ...fileUrl !== void 0 ? { fileUrl } : {}
+    }).where(drizzleOrm.eq(photosTable.id, capture.legacyPhotoId)).run();
+    notifyUploadStatus(capture.legacyPhotoId, capture.studentId, status);
+  }
+  notifyCaptureFileStatus(captureId, fileId, capture.studentId, file.fileRole, status);
+}
+async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
+  const db = getDb();
+  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+  const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+  if (!capture) throw new Error(`Capture ${captureId} was not found.`);
+  if (!file || file.captureId !== captureId) throw new Error(`Capture file ${fileId} was not found.`);
+  if (capture.studentId === null) throw new Error("Capture is not matched to a student.");
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!connectionToken) throw new Error("Cloud upload is not configured.");
+  setCaptureFileStatus(captureId, fileId, "uploading", null);
+  try {
+    await ensureCloudIdentity(capture.projectId, capture.studentId, apiUrl, connectionToken);
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
+    const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get();
+    if (!project?.cloudId || !student?.cloudId) {
+      throw new Error("This project needs to be re-synced before its captures can upload.");
+    }
+    const fileBuffer = require$$0.readFileSync(file.storedPath);
+    const mimeType = file.fileRole === "JPEG" ? "image/jpeg" : "application/octet-stream";
+    const formData = new FormData();
+    formData.append("file", new Blob([fileBuffer], { type: mimeType }), file.originalFilename);
+    formData.append("captureKey", capture.captureKey);
+    formData.append("fileRole", file.fileRole);
+    formData.append("fileFormat", file.fileFormat);
+    formData.append("baseFilename", capture.baseFilename);
+    if (capture.capturedAt) formData.append("capturedAt", capture.capturedAt);
+    if (capture.sequence !== null) formData.append("sequence", String(capture.sequence));
+    formData.append("favorite", String(capture.favorite));
+    formData.append("rejected", String(capture.rejected));
+    formData.append("selected", String(capture.selected));
+    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/captures`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        "X-MC-Upload-Id": String(file.id),
+        ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
+      },
+      body: formData,
+      signal: AbortSignal.timeout(12e4)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      if (response.status === 401) invalidateDesktopCredentials(true);
+      if (response.status === 429 || response.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
+      }
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    let serverFileUrl = null;
+    try {
+      const payload = await response.json();
+      if (typeof payload.file?.fileUrl === "string") serverFileUrl = toServerFileUrl(payload.file.fileUrl);
+    } catch {
+      console.warn("[Upload] Capture file uploaded but did not return a readable fileUrl");
+    }
+    setCaptureFileStatus(captureId, fileId, "done", serverFileUrl);
+    console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`);
+  } catch (error) {
+    const retryable = isRetryableUploadFailure(error);
+    if (retryable) markCloudSessionUnavailable();
+    console.error(`[Upload] Capture file ${retryable ? "waiting for connectivity" : "failed"}:`, error);
+    setCaptureFileStatus(captureId, fileId, retryable ? "pending" : "error", void 0);
+    throw error;
+  }
+}
+async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
+  const db = getDb();
+  const capture = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).get();
+  const file = db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).get();
+  if (!capture || !file || file.captureId !== captureId) throw new Error("Group capture file was not found.");
+  const group = db.select().from(groupsTable).where(drizzleOrm.eq(groupsTable.id, capture.groupId)).get();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!group?.cloudId || !project?.cloudId || !apiUrl || !connectionToken) {
+    throw new Error("This group needs to be re-synced before its captures can upload.");
+  }
+  db.update(groupCaptureFilesTable).set({ uploadStatus: "uploading" }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
+  try {
+    const formData = new FormData();
+    const managedFilename = node_path.basename(file.storedPath);
+    formData.append("file", new Blob([require$$0.readFileSync(file.storedPath)], {
+      type: file.fileRole === "JPEG" ? "image/jpeg" : "application/octet-stream"
+    }), managedFilename);
+    formData.append("captureKey", capture.captureKey);
+    formData.append("baseFilename", capture.baseFilename);
+    formData.append("capturedAt", capture.capturedAt);
+    const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/groups/${group.cloudId}/captures`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        "X-MC-Upload-Id": String(file.id),
+        ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
+      },
+      body: formData,
+      signal: AbortSignal.timeout(12e4)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      if (response.status === 401) invalidateDesktopCredentials(true);
+      if (response.status === 429 || response.status >= 500) throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    const payload = await response.json().catch(() => ({}));
+    db.update(groupCaptureFilesTable).set({
+      uploadStatus: "done",
+      fileUrl: typeof payload.file?.fileUrl === "string" ? toServerFileUrl(payload.file.fileUrl) : null
+    }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
+  } catch (error) {
+    const retryable = isRetryableUploadFailure(error);
+    if (retryable) markCloudSessionUnavailable();
+    db.update(groupCaptureFilesTable).set({ uploadStatus: retryable ? "pending" : "error" }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
+    throw error;
+  }
+}
+function uploadCaptureFile(captureId, fileId, captureBatchKey) {
+  if (!isCloudSessionVerified()) return Promise.resolve();
+  const existing = activeCaptureFileUploads.get(fileId);
+  if (existing) return existing;
+  const task = performUploadCaptureFile(captureId, fileId, captureBatchKey);
+  activeCaptureFileUploads.set(fileId, task);
+  activeUploads.add(task);
+  void task.finally(() => {
+    activeUploads.delete(task);
+    activeCaptureFileUploads.delete(fileId);
+  }).catch(() => {
+  });
+  return task;
+}
+function uploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
+  if (!isCloudSessionVerified()) return Promise.resolve();
+  const task = performUploadGroupCaptureFile(captureId, fileId, captureBatchKey);
+  activeUploads.add(task);
+  void task.finally(() => activeUploads.delete(task)).catch(() => {
+  });
+  return task;
+}
+function getProjectSyncJobs(projectId) {
+  const db = getDb();
+  const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
+  const jobs = [];
+  const mirroredPhotoIds = /* @__PURE__ */ new Set();
+  const groupCaptures = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all();
+  for (const capture of groupCaptures) {
+    for (const file of db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, capture.id)).all()) {
+      if (file.uploadStatus !== "done") jobs.push({ kind: "group-capture-file", captureId: capture.id, fileId: file.id });
+    }
+  }
+  for (const capture of captures) {
+    if (capture.legacyPhotoId !== null) mirroredPhotoIds.add(capture.legacyPhotoId);
+    if (capture.studentId === null) continue;
+    const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
+    for (const file of files) {
+      if (file.uploadStatus !== "done") {
+        jobs.push({ kind: "capture-file", captureId: capture.id, fileId: file.id });
+      }
+    }
+  }
+  const legacyPhotos = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.projectId, projectId)).all();
+  for (const photo of legacyPhotos) {
+    if (!photo.isMatched || photo.studentId === null || mirroredPhotoIds.has(photo.id) || photo.uploadStatus === "done") continue;
+    jobs.push({
+      kind: "legacy-photo",
+      projectId,
+      studentId: photo.studentId,
+      photoId: photo.id,
+      filePath: photo.filePath,
+      fileName: photo.fileName,
+      capturedAt: photo.capturedAt
+    });
+  }
+  return jobs;
+}
+const LIVE_UPLOAD_SETTING_PREFIX = "live_upload:";
+const CAPTURE_BATCH_FILE_KEYS_PREFIX = "capture_batch_files:";
+const LIVE_UPLOAD_INTERVAL_MS = 2500;
+const liveUploadTimers = /* @__PURE__ */ new Map();
+const activeLiveUploadRuns = /* @__PURE__ */ new Map();
+const liveUploadActivity = /* @__PURE__ */ new Map();
+function liveUploadSettingKey(projectId) {
+  return `${LIVE_UPLOAD_SETTING_PREFIX}${projectId}`;
+}
+function projectSyncJobKey(job) {
+  if (job.kind === "capture-file") return `capture:${job.fileId}`;
+  if (job.kind === "group-capture-file") return `group:${job.fileId}`;
+  return `legacy:${job.photoId}`;
+}
+function registerProjectBatchJobs(projectId, jobs) {
+  const settingKey = `${CAPTURE_BATCH_FILE_KEYS_PREFIX}${projectId}`;
+  let existing = [];
+  try {
+    const stored = getSetting(settingKey);
+    if (stored) existing = JSON.parse(stored);
+  } catch {
+    existing = [];
+  }
+  const keys = new Set(existing);
+  for (const job of jobs) keys.add(projectSyncJobKey(job));
+  setSetting(settingKey, JSON.stringify([...keys]));
+  return keys.size;
+}
+function getProjectCaptureBatchExpectedCount(projectId) {
+  return registerProjectBatchJobs(projectId, getProjectSyncJobs(projectId));
+}
+function isLiveUploadEnabled(projectId) {
+  return getSetting(liveUploadSettingKey(projectId)) === "1";
+}
+function getUploadStatusCounts(projectId) {
+  const db = getDb();
+  const statuses = [];
+  const captures = db.select({ id: capturesTable.id }).from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
+  for (const capture of captures) {
+    statuses.push(...db.select({ status: imageFilesTable.uploadStatus }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all().map((row) => row.status));
+  }
+  const groupCaptures = db.select({ id: groupCapturesTable.id }).from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all();
+  for (const capture of groupCaptures) {
+    statuses.push(...db.select({ status: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, capture.id)).all().map((row) => row.status));
+  }
+  const mirroredPhotoIds = new Set(
+    db.select({ id: capturesTable.legacyPhotoId }).from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().flatMap((row) => row.id === null ? [] : [row.id])
+  );
+  statuses.push(...db.select({ id: photosTable.id, status: photosTable.uploadStatus }).from(photosTable).where(drizzleOrm.and(drizzleOrm.eq(photosTable.projectId, projectId), drizzleOrm.eq(photosTable.isMatched, true))).all().filter((row) => !mirroredPhotoIds.has(row.id)).map((row) => row.status));
+  return {
+    pending: statuses.filter((status) => status === "pending" || status === null).length,
+    uploading: statuses.filter((status) => status === "uploading").length,
+    done: statuses.filter((status) => status === "done").length,
+    error: statuses.filter((status) => status === "error").length,
+    total: statuses.length
+  };
+}
+function getLiveUploadState(projectId) {
+  return {
+    projectId,
+    enabled: isLiveUploadEnabled(projectId),
+    running: activeLiveUploadRuns.has(projectId),
+    cloudReady: isCloudSessionVerified(),
+    ...getUploadStatusCounts(projectId),
+    ...liveUploadActivity.get(projectId)
+  };
+}
+function emitLiveUploadState(projectId) {
+  electron.BrowserWindow.getAllWindows()[0]?.webContents.send("upload:liveStateChanged", getLiveUploadState(projectId));
+}
+function getProjectLiveUploadJobs(projectId, includeErrors) {
+  const db = getDb();
+  return getProjectSyncJobs(projectId).filter((job) => {
+    const status = job.kind === "capture-file" ? db.select({ value: imageFilesTable.uploadStatus }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, job.fileId)).get()?.value : job.kind === "group-capture-file" ? db.select({ value: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.id, job.fileId)).get()?.value : db.select({ value: photosTable.uploadStatus }).from(photosTable).where(drizzleOrm.eq(photosTable.id, job.photoId)).get()?.value;
+    return status !== "error" || includeErrors;
+  });
+}
+async function uploadProjectJob(job, captureBatchKey) {
+  if (job.kind === "capture-file") {
+    await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey);
+  } else if (job.kind === "group-capture-file") {
+    await uploadGroupCaptureFile(job.captureId, job.fileId, captureBatchKey);
+  } else {
+    await uploadPhoto(
+      job.projectId,
+      job.studentId,
+      job.photoId,
+      job.filePath,
+      job.fileName,
+      job.capturedAt,
+      captureBatchKey
+    );
+  }
+}
+async function runLiveUpload(projectId, includeErrors = false) {
+  const existing = activeLiveUploadRuns.get(projectId);
+  if (existing) return existing;
+  if (!isCloudSessionVerified()) {
+    emitLiveUploadState(projectId);
+    return;
+  }
+  const project = getDb().select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project || project.finishedAt) return;
+  const task = (async () => {
+    try {
+      const jobs = getProjectLiveUploadJobs(projectId, includeErrors);
+      if (jobs.length === 0) return;
+      await syncGroupCloudIdentities(projectId);
+      const captureBatchKey = await beginProjectCaptureBatch(
+        projectId,
+        registerProjectBatchJobs(projectId, jobs)
+      );
+      for (const job of jobs) {
+        if (!isCloudSessionVerified()) break;
+        try {
+          await uploadProjectJob(job, captureBatchKey);
+          liveUploadActivity.set(projectId, { lastUploadedAt: (/* @__PURE__ */ new Date()).toISOString() });
+        } catch (error) {
+          liveUploadActivity.set(projectId, {
+            ...liveUploadActivity.get(projectId),
+            lastError: String(error)
+          });
+          if (!isCloudSessionVerified()) break;
+        }
+        emitLiveUploadState(projectId);
+      }
+    } catch (error) {
+      liveUploadActivity.set(projectId, {
+        ...liveUploadActivity.get(projectId),
+        lastError: String(error)
+      });
+    } finally {
+      activeLiveUploadRuns.delete(projectId);
+      emitLiveUploadState(projectId);
+    }
+  })();
+  activeLiveUploadRuns.set(projectId, task);
+  emitLiveUploadState(projectId);
+  return task;
+}
+function ensureLiveUploadTimer(projectId) {
+  if (liveUploadTimers.has(projectId)) return;
+  const timer = setInterval(() => {
+    if (isLiveUploadEnabled(projectId)) void runLiveUpload(projectId);
+  }, LIVE_UPLOAD_INTERVAL_MS);
+  timer.unref();
+  liveUploadTimers.set(projectId, timer);
+  void runLiveUpload(projectId);
+}
+function stopLiveUploadTimer(projectId) {
+  const timer = liveUploadTimers.get(projectId);
+  if (timer) clearInterval(timer);
+  liveUploadTimers.delete(projectId);
+}
+function kickEnabledLiveUploads() {
+  for (const row of getDb().select().from(settingsTable).all()) {
+    if (!row.key.startsWith(LIVE_UPLOAD_SETTING_PREFIX) || row.value !== "1") continue;
+    const projectId = Number(row.key.slice(LIVE_UPLOAD_SETTING_PREFIX.length));
+    if (Number.isInteger(projectId)) ensureLiveUploadTimer(projectId);
+  }
+}
+function initializeLiveUploads() {
+  kickEnabledLiveUploads();
+}
+async function pauseLiveUploadForFinish(projectId) {
+  setSetting(liveUploadSettingKey(projectId), "0");
+  stopLiveUploadTimer(projectId);
+  await activeLiveUploadRuns.get(projectId);
+  emitLiveUploadState(projectId);
+}
+async function syncProjectUploads(projectId, onProgress, captureBatchKey) {
+  const jobs = getProjectSyncJobs(projectId);
+  let completed = 0;
+  let failed = 0;
+  let firstError;
+  const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError });
+  report();
+  for (const job of jobs) {
+    try {
+      if (!isCloudSessionVerified()) {
+        throw new Error("Cloud sync is unavailable. Local captures are safe; reconnect and try again.");
+      }
+      if (job.kind === "capture-file") {
+        await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey);
+      } else if (job.kind === "group-capture-file") {
+        await uploadGroupCaptureFile(job.captureId, job.fileId, captureBatchKey);
+      } else {
+        await uploadPhoto(
+          job.projectId,
+          job.studentId,
+          job.photoId,
+          job.filePath,
+          job.fileName,
+          job.capturedAt,
+          captureBatchKey
+        );
+      }
+    } catch (error) {
+      failed++;
+      firstError ??= String(error);
+    } finally {
+      completed++;
+      report();
+    }
+  }
+  return { completed, total: jobs.length, failed, error: firstError };
+}
+async function beginProjectCaptureBatch(projectId, expectedFileCount) {
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project?.cloudId) throw new Error("This project needs to be re-synced before its batch can upload.");
+  const settingKey = `capture_batch:${projectId}`;
+  const batchKey = getSetting(settingKey) ?? crypto.randomUUID();
+  setSetting(settingKey, batchKey);
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!connectionToken) throw new Error("Cloud upload is not configured.");
+  const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/capture-batches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${connectionToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ batchKey, expectedFileCount }),
+    signal: AbortSignal.timeout(3e4)
+  });
+  if (!response.ok) throw new Error(`Could not start capture batch: HTTP ${response.status}: ${await response.text()}`);
+  return batchKey;
+}
+async function finishProjectCaptureBatch(projectId, batchKey, status, failedFileCount) {
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!project?.cloudId || !apiUrl || !connectionToken) throw new Error("Cloud upload is not configured.");
+  const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/capture-batches/${encodeURIComponent(batchKey)}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${connectionToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status, failedFileCount }),
+    signal: AbortSignal.timeout(3e4)
+  });
+  if (!response.ok) throw new Error(`Could not update capture batch: HTTP ${response.status}: ${await response.text()}`);
+  const payload = await response.json().catch(() => null);
+  assertCaptureBatchComplete(payload);
+}
+function registerUploadHandlers() {
+  electron.ipcMain.handle("upload:getLiveState", (_e, { projectId }) => getLiveUploadState(projectId));
+  electron.ipcMain.handle("upload:setLiveEnabled", async (_e, { projectId, enabled }) => {
+    const project = getDb().select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    if (!project || project.finishedAt) return getLiveUploadState(projectId);
+    setSetting(liveUploadSettingKey(projectId), enabled ? "1" : "0");
+    if (enabled) ensureLiveUploadTimer(projectId);
+    else stopLiveUploadTimer(projectId);
+    emitLiveUploadState(projectId);
+    return getLiveUploadState(projectId);
+  });
+  electron.ipcMain.handle("upload:runNow", async (_e, { projectId }) => {
+    await runLiveUpload(projectId);
+    return getLiveUploadState(projectId);
+  });
+  electron.ipcMain.handle("upload:retryProjectFailed", async (_e, { projectId }) => {
+    await runLiveUpload(projectId, true);
+    return getLiveUploadState(projectId);
+  });
+  electron.ipcMain.handle("upload:testConnection", async () => {
+    const { apiUrl, connectionToken } = getUploadConfig$1();
+    if (!connectionToken) {
+      return { ok: false, error: "Sign in to Volume Capture before testing the connection" };
+    }
+    try {
+      const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/me`;
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(5e3)
+      });
+      if (response.ok) {
+        markCloudSessionVerified();
+        return { ok: true };
+      }
+      if (response.status === 401) invalidateDesktopCredentials(true);
+      else if (response.status >= 500) markCloudSessionUnavailable();
+      const body = await response.json().catch(() => ({}));
+      return { ok: false, error: body.error ?? `Server returned ${response.status}` };
+    } catch (err) {
+      markCloudSessionUnavailable();
+      return { ok: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle("upload:retry", async (_e, { photoId }) => {
+    const db = getDb();
+    const photo = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).get();
+    if (!photo || !photo.studentId) return { ok: false, error: "Photo not found or not matched" };
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
+    }
+    try {
+      const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photoId)).get();
+      const jpegFile = capture ? db.select().from(imageFilesTable).where(drizzleOrm.and(drizzleOrm.eq(imageFilesTable.captureId, capture.id), drizzleOrm.eq(imageFilesTable.fileRole, "JPEG"))).get() : void 0;
+      if (capture && jpegFile) {
+        await uploadCaptureFile(capture.id, jpegFile.id);
+        return { ok: true };
+      }
+      await uploadPhoto(
+        photo.projectId,
+        photo.studentId,
+        photo.id,
+        photo.filePath,
+        photo.fileName,
+        photo.capturedAt
+      );
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle("upload:retryFile", async (_e, { fileId }) => {
+    const db = getDb();
+    const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+    if (!file) return { ok: false, error: "Capture file not found" };
+    const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, file.captureId)).get();
+    if (!capture?.studentId) return { ok: false, error: "Capture is not matched to a student" };
+    if (!isCloudSessionVerified()) {
+      return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
+    }
+    try {
+      await uploadCaptureFile(capture.id, file.id);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  });
+  electron.ipcMain.handle("upload:retryGroupFile", async (_e, { fileId }) => {
+    const db = getDb();
+    const file = db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).get();
+    if (!file) return { ok: false, error: "Group capture file not found" };
+    if (!isCloudSessionVerified()) return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
+    try {
+      await uploadGroupCaptureFile(file.captureId, file.id);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  });
+  electron.ipcMain.handle(
+    "upload:getProjectStatus",
+    (_e, { projectId }) => {
+      const db = getDb();
+      const photos = db.select({
+        id: photosTable.id,
+        studentId: photosTable.studentId,
+        uploadStatus: photosTable.uploadStatus,
+        fileUrl: photosTable.fileUrl
+      }).from(photosTable).where(drizzleOrm.and(drizzleOrm.eq(photosTable.projectId, projectId), drizzleOrm.eq(photosTable.isMatched, true))).all();
+      return photos.map((photo) => ({
+        ...photo,
+        fileUrl: toServerFileUrl(photo.fileUrl)
+      }));
+    }
+  );
+  electron.ipcMain.handle("upload:getGlobalErrorCount", () => {
+    const db = getDb();
+    const photos = db.select({ id: photosTable.id }).from(photosTable).where(drizzleOrm.eq(photosTable.uploadStatus, "error")).all();
+    const captureFiles = db.select({ id: imageFilesTable.id }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.uploadStatus, "error")).all();
+    const mirroredPhotoIds = new Set(
+      db.select({ photoId: capturesTable.legacyPhotoId }).from(capturesTable).all().map((row) => row.photoId).filter((photoId) => photoId !== null)
+    );
+    return photos.filter((photo) => !mirroredPhotoIds.has(photo.id)).length + captureFiles.length;
+  });
+}
+function getNewDefaultGroupMemberIds(existingMemberIds, rosterSnapshotIds, currentRosterIds, hasSnapshot) {
+  const existing = new Set(existingMemberIds);
+  const snapshot = new Set(rosterSnapshotIds);
+  return [...currentRosterIds].filter((studentId) => !existing.has(studentId) && (!hasSnapshot || !snapshot.has(studentId)));
+}
+function serializeDefaultGroupRosterSnapshot(studentIds) {
+  return [...new Set(studentIds)].join(",");
+}
 function now$3() {
   return (/* @__PURE__ */ new Date()).toISOString();
+}
+function reconcileDefaultGroups(projectId) {
+  const db = getDb();
+  const classes = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
+  for (const cls of classes) {
+    let group = db.select().from(groupsTable).where(drizzleOrm.and(
+      drizzleOrm.eq(groupsTable.projectId, projectId),
+      drizzleOrm.eq(groupsTable.classId, cls.id),
+      drizzleOrm.eq(groupsTable.isDefaultClassGroup, true)
+    )).get();
+    if (!group) {
+      group = db.insert(groupsTable).values({
+        projectId,
+        classId: cls.id,
+        name: cls.className,
+        isDefaultClassGroup: true
+      }).returning().get();
+    }
+    const markerKey = `default_group_initialized:${group.id}`;
+    const marker = getSetting(markerKey);
+    const members = db.select().from(groupMembersTable).where(drizzleOrm.eq(groupMembersTable.groupId, group.id)).all();
+    const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.classId, cls.id)).all();
+    const snapshot = (marker ? marker.split(",") : []).map(Number).filter(Number.isFinite);
+    const additions = getNewDefaultGroupMemberIds(
+      members.map((member) => member.studentId),
+      snapshot,
+      students.map((student) => student.id),
+      marker !== null
+    );
+    for (const studentId of additions) {
+      db.insert(groupMembersTable).values({ groupId: group.id, studentId }).onConflictDoNothing().run();
+    }
+    setSetting(markerKey, serializeDefaultGroupRosterSnapshot([...snapshot, ...students.map((student) => student.id)]));
+  }
+}
+function toGroup(row, memberStudentIds) {
+  return { ...row, memberStudentIds };
+}
+function generateUniqueLocalStudentId(projectId) {
+  const db = getDb();
+  const existing = new Set(
+    db.select({ id: studentsTable.generatedStudentId }).from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all().map((row) => row.id.toUpperCase())
+  );
+  for (let attempt = 0; attempt < 1e3; attempt++) {
+    const candidate = crypto$1.randomBytes(8).toString("base64url").replace(/[^A-Z0-9]/gi, "").slice(0, 7).toUpperCase();
+    if (candidate.length === 7 && !existing.has(candidate)) return candidate;
+  }
+  throw new Error("Could not generate a unique student code.");
+}
+function toStudent(student, className, photoCount = 0) {
+  return {
+    id: student.id,
+    projectId: student.projectId,
+    classId: student.classId,
+    className,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    generatedStudentId: student.generatedStudentId,
+    simpleQr: student.simpleQr,
+    jsonQr: student.jsonQr,
+    photoCount,
+    createdAt: student.createdAt,
+    updatedAt: student.updatedAt
+  };
 }
 function enrichProject(p, classCount, studentCount, photoCount) {
   return {
     id: p.id,
+    projectType: normalizeProjectType(p.projectType),
     schoolName: p.schoolName,
     photoDate: p.photoDate,
     address: p.address,
@@ -549,6 +1724,7 @@ function registerProjectHandlers() {
     const [{ studentCount }] = db.select({ studentCount: drizzleOrm.count() }).from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, p.id)).all();
     const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(photosTable).where(drizzleOrm.eq(photosTable.projectId, p.id)).all();
     prepareProjectFolders(db, projectId);
+    reconcileDefaultGroups(projectId);
     return enrichProject(p, classCount, studentCount, photoCount);
   });
   electron.ipcMain.handle(
@@ -560,12 +1736,13 @@ function registerProjectHandlers() {
   electron.ipcMain.handle("projects:import", async (_e, { filePath }) => {
     const raw = require$$0.readFileSync(filePath, "utf-8");
     const bundle = JSON.parse(raw);
-    const { project: p, classes, students } = bundle;
+    const { project: p, classes, students, groups = [], groupMembers = [] } = bundle;
     const existing = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.schoolName, p.schoolName)).get();
     let projectId;
     if (existing) {
       db.update(projectsTable).set({
         cloudId: Number.isInteger(p.id) ? p.id : existing.cloudId,
+        projectType: normalizeProjectType(p.projectType),
         schoolName: p.schoolName,
         photoDate: p.photoDate ?? null,
         address: p.address ?? null,
@@ -580,6 +1757,7 @@ function registerProjectHandlers() {
     } else {
       const result = db.insert(projectsTable).values({
         cloudId: Number.isInteger(p.id) ? p.id : null,
+        projectType: normalizeProjectType(p.projectType),
         schoolName: p.schoolName,
         photoDate: p.photoDate ?? null,
         address: p.address ?? null,
@@ -621,13 +1799,96 @@ function registerProjectHandlers() {
       }).run();
       studentsImported++;
     }
+    reconcileDefaultGroups(projectId);
+    for (const group of groups) {
+      const classId = group.classId == null ? null : classIdMap.get(group.classId) ?? null;
+      const existingGroup = Number.isInteger(group.id) ? db.select().from(groupsTable).where(drizzleOrm.and(drizzleOrm.eq(groupsTable.projectId, projectId), drizzleOrm.eq(groupsTable.cloudId, group.id))).get() : void 0;
+      const defaultByClass = group.isDefaultClassGroup ? db.select().from(groupsTable).where(drizzleOrm.and(drizzleOrm.eq(groupsTable.projectId, projectId), drizzleOrm.eq(groupsTable.classId, classId), drizzleOrm.eq(groupsTable.isDefaultClassGroup, true))).get() : void 0;
+      const local = existingGroup ?? defaultByClass ?? db.insert(groupsTable).values({
+        cloudId: Number.isInteger(group.id) ? group.id : null,
+        projectId,
+        classId,
+        name: group.name,
+        isDefaultClassGroup: Boolean(group.isDefaultClassGroup)
+      }).returning().get();
+      if (existingGroup || defaultByClass) {
+        db.update(groupsTable).set({
+          ...Number.isInteger(group.id) ? { cloudId: group.id } : {},
+          classId,
+          name: group.name,
+          isDefaultClassGroup: Boolean(group.isDefaultClassGroup),
+          updatedAt: now$3()
+        }).where(drizzleOrm.eq(groupsTable.id, local.id)).run();
+      }
+      const memberIds = [
+        ...group.memberStudentIds ?? [],
+        ...groupMembers.filter((item) => item.groupId === group.id).map((item) => item.studentId)
+      ];
+      for (const studentId of [...new Set(memberIds)]) {
+        const student = db.select().from(studentsTable).where(drizzleOrm.and(drizzleOrm.eq(studentsTable.projectId, projectId), drizzleOrm.eq(studentsTable.cloudId, studentId))).get();
+        if (student) db.insert(groupMembersTable).values({ groupId: local.id, studentId: student.id }).onConflictDoNothing().run();
+      }
+    }
     const proj = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
     prepareProjectFolders(db, projectId);
+    reconcileDefaultGroups(projectId);
     return {
       project: enrichProject(proj, classes.length, studentsImported, 0),
       classesImported: classes.length,
       studentsImported
     };
+  });
+  electron.ipcMain.handle("groups:list", async (_e, { projectId, classId }) => {
+    reconcileDefaultGroups(projectId);
+    const rows = db.select().from(groupsTable).where(drizzleOrm.eq(groupsTable.projectId, projectId)).all().filter((group) => classId === void 0 || group.classId === classId);
+    return rows.map((group) => toGroup(group, db.select({ studentId: groupMembersTable.studentId }).from(groupMembersTable).where(drizzleOrm.eq(groupMembersTable.groupId, group.id)).all().map((member) => member.studentId)));
+  });
+  electron.ipcMain.handle("groups:create", async (_e, input) => {
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, input.projectId)).get();
+    if (project?.finishedAt) throw new Error("This project is finished and its groups can no longer be changed.");
+    const name = input.name.trim();
+    if (!name) throw new Error("Group name is required.");
+    const group = db.insert(groupsTable).values({
+      projectId: input.projectId,
+      classId: input.classId ?? null,
+      name,
+      isDefaultClassGroup: false,
+      membershipDirty: true
+    }).returning().get();
+    for (const studentId of input.memberStudentIds ?? []) {
+      db.insert(groupMembersTable).values({ groupId: group.id, studentId }).onConflictDoNothing().run();
+    }
+    return toGroup(group, input.memberStudentIds ?? []);
+  });
+  electron.ipcMain.handle("groups:update", async (_e, input) => {
+    const group = db.select().from(groupsTable).where(drizzleOrm.and(
+      drizzleOrm.eq(groupsTable.id, input.groupId),
+      drizzleOrm.eq(groupsTable.projectId, input.projectId)
+    )).get();
+    if (!group) throw new Error("Group not found.");
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, input.projectId)).get();
+    if (project?.finishedAt) throw new Error("This project is finished and its groups can no longer be changed.");
+    if (group.isDefaultClassGroup && input.name !== void 0 && input.name.trim() !== group.name) {
+      throw new Error("The default class group cannot be renamed.");
+    }
+    const updated = input.name === void 0 ? group : db.update(groupsTable).set({ name: input.name.trim(), membershipDirty: true, updatedAt: now$3() }).where(drizzleOrm.eq(groupsTable.id, group.id)).returning().get();
+    if (input.memberStudentIds) {
+      db.delete(groupMembersTable).where(drizzleOrm.eq(groupMembersTable.groupId, group.id)).run();
+      for (const studentId of input.memberStudentIds) {
+        db.insert(groupMembersTable).values({ groupId: group.id, studentId }).onConflictDoNothing().run();
+      }
+      db.update(groupsTable).set({ membershipDirty: true, updatedAt: now$3() }).where(drizzleOrm.eq(groupsTable.id, group.id)).run();
+    }
+    const members = db.select({ studentId: groupMembersTable.studentId }).from(groupMembersTable).where(drizzleOrm.eq(groupMembersTable.groupId, group.id)).all().map((member) => member.studentId);
+    return toGroup(updated, members);
+  });
+  electron.ipcMain.handle("groups:delete", async (_e, { projectId, groupId }) => {
+    const group = db.select().from(groupsTable).where(drizzleOrm.and(drizzleOrm.eq(groupsTable.id, groupId), drizzleOrm.eq(groupsTable.projectId, projectId))).get();
+    if (!group) throw new Error("Group not found.");
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    if (project?.finishedAt) throw new Error("This project is finished and its groups can no longer be changed.");
+    if (group.isDefaultClassGroup) throw new Error("The default class group cannot be deleted.");
+    db.delete(groupsTable).where(drizzleOrm.eq(groupsTable.id, groupId)).run();
   });
   electron.ipcMain.handle("classes:list", async (_e, { projectId }) => {
     const rows = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).orderBy(classesTable.className).all();
@@ -644,6 +1905,40 @@ function registerProjectHandlers() {
     });
   });
   electron.ipcMain.handle(
+    "students:create",
+    async (_e, input) => {
+      const firstName = input.firstName.trim();
+      const lastName = input.lastName.trim();
+      if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) {
+        throw new Error("Enter a first and last name (maximum 100 characters each).");
+      }
+      const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, input.projectId)).get();
+      if (!project) throw new Error("Project not found.");
+      if (project.finishedAt) throw new Error("This project is finished and its roster can no longer be changed.");
+      const cls = db.select().from(classesTable).where(drizzleOrm.and(drizzleOrm.eq(classesTable.id, input.classId), drizzleOrm.eq(classesTable.projectId, input.projectId))).get();
+      if (!cls) throw new Error("Choose a class from this project.");
+      const timestamp = now$3();
+      const student = db.insert(studentsTable).values({
+        projectId: input.projectId,
+        classId: input.classId,
+        firstName,
+        lastName,
+        generatedStudentId: generateUniqueLocalStudentId(input.projectId),
+        createdAt: timestamp,
+        updatedAt: timestamp
+      }).returning().get();
+      prepareProjectFolders(db, input.projectId);
+      reconcileDefaultGroups(input.projectId);
+      const sync = await syncStudentCloudIdentity(input.projectId, student.id);
+      const refreshed = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, student.id)).get() ?? student;
+      return {
+        student: toStudent(refreshed, cls.className),
+        cloudSynced: sync.synced,
+        ...sync.error ? { syncError: sync.error } : {}
+      };
+    }
+  );
+  electron.ipcMain.handle(
     "students:list",
     async (_e, { projectId, classId }) => {
       const rows = db.select({
@@ -652,20 +1947,7 @@ function registerProjectHandlers() {
       }).from(studentsTable).leftJoin(classesTable, drizzleOrm.eq(studentsTable.classId, classesTable.id)).where(drizzleOrm.eq(studentsTable.projectId, projectId)).orderBy(classesTable.className, studentsTable.lastName, studentsTable.firstName).all().filter((r) => !classId || r.student.classId === classId);
       return rows.map(({ student: s, className }) => {
         const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(photosTable).where(drizzleOrm.eq(photosTable.studentId, s.id)).all();
-        return {
-          id: s.id,
-          projectId: s.projectId,
-          classId: s.classId,
-          className: className ?? "",
-          firstName: s.firstName,
-          lastName: s.lastName,
-          generatedStudentId: s.generatedStudentId,
-          simpleQr: s.simpleQr,
-          jsonQr: s.jsonQr,
-          photoCount,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt
-        };
+        return toStudent(s, className ?? "", photoCount);
       });
     }
   );
@@ -824,8 +2106,69 @@ function findPairCandidate(db, input) {
     drizzleOrm.eq(capturesTable.projectId, input.projectId),
     drizzleOrm.eq(capturesTable.baseFilename, normalizeBaseFilename(input.fileName))
   )).all().map((capture) => ({ capture, files: getCaptureFiles(db, capture.id) })).filter(
-    ({ capture, files }) => sameCaptureWindow(input.capturedAt, capture.capturedAt) && !files.some((file) => file.fileRole === role)
+    ({ capture, files }) => sameCaptureWindow(input.capturedAt, capture.capturedAt) && (input.groupId === void 0 || capture.groupId === input.groupId) && !files.some((file) => file.fileRole === role)
   ).sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0];
+}
+function recordGroupCapture(db, input) {
+  const duplicate = findDuplicateFile(db, input.filePath);
+  if (duplicate) return { kind: "duplicate", captureId: duplicate.captureId };
+  const candidate = findPairCandidate(db, input);
+  if (candidate) {
+    insertImageFile(db, candidate.capture.id, input);
+    const files = getCaptureFiles(db, candidate.capture.id);
+    db.update(capturesTable).set({ pairingStatus: statusForFiles(files), updatedAt: input.capturedAt }).where(drizzleOrm.eq(capturesTable.id, candidate.capture.id)).run();
+    const groupCapture = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.captureKey, candidate.capture.captureKey)).get();
+    if (groupCapture) {
+      db.insert(groupCaptureFilesTable).values({
+        captureId: groupCapture.id,
+        fileRole: getCaptureFileRole(input.fileName),
+        fileFormat: getCaptureFileFormat(input.fileName),
+        originalFilename: input.fileName,
+        storedPath: input.storedPath,
+        sourcePath: input.filePath,
+        createdAt: input.capturedAt
+      }).onConflictDoNothing().run();
+      db.update(groupCapturesTable).set({ pairingStatus: statusForFiles(files), updatedAt: input.capturedAt }).where(drizzleOrm.eq(groupCapturesTable.id, groupCapture.id)).run();
+    }
+    return { kind: "paired", captureId: candidate.capture.id };
+  }
+  const role = getCaptureFileRole(input.fileName);
+  if (!role) throw new Error(`Unsupported capture file type: ${input.fileName}`);
+  const capture = db.insert(capturesTable).values({
+    captureKey: ["group", input.projectId, input.groupId, normalizeBaseFilename(input.fileName), input.capturedAt, input.filePath].map((part) => encodeURIComponent(String(part))).join(":"),
+    projectId: input.projectId,
+    studentId: null,
+    classId: input.classId,
+    groupId: input.groupId,
+    baseFilename: normalizeBaseFilename(input.fileName),
+    capturedAt: input.capturedAt,
+    assignmentLocked: true,
+    pairingStatus: role === "JPEG" ? "jpeg_only" : "raw_only",
+    createdAt: input.capturedAt,
+    updatedAt: input.capturedAt
+  }).returning().get();
+  insertImageFile(db, capture.id, input);
+  const groupRow = db.insert(groupCapturesTable).values({
+    captureKey: capture.captureKey,
+    projectId: input.projectId,
+    classId: input.classId,
+    groupId: Number(input.groupId),
+    baseFilename: capture.baseFilename,
+    capturedAt: input.capturedAt,
+    pairingStatus: capture.pairingStatus,
+    createdAt: input.capturedAt,
+    updatedAt: input.capturedAt
+  }).onConflictDoNothing().returning().get();
+  if (groupRow) db.insert(groupCaptureFilesTable).values({
+    captureId: groupRow.id,
+    fileRole: role,
+    fileFormat: getCaptureFileFormat(input.fileName),
+    originalFilename: input.fileName,
+    storedPath: input.storedPath,
+    sourcePath: input.filePath,
+    createdAt: input.capturedAt
+  }).onConflictDoNothing().run();
+  return { kind: "created", captureId: capture.id };
 }
 function statusForFiles(files) {
   const hasJpeg = files.some((file) => file.fileRole === "JPEG");
@@ -1014,6 +2357,18 @@ function rowToCaptureFile(row) {
     fileUrl: row.fileUrl
   };
 }
+function rowToGroupCaptureFile(row) {
+  return {
+    id: row.id,
+    fileRole: row.fileRole,
+    fileFormat: row.fileFormat,
+    originalFilename: row.originalFilename,
+    storedPath: row.storedPath,
+    fileSize: row.fileSize,
+    uploadStatus: row.uploadStatus,
+    fileUrl: row.fileUrl
+  };
+}
 function getCaptureSummary(rows) {
   return rows.reduce(
     (summary, capture) => {
@@ -1029,6 +2384,19 @@ function getCaptureSummary(rows) {
 }
 function registerPhotoHandlers() {
   const db = getDb();
+  electron.ipcMain.handle("groupCaptures:list", async (_e, { projectId, groupId }) => {
+    const rows = db.select().from(groupCapturesTable).where(drizzleOrm.and(drizzleOrm.eq(groupCapturesTable.projectId, projectId), drizzleOrm.eq(groupCapturesTable.groupId, groupId))).all();
+    return rows.map((row) => ({
+      id: row.id,
+      projectId: row.projectId,
+      groupId: row.groupId,
+      baseFilename: row.baseFilename,
+      capturedAt: row.capturedAt,
+      pairingStatus: row.pairingStatus,
+      files: db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, row.id)).all().map(rowToGroupCaptureFile)
+    }));
+  });
+  electron.ipcMain.handle("groupCaptures:summary", async (_e, { projectId }) => db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all().length);
   electron.ipcMain.handle("photos:list", async (_e, { studentId }) => {
     const rows = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.studentId, studentId)).orderBy(photosTable.capturedAt).all();
     const result = [];
@@ -1051,7 +2419,7 @@ function registerPhotoHandlers() {
       const legacyPhotos = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.studentId, studentId)).all();
       reconcileLegacyPhotosAsCaptures(db, legacyPhotos);
       const rows = db.select({ capture: capturesTable, photo: photosTable }).from(capturesTable).leftJoin(photosTable, drizzleOrm.eq(capturesTable.legacyPhotoId, photosTable.id)).where(drizzleOrm.or(
-        drizzleOrm.eq(capturesTable.studentId, studentId),
+        drizzleOrm.and(drizzleOrm.isNull(capturesTable.groupId), drizzleOrm.eq(capturesTable.studentId, studentId)),
         drizzleOrm.eq(photosTable.studentId, studentId)
       )).orderBy(capturesTable.capturedAt).all();
       const result = [];
@@ -1108,7 +2476,7 @@ function registerPhotoHandlers() {
     (_e, { projectId }) => {
       const legacyPhotos = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.projectId, projectId)).all();
       reconcileLegacyPhotosAsCaptures(db, legacyPhotos);
-      const rows = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
+      const rows = db.select().from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, projectId), drizzleOrm.isNull(capturesTable.groupId))).all();
       return getCaptureSummary(rows);
     }
   );
@@ -1223,565 +2591,49 @@ function registerPhotoHandlers() {
     await electron.shell.openPath(filePath);
   });
 }
-function getSetting(key) {
-  const db = getDb();
-  const row = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
-  return row?.value ?? null;
-}
-function setSetting(key, value) {
-  const db = getDb();
-  const existing = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
-  if (existing) {
-    db.update(settingsTable).set({ value }).where(drizzleOrm.eq(settingsTable.key, key)).run();
-  } else {
-    db.insert(settingsTable).values({ key, value }).run();
+async function hashFile(filePath) {
+  const hash = node_crypto.createHash("sha256");
+  for await (const chunk of node_fs.createReadStream(filePath)) {
+    hash.update(chunk);
   }
+  return hash.digest("hex");
 }
-function deleteSetting(key) {
-  getDb().delete(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).run();
+function getManagedCaptureTempPath(sourcePath, destinationPath) {
+  const sourceToken = node_crypto.createHash("sha256").update(sourcePath).digest("hex").slice(0, 12);
+  return `${destinationPath}.partial-${sourceToken}`;
 }
-const DEFAULT_API_URL = "https://volumecapture.net";
-function getDesktopApiUrl() {
-  const smokeTestUrl = process.env.CI === "true" ? process.env.MC_SCHOOL_STUDIO_SMOKE_API_URL?.trim() : void 0;
-  return smokeTestUrl || getSetting("upload_api_url") || DEFAULT_API_URL;
-}
-function saveConnectionToken(token) {
-  const value = electron.safeStorage.isEncryptionAvailable() ? `safe:${electron.safeStorage.encryptString(token).toString("base64")}` : token;
-  setSetting("desktop_connection_token", value);
-  deleteSetting("desktop_retired");
-}
-function readConnectionToken() {
-  const stored = getSetting("desktop_connection_token");
-  if (!stored) return null;
-  if (!stored.startsWith("safe:")) return stored;
-  try {
-    return electron.safeStorage.decryptString(Buffer.from(stored.slice(5), "base64"));
-  } catch {
-    return null;
-  }
-}
-function getUploadConfig$1() {
-  const retired = getSetting("desktop_retired") === "1";
-  return {
-    apiUrl: getDesktopApiUrl(),
-    connectionToken: retired ? null : readConnectionToken()
+async function copyManagedCaptureFile(sourcePath, destinationPath, options = {}) {
+  const temporaryPath = getManagedCaptureTempPath(sourcePath, destinationPath);
+  await fs.rm(temporaryPath, { force: true });
+  await fs.copyFile(sourcePath, temporaryPath, node_fs.constants.COPYFILE_EXCL);
+  const reconcileExistingDestination = async () => {
+    const [sourceHash, destinationHash] = await Promise.all([
+      hashFile(sourcePath),
+      hashFile(destinationPath)
+    ]);
+    if (sourceHash !== destinationHash) {
+      throw new Error(`Managed capture destination already contains different image data: ${destinationPath}`);
+    }
+    return "reconciled";
   };
-}
-function notifyUploadStatus(photoId, studentId, status) {
-  const win = electron.BrowserWindow.getAllWindows()[0];
-  win?.webContents.send("upload:statusChanged", { photoId, studentId, status });
-}
-function notifyCaptureFileStatus(captureId, fileId, studentId, fileRole, status) {
-  const win = electron.BrowserWindow.getAllWindows()[0];
-  win?.webContents.send("capture:fileUploadStatusChanged", {
-    captureId,
-    fileId,
-    studentId,
-    fileRole,
-    status
-  });
-}
-function toServerFileUrl(fileUrl) {
-  if (!fileUrl) return null;
-  if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
-  const { apiUrl } = getUploadConfig$1();
-  return `${apiUrl.replace(/\/+$/, "")}/${fileUrl.replace(/^\/+/, "")}`;
-}
-let cloudSyncDisabledForRetirement = false;
-let cloudSessionVerified = false;
-const activeUploads = /* @__PURE__ */ new Set();
-const activePhotoUploads = /* @__PURE__ */ new Map();
-const activeCaptureFileUploads = /* @__PURE__ */ new Map();
-const cloudIdentityRepairs = /* @__PURE__ */ new Map();
-class RetryableUploadError extends Error {
-}
-function disableCloudSyncForRetirement() {
-  cloudSyncDisabledForRetirement = true;
-  cloudSessionVerified = false;
-}
-function enableCloudSyncAfterSignIn() {
-  cloudSyncDisabledForRetirement = false;
-  cloudSessionVerified = true;
-}
-function markCloudSessionUnavailable() {
-  cloudSessionVerified = false;
-}
-function markCloudSessionVerified() {
-  if (cloudSyncDisabledForRetirement) return;
-  cloudSessionVerified = true;
-}
-function isCloudSessionVerified() {
-  return cloudSessionVerified && !cloudSyncDisabledForRetirement;
-}
-async function repairCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
-  const db = getDb();
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-  const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
-  if (!project || !student) throw new Error("The local project or student no longer exists.");
-  if (project.cloudId !== null && student.cloudId !== null) return;
-  const normalizedName = project.schoolName.trim().toLocaleLowerCase();
-  const projectsResponse = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects`, {
-    headers: { Authorization: `Bearer ${connectionToken}` },
-    signal: AbortSignal.timeout(15e3)
-  });
-  if (!projectsResponse.ok) {
-    const text = await projectsResponse.text();
-    if (projectsResponse.status === 401) invalidateDesktopCredentials(true);
-    if (projectsResponse.status === 429 || projectsResponse.status >= 500) {
-      throw new RetryableUploadError(`HTTP ${projectsResponse.status}: ${text}`);
-    }
-    throw new Error(`Could not refresh project identity (HTTP ${projectsResponse.status}: ${text})`);
-  }
-  const cloudProjects = await projectsResponse.json();
-  const cloudProject = project.cloudId !== null ? cloudProjects.find((candidate) => candidate.id === project.cloudId) : (() => {
-    const matches = cloudProjects.filter((candidate) => candidate.schoolName.trim().toLocaleLowerCase() === normalizedName);
-    if (matches.length > 1) {
-      throw new Error(`Several cloud projects match "${project.schoolName}". Sync this project again before uploading.`);
-    }
-    return matches[0];
-  })();
-  if (!cloudProject) {
-    throw new Error(`The cloud project "${project.schoolName}" is not assigned to this desktop.`);
-  }
-  const bundleResponse = await fetch(
-    `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${cloudProject.id}/bundle`,
-    {
-      headers: { Authorization: `Bearer ${connectionToken}` },
-      signal: AbortSignal.timeout(3e4)
-    }
-  );
-  if (!bundleResponse.ok) {
-    const text = await bundleResponse.text();
-    if (bundleResponse.status === 401) invalidateDesktopCredentials(true);
-    if (bundleResponse.status === 429 || bundleResponse.status >= 500) {
-      throw new RetryableUploadError(`HTTP ${bundleResponse.status}: ${text}`);
-    }
-    throw new Error(`Could not refresh student identity (HTTP ${bundleResponse.status}: ${text})`);
-  }
-  const bundle = await bundleResponse.json();
-  const cloudStudent = bundle.students.find((candidate) => candidate.generatedStudentId.trim().toLocaleLowerCase() === student.generatedStudentId.trim().toLocaleLowerCase());
-  if (!cloudStudent) {
-    throw new Error(`Student "${student.generatedStudentId}" was not found in the cloud project.`);
-  }
-  db.transaction((tx) => {
-    tx.update(projectsTable).set({ cloudId: bundle.project.id }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
-    const localClasses = tx.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
-    for (const cloudClass of bundle.classes) {
-      const localClass = localClasses.find((candidate) => candidate.className.trim().toLocaleLowerCase() === cloudClass.className.trim().toLocaleLowerCase());
-      if (localClass) {
-        tx.update(classesTable).set({ cloudId: cloudClass.id }).where(drizzleOrm.eq(classesTable.id, localClass.id)).run();
-      }
-    }
-    const localStudent = tx.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
-    if (localStudent) {
-      tx.update(studentsTable).set({ cloudId: cloudStudent.id }).where(drizzleOrm.eq(studentsTable.id, studentId)).run();
-    }
-  });
-}
-async function ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
-  const repairKey = `${projectId}:${studentId}`;
-  const existing = cloudIdentityRepairs.get(repairKey);
-  if (existing) {
-    await existing;
-    return;
-  }
-  const repair = repairCloudIdentity(projectId, studentId, apiUrl, connectionToken);
-  cloudIdentityRepairs.set(repairKey, repair);
   try {
-    await repair;
-  } finally {
-    cloudIdentityRepairs.delete(repairKey);
-  }
-}
-function invalidateDesktopCredentials(notifyRenderer = false) {
-  markCloudSessionUnavailable();
-  deleteSetting("desktop_connection_token");
-  deleteSetting("desktop_cached_member");
-  if (notifyRenderer) {
-    electron.BrowserWindow.getAllWindows()[0]?.webContents.send("auth:sessionInvalidated", {
-      signedIn: false,
-      error: "Your desktop session was signed out or revoked. Sign in again."
-    });
-  }
-}
-async function waitForActiveUploads() {
-  await Promise.allSettled([...activeUploads]);
-}
-function isRetryableUploadFailure(error) {
-  if (error instanceof RetryableUploadError) return true;
-  if (!(error instanceof Error)) return false;
-  return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
-}
-async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
-  const db = getDb();
-  const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken) {
-    throw new Error("Cloud upload is not configured.");
-  }
-  db.update(photosTable).set({ uploadStatus: "uploading", fileUrl: null }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
-  notifyUploadStatus(photoId, studentId, "uploading");
-  try {
-    await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken);
-    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-    const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, studentId)).get();
-    if (!project?.cloudId || !student?.cloudId) {
-      throw new Error("This project needs to be re-synced before its photos can upload.");
-    }
-    const fileBuffer = require$$0.readFileSync(filePath);
-    const blob = new Blob([fileBuffer], { type: "image/jpeg" });
-    const formData = new FormData();
-    formData.append("photo", blob, fileName);
-    formData.append("capturedAt", capturedAt);
-    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/photos`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${connectionToken}`,
-        "X-MC-Upload-Id": String(photoId),
-        ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
-      },
-      body: formData,
-      signal: AbortSignal.timeout(3e4)
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      if (response.status === 401) {
-        invalidateDesktopCredentials(true);
-      }
-      if (response.status === 429 || response.status >= 500) {
-        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
-      }
-      throw new Error(`HTTP ${response.status}: ${text}`);
-    }
-    let fileUrl = null;
-    try {
-      const payload = await response.json();
-      if (typeof payload.fileUrl === "string") fileUrl = payload.fileUrl;
-    } catch {
-      console.warn("[Upload] Upload succeeded but did not return a readable fileUrl");
-    }
-    db.update(photosTable).set({ uploadStatus: "done", fileUrl }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
-    notifyUploadStatus(photoId, studentId, "done");
-    console.log(`[Upload] Photo ${photoId} uploaded successfully`);
-  } catch (err) {
-    const retryable = isRetryableUploadFailure(err);
-    if (retryable) markCloudSessionUnavailable();
-    console.error(`[Upload] Upload ${retryable ? "waiting for connectivity" : "failed"}:`, err);
-    db.update(photosTable).set({ uploadStatus: retryable ? "pending" : "error" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
-    notifyUploadStatus(photoId, studentId, retryable ? "pending" : "error");
-    throw err;
-  }
-}
-function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
-  if (!isCloudSessionVerified()) return Promise.resolve();
-  const existing = activePhotoUploads.get(photoId);
-  if (existing) return existing;
-  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey);
-  activePhotoUploads.set(photoId, task);
-  activeUploads.add(task);
-  void task.finally(() => {
-    activeUploads.delete(task);
-    activePhotoUploads.delete(photoId);
-  }).catch(() => {
-  });
-  return task;
-}
-function setCaptureFileStatus(captureId, fileId, status, fileUrl) {
-  const db = getDb();
-  const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
-  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
-  if (!file || !capture || file.captureId !== captureId || capture.studentId === null) return;
-  db.update(imageFilesTable).set({
-    uploadStatus: status,
-    ...fileUrl !== void 0 ? { fileUrl } : {}
-  }).where(drizzleOrm.eq(imageFilesTable.id, fileId)).run();
-  if (file.fileRole === "JPEG" && capture.legacyPhotoId !== null) {
-    db.update(photosTable).set({
-      uploadStatus: status,
-      ...fileUrl !== void 0 ? { fileUrl } : {}
-    }).where(drizzleOrm.eq(photosTable.id, capture.legacyPhotoId)).run();
-    notifyUploadStatus(capture.legacyPhotoId, capture.studentId, status);
-  }
-  notifyCaptureFileStatus(captureId, fileId, capture.studentId, file.fileRole, status);
-}
-async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
-  const db = getDb();
-  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
-  const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
-  if (!capture) throw new Error(`Capture ${captureId} was not found.`);
-  if (!file || file.captureId !== captureId) throw new Error(`Capture file ${fileId} was not found.`);
-  if (capture.studentId === null) throw new Error("Capture is not matched to a student.");
-  const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken) throw new Error("Cloud upload is not configured.");
-  setCaptureFileStatus(captureId, fileId, "uploading", null);
-  try {
-    await ensureCloudIdentity(capture.projectId, capture.studentId, apiUrl, connectionToken);
-    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
-    const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get();
-    if (!project?.cloudId || !student?.cloudId) {
-      throw new Error("This project needs to be re-synced before its captures can upload.");
-    }
-    const fileBuffer = require$$0.readFileSync(file.storedPath);
-    const mimeType = file.fileRole === "JPEG" ? "image/jpeg" : "application/octet-stream";
-    const formData = new FormData();
-    formData.append("file", new Blob([fileBuffer], { type: mimeType }), file.originalFilename);
-    formData.append("captureKey", capture.captureKey);
-    formData.append("fileRole", file.fileRole);
-    formData.append("fileFormat", file.fileFormat);
-    formData.append("baseFilename", capture.baseFilename);
-    if (capture.capturedAt) formData.append("capturedAt", capture.capturedAt);
-    if (capture.sequence !== null) formData.append("sequence", String(capture.sequence));
-    formData.append("favorite", String(capture.favorite));
-    formData.append("rejected", String(capture.rejected));
-    formData.append("selected", String(capture.selected));
-    const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/captures`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${connectionToken}`,
-        "X-MC-Upload-Id": String(file.id),
-        ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
-      },
-      body: formData,
-      signal: AbortSignal.timeout(12e4)
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      if (response.status === 401) invalidateDesktopCredentials(true);
-      if (response.status === 429 || response.status >= 500) {
-        throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
-      }
-      throw new Error(`HTTP ${response.status}: ${text}`);
-    }
-    let serverFileUrl = null;
-    try {
-      const payload = await response.json();
-      if (typeof payload.file?.fileUrl === "string") serverFileUrl = toServerFileUrl(payload.file.fileUrl);
-    } catch {
-      console.warn("[Upload] Capture file uploaded but did not return a readable fileUrl");
-    }
-    setCaptureFileStatus(captureId, fileId, "done", serverFileUrl);
-    console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`);
+    await (options.linkFile ?? fs.link)(temporaryPath, destinationPath);
+    return "copied";
   } catch (error) {
-    const retryable = isRetryableUploadFailure(error);
-    if (retryable) markCloudSessionUnavailable();
-    console.error(`[Upload] Capture file ${retryable ? "waiting for connectivity" : "failed"}:`, error);
-    setCaptureFileStatus(captureId, fileId, retryable ? "pending" : "error", void 0);
-    throw error;
-  }
-}
-function uploadCaptureFile(captureId, fileId, captureBatchKey) {
-  if (!isCloudSessionVerified()) return Promise.resolve();
-  const existing = activeCaptureFileUploads.get(fileId);
-  if (existing) return existing;
-  const task = performUploadCaptureFile(captureId, fileId, captureBatchKey);
-  activeCaptureFileUploads.set(fileId, task);
-  activeUploads.add(task);
-  void task.finally(() => {
-    activeUploads.delete(task);
-    activeCaptureFileUploads.delete(fileId);
-  }).catch(() => {
-  });
-  return task;
-}
-function getProjectSyncJobs(projectId) {
-  const db = getDb();
-  const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
-  const jobs = [];
-  const mirroredPhotoIds = /* @__PURE__ */ new Set();
-  for (const capture of captures) {
-    if (capture.legacyPhotoId !== null) mirroredPhotoIds.add(capture.legacyPhotoId);
-    if (capture.studentId === null) continue;
-    const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
-    for (const file of files) {
-      if (file.uploadStatus !== "done") {
-        jobs.push({ kind: "capture-file", captureId: capture.id, fileId: file.id });
-      }
-    }
-  }
-  const legacyPhotos = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.projectId, projectId)).all();
-  for (const photo of legacyPhotos) {
-    if (!photo.isMatched || photo.studentId === null || mirroredPhotoIds.has(photo.id) || photo.uploadStatus === "done") continue;
-    jobs.push({
-      kind: "legacy-photo",
-      projectId,
-      studentId: photo.studentId,
-      photoId: photo.id,
-      filePath: photo.filePath,
-      fileName: photo.fileName,
-      capturedAt: photo.capturedAt
-    });
-  }
-  return jobs;
-}
-async function syncProjectUploads(projectId, onProgress, captureBatchKey) {
-  const jobs = getProjectSyncJobs(projectId);
-  let completed = 0;
-  let failed = 0;
-  let firstError;
-  const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError });
-  report();
-  for (const job of jobs) {
+    const code = error.code;
+    if (code === "EEXIST") return reconcileExistingDestination();
+    if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV"].includes(code ?? "")) throw error;
     try {
-      if (!isCloudSessionVerified()) {
-        throw new Error("Cloud sync is unavailable. Local captures are safe; reconnect and try again.");
-      }
-      if (job.kind === "capture-file") {
-        await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey);
-      } else {
-        await uploadPhoto(
-          job.projectId,
-          job.studentId,
-          job.photoId,
-          job.filePath,
-          job.fileName,
-          job.capturedAt,
-          captureBatchKey
-        );
-      }
-    } catch (error) {
-      failed++;
-      firstError ??= String(error);
-    } finally {
-      completed++;
-      report();
+      await fs.stat(destinationPath);
+      return reconcileExistingDestination();
+    } catch (statError) {
+      if (statError.code !== "ENOENT") throw statError;
     }
+    await fs.rename(temporaryPath, destinationPath);
+    return "copied";
+  } finally {
+    await fs.rm(temporaryPath, { force: true });
   }
-  return { completed, total: jobs.length, failed, error: firstError };
-}
-function getProjectSyncJobCount(projectId) {
-  return getProjectSyncJobs(projectId).length;
-}
-async function beginProjectCaptureBatch(projectId, expectedFileCount) {
-  const db = getDb();
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-  if (!project?.cloudId) throw new Error("This project needs to be re-synced before its batch can upload.");
-  const settingKey = `capture_batch:${projectId}`;
-  const batchKey = getSetting(settingKey) ?? crypto.randomUUID();
-  setSetting(settingKey, batchKey);
-  const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken) throw new Error("Cloud upload is not configured.");
-  const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/capture-batches`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${connectionToken}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ batchKey, expectedFileCount }),
-    signal: AbortSignal.timeout(3e4)
-  });
-  if (!response.ok) throw new Error(`Could not start capture batch: HTTP ${response.status}: ${await response.text()}`);
-  return batchKey;
-}
-async function finishProjectCaptureBatch(projectId, batchKey, status, failedFileCount) {
-  const db = getDb();
-  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-  const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!project?.cloudId || !apiUrl || !connectionToken) throw new Error("Cloud upload is not configured.");
-  const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/capture-batches/${encodeURIComponent(batchKey)}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${connectionToken}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ status, failedFileCount }),
-    signal: AbortSignal.timeout(3e4)
-  });
-  if (!response.ok) throw new Error(`Could not update capture batch: HTTP ${response.status}: ${await response.text()}`);
-}
-function registerUploadHandlers() {
-  electron.ipcMain.handle("upload:testConnection", async () => {
-    const { apiUrl, connectionToken } = getUploadConfig$1();
-    if (!connectionToken) {
-      return { ok: false, error: "Sign in to Volume Capture before testing the connection" };
-    }
-    try {
-      const url = `${apiUrl.replace(/\/+$/, "")}/api/desktop/me`;
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${connectionToken}` },
-        signal: AbortSignal.timeout(5e3)
-      });
-      if (response.ok) {
-        markCloudSessionVerified();
-        return { ok: true };
-      }
-      if (response.status === 401) invalidateDesktopCredentials(true);
-      else if (response.status >= 500) markCloudSessionUnavailable();
-      const body = await response.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `Server returned ${response.status}` };
-    } catch (err) {
-      markCloudSessionUnavailable();
-      return { ok: false, error: String(err) };
-    }
-  });
-  electron.ipcMain.handle("upload:retry", async (_e, { photoId }) => {
-    const db = getDb();
-    const photo = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.id, photoId)).get();
-    if (!photo || !photo.studentId) return { ok: false, error: "Photo not found or not matched" };
-    if (!isCloudSessionVerified()) {
-      return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
-    }
-    try {
-      const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photoId)).get();
-      const jpegFile = capture ? db.select().from(imageFilesTable).where(drizzleOrm.and(drizzleOrm.eq(imageFilesTable.captureId, capture.id), drizzleOrm.eq(imageFilesTable.fileRole, "JPEG"))).get() : void 0;
-      if (capture && jpegFile) {
-        await uploadCaptureFile(capture.id, jpegFile.id);
-        return { ok: true };
-      }
-      await uploadPhoto(
-        photo.projectId,
-        photo.studentId,
-        photo.id,
-        photo.filePath,
-        photo.fileName,
-        photo.capturedAt
-      );
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-  });
-  electron.ipcMain.handle("upload:retryFile", async (_e, { fileId }) => {
-    const db = getDb();
-    const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
-    if (!file) return { ok: false, error: "Capture file not found" };
-    const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, file.captureId)).get();
-    if (!capture?.studentId) return { ok: false, error: "Capture is not matched to a student" };
-    if (!isCloudSessionVerified()) {
-      return { ok: false, error: "Upload is waiting for an internet connection and a verified studio session." };
-    }
-    try {
-      await uploadCaptureFile(capture.id, file.id);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: String(error) };
-    }
-  });
-  electron.ipcMain.handle(
-    "upload:getProjectStatus",
-    (_e, { projectId }) => {
-      const db = getDb();
-      const photos = db.select({
-        id: photosTable.id,
-        studentId: photosTable.studentId,
-        uploadStatus: photosTable.uploadStatus,
-        fileUrl: photosTable.fileUrl
-      }).from(photosTable).where(drizzleOrm.and(drizzleOrm.eq(photosTable.projectId, projectId), drizzleOrm.eq(photosTable.isMatched, true))).all();
-      return photos.map((photo) => ({
-        ...photo,
-        fileUrl: toServerFileUrl(photo.fileUrl)
-      }));
-    }
-  );
-  electron.ipcMain.handle("upload:getGlobalErrorCount", () => {
-    const db = getDb();
-    const photos = db.select({ id: photosTable.id }).from(photosTable).where(drizzleOrm.eq(photosTable.uploadStatus, "error")).all();
-    const captureFiles = db.select({ id: imageFilesTable.id }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.uploadStatus, "error")).all();
-    const mirroredPhotoIds = new Set(
-      db.select({ photoId: capturesTable.legacyPhotoId }).from(capturesTable).all().map((row) => row.photoId).filter((photoId) => photoId !== null)
-    );
-    return photos.filter((photo) => !mirroredPhotoIds.has(photo.id)).length + captureFiles.length;
-  });
 }
 var commonjsGlobal = typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : {};
 function getDefaultExportFromCjs(x2) {
@@ -42539,6 +43391,7 @@ function resolveWatchFolders(folderPath, folderExists = () => false) {
 const FLUSH_DELAY_MS = 50;
 const watchers = /* @__PURE__ */ new Map();
 const pendingManualTargets = /* @__PURE__ */ new Map();
+const pendingGroupTargets = /* @__PURE__ */ new Map();
 let desktopRetiring = false;
 async function stopAllWatchersForRetirement() {
   desktopRetiring = true;
@@ -42836,15 +43689,51 @@ function registerWatcherHandlers() {
         const student = findProjectStudent(db, projectId, studentId);
         if (!student) throw new Error("Student does not belong to this project");
         pendingManualTargets.set(projectId, studentId);
+        pendingGroupTargets.delete(projectId);
         const session = watchers.get(projectId);
         if (session) setManualStudent(session.sequenceState, studentId);
       } else {
         pendingManualTargets.delete(projectId);
+        pendingGroupTargets.delete(projectId);
         const session = watchers.get(projectId);
         if (session) clearManualStudent(session.sequenceState);
       }
       emitActiveStudentChanged(projectId, studentId, studentId === null ? "none" : "manual");
       return studentId;
+    }
+  );
+  electron.ipcMain.handle(
+    "watcher:getActiveTarget",
+    (_e, { projectId }) => ({
+      studentId: pendingGroupTargets.has(projectId) ? null : watchers.get(projectId)?.sequenceState.activeStudentId ?? pendingManualTargets.get(projectId) ?? null,
+      groupId: pendingGroupTargets.get(projectId) ?? null,
+      targetType: pendingGroupTargets.has(projectId) ? "group" : pendingManualTargets.has(projectId) ? "student" : "none"
+    })
+  );
+  electron.ipcMain.handle(
+    "watcher:setActiveGroup",
+    (_e, { projectId, groupId }) => {
+      if (groupId !== null) {
+        const group = db.select().from(groupsTable).where(drizzleOrm.and(
+          drizzleOrm.eq(groupsTable.id, groupId),
+          drizzleOrm.eq(groupsTable.projectId, projectId)
+        )).get();
+        if (!group) throw new Error("Group does not belong to this project");
+        pendingGroupTargets.set(projectId, groupId);
+        pendingManualTargets.delete(projectId);
+        const session = watchers.get(projectId);
+        if (session) clearManualStudent(session.sequenceState);
+      } else {
+        pendingGroupTargets.delete(projectId);
+      }
+      getMainWindow()?.webContents.send("watcher:activeStudentChanged", {
+        projectId,
+        studentId: null,
+        groupId,
+        targetType: groupId === null ? "none" : "group",
+        source: groupId === null ? "none" : "manual"
+      });
+      return groupId;
     }
   );
 }
@@ -42854,6 +43743,7 @@ async function stopProjectWatcher(projectId, options = {}) {
   if (!session) {
     if (clearTarget) {
       pendingManualTargets.delete(projectId);
+      pendingGroupTargets.delete(projectId);
       emitActiveStudentChanged(projectId, null, "none");
     }
     return;
@@ -42917,7 +43807,8 @@ async function enqueueCapture(projectId, filePath, diagnosticId) {
       // delayed by image copies or a burst of filesystem events, and a
       // photographer may select another student or scan another QR during
       // that delay.
-      selectedStudentId: session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId
+      selectedStudentId: session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId,
+      selectedGroupId: pendingGroupTargets.get(projectId) ?? null
     });
     scheduleFlush(projectId);
   } catch (error) {
@@ -42959,6 +43850,39 @@ async function handleNewPhoto(projectId, capture, session) {
   if (!project) throw new Error(`Project ${projectId} not found`);
   const role = getCaptureFileRole(capture.fileName);
   if (!role || hasProcessedCaptureSource(db, capture.filePath) || hasProcessedQrMarkerSource(db, capture.filePath)) return;
+  if (capture.selectedGroupId !== null && capture.selectedGroupId !== void 0) {
+    const group = db.select().from(groupsTable).where(drizzleOrm.and(
+      drizzleOrm.eq(groupsTable.id, capture.selectedGroupId),
+      drizzleOrm.eq(groupsTable.projectId, projectId)
+    )).get();
+    if (!group) throw new Error("Active capture group no longer exists");
+    const classRow = group.classId === null ? void 0 : db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, group.classId)).get();
+    const destination = path.join(
+      getPhotosDir(),
+      safeFolderName(project.schoolName),
+      safeFolderName(classRow?.className ?? "Unassigned Class"),
+      safeFolderName(group.name)
+    );
+    require$$0.mkdirSync(destination, { recursive: true });
+    const storedPath = path.join(destination, formatGroupPhotoName(
+      classRow?.className ?? "Unassigned Class",
+      group.name,
+      capture.fileName,
+      capture.filePath
+    ));
+    await copyManagedCaptureFile(capture.filePath, storedPath);
+    recordGroupCapture(db, {
+      projectId,
+      studentId: null,
+      classId: group.classId,
+      groupId: String(group.id),
+      filePath: capture.filePath,
+      storedPath,
+      fileName: capture.fileName,
+      capturedAt: new Date(capture.capturedAtMs).toISOString()
+    });
+    return;
+  }
   if (role === "RAW") {
     await handleNewRaw(projectId, capture, session, db);
     return;
@@ -43451,7 +44375,7 @@ function registerCaptureExportHandlers() {
         if (!project) return { ok: false, error: "Project not found." };
         const outputDir = layout === "lightroom_watch_folder" ? destinationDir : path.join(destinationDir, `${safeName(project.schoolName)}-captures`);
         require$$0.mkdirSync(outputDir, { recursive: true });
-        const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().filter((capture) => shouldExport(mode, capture));
+        const captures = db.select().from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, projectId), drizzleOrm.isNull(capturesTable.groupId))).all().filter((capture) => shouldExport(mode, capture));
         let exportedCaptureCount = 0;
         let exportedFileCount = 0;
         let skippedMissingFiles = 0;
@@ -43539,7 +44463,18 @@ function registerProjectSyncHandlers() {
             error: "Connect to Volume Capture before finishing this project. Local captures remain safe."
           };
         }
+        await pauseLiveUploadForFinish(projectId);
+        if (!isCloudSessionVerified()) {
+          return {
+            ok: false,
+            completed: 0,
+            total: getProjectCaptureBatchExpectedCount(projectId),
+            failed: 0,
+            error: "The connection was lost while waiting for background uploads. Capturing has not been stopped; reconnect and try again."
+          };
+        }
         await stopProjectWatcher(projectId, { drain: true, clearTarget: true });
+        await syncGroupCloudIdentities(projectId);
         emitProgress({
           projectId,
           phase: "syncing",
@@ -43547,7 +44482,7 @@ function registerProjectSyncHandlers() {
           total: 0,
           failed: 0
         });
-        const expectedFileCount = getProjectSyncJobCount(projectId);
+        const expectedFileCount = getProjectCaptureBatchExpectedCount(projectId);
         const captureBatchKey = await beginProjectCaptureBatch(projectId, expectedFileCount);
         const progress = await syncProjectUploads(projectId, (current) => {
           emitProgress({
@@ -43662,7 +44597,10 @@ function registerCloudHandlers() {
         const body = await res.json().catch(() => ({}));
         return { ok: false, error: body.error ?? `Server returned ${res.status}` };
       }
-      const projects = await res.json();
+      const projects = (await res.json()).map((project) => ({
+        ...project,
+        projectType: normalizeProjectType(project.projectType)
+      }));
       markCloudSessionVerified();
       return { ok: true, projects };
     } catch (err) {
@@ -43708,6 +44646,7 @@ function registerCloudHandlers() {
             const existingProject = localProjects.find((project) => project.cloudId === p.id) ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName);
             const projectValues = {
               cloudId: p.id,
+              projectType: normalizeProjectType(p.projectType),
               schoolName: p.schoolName,
               photoDate: p.photoDate ?? null,
               address: p.address ?? null,
@@ -43751,8 +44690,52 @@ function registerCloudHandlers() {
               }
               studentsImported++;
             }
+            const localGroups = tx.select().from(groupsTable).where(drizzleOrm.eq(groupsTable.projectId, localProject.id)).all();
+            const localStudentRows = tx.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, localProject.id)).all();
+            for (const cloudGroup of bundle.groups ?? []) {
+              const localClassId = cloudGroup.classId == null ? null : classIdMap.get(cloudGroup.classId) ?? null;
+              const existingGroup = localGroups.find((row) => row.cloudId === cloudGroup.id) ?? localGroups.find((row) => row.name === cloudGroup.name && row.classId === localClassId);
+              const keepLocalEdits = Boolean(existingGroup?.membershipDirty);
+              const localGroup = keepLocalEdits ? existingGroup : existingGroup ? tx.update(groupsTable).set({
+                cloudId: cloudGroup.id,
+                name: cloudGroup.name,
+                classId: localClassId,
+                isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup),
+                updatedAt: now()
+              }).where(drizzleOrm.eq(groupsTable.id, existingGroup.id)).returning().get() : tx.insert(groupsTable).values({
+                cloudId: cloudGroup.id,
+                projectId: localProject.id,
+                classId: localClassId,
+                name: cloudGroup.name,
+                isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup)
+              }).returning().get();
+              if (keepLocalEdits) continue;
+              const memberIds = [
+                ...(cloudGroup.memberStudentIds ?? []).map((studentId) => ({ groupId: cloudGroup.id, studentId })),
+                ...bundle.groupMembers ?? []
+              ].filter((member) => member.groupId === cloudGroup.id).map((member) => localStudentRows.find((student) => student.cloudId === member.studentId)?.id).filter((id) => id !== void 0);
+              if (cloudGroup.memberStudentIds || bundle.groupMembers) {
+                tx.delete(groupMembersTable).where(drizzleOrm.eq(groupMembersTable.groupId, localGroup.id)).run();
+              }
+              if (memberIds.length > 0) {
+                for (const studentId of memberIds) {
+                  tx.insert(groupMembersTable).values({ groupId: localGroup.id, studentId }).onConflictDoNothing().run();
+                }
+              }
+              if (localGroup.isDefaultClassGroup && localGroup.classId !== null) {
+                const fullClassRoster = localStudentRows.filter((student) => student.classId === localGroup.classId).map((student) => student.id);
+                tx.insert(settingsTable).values({
+                  key: `default_group_initialized:${localGroup.id}`,
+                  value: serializeDefaultGroupRosterSnapshot(fullClassRoster)
+                }).onConflictDoUpdate({
+                  target: settingsTable.key,
+                  set: { value: serializeDefaultGroupRosterSnapshot(fullClassRoster) }
+                }).run();
+              }
+            }
             return { projectId: localProject.id, classesImported: classes.length, studentsImported };
           });
+          reconcileDefaultGroups(imported.projectId);
           prepareProjectFolders(db, imported.projectId);
           return { ok: true, ...imported };
         } catch (err) {
@@ -44240,6 +45223,7 @@ electron.app.whenReady().then(() => {
   registerWatcherHandlers();
   registerDialogHandlers();
   registerUploadHandlers();
+  initializeLiveUploads();
   registerCaptureExportHandlers();
   registerProjectSyncHandlers();
   registerAuthHandlers();

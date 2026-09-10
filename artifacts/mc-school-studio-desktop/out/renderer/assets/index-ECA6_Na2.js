@@ -12090,18 +12090,18 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$v = [
+const __iconNode$y = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$v);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$y);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$u = [
+const __iconNode$x = [
   ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
   [
     "path",
@@ -12111,14 +12111,14 @@ const __iconNode$u = [
     }
   ]
 ];
-const Bell = createLucideIcon("bell", __iconNode$u);
+const Bell = createLucideIcon("bell", __iconNode$x);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$t = [
+const __iconNode$w = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12128,14 +12128,14 @@ const __iconNode$t = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$t);
+const BookOpen = createLucideIcon("book-open", __iconNode$w);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$s = [
+const __iconNode$v = [
   [
     "path",
     {
@@ -12145,23 +12145,58 @@ const __iconNode$s = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$s);
+const Camera = createLucideIcon("camera", __iconNode$v);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$r = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-const Check = createLucideIcon("check", __iconNode$r);
+const __iconNode$u = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
+const Check = createLucideIcon("check", __iconNode$u);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$q = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$q);
+const __iconNode$t = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$t);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$s = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$s);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$r = [
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+];
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$r);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$q = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
+  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
+];
+const CircleUser = createLucideIcon("circle-user", __iconNode$q);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12170,10 +12205,10 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$q);
  */
 const __iconNode$p = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$p);
+const CircleX = createLucideIcon("circle-x", __iconNode$p);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12181,10 +12216,11 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$p);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$o = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["path", { d: "M12 13v8", key: "1l5pq0" }],
+  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
+  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$o);
+const CloudUpload = createLucideIcon("cloud-upload", __iconNode$o);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12192,11 +12228,9 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$o);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$n = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
-  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const CircleUser = createLucideIcon("circle-user", __iconNode$n);
+const Cloud = createLucideIcon("cloud", __iconNode$n);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12204,11 +12238,11 @@ const CircleUser = createLucideIcon("circle-user", __iconNode$n);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$m = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$m);
+const Download = createLucideIcon("download", __iconNode$m);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12216,11 +12250,11 @@ const CircleX = createLucideIcon("circle-x", __iconNode$m);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$l = [
-  ["path", { d: "M12 13v8", key: "1l5pq0" }],
-  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
-  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const CloudUpload = createLucideIcon("cloud-upload", __iconNode$l);
+const ExternalLink = createLucideIcon("external-link", __iconNode$l);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12228,40 +12262,6 @@ const CloudUpload = createLucideIcon("cloud-upload", __iconNode$l);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$k = [
-  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
-];
-const Cloud = createLucideIcon("cloud", __iconNode$k);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$j = [
-  ["path", { d: "M12 15V3", key: "m9g1x1" }],
-  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
-  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
-];
-const Download = createLucideIcon("download", __iconNode$j);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$i = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
-];
-const ExternalLink = createLucideIcon("external-link", __iconNode$i);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$h = [
   [
     "path",
     {
@@ -12270,14 +12270,14 @@ const __iconNode$h = [
     }
   ]
 ];
-const FolderOpen = createLucideIcon("folder-open", __iconNode$h);
+const FolderOpen = createLucideIcon("folder-open", __iconNode$k);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$g = [
+const __iconNode$j = [
   [
     "path",
     {
@@ -12286,7 +12286,44 @@ const __iconNode$g = [
     }
   ]
 ];
-const Folder = createLucideIcon("folder", __iconNode$g);
+const Folder = createLucideIcon("folder", __iconNode$j);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$i = [
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+];
+const Image = createLucideIcon("image", __iconNode$i);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$h = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+];
+const Info = createLucideIcon("info", __iconNode$h);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$g = [
+  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
+  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
+  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
+  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
+];
+const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$g);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12294,43 +12331,6 @@ const Folder = createLucideIcon("folder", __iconNode$g);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$f = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
-];
-const Image = createLucideIcon("image", __iconNode$f);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$e = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
-];
-const Info = createLucideIcon("info", __iconNode$e);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$d = [
-  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
-  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
-  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
-  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
-];
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$d);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$c = [
   ["path", { d: "M12 2v4", key: "3427ic" }],
   ["path", { d: "m16.2 7.8 2.9-2.9", key: "r700ao" }],
   ["path", { d: "M18 12h4", key: "wj9ykh" }],
@@ -12340,26 +12340,43 @@ const __iconNode$c = [
   ["path", { d: "M2 12h4", key: "j09sii" }],
   ["path", { d: "m4.9 4.9 2.9 2.9", key: "giyufr" }]
 ];
-const Loader = createLucideIcon("loader", __iconNode$c);
+const Loader = createLucideIcon("loader", __iconNode$f);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$b = [
+const __iconNode$e = [
   ["path", { d: "m16 17 5-5-5-5", key: "1bji2h" }],
   ["path", { d: "M21 12H9", key: "dn1m92" }],
   ["path", { d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", key: "1uf3rs" }]
 ];
-const LogOut = createLucideIcon("log-out", __iconNode$b);
+const LogOut = createLucideIcon("log-out", __iconNode$e);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$a = [
+const __iconNode$d = [
+  [
+    "path",
+    {
+      d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
+      key: "1a8usu"
+    }
+  ],
+  ["path", { d: "m15 5 4 4", key: "1mk7zo" }]
+];
+const Pencil = createLucideIcon("pencil", __iconNode$d);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$c = [
   [
     "path",
     {
@@ -12368,7 +12385,31 @@ const __iconNode$a = [
     }
   ]
 ];
-const Play = createLucideIcon("play", __iconNode$a);
+const Play = createLucideIcon("play", __iconNode$c);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$b = [
+  ["path", { d: "M5 12h14", key: "1ays0h" }],
+  ["path", { d: "M12 5v14", key: "s699le" }]
+];
+const Plus = createLucideIcon("plus", __iconNode$b);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$a = [
+  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
+  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
+  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
+  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+];
+const RefreshCw = createLucideIcon("refresh-cw", __iconNode$a);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12376,12 +12417,10 @@ const Play = createLucideIcon("play", __iconNode$a);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$9 = [
-  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
-  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
-  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
-  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+  ["path", { d: "m21 21-4.34-4.34", key: "14j7rj" }],
+  ["circle", { cx: "11", cy: "11", r: "8", key: "4ej97u" }]
 ];
-const RefreshCw = createLucideIcon("refresh-cw", __iconNode$9);
+const Search = createLucideIcon("search", __iconNode$9);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12389,17 +12428,6 @@ const RefreshCw = createLucideIcon("refresh-cw", __iconNode$9);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$8 = [
-  ["path", { d: "m21 21-4.34-4.34", key: "14j7rj" }],
-  ["circle", { cx: "11", cy: "11", r: "8", key: "4ej97u" }]
-];
-const Search = createLucideIcon("search", __iconNode$8);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$7 = [
   [
     "path",
     {
@@ -12409,7 +12437,17 @@ const __iconNode$7 = [
   ],
   ["circle", { cx: "12", cy: "12", r: "3", key: "1v7zrd" }]
 ];
-const Settings$1 = createLucideIcon("settings", __iconNode$7);
+const Settings$1 = createLucideIcon("settings", __iconNode$8);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$7 = [
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }]
+];
+const Square = createLucideIcon("square", __iconNode$7);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12417,16 +12455,6 @@ const Settings$1 = createLucideIcon("settings", __iconNode$7);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$6 = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }]
-];
-const Square = createLucideIcon("square", __iconNode$6);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$5 = [
   [
     "path",
     {
@@ -12435,7 +12463,21 @@ const __iconNode$5 = [
     }
   ]
 ];
-const Star = createLucideIcon("star", __iconNode$5);
+const Star = createLucideIcon("star", __iconNode$6);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$5 = [
+  ["path", { d: "M10 11v6", key: "nco0om" }],
+  ["path", { d: "M14 11v6", key: "outv1u" }],
+  ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", key: "miytrc" }],
+  ["path", { d: "M3 6h18", key: "d0wm0j" }],
+  ["path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2", key: "e791ji" }]
+];
+const Trash2 = createLucideIcon("trash-2", __iconNode$5);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -16076,6 +16118,31 @@ function useStudents(projectId, classId) {
   }, [projectId, load]);
   return { data, loading, reload: load };
 }
+function useGroups(projectId, classId) {
+  const [data, setData] = reactExports.useState([]);
+  const load = reactExports.useCallback(async () => {
+    if (!projectId) return;
+    setData(await api.invoke("groups:list", { projectId, classId }));
+  }, [projectId, classId]);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  return { data, reload: load };
+}
+function useGroupCaptures(projectId, groupId) {
+  const [data, setData] = reactExports.useState([]);
+  const load = reactExports.useCallback(async () => {
+    if (!projectId || !groupId) {
+      setData([]);
+      return;
+    }
+    setData(await api.invoke("groupCaptures:list", { projectId, groupId }));
+  }, [projectId, groupId]);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  return { data, reload: load };
+}
 function useUnmatchedPhotos(projectId) {
   const [data, setData] = reactExports.useState([]);
   const [loading, setLoading] = reactExports.useState(false);
@@ -16303,16 +16370,19 @@ function useWatcherStatus(projectId) {
 }
 function useActiveCaptureTarget(projectId) {
   const [studentId, setStudentId] = reactExports.useState(null);
+  const [groupId, setGroupId] = reactExports.useState(null);
   const [source, setSource] = reactExports.useState("none");
   const load = reactExports.useCallback(async () => {
     if (!projectId) {
       setStudentId(null);
+      setGroupId(null);
       setSource("none");
       return;
     }
-    const result = await api.invoke("watcher:getActiveStudent", { projectId });
-    setStudentId(result);
-    setSource(result === null ? "none" : "manual");
+    const result = await api.invoke("watcher:getActiveTarget", { projectId });
+    setStudentId(result.studentId);
+    setGroupId(result.groupId);
+    setSource(result.targetType === "none" ? "none" : "manual");
   }, [projectId]);
   reactExports.useEffect(() => {
     void load();
@@ -16322,6 +16392,7 @@ function useActiveCaptureTarget(projectId) {
     return api.on("watcher:activeStudentChanged", (event) => {
       if (event.projectId !== projectId) return;
       setStudentId(event.studentId);
+      setGroupId(event.groupId ?? null);
       setSource(event.source);
     });
   }, [projectId]);
@@ -16334,7 +16405,14 @@ function useActiveCaptureTarget(projectId) {
     setStudentId(result);
     setSource(result === null ? "none" : "manual");
   }, [projectId]);
-  return { studentId, source, setTarget, reload: load };
+  const setGroupTarget = reactExports.useCallback(async (nextGroupId) => {
+    if (!projectId) return;
+    const result = await api.invoke("watcher:setActiveGroup", { projectId, groupId: nextGroupId });
+    setGroupId(result);
+    setStudentId(null);
+    setSource(result === null ? "none" : "manual");
+  }, [projectId]);
+  return { studentId, groupId, source, setTarget, setGroupTarget, reload: load };
 }
 function usePhotoEvents(onMatched, onUnmatched, onMarker) {
   reactExports.useEffect(() => {
@@ -16387,6 +16465,36 @@ function useUploadStatus(projectId) {
     return unsub;
   }, [projectId, load]);
   return { statusMap, photoStatusMap, errorPhotoIds, reload: load };
+}
+function useLiveUpload(projectId) {
+  const [state, setState] = reactExports.useState(null);
+  const load = reactExports.useCallback(async () => {
+    if (!projectId) return;
+    setState(await api.invoke("upload:getLiveState", { projectId }));
+  }, [projectId]);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId) return;
+    const unsubscribe = api.on("upload:liveStateChanged", (next) => {
+      if (next.projectId === projectId) setState(next);
+    });
+    return unsubscribe;
+  }, [projectId]);
+  const setEnabled = reactExports.useCallback(async (enabled) => {
+    if (!projectId) return;
+    setState(await api.invoke("upload:setLiveEnabled", { projectId, enabled }));
+  }, [projectId]);
+  const runNow = reactExports.useCallback(async () => {
+    if (!projectId) return;
+    setState(await api.invoke("upload:runNow", { projectId }));
+  }, [projectId]);
+  const retryFailed = reactExports.useCallback(async () => {
+    if (!projectId) return;
+    setState(await api.invoke("upload:retryProjectFailed", { projectId }));
+  }, [projectId]);
+  return { state, load, setEnabled, runNow, retryFailed };
 }
 function useGlobalErrorCount() {
   const [count, setCount] = reactExports.useState(0);
@@ -16482,6 +16590,7 @@ function ProjectList({ onOpenProject, offline = false }) {
     }
   }
   async function handlePullProject(cp) {
+    const isCorporate = cp.projectType === "corporate";
     setPullingId(cp.id);
     try {
       const result = await window.api.invoke("cloud:pullProject", { cloudProjectId: cp.id });
@@ -16489,7 +16598,7 @@ function ProjectList({ onOpenProject, offline = false }) {
         addToast({
           type: "success",
           title: `Synced: ${cp.schoolName}`,
-          description: `${result.classesImported} classes · ${result.studentsImported} students`
+          description: `${result.classesImported} ${isCorporate ? "departments" : "classes"} · ${result.studentsImported} ${isCorporate ? "employees" : "students"}`
         });
         reload();
         setSyncOpen(false);
@@ -16572,6 +16681,7 @@ function ProjectList({ onOpenProject, offline = false }) {
         !syncLoading && !syncError && cloudProjects.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center py-12 text-slate-500 text-sm", children: "No projects found on the cloud." }),
         !syncLoading && !syncError && cloudProjects.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: cloudProjects.map((cp) => {
           const isPulling = pullingId === cp.id;
+          const isCorporate = cp.projectType === "corporate";
           const alreadyLocal = projects.some(
             (lp) => lp.schoolName === cp.schoolName
           );
@@ -16586,9 +16696,12 @@ function ProjectList({ onOpenProject, offline = false }) {
                     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-slate-900 truncate", children: cp.schoolName }),
                     /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-500 mt-0.5", children: [
                       cp.classCount,
-                      " classes · ",
+                      " ",
+                      isCorporate ? "departments" : "classes",
+                      " · ",
                       cp.studentCount,
-                      " students",
+                      " ",
+                      isCorporate ? "employees" : "students",
                       cp.photoDate ? ` · ${cp.photoDate}` : ""
                     ] })
                   ] })
@@ -16640,6 +16753,7 @@ function ProjectList({ onOpenProject, offline = false }) {
   ] });
 }
 function ProjectCard({ project: p, onClick }) {
+  const isCorporate = p.projectType === "corporate";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "button",
     {
@@ -16651,7 +16765,7 @@ function ProjectCard({ project: p, onClick }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-lg bg-teal-50 flex items-center justify-center shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-5 text-teal-600" }) }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "font-semibold text-slate-900", children: p.schoolName }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mt-0.5", children: p.photoDate ? `Photo day: ${p.photoDate}` : "No photo date set" })
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mt-0.5", children: p.photoDate ? `${isCorporate ? "Headshot day" : "Photo day"}: ${p.photoDate}` : `No ${isCorporate ? "headshot" : "photo"} date set` })
             ] })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(ChevronRight, { className: "size-5 text-slate-400 group-hover:text-teal-500 transition-colors mt-2.5" })
@@ -16662,14 +16776,15 @@ function ProjectCard({ project: p, onClick }) {
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
               p.classCount,
               " ",
-              p.classCount === 1 ? "class" : "classes"
+              isCorporate ? p.classCount === 1 ? "department" : "departments" : p.classCount === 1 ? "class" : "classes"
             ] })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5 text-sm text-slate-600", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(Users, { className: "size-3.5" }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
               p.studentCount,
-              " students"
+              " ",
+              isCorporate ? p.studentCount === 1 ? "employee" : "employees" : p.studentCount === 1 ? "student" : "students"
             ] })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5 text-sm text-slate-600", children: [
@@ -16706,6 +16821,21 @@ function Dialog({ open, onClose, title, children, className }) {
     ] })
   ] });
 }
+const Input = reactExports.forwardRef(
+  ({ className, type, ...props }, ref) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "input",
+    {
+      type,
+      className: cn(
+        "flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-sm text-slate-900 shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-50",
+        className
+      ),
+      ref,
+      ...props
+    }
+  )
+);
+Input.displayName = "Input";
 class PreviewScheduler {
   constructor() {
     this.active = null;
@@ -16801,10 +16931,18 @@ const captureFilterOptions = [
 ];
 function ProjectView({ projectId, onBack, offline = false }) {
   const { data: project, reload: reloadProject } = useProject(projectId);
+  const isCorporate = project?.projectType === "corporate";
+  const departmentLabel = isCorporate ? "Department" : "Class";
+  const employeeLabel = isCorporate ? "Employee" : "Student";
+  const employeePlural = `${employeeLabel}s`;
   const { data: captureSummary } = useCaptureSummary(projectId);
-  const { data: classes } = useClasses(projectId);
+  const [groupCaptureCount, setGroupCaptureCount] = reactExports.useState(0);
+  const { data: classes, reload: reloadClasses } = useClasses(projectId);
   const [selectedClassId, setSelectedClassId] = reactExports.useState(null);
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? void 0);
+  const { data: groups, reload: reloadGroups } = useGroups(projectId, selectedClassId ?? void 0);
+  const [selectedGroup, setSelectedGroup] = reactExports.useState(null);
+  const { data: groupCaptures, reload: reloadGroupCaptures } = useGroupCaptures(projectId, selectedGroup?.id ?? null);
   const {
     data: unmatchedPhotos,
     loading: unmatchedLoading,
@@ -16814,20 +16952,40 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId);
   const {
     studentId: activeStudentId,
+    groupId: activeGroupId,
     source: activeStudentSource,
-    setTarget: setActiveCaptureTarget
+    setTarget: setActiveCaptureTarget,
+    setGroupTarget: setActiveGroupTarget
   } = useActiveCaptureTarget(projectId);
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId);
+  const {
+    state: liveUpload,
+    load: reloadLiveUpload,
+    setEnabled: setLiveUploadEnabled,
+    runNow: runUploadNow,
+    retryFailed: retryProjectFailed
+  } = useLiveUpload(projectId);
   const [search, setSearch] = reactExports.useState("");
-  const [settingFolder, setSettingFolder] = reactExports.useState(false);
+  const [addStudentOpen, setAddStudentOpen] = reactExports.useState(false);
   const [reassignDialogPhoto, setReassignDialogPhoto] = reactExports.useState(null);
   const [retrying, setRetrying] = reactExports.useState(false);
   const [exportMode, setExportMode] = reactExports.useState("all");
   const [exporting, setExporting] = reactExports.useState(null);
   const [finishing, setFinishing] = reactExports.useState(false);
+  const [renamingGroupId, setRenamingGroupId] = reactExports.useState(null);
+  const [renameValue, setRenameValue] = reactExports.useState("");
   const [syncProgress, setSyncProgress] = reactExports.useState(null);
+  const [uploadDialogOpen, setUploadDialogOpen] = reactExports.useState(false);
+  const [finishDialogOpen, setFinishDialogOpen] = reactExports.useState(false);
+  const [uploadActionRunning, setUploadActionRunning] = reactExports.useState(false);
   const autoStartAttemptedRef = reactExports.useRef(null);
-  const pendingUploadCount = [...uploadStatusMap.values()].reduce((count, summary) => count + summary.pending + summary.uploading, 0);
+  const pendingUploadCount = liveUpload ? liveUpload.pending + liveUpload.uploading : [...uploadStatusMap.values()].reduce(
+    (count, summary) => count + summary.pending + summary.uploading,
+    0
+  );
+  reactExports.useEffect(() => {
+    void window.api.invoke("groupCaptures:summary", { projectId }).then(setGroupCaptureCount);
+  }, [projectId, groupCaptures]);
   reactExports.useEffect(() => {
     return window.api.on("project:syncProgress", (event) => {
       if (event.projectId === projectId) setSyncProgress(event);
@@ -16862,8 +17020,78 @@ function ProjectView({ projectId, onBack, offline = false }) {
     const activeStudent = students.find((student) => student.id === activeStudentId);
     if (activeStudent) setSelectedStudent(activeStudent);
   }, [activeStudentId, students]);
+  reactExports.useEffect(() => {
+    if (selectedGroup && !groups.some((group) => group.id === selectedGroup.id)) {
+      setSelectedGroup(null);
+      if (activeGroupId === selectedGroup.id) void setActiveGroupTarget(null);
+    }
+  }, [groups, selectedGroup, activeGroupId, setActiveGroupTarget]);
+  async function handleSelectGroup(group) {
+    setSelectedGroup(group);
+    setSelectedStudent(null);
+    try {
+      await setActiveGroupTarget(group.id);
+    } catch (error) {
+      addToast({ type: "error", title: "Could not select capture group", description: String(error) });
+    }
+  }
+  async function handleCreateGroup() {
+    const name = window.prompt("Group name");
+    if (!name?.trim()) return;
+    try {
+      const group = await window.api.invoke("groups:create", {
+        projectId,
+        classId: selectedClassId,
+        name,
+        memberStudentIds: selectedClassId ? students.map((student) => student.id) : []
+      });
+      await reloadGroups();
+      await handleSelectGroup(group);
+    } catch (error) {
+      addToast({ type: "error", title: "Could not create group", description: String(error) });
+    }
+  }
+  async function handleRenameGroup(group) {
+    const name = renameValue.trim();
+    if (!name || name === group.name) {
+      setRenamingGroupId(null);
+      return;
+    }
+    try {
+      const updated = await window.api.invoke("groups:update", {
+        projectId,
+        groupId: group.id,
+        name
+      });
+      if (selectedGroup?.id === group.id) setSelectedGroup(updated);
+      setRenamingGroupId(null);
+      await reloadGroups();
+    } catch (error) {
+      addToast({ type: "error", title: "Could not rename group", description: String(error) });
+    }
+  }
+  async function handleDeleteGroup(group) {
+    if (!window.confirm(`Delete the custom group "${group.name}"? Its captured files will be kept.`)) return;
+    try {
+      await window.api.invoke("groups:delete", { projectId, groupId: group.id });
+      if (selectedGroup?.id === group.id) {
+        setSelectedGroup(null);
+        if (activeGroupId === group.id) await setActiveGroupTarget(null);
+      }
+      await reloadGroups();
+    } catch (error) {
+      addToast({ type: "error", title: "Could not delete group", description: String(error) });
+    }
+  }
+  async function handleGroupMembership(group, studentId, checked) {
+    const memberStudentIds = checked ? [.../* @__PURE__ */ new Set([...group.memberStudentIds, studentId])] : group.memberStudentIds.filter((id) => id !== studentId);
+    const updated = await window.api.invoke("groups:update", { projectId, groupId: group.id, memberStudentIds });
+    setSelectedGroup(updated);
+    await reloadGroups();
+  }
   async function handleSelectCaptureStudent(student) {
     setSelectedStudent(student);
+    setSelectedGroup(null);
     try {
       await setActiveCaptureTarget(student.id);
     } catch (error) {
@@ -16884,6 +17112,31 @@ function ProjectView({ projectId, onBack, offline = false }) {
         description: String(error)
       });
     }
+  }
+  async function handleStudentCreated(result) {
+    await Promise.all([reloadStudents(), reloadClasses(), reloadProject()]);
+    setSelectedClassId(result.student.classId);
+    setSelectedStudent(result.student);
+    let selectedForCapture = false;
+    try {
+      await setActiveCaptureTarget(result.student.id);
+      selectedForCapture = true;
+    } catch (error) {
+      addToast({
+        type: "error",
+        title: "Student added, but not selected for capture",
+        description: error instanceof Error ? error.message : String(error)
+      });
+    }
+    addToast({
+      type: "success",
+      title: `${result.student.firstName} ${result.student.lastName} added`,
+      description: [
+        result.student.className,
+        result.cloudSynced ? "synced to cloud" : "saved locally; cloud sync will retry during Upload & Finish",
+        selectedForCapture ? "selected for capture" : null
+      ].filter(Boolean).join(" · ")
+    });
   }
   async function handleSetWatchFolder() {
     const folder = await window.api.invoke("dialog:openFolder");
@@ -16977,6 +17230,8 @@ function ProjectView({ projectId, onBack, offline = false }) {
       await reloadProject();
       await reloadUploadStatus();
       if (result.ok) {
+        setFinishDialogOpen(false);
+        setUploadDialogOpen(false);
         addToast({
           type: "success",
           title: "Project uploaded and finished",
@@ -16993,6 +17248,35 @@ function ProjectView({ projectId, onBack, offline = false }) {
       addToast({ type: "error", title: "Could not finish project", description: String(error) });
     } finally {
       setFinishing(false);
+      await reloadLiveUpload();
+    }
+  }
+  async function handleToggleLiveUpload() {
+    if (!liveUpload || project?.finishedAt) return;
+    setUploadActionRunning(true);
+    try {
+      await setLiveUploadEnabled(!liveUpload.enabled);
+      addToast({
+        type: "success",
+        title: liveUpload.enabled ? "Live Upload paused" : "Live Upload enabled",
+        description: liveUpload.enabled ? "New captures stay queued locally until you resume or finish." : "New captures will upload in the background. This does not finish the shoot."
+      });
+    } catch (error) {
+      addToast({ type: "error", title: "Could not change Live Upload", description: String(error) });
+    } finally {
+      setUploadActionRunning(false);
+    }
+  }
+  async function handleUploadNow(retryFailed = false) {
+    setUploadActionRunning(true);
+    try {
+      if (retryFailed) await retryProjectFailed();
+      else await runUploadNow();
+      await reloadUploadStatus();
+    } catch (error) {
+      addToast({ type: "error", title: "Upload could not continue", description: String(error) });
+    } finally {
+      setUploadActionRunning(false);
     }
   }
   const filteredStudents = students.filter((s) => {
@@ -17000,155 +17284,272 @@ function ProjectView({ projectId, onBack, offline = false }) {
     const q = search.toLowerCase();
     return s.firstName.toLowerCase().includes(q) || s.lastName.toLowerCase().includes(q) || s.generatedStudentId.toLowerCase().includes(q);
   });
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: onBack, className: "text-slate-400 hover:text-slate-700 transition-colors", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ArrowLeft, { className: "size-5" }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "font-bold text-slate-900 truncate", children: project?.schoolName ?? "…" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-500", children: [
-          project?.classCount,
-          " classes · ",
-          project?.studentCount,
-          " students · ",
-          captureSummary.total > 0 ? `${captureSummary.total} captures` : `${project?.photoCount ?? 0} photos taken`
-        ] }),
-        captureSummary.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-0.5 text-[11px] text-slate-400", children: [
-          captureSummary.complete,
-          " paired · ",
-          captureSummary.jpegOnly,
-          " JPEG only · ",
-          captureSummary.rawOnly,
-          " RAW only"
-        ] }),
-        pendingUploadCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-amber-700", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3" }),
-          pendingUploadCount,
-          " photo",
-          pendingUploadCount === 1 ? "" : "s",
-          " waiting for upload"
-        ] }),
-        project?.finishedAt ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-green-700", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3" }),
-          "Project finished · local capture is closed"
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-slate-500", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Folder, { className: "size-3" }),
-          "Local capture is live · upload starts only when you finish the project"
-        ] }),
-        syncProgress?.phase === "error" && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 flex items-center gap-1 text-xs text-red-700", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-3" }),
-          syncProgress.failed,
-          " file",
-          syncProgress.failed === 1 ? "" : "s",
-          " failed · local project remains unfinished"
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full font-sans bg-slate-50", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-5 min-w-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: onBack, "aria-label": "Back to projects", className: "text-slate-400 hover:text-white transition-colors bg-slate-900 hover:bg-slate-800 p-1.5 rounded-md shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ArrowLeft, { className: "size-4" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "font-extrabold text-white text-base tracking-tight truncate", children: project?.schoolName ?? "…" }),
+          isCorporate && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase tracking-widest text-teal-400", children: "Headshot Session" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5 text-[11px] font-medium text-slate-400 mt-0.5 whitespace-nowrap", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+              project?.classCount,
+              " ",
+              departmentLabel.toLowerCase(),
+              project?.classCount === 1 ? "" : "s"
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-1 h-1 rounded-full bg-slate-700" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+              project?.studentCount,
+              " ",
+              employeePlural.toLowerCase()
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-1 h-1 rounded-full bg-slate-700" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-slate-300", children: captureSummary.total > 0 ? `${captureSummary.total} captures` : `${project?.photoCount ?? 0} photos` }),
+            pendingUploadCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-1 h-1 rounded-full bg-amber-500/50" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-amber-400 flex items-center gap-1", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3" }),
+                " ",
+                pendingUploadCount,
+                " pending"
+              ] })
+            ] }),
+            syncProgress?.phase === "error" && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-1 h-1 rounded-full bg-red-500/50" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-red-400 flex items-center gap-1", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-3" }),
+                " ",
+                syncProgress.failed,
+                " failed"
+              ] })
+            ] })
+          ] })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 shrink-0", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Button,
-          {
-            size: "sm",
-            onClick: () => void handleUploadAndFinish(),
-            disabled: finishing || Boolean(project?.finishedAt) || captureSummary.total === 0,
-            className: cn(
-              "gap-1.5",
-              project?.finishedAt ? "bg-green-600 hover:bg-green-600" : "bg-teal-600 hover:bg-teal-700"
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4 shrink-0", children: [
+        project?.watchFolder ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn(
+          "flex items-center h-8 rounded-md border transition-colors overflow-hidden",
+          isRunning ? "bg-teal-500/10 border-teal-500/20" : "bg-slate-900 border-slate-800"
+        ), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 px-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("w-2 h-2 rounded-full", isRunning ? "bg-teal-400 animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.6)]" : "bg-slate-600") }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: cn("text-[10px] font-bold uppercase tracking-wider", isRunning ? "text-teal-400" : "text-slate-400"), children: isRunning ? "Live" : "Paused" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("w-px h-full", isRunning ? "bg-teal-500/20" : "bg-slate-800") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { onClick: handleToggleWatcher, className: cn("px-3 h-full text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1", isRunning ? "text-teal-400 hover:text-white hover:bg-teal-500/20" : "text-slate-300 hover:text-white hover:bg-slate-800"), children: [
+            isRunning ? /* @__PURE__ */ jsxRuntimeExports.jsx(Square, { className: "size-3 fill-current" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { className: "size-3 fill-current" }),
+            isRunning ? "Stop" : "Start"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("w-px h-full", isRunning ? "bg-teal-500/20" : "bg-slate-800") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: handleSetWatchFolder, "aria-label": "Change watch folder", className: cn("px-2 h-full transition-colors", isRunning ? "text-teal-600 hover:text-teal-300 hover:bg-teal-500/20" : "text-slate-400 hover:text-white hover:bg-slate-800"), title: "Change folder", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Folder, { className: "size-3" }) })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { size: "sm", variant: "outline", onClick: handleSetWatchFolder, className: "h-8 bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold uppercase tracking-wider", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Folder, { className: "size-3.5 mr-1.5" }),
+          " Set Watch Folder"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-px h-6 bg-slate-800" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn(
+            "flex items-center h-8 rounded-md border overflow-hidden",
+            liveUpload?.enabled ? "bg-blue-500/10 border-blue-500/30" : "bg-slate-900 border-slate-800"
+          ), children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                onClick: () => void handleToggleLiveUpload(),
+                disabled: uploadActionRunning || Boolean(project?.finishedAt),
+                className: cn(
+                  "h-full px-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50",
+                  liveUpload?.enabled ? "text-blue-300 hover:bg-blue-500/20" : "text-slate-300 hover:bg-slate-800"
+                ),
+                title: "Uploads captures in the background without finishing the shoot",
+                children: [
+                  liveUpload?.running ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(CloudUpload, { className: "size-3" }),
+                  "Live Upload ",
+                  liveUpload?.enabled ? "On" : "Off"
+                ]
+              }
             ),
-            title: project?.finishedAt ? "This project has already been finished" : "Stop local capture, upload the local project, and finish it",
-            children: [
-              finishing ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : project?.finishedAt ? /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3.5" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(CloudUpload, { className: "size-3.5" }),
-              finishing ? syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : "Preparing…" : project?.finishedAt ? "Project finished" : syncProgress?.phase === "error" ? "Retry Upload & Finish" : "Upload & Finish Project"
-            ]
-          }
-        ),
-        captureSummary.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(
-            "select",
-            {
-              value: exportMode,
-              onChange: (event) => setExportMode(event.target.value),
-              className: "h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-teal-500",
-              "aria-label": "Capture export mode",
-              children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "all", children: "Export all captures" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "paired", children: "Export paired JPEG + RAW" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "jpeg_only", children: "Export JPEG-only" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "raw_only", children: "Export RAW-only" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "selected", children: "Export selected" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "favorite", children: "Export favorites" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "final_selection", children: "Export final selection" })
-              ]
-            }
-          ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("w-px h-full", liveUpload?.enabled ? "bg-blue-500/30" : "bg-slate-800") }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                onClick: () => setUploadDialogOpen(true),
+                className: "h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold",
+                title: "Open upload activity",
+                children: liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : "Status"
+              }
+            )
+          ] }),
+          captureSummary.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "select",
+              {
+                value: exportMode,
+                onChange: (event) => setExportMode(event.target.value),
+                className: "h-full bg-transparent px-2 text-[10px] font-bold uppercase tracking-wider text-slate-300 focus:outline-none border-r border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "all", children: "All" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "paired", children: "Paired" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "jpeg_only", children: "JPEG Only" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "raw_only", children: "RAW Only" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "selected", children: "Selected" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "favorite", children: "Favorites" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "final_selection", children: "Final" })
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { onClick: () => void handleExportCaptures("capture_folders"), disabled: exporting !== null, className: "px-3 h-full text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5 disabled:opacity-50", children: [
+              exporting === "capture_folders" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3" }),
+              "Export"
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-px h-full bg-slate-800" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { onClick: () => void handleExportCaptures("lightroom_watch_folder"), disabled: exporting !== null, className: "px-3 h-full text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5 disabled:opacity-50", title: "Send to Lightroom Auto Import", children: [
+              exporting === "lightroom_watch_folder" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-3" }),
+              "To LR"
+            ] })
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Button,
             {
-              variant: "outline",
               size: "sm",
-              onClick: () => void handleExportCaptures("capture_folders"),
-              disabled: exporting !== null,
+              onClick: () => setFinishDialogOpen(true),
+              disabled: finishing || Boolean(project?.finishedAt) || captureSummary.total === 0 && groupCaptureCount === 0,
+              className: cn(
+                "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
+                project?.finishedAt ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+              ),
               children: [
-                exporting === "capture_folders" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3.5" }),
-                exporting === "capture_folders" ? "Exporting…" : "Export"
-              ]
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(
-            Button,
-            {
-              variant: "outline",
-              size: "sm",
-              onClick: () => void handleExportCaptures("lightroom_watch_folder"),
-              disabled: exporting !== null,
-              title: "Choose the folder configured as Lightroom Classic's Auto Import watched folder",
-              children: [
-                exporting === "lightroom_watch_folder" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-3.5" }),
-                exporting === "lightroom_watch_folder" ? "Sending…" : "Send to Lightroom"
+                finishing ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 mr-1.5 animate-spin" }) : project?.finishedAt ? /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3.5 mr-1.5" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(CloudUpload, { className: "size-3.5 mr-1.5" }),
+                finishing ? syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : "Preparing…" : project?.finishedAt ? "Finished" : "Finish My Shoot"
               ]
             }
           )
-        ] }),
-        project?.watchFolder ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-500 max-w-[200px] truncate hidden lg:block", children: project.watchFolder }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: handleSetWatchFolder, children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Folder, { className: "size-3.5" }),
-            "Change folder"
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Button,
-            {
-              size: "sm",
-              variant: isRunning ? "destructive" : "default",
-              onClick: handleToggleWatcher,
-              className: "gap-1.5",
-              children: isRunning ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Square, { className: "size-3", fill: "currentColor" }),
-                " Stop watching"
-              ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { className: "size-3", fill: "currentColor" }),
-                " Start watching"
-              ] })
-            }
-          ),
-          isRunning && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1 text-xs text-green-600 font-medium", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-2 h-2 rounded-full bg-green-500 animate-pulse" }),
-            "Live"
-          ] })
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: handleSetWatchFolder, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Folder, { className: "size-3.5" }),
-          "Set watch folder"
         ] })
       ] })
     ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Dialog,
+      {
+        open: uploadDialogOpen,
+        onClose: () => setUploadDialogOpen(false),
+        title: "Upload Activity",
+        className: "max-w-lg",
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: "Uploads can continue while you photograph and while this window is closed. They do not finish the shoot." }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-4 gap-2", children: [
+            ["Uploaded", liveUpload?.done ?? 0, "text-emerald-700 bg-emerald-50"],
+            ["Uploading", liveUpload?.uploading ?? 0, "text-blue-700 bg-blue-50"],
+            ["Queued", liveUpload?.pending ?? 0, "text-amber-700 bg-amber-50"],
+            ["Failed", liveUpload?.error ?? 0, "text-red-700 bg-red-50"]
+          ].map(([label, value, color]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn("rounded-lg p-3 text-center", String(color)), children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xl font-extrabold", children: String(value) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase tracking-wider", children: String(label) })
+          ] }, String(label))) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-bold text-slate-700", children: "Cloud connection" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: cn("font-bold", liveUpload?.cloudReady ? "text-emerald-600" : "text-amber-600"), children: liveUpload?.cloudReady ? "Connected" : "Waiting for connection" })
+            ] }),
+            liveUpload?.lastUploadedAt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 text-slate-500", children: [
+              "Last upload ",
+              new Date(liveUpload.lastUploadedAt).toLocaleTimeString()
+            ] }),
+            liveUpload?.lastError && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-2 text-red-600 break-words", children: liveUpload.lastError })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2 justify-end", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Button,
+              {
+                variant: "outline",
+                disabled: uploadActionRunning || Boolean(project?.finishedAt),
+                onClick: () => void handleToggleLiveUpload(),
+                children: liveUpload?.enabled ? "Pause Live Upload" : "Resume Live Upload"
+              }
+            ),
+            (liveUpload?.error ?? 0) > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Button,
+              {
+                variant: "outline",
+                disabled: uploadActionRunning || !liveUpload?.cloudReady,
+                onClick: () => void handleUploadNow(true),
+                children: "Retry Failed"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              Button,
+              {
+                disabled: uploadActionRunning || !liveUpload?.cloudReady || (liveUpload?.pending ?? 0) === 0,
+                onClick: () => void handleUploadNow(),
+                className: "bg-blue-600 hover:bg-blue-700 text-white",
+                children: [
+                  uploadActionRunning && /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-4 mr-2 animate-spin" }),
+                  "Upload Now"
+                ]
+              }
+            )
+          ] })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Dialog,
+      {
+        open: finishDialogOpen,
+        onClose: () => !finishing && setFinishDialogOpen(false),
+        title: "Finish My Shoot?",
+        className: "max-w-lg",
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-amber-200 bg-amber-50 p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-5 text-amber-600 shrink-0 mt-0.5" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-bold text-amber-900", children: "This stops capture intake on this computer." }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-amber-800 mt-1", children: "Volume Capture will drain the watch folder, upload every remaining file, and finish this photographer’s batch. It does not close the studio’s entire project." })
+            ] })
+          ] }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-3 gap-2 text-center", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg bg-slate-50 p-3", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xl font-extrabold text-slate-900", children: liveUpload?.done ?? 0 }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase text-slate-500", children: "Uploaded" })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg bg-amber-50 p-3", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xl font-extrabold text-amber-700", children: (liveUpload?.pending ?? 0) + (liveUpload?.uploading ?? 0) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase text-amber-700", children: "Remaining" })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg bg-red-50 p-3", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xl font-extrabold text-red-700", children: liveUpload?.error ?? 0 }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase text-red-700", children: "Need retry" })
+            ] })
+          ] }),
+          !liveUpload?.cloudReady && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-600", children: "Connect to Volume Capture before finishing. Your local captures remain safe." }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3 justify-end", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { variant: "outline", disabled: finishing, onClick: () => setFinishDialogOpen(false), children: "Keep Shooting" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              Button,
+              {
+                disabled: finishing || !liveUpload?.cloudReady,
+                onClick: () => void handleUploadAndFinish(),
+                className: "bg-blue-600 hover:bg-blue-700 text-white",
+                children: [
+                  finishing && /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-4 mr-2 animate-spin" }),
+                  finishing && syncProgress?.total ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : "Upload Remaining & Finish"
+                ]
+              }
+            )
+          ] })
+        ] })
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 flex overflow-hidden", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-72 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex overflow-x-auto border-b border-slate-100 shrink-0", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-[340px] flex-shrink-0 bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-10 flex flex-col", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex overflow-x-auto border-b border-slate-100 shrink-0 p-2 gap-1 hide-scrollbar", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
             {
               onClick: () => setSelectedClassId(null),
               className: cn(
-                "px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
-                !selectedClassId ? "border-teal-500 text-teal-600" : "border-transparent text-slate-500 hover:text-slate-700"
+                "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
+                !selectedClassId ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
               ),
               children: [
                 "All (",
@@ -17162,55 +17563,118 @@ function ProjectView({ projectId, onBack, offline = false }) {
             {
               onClick: () => setSelectedClassId(c.id),
               className: cn(
-                "px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
-                selectedClassId === c.id ? "border-teal-500 text-teal-600" : "border-transparent text-slate-500 hover:text-slate-700"
+                "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
+                selectedClassId === c.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
               ),
               children: c.className
             },
             c.id
           ))
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-2 border-b border-slate-100", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-2.5 top-2 size-3.5 text-slate-400" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-3 border-b border-slate-100 bg-slate-50/50 shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative flex-1", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-2.5 size-4 text-slate-400" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "text",
+                placeholder: `Search ${employeePlural.toLowerCase()}...`,
+                value: search,
+                onChange: (e) => setSearch(e.target.value),
+                className: "w-full pl-9 pr-3 py-2 text-sm font-medium border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all shadow-sm placeholder:text-slate-400"
+              }
+            )
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "input",
+            "button",
             {
-              type: "text",
-              placeholder: "Search students…",
-              value: search,
-              onChange: (e) => setSearch(e.target.value),
-              className: "w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md bg-slate-50 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              type: "button",
+              onClick: () => setAddStudentOpen(true),
+              disabled: classes.length === 0 || Boolean(project?.finishedAt),
+              "aria-label": `Add ${employeeLabel.toLowerCase()}`,
+              className: "size-[38px] bg-slate-900 text-white rounded-lg flex items-center justify-center hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm shrink-0",
+              title: project?.finishedAt ? "This project is finished" : `Add ${employeeLabel.toLowerCase()}`,
+              children: /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "size-4" })
             }
           )
         ] }) }),
-        errorPhotoIds.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-2 border-b border-red-100 bg-red-50", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        errorPhotoIds.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-2 border-b border-red-100 bg-red-50 shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "button",
           {
             onClick: handleRetryFailed,
             disabled: retrying,
-            className: "w-full flex items-center justify-center gap-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-60 rounded-md px-2 py-1.5 transition-colors",
+            className: "w-full flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-60 rounded-md px-2 py-2 transition-colors",
             children: [
-              retrying ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-3" }),
+              retrying ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-3.5" }),
               retrying ? "Retrying…" : `Retry ${errorPhotoIds.length} failed upload${errorPhotoIds.length !== 1 ? "s" : ""}`
             ]
           }
         ) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 overflow-y-auto", children: [
-          filteredStudents.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-            StudentRow,
-            {
-              student: s,
-              isSelected: selectedStudent?.id === s.id,
-              isActive: activeStudentId === s.id,
-              onClick: () => void handleSelectCaptureStudent(s),
-              uploadSummary: uploadStatusMap.get(s.id)
-            },
-            s.id
-          )),
-          filteredStudents.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center text-slate-400 text-xs py-8", children: "No students found" })
+          groups.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "py-2 border-b border-slate-100", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Groups" }),
+              !project?.finishedAt && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => void handleCreateGroup(), className: "text-teal-600 hover:text-teal-700 flex items-center gap-0.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "size-3" }),
+                " New"
+              ] })
+            ] }),
+            groups.map((group) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("flex flex-col border-b border-slate-100 last:border-0", selectedGroup?.id === group.id ? "bg-teal-50/50" : "bg-white"), children: renamingGroupId === group.id ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-4 py-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { className: "flex gap-2", onSubmit: (e) => {
+              e.preventDefault();
+              void handleRenameGroup(group);
+            }, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { autoFocus: true, value: renameValue, onChange: (e) => setRenameValue(e.target.value), className: "flex-1 h-7 px-2 text-xs font-medium border border-slate-300 rounded focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { type: "submit", size: "sm", className: "h-7 px-2 bg-teal-600 hover:bg-teal-700 text-white text-[10px] uppercase font-bold tracking-wider", children: "Save" })
+            ] }) }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn("flex items-center px-4 py-2 group/group transition-colors border-l-4", selectedGroup?.id === group.id ? "border-teal-500" : "border-transparent hover:bg-slate-50"), children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => void handleSelectGroup(group), className: "flex-1 flex items-center justify-between text-left min-w-0 mr-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5 min-w-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("w-6 h-6 rounded-md flex items-center justify-center shrink-0", selectedGroup?.id === group.id ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-500"), children: /* @__PURE__ */ jsxRuntimeExports.jsx(User, { className: "size-3.5" }) }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: cn("text-sm font-bold truncate", selectedGroup?.id === group.id ? "text-teal-950" : "text-slate-800"), children: group.name })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-slate-200 hover:bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0 rounded font-bold shadow-none", children: group.memberStudentIds.length })
+              ] }),
+              !group.isDefaultClassGroup && !project?.finishedAt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1 opacity-0 group-hover/group:opacity-100 transition-opacity", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => {
+                  setRenamingGroupId(group.id);
+                  setRenameValue(group.name);
+                }, className: "p-1 text-slate-400 hover:text-teal-600 transition-colors", title: "Rename group", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Pencil, { className: "size-3.5" }) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => void handleDeleteGroup(group), className: "p-1 text-slate-400 hover:text-red-600 transition-colors", title: "Delete group", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "size-3.5" }) })
+              ] })
+            ] }) }, group.id))
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "py-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400", children: employeePlural }),
+            filteredStudents.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              StudentRow,
+              {
+                student: s,
+                isSelected: selectedStudent?.id === s.id,
+                isActive: activeStudentId === s.id,
+                onClick: () => void handleSelectCaptureStudent(s),
+                uploadSummary: uploadStatusMap.get(s.id)
+              },
+              s.id
+            )),
+            filteredStudents.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-8 text-center text-slate-400 text-xs font-medium", children: [
+              "No ",
+              employeePlural.toLowerCase(),
+              " found"
+            ] })
+          ] })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto bg-slate-50", children: selectedStudent ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 flex flex-col min-w-0 bg-slate-50", children: selectedGroup ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        GroupDetail,
+        {
+          group: selectedGroup,
+          students,
+          groupCaptures,
+          isActiveCaptureTarget: activeGroupId === selectedGroup.id,
+          onMembershipChange: handleGroupMembership,
+          onClearCaptureTarget: () => void setActiveGroupTarget(null),
+          onRefreshCaptures: () => void reloadGroupCaptures()
+        }
+      ) : selectedStudent ? /* @__PURE__ */ jsxRuntimeExports.jsx(
         StudentDetail,
         {
           student: selectedStudent,
@@ -17220,7 +17684,8 @@ function ProjectView({ projectId, onBack, offline = false }) {
           isActiveCaptureTarget: activeStudentId === selectedStudent.id,
           activeStudentSource,
           onClearCaptureTarget: () => void handleClearCaptureStudent(),
-          offline
+          offline,
+          employeeLabel
         }
       ) : unmatchedPhotos.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
         UnmatchedPhotosPanel,
@@ -17230,18 +17695,10 @@ function ProjectView({ projectId, onBack, offline = false }) {
           onOpen: (filePath) => window.api.invoke("photos:openInSystem", { filePath }),
           onReassign: setReassignDialogPhoto
         }
-      ) : unmatchedPhotos.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-        UnmatchedPhotosPanel,
-        {
-          photos: unmatchedPhotos,
-          loading: unmatchedLoading,
-          onOpen: (filePath) => window.api.invoke("photos:openInSystem", { filePath }),
-          onReassign: setReassignDialogPhoto
-        }
-      ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full text-center p-8", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-20 h-20 rounded-2xl bg-slate-200 flex items-center justify-center mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(User, { className: "size-10 text-slate-400" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-slate-600 mb-1", children: "No student selected" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400 max-w-xs", children: "Click a student on the left to display their QR code for the photographer." })
+      ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full p-12 text-center bg-slate-50", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-24 h-24 bg-white shadow-sm rounded-3xl flex items-center justify-center mb-6 border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsx(User, { className: "size-12 text-slate-300" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-2xl font-extrabold text-slate-900 mb-2 tracking-tight", children: "Select a subject" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-slate-500 max-w-md text-base font-medium leading-relaxed", children: "Click a student or group in the roster to set them as the active target and display their QR code for the camera." })
       ] }) })
     ] }),
     reassignDialogPhoto && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -17256,8 +17713,124 @@ function ProjectView({ projectId, onBack, offline = false }) {
           void reloadStudents();
         }
       }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      AddStudentDialog,
+      {
+        open: addStudentOpen,
+        projectId,
+        classes,
+        initialClassId: selectedClassId,
+        onClose: () => setAddStudentOpen(false),
+        onCreated: handleStudentCreated,
+        departmentLabel,
+        employeeLabel
+      }
     )
   ] });
+}
+function AddStudentDialog({
+  open,
+  projectId,
+  classes,
+  initialClassId,
+  onClose,
+  onCreated,
+  departmentLabel,
+  employeeLabel
+}) {
+  const [classId, setClassId] = reactExports.useState("");
+  const [firstName, setFirstName] = reactExports.useState("");
+  const [lastName, setLastName] = reactExports.useState("");
+  const [saving, setSaving] = reactExports.useState(false);
+  reactExports.useEffect(() => {
+    if (!open) return;
+    setClassId(String(initialClassId ?? classes[0]?.id ?? ""));
+    setFirstName("");
+    setLastName("");
+  }, [classes, initialClassId, open]);
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    try {
+      const result = await window.api.invoke("students:create", {
+        projectId,
+        classId: Number(classId),
+        firstName,
+        lastName
+      });
+      await onCreated(result);
+      onClose();
+    } catch (error) {
+      addToast({
+        type: "error",
+        title: "Could not add student",
+        description: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(Dialog, { open, onClose, title: `Add ${employeeLabel} to ${departmentLabel}`, className: "max-w-md", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { className: "space-y-5", onSubmit: handleSubmit, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("label", { htmlFor: "new-student-class", className: "mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500", children: departmentLabel }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "select",
+        {
+          id: "new-student-class",
+          value: classId,
+          onChange: (event) => setClassId(event.target.value),
+          className: "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 shadow-sm",
+          required: true,
+          children: classes.map((cls) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: cls.id, children: cls.className }, cls.id))
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("label", { htmlFor: "new-student-first-name", className: "mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500", children: "First name" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            id: "new-student-first-name",
+            value: firstName,
+            onChange: (event) => setFirstName(event.target.value),
+            maxLength: 100,
+            autoFocus: true,
+            required: true,
+            className: "h-10 font-medium"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("label", { htmlFor: "new-student-last-name", className: "mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500", children: "Last name" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            id: "new-student-last-name",
+            value: lastName,
+            onChange: (event) => setLastName(event.target.value),
+            maxLength: 100,
+            required: true,
+            className: "h-10 font-medium"
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs font-medium leading-relaxed text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100", children: [
+      "The ",
+      employeeLabel.toLowerCase(),
+      " is saved on this Mac immediately and selected as the active capture target. If you are offline, Volume Capture will add them to the cloud during Upload & Finish."
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-end gap-3 pt-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { type: "button", variant: "outline", onClick: onClose, disabled: saving, className: "text-xs font-bold uppercase tracking-wider h-10 px-5", children: "Cancel" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { type: "submit", disabled: saving || !classId || !firstName.trim() || !lastName.trim(), className: "bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider h-10 px-5 shadow-sm", children: [
+        saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-4 mr-2 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "size-4 mr-2" }),
+        saving ? "Adding…" : `Add ${employeeLabel.toLowerCase()}`
+      ] })
+    ] })
+  ] }) });
 }
 function UnmatchedPhotosPanel({
   photos,
@@ -17265,34 +17838,43 @@ function UnmatchedPhotosPanel({
   onOpen,
   onReassign
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-8", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-bold text-slate-900", children: "Photos needing assignment" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-slate-500", children: "These captures were saved, but no student QR or filename match was found. Assign them manually or photograph the student QR before the next portraits." })
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-[1400px] mx-auto", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-6 flex items-start gap-4 bg-white p-6 rounded-2xl border border-amber-200 shadow-sm", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-6" }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-extrabold text-slate-900 tracking-tight", children: "Photos needing assignment" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm font-medium text-slate-500 leading-relaxed max-w-2xl", children: "These captures were saved, but no student QR or filename match was found. Assign them manually or photograph the student QR before the next portraits." })
+      ] })
     ] }),
-    loading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-40 items-center justify-center text-sm text-slate-400", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "mr-2 size-4 animate-spin" }),
-      " Loading captures…"
-    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-3 gap-3", children: photos.map((photo) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "overflow-hidden rounded-lg border border-amber-200 bg-white", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "aspect-square bg-slate-100", children: photo.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "img",
-        {
-          src: photo.thumbnailData,
-          alt: photo.fileName,
-          className: "h-full w-full object-cover",
-          draggable: false
-        }
-      ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-full items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 p-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "truncate text-[11px] text-slate-600", title: photo.fileName, children: photo.fileName }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-1.5", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
+    loading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-64 flex-col items-center justify-center bg-white border border-slate-200 rounded-2xl shadow-sm text-slate-400", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "mb-3 size-6 animate-spin text-amber-500" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-bold", children: "Loading captures..." })
+    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4", children: photos.map((photo) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col group transition-shadow hover:shadow-md", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "aspect-square bg-slate-100 relative", children: [
+        photo.thumbnailData ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: photo.thumbnailData,
+            alt: photo.fileName,
+            className: "h-full w-full object-cover",
+            draggable: false
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-full items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-2 left-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-amber-500 text-white text-[9px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded shadow-sm", children: "Unassigned" }) })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3 p-4 flex-1 flex flex-col justify-between", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "truncate text-xs font-mono font-medium text-slate-500", title: photo.fileName, children: photo.fileName }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-2", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
             {
               type: "button",
               onClick: () => void onOpen(photo.filePath),
-              className: "rounded bg-slate-100 px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-200",
-              children: "Open"
+              className: "rounded-lg bg-slate-100 px-2 py-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-700 hover:bg-slate-200 transition-colors flex items-center justify-center gap-1",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
+                " Open"
+              ]
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -17300,27 +17882,43 @@ function UnmatchedPhotosPanel({
             {
               type: "button",
               onClick: () => onReassign(photo),
-              className: "rounded bg-teal-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-teal-700",
+              className: "rounded-lg bg-teal-600 px-2 py-2 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-teal-700 transition-colors flex items-center justify-center gap-1 shadow-sm",
               children: "Assign"
             }
           )
         ] })
       ] })
     ] }, photo.id)) })
-  ] });
+  ] }) });
 }
 function UploadBadge({ summary }) {
   if (summary.uploading > 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: "Uploading…", className: "flex items-center gap-0.5 text-[10px] text-blue-600", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) });
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { title: "Uploading…", className: "flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }),
+      " ",
+      summary.uploading
+    ] });
   }
   if (summary.error > 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: `${summary.error} upload(s) failed`, className: "flex items-center gap-0.5 text-[10px] text-red-500", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3" }) });
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { title: `${summary.error} upload(s) failed`, className: "flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3" }),
+      " ",
+      summary.error
+    ] });
   }
   if (summary.pending > 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: `${summary.pending} upload(s) queued`, className: "flex items-center gap-0.5 text-[10px] text-amber-500", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3" }) });
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { title: `${summary.pending} upload(s) queued`, className: "flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3" }),
+      " ",
+      summary.pending
+    ] });
   }
   if (summary.done > 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { title: `${summary.done} photo(s) uploaded`, className: "flex items-center gap-0.5 text-[10px] text-green-600", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3" }) });
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { title: `${summary.done} photo(s) uploaded`, className: "flex items-center gap-1 text-[10px] font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3" }),
+      " ",
+      summary.done
+    ] });
   }
   return null;
 }
@@ -17331,37 +17929,36 @@ function StudentRow({
   onClick,
   uploadSummary
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
     "button",
     {
       onClick,
       className: cn(
-        "w-full px-3 py-2.5 text-left flex items-center gap-2 transition-colors border-b border-slate-50",
-        isActive ? "bg-blue-100 border-l-4 border-l-blue-600 ring-1 ring-inset ring-blue-200" : isSelected ? "bg-slate-100 border-l-2 border-l-slate-400" : "hover:bg-slate-50"
+        "text-left w-full p-3 border-b transition-colors flex items-center gap-3",
+        isActive ? "bg-teal-50/50 border-l-4 border-l-teal-500" : isSelected ? "bg-slate-50 border-l-4 border-l-transparent" : "hover:bg-slate-50 border-l-4 border-l-transparent border-b-slate-100"
       ),
       "aria-pressed": isActive,
       title: isActive ? "Active capture student" : "Select as active capture student",
-      children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: cn("text-sm font-medium truncate", isActive ? "text-blue-800" : "text-slate-800"), children: [
+      children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between mb-1", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: cn("font-bold text-sm truncate", isActive ? "text-teal-950" : "text-slate-900"), children: [
             s.lastName,
             ", ",
             s.firstName
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: cn("text-xs font-mono", isActive ? "text-blue-600" : "text-slate-400"), children: s.generatedStudentId })
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5 shrink-0", children: [
+            isActive && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { className: "bg-teal-600 hover:bg-teal-600 text-white text-[9px] font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded-sm shadow-sm", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-2.5 mr-1" }),
+              "Active"
+            ] }),
+            s.photoCount > 0 && !isActive && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-slate-200 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-none", children: s.photoCount })
+          ] })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1 shrink-0", children: [
-          isActive && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { className: "border-blue-200 bg-blue-600 text-[9px] text-white", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "mr-0.5 size-2.5" }),
-            "ACTIVE"
-          ] }),
-          uploadSummary && /* @__PURE__ */ jsxRuntimeExports.jsx(UploadBadge, { summary: uploadSummary }),
-          s.photoCount > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", className: "text-[10px] px-1.5 py-0", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-2.5 mr-0.5" }),
-            s.photoCount
-          ] }) : null
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: cn("text-[10px] font-mono font-medium", isActive ? "text-teal-700" : "text-slate-500"), children: s.generatedStudentId }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-1", children: uploadSummary && /* @__PURE__ */ jsxRuntimeExports.jsx(UploadBadge, { summary: uploadSummary }) })
         ] })
-      ]
+      ] })
     }
   );
 }
@@ -17373,7 +17970,8 @@ function StudentDetail({
   isActiveCaptureTarget,
   activeStudentSource,
   onClearCaptureTarget,
-  offline
+  offline,
+  employeeLabel
 }) {
   const {
     data: review,
@@ -17457,66 +18055,39 @@ function StudentDetail({
       addToast({ type: "error", title: "Could not update capture review", description: String(error) });
     }
   }
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { className: "text-lg font-bold text-slate-900", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full relative bg-slate-50", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative", children: [
+      isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-full h-1 bg-teal-500" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col min-w-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-3 mb-2", children: [
+          isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { className: "bg-teal-500 hover:bg-teal-500 text-white font-extrabold uppercase tracking-widest text-[10px] px-2.5 py-0.5 shadow-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-3 mr-1.5" }),
+            " Active Target"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-mono font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 truncate", children: student.generatedStudentId }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-extrabold uppercase tracking-widest text-slate-400 truncate", children: student.className })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { className: "text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words", "aria-label": employeeLabel, children: [
           student.firstName,
           " ",
           student.lastName
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mt-1", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded", children: student.generatedStudentId }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-500", children: student.className })
-        ] }),
-        isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 flex items-center gap-2 text-xs font-semibold text-blue-700", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-3.5" }),
-            "Active capture student",
-            activeStudentSource === "qr" ? " · selected by QR" : ""
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-normal text-blue-600", children: "New JPEG and RAW captures will be assigned here" })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-        isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: onClearCaptureTarget, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3.5" }),
-          "Clear target"
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-end gap-3 justify-center shrink-0", children: [
+        isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: onClearCaptureTarget, className: "text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3.5 mr-1.5" }),
+          " Clear Target"
         ] }),
-        captures.length > 0 || qrMarkers.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "success", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-[11px] font-bold uppercase tracking-widest text-slate-500", children: [
           captures.length,
-          " capture",
+          " Capture",
           captures.length !== 1 ? "s" : "",
-          " recorded",
-          qrMarkers.length > 0 && ` · ${qrMarkers.length} QR marker${qrMarkers.length !== 1 ? "s" : ""}`
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "warning", children: "Not yet photographed" })
+          " recorded"
+        ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-8 p-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-medium text-slate-500 uppercase tracking-wider mb-3", children: "QR Code — show to camera" }),
-        student.simpleQr ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-white border-4 border-slate-900 rounded-2xl p-4 shadow-lg", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "img",
-          {
-            src: student.simpleQr,
-            alt: "Student QR Code",
-            className: "w-64 h-64",
-            draggable: false
-          }
-        ) }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-72 h-72 bg-slate-100 rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-slate-300", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-8 text-slate-400 mb-2" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 font-medium", children: "QR not generated yet" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-1", children: "Generate QR codes in the web app first" })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-400 mt-3 font-mono", children: [
-          student.firstName,
-          ".",
-          student.lastName,
-          ".",
-          student.generatedStudentId
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-[1400px] mx-auto flex flex-col-reverse xl:flex-row gap-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0 flex flex-col gap-6", children: [
         livePreview?.photo.previewUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
           LivePreview,
           {
@@ -17524,83 +18095,117 @@ function StudentDetail({
             traceId: livePreview.pipeline?.traceId
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs font-medium text-slate-500 uppercase tracking-wider mb-3", children: [
-          "Capture review (",
-          filteredCaptures.length + qrMarkers.length,
-          ")"
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1.5 mb-3", children: captureFilterOptions.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "button",
-          {
-            type: "button",
-            onClick: () => setPairingFilter(option.value),
-            className: cn(
-              "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-              pairingFilter === option.value ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
-            ),
-            children: [
-              option.label,
-              " (",
-              option.value === "all" ? captures.length : captureCounts[option.value],
-              ")"
-            ]
-          },
-          option.value
-        )) }),
-        capturesLoading && captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "mr-2 size-4 animate-spin" }),
-          "Loading captures…"
-        ] }) : capturesError ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-red-200 bg-red-50 rounded-xl px-6 text-center", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-8 text-red-400 mb-2" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-700", children: "Could not load these captures" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mt-1", children: capturesError }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              type: "button",
-              onClick: () => void reloadCaptures(),
-              className: "mt-3 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-200",
-              children: "Try again"
-            }
-          )
-        ] }) : captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300 mb-2" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No captures yet" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-400 mt-0.5", children: "JPEG and RAW files will appear here automatically when captured" })
-        ] }) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-8 text-slate-300 mb-2" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-400", children: "No captures match this filter" })
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-3 gap-3", children: [
-          qrMarkers.map((marker) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-            QrMarkerTile,
-            {
-              marker,
-              onOpen: () => handleOpenPhoto(marker.filePath)
-            },
-            marker.id
-          )),
-          filteredCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-            CaptureTile,
-            {
-              capture,
-              uploadStatus: capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : void 0,
-              onOpen: () => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? ""),
-              onDelete: capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto.id) : void 0,
-              onRetry: capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto.id) : void 0,
-              retrying: capture.legacyPhoto?.id === retryingPhotoId,
-              onRetryFile: handleRetryFile,
-              retryingFileId,
-              onUpdateReview: handleUpdateCaptureReview,
-              onReassign: capture.legacyPhoto ? () => {
-                setReassignPhoto(capture.legacyPhoto);
-                setReassignOpen(true);
-              } : void 0
-            },
-            capture.id
-          ))
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-4 mb-4", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit", children: "2. Live Captures" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm", children: captureFilterOptions.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                onClick: () => setPairingFilter(option.value),
+                className: cn(
+                  "rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5",
+                  pairingFilter === option.value ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                ),
+                children: [
+                  option.label,
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: cn(
+                    "px-1.5 py-0.5 rounded text-[9px] font-extrabold",
+                    pairingFilter === option.value ? "bg-slate-700 text-white" : "bg-slate-200 text-slate-600"
+                  ), children: option.value === "all" ? captures.length : captureCounts[option.value] })
+                ]
+              },
+              option.value
+            )) })
+          ] }),
+          capturesLoading && captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-64 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-3xl text-slate-400 shadow-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-8 animate-spin mb-4 text-teal-500" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-bold uppercase tracking-wider", children: "Loading captures..." })
+          ] }) : capturesError ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-64 flex flex-col items-center justify-center border border-red-200 bg-red-50 rounded-3xl px-6 text-center shadow-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-10 text-red-400 mb-3" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-base font-extrabold text-red-700", children: "Could not load these captures" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-medium text-red-600 mt-1", children: capturesError }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => void reloadCaptures(),
+                className: "mt-4 rounded-lg bg-red-600 px-4 py-2 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-red-700 shadow-sm",
+                children: "Try again"
+              }
+            )
+          ] }) : captures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-72 flex flex-col items-center justify-center bg-white border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center shadow-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-20 h-20 bg-teal-50 text-teal-600 rounded-3xl flex items-center justify-center mb-5 shadow-sm border border-teal-100", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-10" }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-extrabold text-slate-900 mb-2 tracking-tight", children: "Ready for photos" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-slate-500 max-w-sm text-sm font-medium leading-relaxed", children: "Show the QR code to the camera, then start shooting. Captures will appear here instantly." })
+          ] }) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-64 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-3xl shadow-sm text-center", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-10 text-slate-300 mb-3" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-extrabold text-slate-500 uppercase tracking-wider", children: "No captures match filter" })
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4", children: [
+            qrMarkers.map((marker) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              QrMarkerTile,
+              {
+                marker,
+                onOpen: () => handleOpenPhoto(marker.filePath)
+              },
+              marker.id
+            )),
+            filteredCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              CaptureTile,
+              {
+                capture,
+                uploadStatus: capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : void 0,
+                onOpen: () => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? ""),
+                onDelete: capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto.id) : void 0,
+                onRetry: capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto.id) : void 0,
+                retrying: capture.legacyPhoto?.id === retryingPhotoId,
+                onRetryFile: handleRetryFile,
+                retryingFileId,
+                onUpdateReview: handleUpdateCaptureReview,
+                onReassign: capture.legacyPhoto ? () => {
+                  setReassignPhoto(capture.legacyPhoto);
+                  setReassignOpen(true);
+                } : void 0
+              },
+              capture.id
+            ))
+          ] })
         ] })
-      ] })
-    ] }),
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full xl:w-[300px] shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-3xl shadow-sm border border-slate-200 p-6 flex flex-col sm:flex-row xl:flex-col items-center sm:items-stretch xl:items-center gap-6", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col flex-1 justify-center items-center sm:items-start xl:items-center min-w-0 w-full", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-4 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm", children: "1. Scan to link" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-[11px] text-slate-500 font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center sm:text-left xl:text-center border border-slate-100 hidden sm:block xl:hidden mb-4", children: [
+            student.firstName,
+            ".",
+            student.lastName,
+            ".",
+            student.generatedStudentId
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "hidden sm:block xl:hidden text-xs text-slate-400 font-medium max-w-[200px]", children: "Present this code to the camera before capturing portraits." })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 w-48 sm:w-40 xl:w-full flex flex-col items-center", children: student.simpleQr ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: student.simpleQr,
+            alt: "Student QR Code",
+            className: "w-full aspect-square bg-slate-50 rounded-2xl border-2 border-slate-100 p-3 shadow-inner",
+            draggable: false
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full aspect-square bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-8 text-slate-300 mb-2" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-bold text-slate-500 text-center", children: "QR not generated" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] font-medium text-slate-400 text-center mt-1", children: "Generate in the web app" })
+        ] }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-[11px] text-slate-500 mt-2 sm:hidden xl:block font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center border border-slate-100", children: [
+          student.firstName,
+          ".",
+          student.lastName,
+          ".",
+          student.generatedStudentId
+        ] })
+      ] }) })
+    ] }) }),
     reassignOpen && reassignPhoto && /* @__PURE__ */ jsxRuntimeExports.jsx(
       ReassignDialog,
       {
@@ -17614,6 +18219,95 @@ function StudentDetail({
         }
       }
     )
+  ] });
+}
+function GroupDetail({
+  group,
+  students,
+  groupCaptures,
+  isActiveCaptureTarget,
+  onMembershipChange,
+  onClearCaptureTarget,
+  onRefreshCaptures
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full relative bg-slate-50", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative", children: [
+      isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-full h-1 bg-teal-500" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col min-w-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-2", children: [
+          isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { className: "bg-teal-500 hover:bg-teal-500 text-white font-extrabold uppercase tracking-widest text-[10px] px-2.5 py-0.5 shadow-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-3 mr-1.5" }),
+            " Active Target"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-extrabold uppercase tracking-widest text-slate-400", children: "Custom Group" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words", children: group.name })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-end gap-3 justify-center shrink-0", children: [
+        isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: onClearCaptureTarget, className: "text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3.5 mr-1.5" }),
+          " Clear Target"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-[11px] font-bold uppercase tracking-widest text-slate-500", children: [
+          groupCaptures.length,
+          " Capture",
+          groupCaptures.length !== 1 ? "s" : "",
+          " recorded"
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full xl:w-[340px] shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[300px] xl:max-h-[calc(100vh-250px)]", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-6 border-b border-slate-100 bg-slate-50 shrink-0", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-3 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 w-fit shadow-sm", children: "1. Roster" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-base font-extrabold text-slate-900", children: "Select group members" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-medium text-slate-500 mt-1.5 leading-relaxed", children: "Photos will be assigned to all selected students." })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto p-3", children: students.map((student) => {
+          const isSelected = group.memberStudentIds.includes(student.id);
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: cn("flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border", isSelected ? "bg-teal-50/50 border-teal-200 shadow-sm" : "border-transparent hover:bg-slate-50"), children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("input", { type: "checkbox", className: "rounded border-slate-300 text-teal-600 focus:ring-teal-600 size-4", checked: isSelected, onChange: (e) => onMembershipChange(group, student.id, e.target.checked) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: cn("text-sm font-bold truncate", isSelected ? "text-teal-950" : "text-slate-700"), children: [
+                student.lastName,
+                ", ",
+                student.firstName
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] font-mono font-medium text-slate-500 truncate mt-0.5", children: student.generatedStudentId })
+            ] })
+          ] }, student.id);
+        }) })
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0 flex flex-col gap-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between mb-1", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit", children: "2. Group Captures" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { size: "sm", variant: "outline", onClick: onRefreshCaptures, className: "h-8 text-[10px] font-bold uppercase tracking-wider text-slate-600", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-3.5 mr-1.5" }),
+            " Refresh"
+          ] })
+        ] }),
+        groupCaptures.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-72 flex flex-col items-center justify-center bg-white border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center shadow-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-20 h-20 bg-teal-50 text-teal-600 rounded-3xl flex items-center justify-center mb-5 shadow-sm border border-teal-100", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Camera, { className: "size-10" }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-extrabold text-slate-900 mb-2 tracking-tight", children: "Ready for group photos" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-slate-500 max-w-sm text-sm font-medium leading-relaxed mb-4", children: "Make sure all subjects are framed, then start shooting." }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: onRefreshCaptures, className: "bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider px-6 shadow-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-4 mr-2" }),
+            " Check for Captures"
+          ] })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4", children: groupCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col gap-4 relative overflow-hidden group/tile transition-shadow hover:shadow-md", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-1 h-full bg-teal-500" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2 mb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-extrabold text-base text-slate-900 truncate", children: capture.baseFilename }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", children: capture.pairingStatus })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2 mt-1 flex-wrap", children: capture.files.map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => void window.api.invoke("photos:openInSystem", { filePath: file.storedPath }), className: "hover:text-teal-700 hover:bg-teal-50 transition-colors flex items-center justify-center gap-1.5 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 flex-1", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
+            " ",
+            file.fileRole
+          ] }, file.id)) })
+        ] }, capture.id)) })
+      ] })
+    ] }) })
   ] });
 }
 function LivePreview({
@@ -17682,37 +18376,45 @@ function LivePreview({
       cancel();
     };
   }, [photo.filePath, photo.previewUrl, traceId]);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 overflow-hidden rounded-xl border border-blue-200 bg-slate-950 shadow-sm", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between border-b border-white/10 px-3 py-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] font-semibold uppercase tracking-wider text-blue-200", children: "Live preview · latest capture" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-slate-400", children: "Prioritizing newest image" })
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-5 z-10 flex justify-between items-start pointer-events-none transition-opacity duration-300", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-2 bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded shadow-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-1.5 h-1.5 bg-white rounded-full animate-pulse shadow-[0_0_8px_rgba(255,255,255,0.8)]" }),
+          "Live Preview"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-mono font-medium text-white/80 drop-shadow-md bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm", children: photo.fileName })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold text-white/60 uppercase tracking-widest bg-black/40 px-2.5 py-1 rounded backdrop-blur-sm hidden md:block", children: "Prioritizing newest capture" })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "canvas",
-      {
-        ref: canvasRef,
-        role: "img",
-        "aria-label": `Latest capture ${photo.fileName}`,
-        className: cn(
-          "block max-h-96 w-full object-contain",
-          (!canvasPainted || showImageFallback) && "hidden"
-        )
-      }
-    ),
-    (!canvasPainted || showImageFallback) && !previewFailed && /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "img",
-      {
-        src: photo.previewUrl,
-        alt: `Latest capture ${photo.fileName}`,
-        className: "block max-h-96 w-full object-contain",
-        draggable: false,
-        onError: () => setPreviewFailed(true)
-      }
-    ),
-    previewFailed && !canvasPainted && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-40 flex-col items-center justify-center px-6 text-center", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "mb-2 size-7 text-amber-300" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-white", children: "Latest preview could not be displayed" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-xs text-slate-400", children: "The original photograph remains safely stored." })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 w-full bg-black relative flex items-center justify-center p-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "canvas",
+        {
+          ref: canvasRef,
+          role: "img",
+          "aria-label": `Latest capture ${photo.fileName}`,
+          className: cn(
+            "block max-h-full max-w-full object-contain",
+            (!canvasPainted || showImageFallback) && "hidden"
+          )
+        }
+      ),
+      (!canvasPainted || showImageFallback) && !previewFailed && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "img",
+        {
+          src: photo.previewUrl,
+          alt: `Latest capture ${photo.fileName}`,
+          className: "block max-h-full max-w-full object-contain",
+          draggable: false,
+          onError: () => setPreviewFailed(true)
+        }
+      ),
+      previewFailed && !canvasPainted && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-40 flex-col items-center justify-center px-6 text-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "mb-3 size-10 text-amber-500" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-base font-bold text-white", children: "Preview could not be displayed" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1.5 text-xs text-slate-400 font-medium", children: "The original photograph remains safely stored." })
+      ] })
     ] })
   ] });
 }
@@ -17757,17 +18459,28 @@ function GalleryThumbnail({
   }, [fallback, source]);
   const imageSource = fallback ?? generatedSource;
   if (!imageSource) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-full w-full items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) });
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-full w-full items-center justify-center bg-slate-100", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300" }) });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsx(
     "img",
     {
       src: imageSource,
       alt,
-      className: "h-full w-full object-cover",
+      className: "h-full w-full object-cover transition-opacity duration-300 ease-in-out",
       draggable: false
     }
   );
+}
+function CaptureCompleteness({ capture }) {
+  const hasJpeg = capture.pairingStatus === "complete" || capture.pairingStatus === "jpeg_only" || capture.pairingStatus === "unpaired" || capture.files.some((f) => f.fileFormat === "JPG" || f.fileFormat === "JPEG") || !!capture.legacyPhoto;
+  const hasRaw = capture.pairingStatus === "complete" || capture.pairingStatus === "raw_only" || capture.files.some((f) => f.fileRole === "RAW");
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-1.5 z-10", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-[1px] bg-black/70 backdrop-blur-md rounded px-[2px] py-[2px] w-fit shadow-sm border border-white/10", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("text-[9px] font-extrabold uppercase px-1.5 py-[1px] rounded-[2px] tracking-widest", hasJpeg ? "bg-white text-slate-900 shadow-sm" : "text-white/40"), title: hasJpeg ? "JPEG captured" : "Waiting for JPEG", children: "JPG" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("text-[9px] font-extrabold uppercase px-1.5 py-[1px] rounded-[2px] tracking-widest", hasRaw ? "bg-white text-slate-900 shadow-sm" : "text-white/40"), title: hasRaw ? "RAW captured" : "Waiting for RAW", children: "RAW" })
+    ] }),
+    capture.pairingStatus === "unpaired" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-red-600/90 backdrop-blur-md text-white text-[9px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm border border-red-500/50 w-fit", children: "Needs Review" })
+  ] });
 }
 function PhotoTile({
   photo,
@@ -17778,9 +18491,7 @@ function PhotoTile({
   onRetry,
   retrying
 }) {
-  const status = getUploadStatusMeta(uploadStatus?.uploadStatus);
-  const StatusIcon = status.icon;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full", children: [
     photo.thumbnailData || photo.previewUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       GalleryThumbnail,
       {
@@ -17788,59 +18499,44 @@ function PhotoTile({
         fallback: photo.thumbnailData,
         alt: photo.fileName
       }
-    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      "div",
-      {
-        className: cn(
-          "absolute top-1.5 right-1.5 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm",
-          status.badgeClass
-        ),
-        title: `Upload status: ${status.label}`,
-        children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(StatusIcon, { className: cn("size-3", status.iconClass) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: status.label })
-        ]
-      }
-    ),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn("text-[11px] font-medium flex items-center gap-1 mb-1", status.textClass), children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(StatusIcon, { className: "size-3" }),
-        status.label
-      ] }),
+    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex flex-col items-center justify-center gap-2.5 p-4 duration-200 z-20", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[11px] font-mono font-medium truncate w-full text-center mb-1 bg-black/40 px-2 py-1 rounded border border-white/10", children: photo.fileName }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
         {
           onClick: onOpen,
-          className: "w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1 flex items-center justify-center gap-1",
+          className: "w-full bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-[10px] uppercase tracking-widest py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm",
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3.5" }),
             " Open"
           ]
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "button",
-        {
-          onClick: onReassign,
-          className: "w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1",
-          children: "Reassign"
-        }
-      ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "button",
-        {
-          onClick: onDelete,
-          className: "w-full text-white text-xs bg-red-500/70 hover:bg-red-500 rounded px-2 py-1",
-          children: "Delete"
-        }
-      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-2 w-full", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: onReassign,
+            className: "w-full bg-white/10 text-white hover:bg-white/20 font-extrabold text-[10px] uppercase tracking-widest py-2 rounded-lg transition-colors border border-white/10",
+            children: "Reassign"
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: onDelete,
+            className: "w-full bg-red-500/80 text-white hover:bg-red-500 font-extrabold text-[10px] uppercase tracking-widest py-2 rounded-lg transition-colors border border-red-500/30",
+            children: "Delete"
+          }
+        )
+      ] }),
       uploadStatus?.uploadStatus === "error" && /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
         {
           onClick: onRetry,
           disabled: retrying,
-          className: "w-full text-white text-xs bg-red-500/70 hover:bg-red-500 disabled:opacity-60 rounded px-2 py-1 flex items-center justify-center gap-1",
+          className: "w-full text-white text-[10px] font-extrabold uppercase tracking-widest bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-lg py-2 flex items-center justify-center gap-1 mt-1 shadow-sm",
           children: [
             retrying && /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }),
             retrying ? "Retrying…" : "Retry upload"
@@ -17854,23 +18550,23 @@ function PhotoTile({
           download: photo.fileName,
           target: "_blank",
           rel: "noopener noreferrer",
-          className: "w-full text-white text-xs bg-teal-500/80 hover:bg-teal-500 rounded px-2 py-1 flex items-center justify-center gap-1",
+          className: "w-full text-teal-900 text-[10px] font-extrabold uppercase tracking-widest bg-teal-100 hover:bg-teal-200 rounded-lg py-2 flex items-center justify-center gap-1 mt-1 shadow-sm transition-colors",
           title: "Download uploaded photo",
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "size-3.5" }),
             " Download"
           ]
         }
       )
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: photo.fileName }) })
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-6 z-0 pointer-events-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] font-mono font-medium truncate", children: photo.fileName }) })
   ] });
 }
 function QrMarkerTile({
   marker,
   onOpen
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full", children: [
     marker.thumbnailData || marker.previewUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       GalleryThumbnail,
       {
@@ -17878,21 +18574,21 @@ function QrMarkerTile({
         fallback: marker.thumbnailData,
         alt: `QR marker ${marker.fileName}`
       }
-    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-400" }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-1.5 left-1.5 rounded-full bg-teal-700/90 px-2 py-1 text-[10px] font-semibold text-white shadow-sm", children: "QR MARKER" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-2 left-2 rounded bg-teal-600/90 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-widest text-white shadow-sm border border-teal-500/50 backdrop-blur-sm z-10", children: "QR MARKER" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex items-center justify-center p-4 z-20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {
         type: "button",
         onClick: onOpen,
-        className: "w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1 flex items-center justify-center gap-1",
+        className: "w-full bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-[10px] uppercase tracking-widest py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm",
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
-          " Open marker"
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3.5" }),
+          " Open Marker"
         ]
       }
     ) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: marker.fileName }) })
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-6 z-0 pointer-events-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] font-mono font-medium truncate", children: marker.fileName }) })
   ] });
 }
 function CaptureTile({
@@ -17910,7 +18606,7 @@ function CaptureTile({
   const photo = capture.legacyPhoto;
   const rawFile = capture.files.find((file) => file.fileRole === "RAW");
   if (photo) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full w-full bg-slate-100", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         PhotoTile,
         {
@@ -17923,7 +18619,7 @@ function CaptureTile({
           retrying
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureStatusBadge, { status: capture.pairingStatus }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-2 left-2 z-10 pointer-events-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureCompleteness, { capture }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureUploadBadge, { capture }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureReviewControls, { capture, onUpdateReview }),
       rawFile?.uploadStatus === "error" && onRetryFile && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -17932,31 +18628,33 @@ function CaptureTile({
           type: "button",
           onClick: () => onRetryFile(rawFile.id),
           disabled: retryingFileId === rawFile.id,
-          className: "absolute bottom-8 right-1.5 z-10 rounded bg-red-600/90 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-60",
+          className: "absolute bottom-10 right-2 z-30 rounded-lg bg-red-600 px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest text-white opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-60 shadow-sm",
           children: retryingFileId === rawFile.id ? "Retrying…" : "Retry RAW"
         }
       )
     ] });
   }
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-lg overflow-hidden aspect-square", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-10" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-semibold tracking-wide", children: "RAW ORIGINAL" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-slate-400", children: capture.files[0]?.fileFormat ?? "RAW" })
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full h-full flex flex-col items-center justify-center gap-3 text-slate-400 bg-white", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-16 h-16 rounded-2xl bg-slate-50 flex flex-col items-center justify-center border border-slate-100 shadow-inner", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-6 mb-1 text-slate-300" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[9px] font-extrabold tracking-widest uppercase text-slate-400", children: capture.files[0]?.fileFormat ?? "RAW" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold tracking-widest uppercase", children: "RAW Original" })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureStatusBadge, { status: capture.pairingStatus }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-2 left-2 z-10 pointer-events-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureCompleteness, { capture }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureUploadBadge, { capture }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureReviewControls, { capture, onUpdateReview }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-3", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-center text-xs text-white", children: "RAW file recorded without a JPEG partner" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex flex-col items-center justify-center gap-3 p-4 z-20", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-center text-[10px] font-bold uppercase tracking-widest text-white/80 bg-black/40 px-3 py-1.5 rounded-lg border border-white/10 mb-2 leading-relaxed", children: "RAW recorded without JPEG" }),
       rawFile && /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
         {
           type: "button",
           onClick: onOpen,
-          className: "w-full text-white text-xs bg-white/20 hover:bg-white/30 rounded px-2 py-1",
+          className: "w-full bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-[10px] uppercase tracking-widest py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm",
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3 inline mr-1" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3.5" }),
             " Open RAW"
           ]
         }
@@ -17967,12 +18665,12 @@ function CaptureTile({
           type: "button",
           onClick: () => onRetryFile(rawFile.id),
           disabled: retryingFileId === rawFile.id,
-          className: "w-full text-white text-xs bg-red-500/70 hover:bg-red-500 disabled:opacity-60 rounded px-2 py-1",
-          children: retryingFileId === rawFile.id ? "Retrying…" : "Retry RAW upload"
+          className: "w-full bg-red-600 text-white hover:bg-red-700 disabled:opacity-60 font-extrabold text-[10px] uppercase tracking-widest py-2.5 rounded-lg transition-colors shadow-sm mt-1",
+          children: retryingFileId === rawFile.id ? "Retrying…" : "Retry RAW Upload"
         }
       )
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] truncate", children: capture.baseFilename }) })
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-6 z-0 pointer-events-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[10px] font-mono font-medium truncate", children: capture.baseFilename }) })
   ] });
 }
 function CaptureReviewControls({
@@ -17980,7 +18678,11 @@ function CaptureReviewControls({
   onUpdateReview
 }) {
   if (!onUpdateReview) return null;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute bottom-1.5 left-1.5 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100", children: [
+  const hasActiveState = capture.favorite || capture.selected || capture.rejected;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn(
+    "absolute bottom-2 left-2 z-30 flex gap-1.5 transition-all duration-200",
+    hasActiveState ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0"
+  ), children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
@@ -17989,10 +18691,10 @@ function CaptureReviewControls({
         title: capture.favorite ? "Remove favorite" : "Mark favorite",
         onClick: () => onUpdateReview(capture.id, { favorite: !capture.favorite }),
         className: cn(
-          "rounded-full border p-1.5 shadow-sm",
-          capture.favorite ? "border-amber-300 bg-amber-100 text-amber-600" : "border-white/70 bg-black/50 text-white hover:bg-black/70"
+          "rounded-full p-2 shadow-sm transition-colors border",
+          capture.favorite ? "border-amber-300 bg-amber-100 text-amber-600" : "border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40"
         ),
-        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-3", fill: capture.favorite ? "currentColor" : "none" })
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-3.5", fill: capture.favorite ? "currentColor" : "none" })
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -18003,10 +18705,10 @@ function CaptureReviewControls({
         title: capture.selected ? "Remove from selection" : "Add to selection",
         onClick: () => onUpdateReview(capture.id, { selected: !capture.selected, rejected: false }),
         className: cn(
-          "rounded-full border p-1.5 shadow-sm",
-          capture.selected ? "border-teal-300 bg-teal-100 text-teal-700" : "border-white/70 bg-black/50 text-white hover:bg-black/70"
+          "rounded-full p-2 shadow-sm transition-colors border",
+          capture.selected ? "border-teal-300 bg-teal-100 text-teal-700" : "border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40"
         ),
-        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { className: "size-3" })
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { className: "size-3.5" })
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -18017,16 +18719,16 @@ function CaptureReviewControls({
         title: capture.rejected ? "Restore capture" : "Reject capture",
         onClick: () => onUpdateReview(capture.id, { rejected: !capture.rejected, selected: false }),
         className: cn(
-          "rounded-full border p-1.5 shadow-sm",
-          capture.rejected ? "border-red-300 bg-red-100 text-red-700" : "border-white/70 bg-black/50 text-white hover:bg-black/70"
+          "rounded-full p-2 shadow-sm transition-colors border",
+          capture.rejected ? "border-red-300 bg-red-100 text-red-700" : "border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40"
         ),
-        children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3" })
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3.5" })
       }
     )
   ] });
 }
 function CaptureUploadBadge({ capture }) {
-  const statuses = capture.files.filter((file) => file.fileRole === "RAW").map((file) => file.uploadStatus).filter(Boolean);
+  const statuses = capture.files.map((file) => file.uploadStatus).filter((status2) => Boolean(status2));
   if (statuses.length === 0) return null;
   const status = statuses.includes("error") ? "error" : statuses.includes("uploading") ? "uploading" : statuses.includes("pending") ? "pending" : "done";
   const meta = getUploadStatusMeta(status);
@@ -18035,33 +18737,14 @@ function CaptureUploadBadge({ capture }) {
     "span",
     {
       className: cn(
-        "absolute top-1.5 right-1.5 z-10 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm",
+        "absolute top-2 right-2 z-10 flex items-center justify-center rounded-full p-1.5 shadow-sm border backdrop-blur-md",
         meta.badgeClass
       ),
       title: `Capture upload: ${meta.label}`,
       children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(StatusIcon, { className: cn("size-3", meta.iconClass) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(StatusIcon, { className: cn("size-3.5", meta.iconClass) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: meta.label })
       ]
-    }
-  );
-}
-function CaptureStatusBadge({ status }) {
-  const meta = {
-    complete: { label: "JPEG + RAW", className: "bg-green-100/95 text-green-700 border-green-200" },
-    jpeg_only: { label: "JPEG only", className: "bg-amber-100/95 text-amber-700 border-amber-200" },
-    raw_only: { label: "RAW only", className: "bg-blue-100/95 text-blue-700 border-blue-200" },
-    unpaired: { label: "Needs review", className: "bg-red-100/95 text-red-700 border-red-200" },
-    pending: { label: "Pending", className: "bg-slate-100/95 text-slate-600 border-slate-200" }
-  }[status];
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(
-    "span",
-    {
-      className: cn(
-        "absolute top-1.5 left-1.5 z-10 rounded-full border px-1.5 py-1 text-[9px] font-semibold shadow-sm",
-        meta.className
-      ),
-      children: meta.label
     }
   );
 }
@@ -18071,41 +18754,41 @@ function getUploadStatusMeta(status) {
       return {
         label: "Waiting for upload",
         icon: Upload,
-        badgeClass: "bg-amber-50/95 border-amber-200",
-        iconClass: "text-amber-600",
+        badgeClass: "bg-black/60 border-white/10",
+        iconClass: "text-amber-400",
         textClass: "text-amber-200"
       };
     case "uploading":
       return {
         label: "Uploading…",
         icon: Loader,
-        badgeClass: "bg-blue-50/95 border-blue-200",
-        iconClass: "text-blue-600 animate-spin",
+        badgeClass: "bg-black/60 border-white/10",
+        iconClass: "text-blue-400 animate-spin",
         textClass: "text-blue-200"
       };
     case "done":
       return {
         label: "Uploaded",
         icon: CircleCheckBig,
-        badgeClass: "bg-green-50/95 border-green-200",
-        iconClass: "text-green-600",
+        badgeClass: "bg-black/60 border-white/10",
+        iconClass: "text-green-400",
         textClass: "text-green-200"
       };
     case "error":
       return {
         label: "Upload failed",
         icon: CircleX,
-        badgeClass: "bg-red-50/95 border-red-200",
-        iconClass: "text-red-600",
-        textClass: "text-red-200"
+        badgeClass: "bg-red-500/90 border-red-400",
+        iconClass: "text-white",
+        textClass: "text-white"
       };
     default:
       return {
         label: "Not uploaded",
         icon: CloudUpload,
-        badgeClass: "bg-slate-50/95 border-slate-200",
-        iconClass: "text-slate-500",
-        textClass: "text-slate-200"
+        badgeClass: "bg-black/60 border-white/10",
+        iconClass: "text-white/60",
+        textClass: "text-white/60"
       };
   }
 }
@@ -18136,40 +18819,51 @@ function ReassignDialog({
       setSaving(false);
     }
   }
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(Dialog, { open: true, title: "Reassign photo to student", onClose, className: "max-w-sm", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500 mb-3", children: "Select the student this photo belongs to:" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "input",
-      {
-        type: "text",
-        placeholder: "Search students…",
-        value: search,
-        onChange: (e) => setSearch(e.target.value),
-        className: "w-full px-3 py-2 text-sm border border-slate-200 rounded-lg mb-2 focus:outline-none focus:ring-1 focus:ring-teal-500"
-      }
-    ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "h-48 overflow-y-auto border border-slate-200 rounded-lg mb-4", children: filtered.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      "button",
-      {
-        onClick: () => setSelectedId(s.id),
-        className: cn(
-          "w-full px-3 py-2 text-left text-sm border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors",
-          selectedId === s.id ? "bg-teal-50 text-teal-700 font-medium" : "text-slate-700"
-        ),
-        children: [
-          s.lastName,
-          ", ",
-          s.firstName,
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ml-2 font-mono text-xs text-slate-400", children: s.generatedStudentId })
-        ]
-      },
-      s.id
-    )) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 justify-end", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { variant: "outline", size: "sm", onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { size: "sm", onClick: handleSave, disabled: !selectedId || saving, children: saving ? "Saving…" : "Reassign" })
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(Dialog, { open: true, title: "Reassign Photo", onClose, className: "max-w-md", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4 mt-2", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-slate-500", children: "Select the correct subject for this photo:" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-3 size-4 text-slate-400" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "input",
+        {
+          type: "text",
+          placeholder: "Search roster…",
+          value: search,
+          onChange: (e) => setSearch(e.target.value),
+          className: "w-full pl-9 pr-4 py-2.5 text-sm font-medium border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 shadow-sm"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-64 overflow-y-auto border border-slate-200 rounded-xl bg-slate-50 p-1.5 shadow-inner", children: [
+      filtered.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          onClick: () => setSelectedId(s.id),
+          className: cn(
+            "w-full px-3 py-2.5 text-left text-sm rounded-lg transition-colors flex items-center justify-between mb-1 last:mb-0",
+            selectedId === s.id ? "bg-teal-100 text-teal-900 border border-teal-200 shadow-sm" : "text-slate-700 hover:bg-white border border-transparent"
+          ),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "font-bold truncate mr-2", children: [
+              s.lastName,
+              ", ",
+              s.firstName
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-mono text-[11px] font-medium text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 shrink-0", children: s.generatedStudentId })
+          ]
+        },
+        s.id
+      )),
+      filtered.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "h-full flex items-center justify-center text-xs font-bold uppercase tracking-wider text-slate-400", children: "No subjects found" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3 justify-end pt-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { variant: "outline", onClick: onClose, className: "text-xs font-bold uppercase tracking-wider h-10 px-5", children: "Cancel" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: handleSave, disabled: !selectedId || saving, className: "bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider h-10 px-5 shadow-sm", children: [
+        saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-4 animate-spin mr-2" }) : null,
+        saving ? "Saving…" : "Reassign"
+      ] })
     ] })
-  ] });
+  ] }) });
 }
 function Settings({
   member,

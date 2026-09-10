@@ -4,7 +4,7 @@ import { registerProjectHandlers } from './ipc/projects'
 import { registerPhotoHandlers } from './ipc/photos'
 import { registerWatcherHandlers, stopAllWatchersForShutdown } from './ipc/watcher'
 import { registerDialogHandlers } from './ipc/dialog'
-import { registerUploadHandlers } from './ipc/upload'
+import { initializeLiveUploads, registerUploadHandlers } from './ipc/upload'
 import { registerCaptureExportHandlers } from './ipc/captureExport'
 import { registerProjectSyncHandlers } from './ipc/projectSync'
 import { fetchCurrentSession, registerAuthHandlers } from './ipc/auth'
@@ -107,6 +107,7 @@ app.whenReady().then(() => {
   registerWatcherHandlers()
   registerDialogHandlers()
   registerUploadHandlers()
+  initializeLiveUploads()
   registerCaptureExportHandlers()
   registerProjectSyncHandlers()
   registerAuthHandlers()

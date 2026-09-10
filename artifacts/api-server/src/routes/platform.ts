@@ -167,7 +167,7 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
     } else if (studio.storageStatus === "connection_requested") {
       alerts.push({ code: "storage_pending", label: "Storage connection is pending", severity: "attention" });
     } else if (studio.storageStatus === "using_platform") {
-      alerts.push({ code: "platform_storage", label: "Using platform storage fallback", severity: "attention" });
+      alerts.push({ code: "platform_storage", label: "Using platform owner Google Drive as primary backup", severity: "info" });
     }
     if (expiredDesktops.length > 0) {
       alerts.push({

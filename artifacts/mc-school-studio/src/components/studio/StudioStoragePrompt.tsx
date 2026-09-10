@@ -63,7 +63,7 @@ export function StudioStoragePrompt() {
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">Studio setup</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">Choose where {context.studio.name} stores its photos</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-              Your JPEG and RAW files are already protected by the platform work Drive. You can keep that coverage or request your own Google Drive or Dropbox connection.
+              Your JPEG and RAW files are already protected by the platform owner Google Drive. You can keep that primary backup or request your own Google Drive or Dropbox as an additional copy.
             </p>
           </div>
         </div>
@@ -82,7 +82,7 @@ export function StudioStoragePrompt() {
             className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDrive className="h-4 w-4" />}
-            Use platform storage
+            Keep primary backup
           </button>
         </div>
       </div>

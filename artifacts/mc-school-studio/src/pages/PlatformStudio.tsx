@@ -94,7 +94,7 @@ export default function PlatformStudio() {
         </section>
 
         <section className="overflow-hidden rounded-xl border bg-white">
-          <div className="border-b p-5"><h2 className="font-semibold">Studio storage connections</h2><p className="mt-1 text-sm text-slate-500">OAuth access is refreshed automatically. Revoke it when access must end; the platform Drive takes over.</p></div>
+           <div className="border-b p-5"><h2 className="font-semibold">Studio storage connections</h2><p className="mt-1 text-sm text-slate-500">OAuth access is refreshed automatically. Revoke it when access must end; the platform owner Google Drive remains the primary backup.</p></div>
           {data.storageConnections.length === 0 ? <p className="p-5 text-sm text-slate-500">No studio-owned storage connection.</p> : <div className="divide-y">{data.storageConnections.map((item) => <div key={item.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium capitalize">{readable(item.provider)}</p><p className="text-sm text-slate-500">{item.providerAccountEmail} · {item.status}</p></div>{item.status === "active" && <button disabled={busy !== null} onClick={() => void mutate(`storage-${item.id}`, `/api/platform/studios/${studioId}/storage-connections/${item.id}`, { method: "DELETE" }, "Storage access revoked")} className="rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">Revoke storage</button>}</div>)}</div>}
         </section>
 

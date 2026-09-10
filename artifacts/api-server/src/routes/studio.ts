@@ -132,9 +132,11 @@ router.get("/", requireAuth, async (req, res): Promise<void> => {
       role: member.role,
       status: member.status,
     },
-    activeStorageProvider: studio.storageStatus === "connected"
+    activeStorageProvider: "platform_google_drive",
+    secondaryStorageProvider: studio.storageStatus === "connected"
+      && isExternalProvider(studio.storageProvider)
       ? studio.storageProvider
-      : "platform_google_drive",
+      : null,
     connections,
     storageAudit: audit,
   });
@@ -292,9 +294,11 @@ router.put("/storage", requireAuth, async (req, res): Promise<void> => {
 
   res.json({
     studio: updated,
-    activeStorageProvider: updated.storageStatus === "connected"
+    activeStorageProvider: "platform_google_drive",
+    secondaryStorageProvider: updated.storageStatus === "connected"
+      && isExternalProvider(updated.storageProvider)
       ? updated.storageProvider
-      : "platform_google_drive",
+      : null,
   });
 });
 

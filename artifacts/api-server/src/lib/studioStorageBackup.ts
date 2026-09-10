@@ -8,7 +8,6 @@ import {
 } from "@workspace/db";
 import {
   backupFileToGoogleDrive,
-  GoogleDriveBackupError,
   type DriveBackupInput,
   type DriveRequester,
 } from "./googleDriveBackup";
@@ -137,6 +136,10 @@ async function markConnectionError(
 }
 
 export async function backupFileForStudio(input: DriveBackupInput): Promise<void> {
+  // The platform owner's Google Drive is the canonical first backup for every studio.
+  // A studio-owned provider is an optional second copy, never the only copy.
+  await backupFileToGoogleDrive(input);
+
   const [studio] = await db.select({
     storageProvider: studiosTable.storageProvider,
     storageStatus: studiosTable.storageStatus,
@@ -144,7 +147,6 @@ export async function backupFileForStudio(input: DriveBackupInput): Promise<void
   const provider = studio?.storageProvider;
   if (!studio || studio.storageStatus !== "connected"
     || (provider !== "google_drive" && provider !== "dropbox")) {
-    await backupFileToGoogleDrive(input);
     return;
   }
 
@@ -170,12 +172,7 @@ export async function backupFileForStudio(input: DriveBackupInput): Promise<void
     }).where(eq(studioStorageConnectionsTable.id, connection.id));
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Studio storage backup failed";
-    logger.error({ err: error, studioId: input.studioId, provider }, "Studio storage failed; using platform fallback");
+    logger.error({ err: error, studioId: input.studioId, provider }, "Secondary studio storage failed; platform backup is safe");
     await markConnectionError(input.studioId, provider, detail);
-    try {
-      await backupFileToGoogleDrive(input);
-    } catch (fallbackError) {
-      throw new GoogleDriveBackupError("Studio storage and platform fallback both failed", { cause: fallbackError });
-    }
   }
 }

@@ -24,6 +24,7 @@ type StudioContext = {
     status: string;
   };
   activeStorageProvider: StorageProvider;
+  secondaryStorageProvider: StorageProvider | null;
   connections: Array<{
     id: number;
     provider: "google_drive" | "dropbox";
@@ -47,18 +48,18 @@ const providerDetails: Record<StorageProvider, {
   icon: typeof Cloud;
 }> = {
   platform_google_drive: {
-    name: "Platform work Drive",
-    description: "Files are backed up to the managed Volume Capture workspace. No setup is required.",
+    name: "Platform owner Google Drive",
+    description: "The primary backup for every studio. New JPEG and RAW files are saved here first.",
     icon: HardDrive,
   },
   google_drive: {
     name: "Your Google Drive",
-    description: "Request a studio-owned Google Drive connection while platform storage continues protecting new uploads.",
+    description: "Optional secondary backup. Your files continue going to the platform owner Drive first.",
     icon: Cloud,
   },
   dropbox: {
     name: "Your Dropbox",
-    description: "Request a studio-owned Dropbox connection while platform storage continues protecting new uploads.",
+    description: "Optional secondary backup. Your files continue going to the platform owner Drive first.",
     icon: Database,
   },
 };
@@ -137,6 +138,7 @@ export default function StudioSettings() {
       const body = await response.json().catch(() => ({})) as {
         studio?: StudioContext["studio"];
         activeStorageProvider?: StorageProvider;
+        secondaryStorageProvider?: StorageProvider | null;
         error?: string;
       };
       if (!response.ok || !body.studio || !body.activeStorageProvider) {
@@ -146,6 +148,7 @@ export default function StudioSettings() {
         ...current,
         studio: body.studio!,
         activeStorageProvider: body.activeStorageProvider!,
+         secondaryStorageProvider: body.secondaryStorageProvider ?? null,
       } : current);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not update the storage choice.");
@@ -258,6 +261,7 @@ export default function StudioSettings() {
   const activeConnection = context.connections.find((connection) =>
     connection.provider === context.studio.storageProvider && connection.status === "active",
   );
+  const secondaryProvider = context.secondaryStorageProvider;
   const callbackStatus = new URLSearchParams(window.location.search).get("storage");
 
   return (
@@ -266,7 +270,7 @@ export default function StudioSettings() {
         <header>
           <p className="text-sm font-semibold text-teal-700">{context.studio.name}</p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Studio settings</h1>
-          <p className="mt-2 max-w-2xl text-slate-600">Manage your studio identity and where original JPEG and RAW files are backed up.</p>
+               <p className="mt-2 max-w-2xl text-slate-600">Manage your studio identity and backup copies of original JPEG and RAW files.</p>
         </header>
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -320,12 +324,12 @@ export default function StudioSettings() {
 
         <div>
           <h2 className="text-xl font-semibold text-slate-950">Photo storage</h2>
-          <p className="mt-1 text-sm text-slate-600">Choose where this studio’s original JPEG and RAW files are protected.</p>
+         <p className="mt-1 text-sm text-slate-600">The platform owner Google Drive is always the primary backup. You can add your own Google Drive or Dropbox as a second copy.</p>
         </div>
 
         {callbackStatus === "connected" && (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900">
-            Storage connected and verified. New backups will use the account shown below.
+             Secondary storage connected and verified. New files will continue to go to the platform owner Google Drive and will also be copied to the account shown below.
           </p>
         )}
         {(callbackStatus === "connection_failed" || callbackStatus === "invalid_state") && (
@@ -340,9 +344,10 @@ export default function StudioSettings() {
             <div>
               <h2 className="font-semibold text-emerald-950">Backup is active</h2>
               <p className="mt-1 text-sm leading-6 text-emerald-800">
-                {providerDetails[context.activeStorageProvider].name} is protecting uploads now.
-                {requestedProvider ? ` Your ${providerDetails[requestedProvider].name} request is pending; there is no gap in coverage.` : ""}
-                {context.studio.storageStatus === "connection_error" ? " The studio connection needs attention; platform storage has taken over automatically." : ""}
+                 {providerDetails[context.activeStorageProvider].name} is the primary backup for uploads.
+                 {secondaryProvider ? ` A second copy is also sent to ${providerDetails[secondaryProvider].name}.` : ""}
+                 {requestedProvider ? ` Your ${providerDetails[requestedProvider].name} request is pending; the primary backup remains active.` : ""}
+                 {context.studio.storageStatus === "connection_error" ? " The secondary connection needs attention; the primary platform backup remains active." : ""}
               </p>
             </div>
           </div>
@@ -356,6 +361,7 @@ export default function StudioSettings() {
             const details = providerDetails[provider];
             const Icon = details.icon;
             const isActive = context.activeStorageProvider === provider;
+            const isSecondary = context.secondaryStorageProvider === provider;
             const isRequested = requestedProvider === provider;
             const connection = context.connections.find((item) => item.provider === provider && item.status === "active");
             return (
@@ -364,7 +370,8 @@ export default function StudioSettings() {
                   <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${isActive ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-600"}`}>
                     <Icon className="h-5 w-5" />
                   </div>
-                  {isActive && <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-700">Active now</span>}
+                  {isActive && <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-700">Primary backup</span>}
+                  {isSecondary && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">Secondary backup</span>}
                   {isRequested && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">Requested</span>}
                 </div>
                 <h2 className="mt-5 text-lg font-semibold text-slate-950">{details.name}</h2>
@@ -404,7 +411,7 @@ export default function StudioSettings() {
           <section className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="font-semibold text-slate-950">Connected as {activeConnection.providerAccountEmail}</h2>
-              <p className="mt-1 text-sm text-slate-600">Disconnecting immediately returns new uploads to platform storage. Existing files are untouched.</p>
+                <p className="mt-1 text-sm text-slate-600">Disconnecting removes the secondary copy. New uploads continue to the platform owner Google Drive, and existing files are untouched.</p>
             </div>
             <button type="button" disabled={saving !== null} onClick={() => void disconnectStorage()} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md border border-red-200 px-4 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
               <Unplug className="h-4 w-4" />Disconnect
@@ -413,9 +420,9 @@ export default function StudioSettings() {
         )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold text-slate-950">How fallback works</h2>
+          <h2 className="font-semibold text-slate-950">How backups work</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Until a studio-owned provider is fully authorized, uploads continue to the managed platform work Drive. Changing a preference never moves, renames, or deletes files that were already backed up.
+            Every upload is first saved to the platform owner Google Drive. If a studio-owned provider is connected, Volume Capture creates a second copy there. If the secondary connection fails, the primary backup remains the successful upload destination. Changing a preference never moves, renames, or deletes files that were already backed up.
           </p>
         </section>
 

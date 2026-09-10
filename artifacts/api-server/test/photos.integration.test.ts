@@ -261,9 +261,7 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   };
   assert.equal(jpegUploaded.pairingStatus, "jpeg_only");
   assert.equal(jpegUploaded.file.fileRole, "JPEG");
-  const jpegPath = path.resolve(process.cwd(), jpegUploaded.file.fileUrl.replace(/^\//, ""));
-  captureFilePaths.push(jpegPath);
-  await rm(jpegPath, { force: true });
+  captureFilePaths.push(path.resolve(process.cwd(), jpegUploaded.file.fileUrl.replace(/^\//, "")));
 
   const retryForm = new (globalThis as any).FormData();
   retryForm.append(

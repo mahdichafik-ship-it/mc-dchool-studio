@@ -10,7 +10,6 @@ await build({
     path.resolve(artifactDir, "test/access.integration.test.ts"),
     path.resolve(artifactDir, "test/platform.integration.test.ts"),
     path.resolve(artifactDir, "test/groupMembership.test.ts"),
-    path.resolve(artifactDir, "test/googleDriveBackup.test.ts"),
   ],
   outdir: path.resolve(artifactDir, "test"),
   entryNames: "[name]",

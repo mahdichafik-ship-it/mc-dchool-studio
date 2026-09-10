@@ -43,9 +43,8 @@ async function usableCredentials(
 function googleRequester(accessToken: string): DriveRequester {
   return async (path, options = {}) => {
     const headers = new Headers(options.headers);
-    const isResumableUpload = /^https:\/\//i.test(path);
-    if (!isResumableUpload) headers.set("Authorization", `Bearer ${accessToken}`);
-    return fetch(isResumableUpload ? path : `https://www.googleapis.com${path}`, {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+    return fetch(`https://www.googleapis.com${path}`, {
       method: options.method,
       headers,
       body: options.body as any,

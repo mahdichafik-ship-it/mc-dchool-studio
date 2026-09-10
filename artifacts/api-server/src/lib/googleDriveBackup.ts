@@ -60,9 +60,8 @@ const platformDriveRequest: DriveRequester = async (
   path: string,
   options: { method?: string; headers?: Record<string, string>; body?: unknown } = {},
 ): Promise<Response> => {
-  const response = /^https:\/\//i.test(path)
-    ? await fetch(path, options as RequestInit)
-    : await new ReplitConnectors().proxy(CONNECTOR_NAME, path, options);
+  const connectors = new ReplitConnectors();
+  const response = await connectors.proxy(CONNECTOR_NAME, path, options);
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new GoogleDriveBackupError(
@@ -148,6 +147,7 @@ async function uploadFile(
   if (existing) return existing;
 
   const fileBytes = fs.readFileSync(filePath);
+  const boundary = `mc-school-studio-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const metadata = JSON.stringify({
     name: fileName,
     parents: [parentId],
@@ -159,31 +159,23 @@ async function uploadFile(
       mcSchoolStudioFileRole: fileRole,
     },
   });
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+    fileBytes,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
 
   const query = new URLSearchParams({
-    uploadType: "resumable",
+    uploadType: "multipart",
     fields: "id,name,mimeType,webViewLink,size",
   });
-  const sessionResponse = await request(`/upload/drive/v3/files?${query.toString()}`, {
+  const response = await request(`/upload/drive/v3/files?${query.toString()}`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json; charset=UTF-8",
-      "X-Upload-Content-Type": mimeType,
-      "X-Upload-Content-Length": String(fileBytes.length),
+      "Content-Type": `multipart/related; boundary=${boundary}`,
     },
-    body: metadata,
-  });
-  const uploadUrl = sessionResponse.headers.get("location");
-  if (!uploadUrl || !/^https:\/\//i.test(uploadUrl)) {
-    throw new GoogleDriveBackupError("Google Drive did not return a resumable upload URL.");
-  }
-  const response = await request(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "Content-Type": mimeType,
-      "Content-Length": String(fileBytes.length),
-    },
-    body: fileBytes,
+    body,
   });
   if (!response.ok) throw new GoogleDriveBackupError(`Google Drive returned HTTP ${response.status}`);
   return await response.json() as DriveFile;

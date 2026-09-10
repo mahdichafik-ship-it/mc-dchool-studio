@@ -602,7 +602,6 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
           .from(groupCaptureFilesTable).innerJoin(groupCapturesTable, eq(groupCaptureFilesTable.captureId, groupCapturesTable.id))
           .where(and(eq(groupCaptureFilesTable.desktopConnectionId, connection.connectionId), eq(groupCaptureFilesTable.clientUploadId, clientUploadId))).limit(1);
         if (existing) {
-          discardUploadedFile(req);
           if (existing.capture.projectId !== projectId || existing.capture.groupId !== groupId) throw new Error("Desktop upload identifier was reused for a different group");
           if (captureBatch && existing.file.captureBatchId === null) {
             const [attached] = await tx.update(groupCaptureFilesTable)
@@ -612,12 +611,12 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
                 isNull(groupCaptureFilesTable.captureBatchId),
               ))
               .returning();
-            if (attached) return { capture: existing.capture, file: attached, reused: true };
+            if (attached) return { capture: existing.capture, file: attached, backupFilePath: req.file!.path, reused: true };
             const [current] = await tx.select().from(groupCaptureFilesTable)
               .where(eq(groupCaptureFilesTable.id, existing.file.id)).limit(1);
-            return { capture: existing.capture, file: current ?? existing.file, reused: true };
+            return { capture: existing.capture, file: current ?? existing.file, backupFilePath: req.file!.path, reused: true };
           }
-          return { ...existing, reused: true };
+          return { ...existing, backupFilePath: req.file!.path, reused: true };
         }
       }
       let [capture] = await tx.select().from(groupCapturesTable).where(and(eq(groupCapturesTable.projectId, projectId), eq(groupCapturesTable.captureKey, captureKey))).limit(1);
@@ -629,7 +628,6 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
       }).returning();
       const [existingRole] = await tx.select().from(groupCaptureFilesTable).where(and(eq(groupCaptureFilesTable.captureId, capture.id), eq(groupCaptureFilesTable.fileRole, role))).limit(1);
       if (existingRole) {
-        discardUploadedFile(req);
         if (
           captureBatch
           && existingRole.captureBatchId === null
@@ -642,12 +640,12 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
               isNull(groupCaptureFilesTable.captureBatchId),
             ))
             .returning();
-          if (attached) return { capture, file: attached, reused: true };
+          if (attached) return { capture, file: attached, backupFilePath: req.file!.path, reused: true };
           const [current] = await tx.select().from(groupCaptureFilesTable)
             .where(eq(groupCaptureFilesTable.id, existingRole.id)).limit(1);
-          return { capture, file: current ?? existingRole, reused: true };
+          return { capture, file: current ?? existingRole, backupFilePath: req.file!.path, reused: true };
         }
-        return { capture, file: existingRole, reused: true };
+        return { capture, file: existingRole, backupFilePath: req.file!.path, reused: true };
       }
       const [file] = await tx.insert(groupCaptureFilesTable).values({
         captureId: capture.id, fileRole: role, fileFormat: captureFileFormat(req.file!.originalname),
@@ -657,10 +655,11 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
       }).returning();
       const files = await tx.select({ fileRole: groupCaptureFilesTable.fileRole }).from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.captureId, capture.id));
       [capture] = await tx.update(groupCapturesTable).set({ pairingStatus: captureStatusForFiles(files), updatedAt: new Date() }).where(eq(groupCapturesTable.id, capture.id)).returning();
-      return { capture, file, reused: false };
+      return { capture, file, backupFilePath: req.file!.path, reused: false };
     });
-    try { await backupGroupUploadedFile(projectId, groupId, resolveFilePath(result.file.fileUrl), result.file.originalFilename, result.file.fileRole as "JPEG" | "RAW", result.file.fileFormat, `group-capture:${result.capture.id}:${result.file.fileRole}`); }
+    try { await backupGroupUploadedFile(projectId, groupId, result.backupFilePath, result.file.originalFilename, result.file.fileRole as "JPEG" | "RAW", result.file.fileFormat, `group-capture:${result.capture.id}:${result.file.fileRole}`); }
     catch (error) { if (error instanceof GoogleDriveBackupError) { res.status(503).json({ error: "Capture saved locally, but Google Drive backup failed. Retry the upload.", code: "GOOGLE_DRIVE_BACKUP_FAILED" }); return; } throw error; }
+    if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json({ captureId: result.capture.id, captureKey: result.capture.captureKey, pairingStatus: result.capture.pairingStatus, file: result.file, reused: result.reused });
   } catch (error) { discardUploadedFile(req); next(error); }
 });
@@ -742,7 +741,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             captureBatchId: captureBatch?.id ?? null,
           })
           .returning();
-        return { photo, reused: false };
+        return { photo, backupFilePath: req.file!.path, reused: false };
       }
 
       return db.transaction(async (tx) => {
@@ -759,11 +758,10 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
           .limit(1);
 
         if (existing) {
-          discardUploadedFile(req);
           if (existing.projectId !== projectId || existing.studentId !== studentId) {
             throw new Error("Desktop upload identifier was reused for a different photo target");
           }
-          return { photo: existing, reused: true };
+          return { photo: existing, backupFilePath: req.file!.path, reused: true };
         }
 
         const [photo] = await tx
@@ -781,7 +779,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             clientUploadId,
           })
           .returning();
-        return { photo, reused: false };
+        return { photo, backupFilePath: req.file!.path, reused: false };
       });
     };
 
@@ -790,7 +788,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       await backupUploadedFile(
         projectId,
         studentId,
-        resolveFilePath(result.photo.fileUrl),
+        result.backupFilePath,
         result.photo.fileName,
         "JPEG",
         "JPG",
@@ -807,6 +805,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       }
       throw error;
     }
+    if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json(photoToResponse(result.photo));
   } catch (error) {
     discardUploadedFile(req);
@@ -904,8 +903,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
           ))
           .limit(1);
         if (existingByClientId) {
-          discardUploadedFile(req);
-          return { capture: existingByClientId.capture, file: existingByClientId.file, reused: true };
+          return { capture: existingByClientId.capture, file: existingByClientId.file, backupFilePath: uploadedFile.path, reused: true };
         }
       }
 
@@ -947,8 +945,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         ))
         .limit(1);
       if (existingByRole) {
-        discardUploadedFile(req);
-        return { capture, file: existingByRole, reused: true };
+        return { capture, file: existingByRole, backupFilePath: uploadedFile.path, reused: true };
       }
 
       const [file] = await tx
@@ -977,7 +974,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         .set({ pairingStatus, updatedAt: new Date() })
         .where(eq(capturesTable.id, capture.id))
         .returning();
-      return { capture, file, reused: false };
+      return { capture, file, backupFilePath: uploadedFile.path, reused: false };
     });
 
     const fileRole = result.file.fileRole === "RAW"
@@ -993,7 +990,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       await backupUploadedFile(
         projectId,
         studentId,
-        resolveFilePath(result.file.fileUrl),
+        result.backupFilePath,
         result.file.originalFilename,
         fileRole,
         result.file.fileFormat,
@@ -1018,6 +1015,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       throw error;
     }
 
+    if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,
       captureKey: result.capture.captureKey,

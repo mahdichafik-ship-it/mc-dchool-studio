@@ -20,6 +20,7 @@ import StudioSettings from "./pages/StudioSettings";
 import PlatformStudio from "./pages/PlatformStudio";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
+import Delivery from "./pages/Delivery";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -182,6 +183,7 @@ function Router() {
       <Route path="/sign-up/*?" component={SignUpPage} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
+      <Route path="/delivery/:slug" component={Delivery} />
       <Route path="/desktop/connect" component={DesktopConnect} />
       <Route path="/studio-invite/:code" component={StudioInvite} />
       

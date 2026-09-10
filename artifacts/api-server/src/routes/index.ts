@@ -12,6 +12,7 @@ import teamRouter from "./team";
 import platformRouter from "./platform";
 import studioRouter from "./studio";
 import groupsRouter from "./groups";
+import deliveryRouter from "./delivery";
 
 const router = Router();
 
@@ -32,5 +33,6 @@ router.use("/desktop", photosRouter);
 router.use("/team", teamRouter);
 router.use("/platform", platformRouter);
 router.use("/studio", studioRouter);
+router.use(deliveryRouter);
 
 export default router;

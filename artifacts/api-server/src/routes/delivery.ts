@@ -1,20 +1,25 @@
 import { Router } from "express";
-import fs from "node:fs";
-import path from "node:path";
+import { Readable } from "node:stream";
+import sharp from "sharp";
+import Stripe from "stripe";
 import {
   db,
   deliveryAccessesTable,
   deliveryGalleriesTable,
+  deliveryOrderItemsTable,
+  deliveryOrdersTable,
   projectsTable,
   studentPhotosTable,
   studentsTable,
   studiosTable,
 } from "@workspace/db";
-import { and, eq, isNull } from "drizzle-orm";
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject } from "../lib/studioAccess";
 import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
+import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { getUncachableStripeClient } from "../lib/stripeClient";
 
 const router = Router();
 const DELIVERY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -93,8 +98,45 @@ function activeGallery(gallery: typeof deliveryGalleriesTable.$inferSelect): boo
   return gallery.status === "published" && (!gallery.expiresAt || gallery.expiresAt > new Date());
 }
 
-function photoFilePath(fileUrl: string): string {
-  return path.join(process.cwd(), fileUrl.replace(/^\//, ""));
+async function getDeliveryPrice(): Promise<Stripe.Price> {
+  const stripe = await getUncachableStripeClient();
+  const products = await stripe.products.search({
+    query: "name:'Volume Capture digital photo' AND active:'true'",
+  });
+  const product = products.data[0];
+  if (!product) throw new Error("The delivery photo price has not been configured");
+  const prices = await stripe.prices.list({ product: product.id, active: true, type: "one_time", limit: 20 });
+  const price = prices.data.find((candidate) => candidate.metadata.kind === "delivery_photo") ?? prices.data[0];
+  if (!price || !price.unit_amount) throw new Error("The delivery photo price has not been configured");
+  return price;
+}
+
+async function getAccessForToken(galleryId: number, accessId: number) {
+  const [access] = await db
+    .select({ access: deliveryAccessesTable, student: studentsTable })
+    .from(deliveryAccessesTable)
+    .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
+    .where(and(
+      eq(deliveryAccessesTable.id, accessId),
+      eq(deliveryAccessesTable.galleryId, galleryId),
+      isNull(deliveryAccessesTable.revokedAt),
+    ))
+    .limit(1);
+  return access ?? null;
+}
+
+async function photoHasBeenPaid(accessId: number, photoId: number): Promise<boolean> {
+  const [item] = await db
+    .select({ id: deliveryOrderItemsTable.id })
+    .from(deliveryOrderItemsTable)
+    .innerJoin(deliveryOrdersTable, eq(deliveryOrderItemsTable.orderId, deliveryOrdersTable.id))
+    .where(and(
+      eq(deliveryOrdersTable.accessId, accessId),
+      eq(deliveryOrdersTable.status, "paid"),
+      eq(deliveryOrderItemsTable.photoId, photoId),
+    ))
+    .limit(1);
+  return Boolean(item);
 }
 
 // Public metadata for the code-entry page. No student or photo information is returned.
@@ -153,16 +195,7 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
     return;
   }
 
-  const [access] = await db
-    .select({ access: deliveryAccessesTable, student: studentsTable })
-    .from(deliveryAccessesTable)
-    .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
-    .where(and(
-      eq(deliveryAccessesTable.id, verified.accessId),
-      eq(deliveryAccessesTable.galleryId, row.gallery.id),
-      isNull(deliveryAccessesTable.revokedAt),
-    ))
-    .limit(1);
+  const access = await getAccessForToken(row.gallery.id, verified.accessId);
   if (!access) {
     res.status(401).json({ error: "Delivery access has been revoked" });
     return;
@@ -183,12 +216,134 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       firstName: access.student.firstName,
       lastName: access.student.lastName,
     },
-    photos: photos.map((photo) => ({
+    price: await getDeliveryPrice().then((price) => ({
+      unitAmount: price.unit_amount,
+      currency: price.currency,
+    })),
+    photos: photos.filter((photo) => photo.durableObjectPath).map((photo) => ({
       id: photo.id,
       fileName: photo.fileName,
       mimeType: photo.mimeType,
-      fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?token=${encodeURIComponent(String(req.header("x-delivery-token") ?? req.query.token ?? ""))}`,
+      fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?preview=1&token=${encodeURIComponent(String(req.header("x-delivery-token") ?? req.query.token ?? ""))}`,
+      downloadUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?download=1&token=${encodeURIComponent(String(req.header("x-delivery-token") ?? req.query.token ?? ""))}`,
     })),
+  });
+});
+
+router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
+  const row = await getGalleryBySlug(String(req.params.slug));
+  if (!row || !activeGallery(row.gallery)) {
+    res.status(404).json({ error: "Delivery gallery not found or no longer available" });
+    return;
+  }
+  const verified = verifyToken(String(req.body?.token ?? ""), row.gallery.id);
+  if (!verified) {
+    res.status(401).json({ error: "Delivery access has expired. Enter the code again." });
+    return;
+  }
+  const access = await getAccessForToken(row.gallery.id, verified.accessId);
+  if (!access) {
+    res.status(401).json({ error: "Delivery access has been revoked" });
+    return;
+  }
+  const rawPhotoIds: unknown[] = Array.isArray(req.body?.photoIds) ? req.body.photoIds : [];
+  const photoIds: number[] = [...new Set(
+    rawPhotoIds
+      .map((id) => Number(id))
+      .filter((id): id is number => Number.isInteger(id) && id > 0),
+  )];
+  if (photoIds.length < 1 || photoIds.length > 100) {
+    res.status(400).json({ error: "Select between 1 and 100 photos" });
+    return;
+  }
+
+  const photos = await db
+    .select()
+    .from(studentPhotosTable)
+    .where(and(
+      eq(studentPhotosTable.projectId, row.gallery.projectId),
+      eq(studentPhotosTable.studentId, access.student.id),
+      inArray(studentPhotosTable.id, photoIds),
+      isNotNull(studentPhotosTable.durableObjectPath),
+    ));
+  if (photos.length !== photoIds.length) {
+    res.status(400).json({ error: "One or more selected photos are not available for ordering" });
+    return;
+  }
+
+  try {
+    const price = await getDeliveryPrice();
+    const stripe = await getUncachableStripeClient();
+    const [order] = await db.insert(deliveryOrdersTable).values({
+      galleryId: row.gallery.id,
+      accessId: access.access.id,
+      status: "pending",
+      stripeCheckoutSessionId: `pending-${randomUUID()}`,
+      amountTotal: price.unit_amount! * photos.length,
+      currency: price.currency,
+    }).returning();
+    await db.insert(deliveryOrderItemsTable).values(photos.map((photo) => ({
+      orderId: order.id,
+      photoId: photo.id,
+      unitAmount: price.unit_amount!,
+      currency: price.currency,
+    })));
+
+    const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const origin = `${forwardedProto || req.protocol}://${req.get("host")}`;
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [{ price: price.id, quantity: photos.length }],
+      customer_creation: "always",
+      metadata: { orderId: String(order.id), gallerySlug: row.gallery.slug },
+      success_url: `${origin}/delivery/${row.gallery.slug}?paid=1&order=${order.id}`,
+      cancel_url: `${origin}/delivery/${row.gallery.slug}?cancelled=1`,
+    });
+    await db.update(deliveryOrdersTable).set({
+      stripeCheckoutSessionId: session.id,
+    }).where(eq(deliveryOrdersTable.id, order.id));
+    res.json({ checkoutUrl: session.url, orderId: order.id });
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : "Checkout is not available yet" });
+  }
+});
+
+router.get("/delivery/:slug/orders/:orderId", async (req, res): Promise<void> => {
+  const row = await getGalleryBySlug(String(req.params.slug));
+  const orderId = Number(req.params.orderId);
+  if (!row || !activeGallery(row.gallery) || !Number.isInteger(orderId)) {
+    res.status(404).json({ error: "Order not found" });
+    return;
+  }
+  const verified = verifyToken(String(req.query.token ?? req.header("x-delivery-token") ?? ""), row.gallery.id);
+  if (!verified) {
+    res.status(401).json({ error: "Delivery access has expired" });
+    return;
+  }
+  const [order] = await db
+    .select()
+    .from(deliveryOrdersTable)
+    .where(and(
+      eq(deliveryOrdersTable.id, orderId),
+      eq(deliveryOrdersTable.galleryId, row.gallery.id),
+      eq(deliveryOrdersTable.accessId, verified.accessId),
+    ))
+    .limit(1);
+  if (!order) {
+    res.status(404).json({ error: "Order not found" });
+    return;
+  }
+  const items = await db
+    .select({ photoId: deliveryOrderItemsTable.photoId })
+    .from(deliveryOrderItemsTable)
+    .where(eq(deliveryOrderItemsTable.orderId, order.id));
+  res.json({
+    orderId: order.id,
+    status: order.status,
+    amountTotal: order.amountTotal,
+    currency: order.currency,
+    paidAt: order.paidAt?.toISOString() ?? null,
+    photoIds: items.map((item) => item.photoId),
   });
 });
 
@@ -222,15 +377,35 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     return;
   }
 
-  const filePath = photoFilePath(photo.photo.fileUrl);
-  if (!fs.existsSync(filePath)) {
-    res.status(404).json({ error: "Photo file is not available" });
+  if (!photo.photo.durableObjectPath) {
+    res.status(404).json({ error: "Photo is not available for delivery" });
     return;
   }
+  const isPreview = req.query.preview === "1";
+  if (!isPreview && !(await photoHasBeenPaid(verified.accessId, photoId))) {
+    res.status(402).json({ error: "Complete payment before downloading this photo" });
+    return;
+  }
+  let objectFile;
+  try {
+    objectFile = await objectStorageService.getObjectEntityFile(photo.photo.durableObjectPath);
+  } catch (error) {
+    if (error instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Photo file is not available" });
+      return;
+    }
+    throw error;
+  }
   res.setHeader("Content-Type", photo.photo.mimeType || "image/jpeg");
-  res.setHeader("Content-Disposition", `inline; filename="${photo.photo.fileName.replace(/["\r\n]/g, "_")}"`);
+  res.setHeader("Content-Disposition", `${isPreview ? "inline" : "attachment"}; filename="${photo.photo.fileName.replace(/["\r\n]/g, "_")}"`);
   res.setHeader("Cache-Control", "private, max-age=300");
-  res.sendFile(filePath);
+  const input = objectFile.createReadStream();
+  if (isPreview) {
+    res.setHeader("Content-Type", "image/jpeg");
+    input.pipe(sharp().resize({ width: 1200, withoutEnlargement: true }).jpeg({ quality: 78 })).pipe(res);
+    return;
+  }
+  input.pipe(res);
 });
 
 // Studio-owner/admin controls.
@@ -268,6 +443,21 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
   if (!project) {
     res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [undeliverablePhoto] = await db
+    .select({ id: studentPhotosTable.id })
+    .from(studentPhotosTable)
+    .where(and(
+      eq(studentPhotosTable.projectId, projectId),
+      isNull(studentPhotosTable.durableObjectPath),
+    ))
+    .limit(1);
+  if (undeliverablePhoto) {
+    res.status(409).json({
+      error: "Some photos are not in durable storage yet. Re-upload them before publishing delivery.",
+      code: "PHOTO_STORAGE_INCOMPLETE",
+    });
     return;
   }
 

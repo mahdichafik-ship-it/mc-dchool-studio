@@ -28,3 +28,4 @@
 - [Desktop late-student reconciliation](desktop-late-student-reconciliation.md) — students added during a shoot stay capture-ready offline and must reconcile to cloud identity before upload.
 - [Project-type compatibility](project-type-compatibility.md) — corporate headshots reuse school data concepts internally; absent or unknown types must remain school-safe.
 - [Volume Capture delivery access](volume-capture-delivery-access.md) — private delivery uses guardian-friendly subject access codes, not child-managed accounts.
+- [Stripe migration compatibility](stripe-migration-compatibility.md) — modern Stripe schemas may need migration-ledger reconciliation before legacy sync migrations can start safely.

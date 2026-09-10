@@ -12,6 +12,7 @@ import {
 import router from "./routes";
 import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger";
+import { WebhookHandlers } from "./lib/webhookHandlers";
 
 const app = express();
 
@@ -20,6 +21,21 @@ app.use(pinoHttp({ logger }));
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
+
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  const signature = req.headers["stripe-signature"];
+  if (!signature || Array.isArray(signature)) {
+    res.status(400).json({ error: "Missing Stripe signature" });
+    return;
+  }
+  try {
+    await WebhookHandlers.processWebhook(req.body as Buffer, signature);
+    res.json({ received: true });
+  } catch (error) {
+    logger.error({ err: error }, "Stripe webhook processing failed");
+    res.status(400).json({ error: "Webhook could not be processed" });
+  }
+});
 
 // Note: multer handles its own body parsing for multipart routes.
 // JSON/urlencoded parsers must come after the Clerk proxy but before routes.

@@ -24,6 +24,7 @@ import { canAccessDesktopProject, canAccessProject } from "../lib/studioAccess";
 import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
 import { GoogleDriveBackupError } from "../lib/googleDriveBackup";
 import { backupFileForStudio } from "../lib/studioStorageBackup";
+import { storePhotoDurably } from "../lib/durablePhotoStorage";
 
 const router = Router({ mergeParams: true });
 
@@ -694,6 +695,18 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       res.status(400).json({ error: "No photo uploaded (use field name 'photo')" });
       return;
     }
+    let durableObjectPath: string;
+    try {
+      durableObjectPath = await storePhotoDurably(req.file.path, req.file.mimetype);
+    } catch (error) {
+      logger.error({ err: error, projectId, studentId }, "Durable photo storage failed");
+      discardUploadedFile(req);
+      res.status(503).json({
+        error: "Photo could not be stored safely. Please retry the upload.",
+        code: "PHOTO_STORAGE_FAILED",
+      });
+      return;
+    }
 
     const relPath = path
       .relative(path.resolve(process.cwd(), "uploads"), req.file.path)
@@ -723,6 +736,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             studentId,
             fileName: req.file!.originalname,
             fileUrl,
+            durableObjectPath,
             mimeType: req.file!.mimetype,
             capturedAt: capturedAt || null,
             captureBatchId: captureBatch?.id ?? null,
@@ -759,6 +773,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
             studentId,
             fileName: req.file!.originalname,
             fileUrl,
+            durableObjectPath,
             mimeType: req.file!.mimetype,
             capturedAt: capturedAt || null,
             captureBatchId: captureBatch?.id ?? null,
@@ -837,6 +852,18 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     if (!role || (requestedRole && requestedRole !== role)) {
       discardUploadedFile(req);
       res.status(400).json({ error: "Capture file role does not match its filename" });
+      return;
+    }
+    let durableObjectPath: string;
+    try {
+      durableObjectPath = await storePhotoDurably(uploadedFile.path, uploadedFile.mimetype || "application/octet-stream");
+    } catch (error) {
+      logger.error({ err: error, projectId, studentId }, "Durable capture storage failed");
+      discardUploadedFile(req);
+      res.status(503).json({
+        error: "Capture could not be stored safely. Please retry the upload.",
+        code: "PHOTO_STORAGE_FAILED",
+      });
       return;
     }
     if (!captureKey || captureKey.length > 500) {
@@ -932,6 +959,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
           fileFormat: body.fileFormat?.trim() || captureFileFormat(uploadedFile.originalname),
           originalFilename: uploadedFile.originalname,
           fileUrl,
+          durableObjectPath,
           mimeType: uploadedFile.mimetype || (role === "JPEG" ? "image/jpeg" : "application/octet-stream"),
           fileSize: uploadedFile.size,
           captureBatchId: captureBatch?.id ?? null,

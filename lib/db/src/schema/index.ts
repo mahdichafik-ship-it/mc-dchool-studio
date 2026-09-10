@@ -8,3 +8,4 @@ export * from "./storage";
 export * from "./platformAudit";
 export * from "./groups";
 export * from "./deliveries";
+export * from "./deliveryOrders";

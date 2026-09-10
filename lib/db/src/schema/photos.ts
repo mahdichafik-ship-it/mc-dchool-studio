@@ -13,6 +13,7 @@ export const studentPhotosTable = pgTable("student_photos", {
     .references(() => studentsTable.id, { onDelete: "cascade" }),
   fileName: text("file_name").notNull(),
   fileUrl: text("file_url").notNull(),
+  durableObjectPath: text("durable_object_path"),
   mimeType: text("mime_type").notNull().default("image/jpeg"),
   capturedAt: text("captured_at"),
   captureBatchId: integer("capture_batch_id")

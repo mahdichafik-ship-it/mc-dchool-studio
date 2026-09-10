@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -118,6 +118,15 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // stripe-replit-sync resolves migrations relative to its bundled runtime.
+  // Copy the package's SQL migrations beside the API bundle so startup
+  // migrations also work in the production-style esbuild output.
+  await cp(
+    path.resolve(artifactDir, "../../node_modules/stripe-replit-sync/dist/migrations"),
+    path.join(distDir, "migrations"),
+    { recursive: true },
+  );
 }
 
 buildAll().catch((err) => {

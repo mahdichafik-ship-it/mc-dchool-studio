@@ -44,7 +44,8 @@ function googleRequester(accessToken: string): DriveRequester {
   return async (path, options = {}) => {
     const headers = new Headers(options.headers);
     headers.set("Authorization", `Bearer ${accessToken}`);
-    return fetch(`https://www.googleapis.com${path}`, {
+    const url = /^https:\/\//i.test(path) ? path : `https://www.googleapis.com${path}`;
+    return fetch(url, {
       method: options.method,
       headers,
       body: options.body as any,

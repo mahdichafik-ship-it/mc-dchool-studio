@@ -9,6 +9,7 @@ import {
   deliveryGalleriesTable,
   deliveryOrderItemsTable,
   deliveryOrdersTable,
+  classesTable,
   projectsTable,
   studentPhotosTable,
   studentsTable,
@@ -521,21 +522,23 @@ router.get("/projects/:projectId/delivery/access-cards", requireAuth, async (req
     return;
   }
   const rows = await db
-    .select({ access: deliveryAccessesTable, student: studentsTable })
+    .select({ access: deliveryAccessesTable, student: studentsTable, className: classesTable.className })
     .from(deliveryAccessesTable)
     .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
+    .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
     .where(and(eq(deliveryAccessesTable.galleryId, gallery.id), isNull(deliveryAccessesTable.revokedAt)));
 
   const forwardedProtocol = String(req.get("x-forwarded-proto") ?? "").split(",")[0].trim();
   const forwardedHost = String(req.get("x-forwarded-host") ?? "").split(",")[0].trim();
   const origin = `${forwardedProtocol || req.protocol}://${forwardedHost || req.get("host")}`;
-  res.json(await Promise.all(rows.map(async ({ access, student }) => {
+  res.json(await Promise.all(rows.map(async ({ access, student, className }) => {
     const accessCode = decryptStorageValue<string>(access.accessCodeEncrypted);
     const accessUrl = `/delivery/${gallery.slug}?code=${encodeURIComponent(accessCode)}`;
     return {
       firstName: student.firstName,
       lastName: student.lastName,
       generatedStudentId: student.generatedStudentId,
+      className,
       accessCode,
       accessUrl,
       qrDataUrl: await QRCode.toDataURL(`${origin}${accessUrl}`, {

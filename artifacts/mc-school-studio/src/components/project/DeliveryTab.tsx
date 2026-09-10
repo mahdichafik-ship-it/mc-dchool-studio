@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Check, Copy, Download, ExternalLink, Loader2, LockKeyhole, Palette, Printer, QrCode, Send } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Loader2, LockKeyhole, Printer, QrCode, Send } from "lucide-react";
 
 type DeliveryState = {
   gallery: {
@@ -14,6 +14,7 @@ type AccessCard = {
   firstName: string;
   lastName: string;
   generatedStudentId: string;
+  className: string | null;
   accessCode: string;
   accessUrl: string;
   qrDataUrl: string;
@@ -57,6 +58,12 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [classFilter, setClassFilter] = useState("all");
+
+  const classOptions = Array.from(
+    new Set(cards.map((card) => card.className).filter((value): value is string => Boolean(value))),
+  ).sort((a, b) => a.localeCompare(b));
+  const visibleCards = classFilter === "all" ? cards : cards.filter((card) => card.className === classFilter);
 
   async function load() {
     setLoading(true);
@@ -119,12 +126,13 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
   }
 
   function downloadCards() {
-    if (!cards.length || !state?.gallery) return;
-    const header = ["First name", "Last name", "Student ID", "Access code", "Private gallery URL"];
-    const rows = cards.map((card) => [
+    if (!visibleCards.length || !state?.gallery) return;
+    const header = ["First name", "Last name", "Student ID", "Class / department", "Access code", "Private gallery URL"];
+    const rows = visibleCards.map((card) => [
       card.firstName,
       card.lastName,
       card.generatedStudentId,
+      card.className ?? "",
       card.accessCode,
       `${window.location.origin}${card.accessUrl}`,
     ]);
@@ -139,14 +147,14 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
   }
 
   function printCards() {
-    if (!cards.length) return;
+    if (!visibleCards.length) return;
     const entity = isCorporate ? "employee" : "student";
     const entityPlural = isCorporate ? "employees" : "students";
     const publicOrigin = window.location.origin;
     const logoUrl = branding.logoObjectPath
       ? `/api/studio/branding/logo?rev=${encodeURIComponent(branding.brandingUpdatedAt ?? "")}`
       : "";
-    const cardMarkup = cards.map((card) => {
+    const cardMarkup = visibleCards.map((card) => {
       const fullUrl = `${publicOrigin}${card.accessUrl}`;
       return `
         <article class="access-card">
@@ -190,13 +198,13 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
         <header class="sheet-header">
           ${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(branding.name)} logo" />` : ""}
           <div><div class="brand-name">${escapeHtml(branding.name)}</div><div class="tagline">${escapeHtml(branding.tagline ?? "Private photo delivery")}</div></div>
-          <div class="sheet-title"><h1>Private ${entity} photo access</h1><p>${escapeHtml(projectName ?? "Photo delivery")} · ${cards.length} ${entityPlural}</p></div>
+          <div class="sheet-title"><h1>Private ${entity} photo access</h1><p>${escapeHtml(projectName ?? "Photo delivery")} · ${visibleCards.length} ${entityPlural}${classFilter === "all" ? "" : ` · ${escapeHtml(classFilter)}`}</p></div>
         </header>
         <main class="grid">${cardMarkup}</main>
         <div class="footer">Print this sheet and give each card only to the matching ${entity} or family.</div>
         <script>window.addEventListener("load", () => window.print());<\/script>
       </body></html>`;
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    const printWindow = window.open("", "_blank");
     if (!printWindow) {
       setError("Allow pop-ups to print the branded QR sheet.");
       return;
@@ -282,8 +290,17 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
             {cards.length > 0 && (
               <div className="mt-4 rounded-lg bg-slate-50 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium text-slate-700">{cards.length} access cards ready</p>
+                   <p className="text-sm font-medium text-slate-700">{visibleCards.length} of {cards.length} access cards ready</p>
                    <div className="flex flex-wrap justify-end gap-2">
+                     {classOptions.length > 0 && (
+                       <label className="flex items-center gap-2 text-sm text-slate-600">
+                         <span className="sr-only">Filter by class or department</span>
+                         <select value={classFilter} onChange={(event) => setClassFilter(event.target.value)} className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm">
+                           <option value="all">All classes / departments</option>
+                           {classOptions.map((className) => <option key={className} value={className}>{className}</option>)}
+                         </select>
+                       </label>
+                     )}
                      <button onClick={printCards} className="inline-flex h-9 items-center gap-2 rounded-md bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800">
                        <Printer className="size-4" />Print / Save PDF
                      </button>
@@ -292,7 +309,7 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
                      </button>
                    </div>
                 </div>
-                 <p className="mt-2 text-xs text-slate-500"><QrCode className="mr-1 inline size-3.5" />Each card includes a scannable link, the access code, and your studio branding. Keep the sheet private.</p>
+                  <p className="mt-2 text-xs text-slate-500"><QrCode className="mr-1 inline size-3.5" />Each card includes a scannable link, the access code, and your studio branding. Keep the sheet private.</p>
               </div>
             )}
           </section>

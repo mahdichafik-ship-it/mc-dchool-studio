@@ -8,3 +8,5 @@ Use Google Drive resumable uploads for photo backups: start the authenticated se
 **Why:** In a published autoscale deployment, connector-authenticated folder and metadata requests succeeded, but a large multipart JPEG upload was blocked by a Cloudflare challenge and returned HTML with HTTP 403.
 
 **How to apply:** Keep connector requests small and authenticated. Validate the returned resumable URL, then upload the file bytes directly to that session URL. Preserve idempotency checks before starting the session.
+
+The user confirmed resumable uploads succeeded in production on 2026-09-10. Large originals still incur real transfer time; measure metadata-request savings separately from network throughput.

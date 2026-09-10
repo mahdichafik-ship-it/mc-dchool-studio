@@ -27,6 +27,11 @@ import photosRouter, { recoverPhotoDeleteBackups } from "../src/routes/photos";
 import desktopRouter from "../src/routes/desktop";
 import projectsRouter from "../src/routes/projects";
 import { createDesktopToken } from "../src/lib/desktopAuth";
+import {
+  clearGoogleDriveFolderCacheForTests,
+  setPlatformDriveRequesterForTests,
+  type DriveRequester,
+} from "../src/lib/googleDriveBackup";
 
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
 const jpegBytes = Buffer.from(
@@ -34,6 +39,29 @@ const jpegBytes = Buffer.from(
   "base64",
 );
 const rawBytes = Buffer.from("sample-raw-capture-bytes");
+let mockDriveId = 1;
+const mockDriveRequester: DriveRequester = async (requestPath, options = {}) => {
+  const method = options.method ?? "GET";
+  if (requestPath.startsWith("/drive/v3/about?") && method === "GET") {
+    return Response.json({ user: { permissionId: "integration-platform-account" } });
+  }
+  if (requestPath.startsWith("/drive/v3/files?") && method === "GET") {
+    return Response.json({ files: [] });
+  }
+  if (requestPath.startsWith("/drive/v3/files?") && method === "POST") {
+    const metadata = JSON.parse(String(options.body));
+    return Response.json({ id: `test-folder-${mockDriveId++}`, name: metadata.name });
+  }
+  if (requestPath.startsWith("/upload/drive/v3/files?") && method === "POST") {
+    return new Response(null, {
+      headers: { location: `https://test-upload.invalid/${mockDriveId++}` },
+    });
+  }
+  if (requestPath.startsWith("https://test-upload.invalid/") && method === "PUT") {
+    return Response.json({ id: `test-file-${mockDriveId++}` });
+  }
+  return Response.json({ error: "Unexpected mocked Drive request" }, { status: 500 });
+};
 
 type PhotoResponse = {
   id: number;
@@ -85,6 +113,8 @@ app.use("/api/projects", projectsRouter);
 app.use("/api/desktop", desktopRouter);
 
 before(async () => {
+  clearGoogleDriveFolderCacheForTests();
+  setPlatformDriveRequesterForTests(mockDriveRequester);
   const [studio] = await db
     .insert(studiosTable)
     .values({ name: "Photo flow integration studio", createdByUserId: userId })
@@ -204,6 +234,8 @@ before(async () => {
 });
 
 after(async () => {
+  setPlatformDriveRequesterForTests();
+  clearGoogleDriveFolderCacheForTests();
   if (uploadedFilePath) {
     await rm(uploadedFilePath, { force: true });
   }

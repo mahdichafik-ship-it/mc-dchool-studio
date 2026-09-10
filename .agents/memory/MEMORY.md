@@ -32,3 +32,4 @@
 - [Stripe migration compatibility](stripe-migration-compatibility.md) — modern Stripe schemas may need migration-ledger reconciliation before legacy sync migrations can start safely.
 - [Stripe sandbox claiming](stripe-sandbox-claiming.md) — a healthy Replit Stripe connection can still require claiming the development sandbox in Stripe Dashboard.
 - [Google Drive large uploads](google-drive-large-uploads.md) — send file bytes through resumable Google upload sessions, not large connector-proxy multipart bodies.
+- [Cloud backup test isolation](cloud-backup-test-isolation.md) — a development database does not isolate connected cloud accounts; tests must replace external backup requesters.

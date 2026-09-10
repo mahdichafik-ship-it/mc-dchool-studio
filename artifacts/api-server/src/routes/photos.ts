@@ -22,7 +22,7 @@ import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
 import { canAccessDesktopProject, canAccessProject } from "../lib/studioAccess";
 import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
-import { GoogleDriveBackupError } from "../lib/googleDriveBackup";
+import { canonicalStudentFolderName, GoogleDriveBackupError } from "../lib/googleDriveBackup";
 import { backupFileForStudio } from "../lib/studioStorageBackup";
 import { storePhotoDurably } from "../lib/durablePhotoStorage";
 
@@ -526,7 +526,11 @@ async function backupUploadedFile(
     classId: context.classId,
     className: context.className,
     studentId,
-    studentFolderName: `${context.generatedStudentId}_${context.lastName}_${context.firstName}`,
+    studentFolderName: canonicalStudentFolderName(
+      context.firstName,
+      context.lastName,
+      context.generatedStudentId,
+    ),
     filePath,
     fileName,
     fileRole,
@@ -550,7 +554,7 @@ async function backupGroupUploadedFile(projectId: number, groupId: number, fileP
     schoolName: context.schoolName, classId: context.classId ?? 0,
     className: context.className ?? "Groups", studentId: groupId,
     studentFolderName: `Group_${groupId}`, filePath, fileName, fileRole: role,
-    fileFormat: format, backupKey: key,
+    fileFormat: format, backupKey: key, subjectType: "group",
   });
 }
 

@@ -904,7 +904,12 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
           ))
           .limit(1);
         if (existingByClientId) {
-          discardUploadedFile(req);
+          if (
+            existingByClientId.capture.projectId !== projectId
+            || existingByClientId.capture.studentId !== studentId
+          ) {
+            throw new Error("Desktop upload identifier was reused for a different capture target");
+          }
           return { capture: existingByClientId.capture, file: existingByClientId.file, reused: true };
         }
       }
@@ -947,7 +952,6 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         ))
         .limit(1);
       if (existingByRole) {
-        discardUploadedFile(req);
         return { capture, file: existingByRole, reused: true };
       }
 
@@ -993,7 +997,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       await backupUploadedFile(
         projectId,
         studentId,
-        resolveFilePath(result.file.fileUrl),
+        result.reused ? uploadedFile.path : resolveFilePath(result.file.fileUrl),
         result.file.originalFilename,
         fileRole,
         result.file.fileFormat,
@@ -1001,6 +1005,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       );
     } catch (error) {
       if (error instanceof GoogleDriveBackupError) {
+        if (result.reused) discardUploadedFile(req);
         logger.error({
           err: error,
           projectId,
@@ -1017,6 +1022,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       }
       throw error;
     }
+    if (result.reused) discardUploadedFile(req);
 
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,

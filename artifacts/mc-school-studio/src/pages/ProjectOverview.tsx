@@ -117,7 +117,7 @@ export default function ProjectOverview() {
                 <CollaborationTab projectId={project.id} />
               </TabsContent>
               <TabsContent value="delivery" className="m-0 p-0 flex-1 overflow-auto">
-                <DeliveryTab projectId={project.id} isCorporate={isCorporate} />
+                <DeliveryTab projectId={project.id} projectName={project.schoolName} isCorporate={isCorporate} />
               </TabsContent>
               <TabsContent value="exports" className="m-0 p-6 flex-1 overflow-auto">
                 <ExportsTab project={project} isCorporate={isCorporate} />

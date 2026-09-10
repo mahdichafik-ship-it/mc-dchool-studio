@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Check, Copy, Download, ExternalLink, Loader2, LockKeyhole, Send } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Loader2, LockKeyhole, Palette, Printer, QrCode, Send } from "lucide-react";
 
 type DeliveryState = {
   gallery: {
@@ -16,11 +16,43 @@ type AccessCard = {
   generatedStudentId: string;
   accessCode: string;
   accessUrl: string;
+  qrDataUrl: string;
 };
 
-export function DeliveryTab({ projectId, isCorporate }: { projectId: number; isCorporate?: boolean }) {
+type StudioBranding = {
+  name: string;
+  tagline: string | null;
+  contactEmail: string | null;
+  logoObjectPath: string | null;
+  primaryColor: string;
+  accentColor: string;
+  brandingUpdatedAt: string | null;
+};
+
+const fallbackBranding: StudioBranding = {
+  name: "Volume Capture",
+  tagline: "Private photo delivery",
+  contactEmail: null,
+  logoObjectPath: null,
+  primaryColor: "#0F766E",
+  accentColor: "#14B8A6",
+  brandingUpdatedAt: null,
+};
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character] ?? character);
+}
+
+export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId: number; projectName?: string; isCorporate?: boolean }) {
   const [state, setState] = useState<DeliveryState | null>(null);
   const [cards, setCards] = useState<AccessCard[]>([]);
+  const [branding, setBranding] = useState<StudioBranding>(fallbackBranding);
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +62,16 @@ export function DeliveryTab({ projectId, isCorporate }: { projectId: number; isC
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/delivery`, { credentials: "include" });
+      const [response, studioResponse] = await Promise.all([
+        fetch(`/api/projects/${projectId}/delivery`, { credentials: "include" }),
+        fetch("/api/studio", { credentials: "include" }),
+      ]);
       if (!response.ok) throw new Error("Could not load delivery settings.");
       setState(await response.json() as DeliveryState);
+      if (studioResponse.ok) {
+        const studioBody = await studioResponse.json() as { studio?: StudioBranding };
+        if (studioBody.studio) setBranding(studioBody.studio);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load delivery settings.");
     } finally {
@@ -65,7 +104,10 @@ export function DeliveryTab({ projectId, isCorporate }: { projectId: number; isC
 
   async function loadCards() {
     const response = await fetch(`/api/projects/${projectId}/delivery/access-cards`, { credentials: "include" });
-    if (!response.ok) return;
+    if (!response.ok) {
+      setError("Could not load the private access codes.");
+      return;
+    }
     setCards(await response.json() as AccessCard[]);
   }
 
@@ -94,6 +136,73 @@ export function DeliveryTab({ projectId, isCorporate }: { projectId: number; isC
     link.download = "volume-capture-access-cards.csv";
     link.click();
     URL.revokeObjectURL(link.href);
+  }
+
+  function printCards() {
+    if (!cards.length) return;
+    const entity = isCorporate ? "employee" : "student";
+    const entityPlural = isCorporate ? "employees" : "students";
+    const publicOrigin = window.location.origin;
+    const logoUrl = branding.logoObjectPath
+      ? `/api/studio/branding/logo?rev=${encodeURIComponent(branding.brandingUpdatedAt ?? "")}`
+      : "";
+    const cardMarkup = cards.map((card) => {
+      const fullUrl = `${publicOrigin}${card.accessUrl}`;
+      return `
+        <article class="access-card">
+          <div class="card-name">${escapeHtml(card.firstName)} ${escapeHtml(card.lastName)}</div>
+          <div class="card-id">${escapeHtml(card.generatedStudentId)}</div>
+          <img class="qr" src="${escapeHtml(card.qrDataUrl)}" alt="QR code for ${escapeHtml(card.firstName)} ${escapeHtml(card.lastName)}" />
+          <div class="scan-label">Scan to view private photos</div>
+          <div class="code-label">Access code</div>
+          <div class="code">${escapeHtml(card.accessCode)}</div>
+          <div class="url">${escapeHtml(fullUrl)}</div>
+          <p class="instruction">Keep this card private. It provides access to this ${entity}'s photos.</p>
+        </article>`;
+    }).join("");
+    const html = `<!doctype html>
+      <html><head><meta charset="utf-8"><title>${escapeHtml(branding.name)} — ${escapeHtml(projectName ?? "Photo delivery")}</title>
+      <style>
+        @page { size: letter; margin: 0.35in; }
+        * { box-sizing: border-box; }
+        body { margin: 0; color: #172033; font-family: Arial, Helvetica, sans-serif; background: #fff; }
+        .sheet-header { display: flex; align-items: center; gap: 14px; padding: 0 0 16px; border-bottom: 4px solid ${escapeHtml(branding.accentColor)}; margin-bottom: 16px; }
+        .logo { width: 58px; height: 58px; object-fit: contain; border-radius: 10px; }
+        .brand-name { color: ${escapeHtml(branding.primaryColor)}; font-size: 19px; font-weight: 700; }
+        .tagline { color: #657084; font-size: 11px; margin-top: 3px; }
+        .sheet-title { margin-left: auto; text-align: right; }
+        .sheet-title h1 { margin: 0; font-size: 16px; }
+        .sheet-title p { margin: 4px 0 0; color: #657084; font-size: 11px; }
+        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .access-card { min-height: 3.55in; padding: 14px; border: 1px solid #dbe2ea; border-top: 5px solid ${escapeHtml(branding.primaryColor)}; border-radius: 10px; text-align: center; page-break-inside: avoid; }
+        .card-name { font-size: 17px; font-weight: 700; }
+        .card-id { color: #657084; font-size: 10px; margin-top: 3px; }
+        .qr { display: block; width: 1.48in; height: 1.48in; margin: 10px auto 5px; image-rendering: pixelated; }
+        .scan-label { color: #657084; font-size: 10px; }
+        .code-label { color: #657084; font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; margin-top: 9px; }
+        .code { color: ${escapeHtml(branding.primaryColor)}; font-family: monospace; font-size: 18px; font-weight: 700; letter-spacing: 0.12em; margin-top: 3px; }
+        .url { color: #657084; font-size: 8px; overflow-wrap: anywhere; margin-top: 5px; }
+        .instruction { color: #657084; font-size: 9px; line-height: 1.35; margin: 8px 0 0; }
+        .footer { color: #657084; font-size: 9px; margin-top: 14px; text-align: center; }
+        @media print { .footer { display: none; } }
+      </style></head>
+      <body>
+        <header class="sheet-header">
+          ${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(branding.name)} logo" />` : ""}
+          <div><div class="brand-name">${escapeHtml(branding.name)}</div><div class="tagline">${escapeHtml(branding.tagline ?? "Private photo delivery")}</div></div>
+          <div class="sheet-title"><h1>Private ${entity} photo access</h1><p>${escapeHtml(projectName ?? "Photo delivery")} · ${cards.length} ${entityPlural}</p></div>
+        </header>
+        <main class="grid">${cardMarkup}</main>
+        <div class="footer">Print this sheet and give each card only to the matching ${entity} or family.</div>
+        <script>window.addEventListener("load", () => window.print());<\/script>
+      </body></html>`;
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) {
+      setError("Allow pop-ups to print the branded QR sheet.");
+      return;
+    }
+    printWindow.document.write(html);
+    printWindow.document.close();
   }
 
   if (loading) {
@@ -161,7 +270,7 @@ export function DeliveryTab({ projectId, isCorporate }: { projectId: number; isC
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="font-semibold text-slate-900">Access cards</h3>
-                <p className="mt-1 text-sm text-slate-500">Download a CSV with one private code and link per {isCorporate ? "employee" : "student"}.</p>
+                <p className="mt-1 text-sm text-slate-500">Print a branded QR sheet or download a CSV with one private code and link per {isCorporate ? "employee" : "student"}.</p>
               </div>
               <button
                 onClick={() => void loadCards()}
@@ -174,11 +283,16 @@ export function DeliveryTab({ projectId, isCorporate }: { projectId: number; isC
               <div className="mt-4 rounded-lg bg-slate-50 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-medium text-slate-700">{cards.length} access cards ready</p>
-                  <button onClick={downloadCards} className="inline-flex h-9 items-center gap-2 rounded-md bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800">
-                    <Download className="size-4" />Download CSV
-                  </button>
+                   <div className="flex flex-wrap justify-end gap-2">
+                     <button onClick={printCards} className="inline-flex h-9 items-center gap-2 rounded-md bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800">
+                       <Printer className="size-4" />Print / Save PDF
+                     </button>
+                     <button onClick={downloadCards} className="inline-flex h-9 items-center gap-2 rounded-md bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800">
+                       <Download className="size-4" />Download CSV
+                     </button>
+                   </div>
                 </div>
-                <p className="mt-2 text-xs text-slate-500">Keep this file private. Anyone with a code can view that person’s delivery gallery.</p>
+                 <p className="mt-2 text-xs text-slate-500"><QrCode className="mr-1 inline size-3.5" />Each card includes a scannable link, the access code, and your studio branding. Keep the sheet private.</p>
               </div>
             )}
           </section>

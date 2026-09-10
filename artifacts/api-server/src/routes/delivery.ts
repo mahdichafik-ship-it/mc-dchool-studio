@@ -1,4 +1,5 @@
 import { Router } from "express";
+import QRCode from "qrcode";
 import { Readable } from "node:stream";
 import sharp from "sharp";
 import Stripe from "stripe";
@@ -525,12 +526,24 @@ router.get("/projects/:projectId/delivery/access-cards", requireAuth, async (req
     .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
     .where(and(eq(deliveryAccessesTable.galleryId, gallery.id), isNull(deliveryAccessesTable.revokedAt)));
 
-  res.json(rows.map(({ access, student }) => ({
-    firstName: student.firstName,
-    lastName: student.lastName,
-    generatedStudentId: student.generatedStudentId,
-    accessCode: decryptStorageValue<string>(access.accessCodeEncrypted),
-    accessUrl: `/delivery/${gallery.slug}?code=${encodeURIComponent(decryptStorageValue<string>(access.accessCodeEncrypted))}`,
+  const forwardedProtocol = String(req.get("x-forwarded-proto") ?? "").split(",")[0].trim();
+  const forwardedHost = String(req.get("x-forwarded-host") ?? "").split(",")[0].trim();
+  const origin = `${forwardedProtocol || req.protocol}://${forwardedHost || req.get("host")}`;
+  res.json(await Promise.all(rows.map(async ({ access, student }) => {
+    const accessCode = decryptStorageValue<string>(access.accessCodeEncrypted);
+    const accessUrl = `/delivery/${gallery.slug}?code=${encodeURIComponent(accessCode)}`;
+    return {
+      firstName: student.firstName,
+      lastName: student.lastName,
+      generatedStudentId: student.generatedStudentId,
+      accessCode,
+      accessUrl,
+      qrDataUrl: await QRCode.toDataURL(`${origin}${accessUrl}`, {
+        errorCorrectionLevel: "M",
+        margin: 2,
+        width: 320,
+      }),
+    };
   })));
 });
 

@@ -219,10 +219,11 @@ test("keeps platform storage active while a studio-owned connection is pending",
   const initial = await request(inviteeId, "/api/studio");
   assert.equal(initial.status, 200);
   const initialBody = await initial.json() as {
-    studio: { storageProvider: string; storageStatus: string };
+    studio: { storageProvider: string; storageStatus: string; platformBackupEnabled: boolean };
     activeStorageProvider: string;
   };
-  assert.equal(initialBody.studio.storageStatus, "needs_setup");
+  assert.equal(initialBody.studio.storageStatus, "using_platform");
+  assert.equal(initialBody.studio.platformBackupEnabled, true);
   assert.equal(initialBody.activeStorageProvider, "platform_google_drive");
 
   const requested = await request(inviteeId, "/api/studio/storage", {
@@ -506,6 +507,50 @@ test("never exposes or selects another studio's storage connection", async () =>
   const viewer = await request(studioViewerId, "/api/studio");
   assert.equal(viewer.status, 200);
   assert.deepEqual((await viewer.json() as { connections: unknown[] }).connections, []);
+});
+
+test("lets studio managers keep or disconnect the platform backup without leaving a backup gap", async () => {
+  const disabled = await request(inviteeId, "/api/studio/storage/platform-backup", {
+    method: "PATCH",
+    body: JSON.stringify({ enabled: false }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(disabled.status, 200);
+  const disabledBody = await disabled.json() as {
+    studio: { platformBackupEnabled: boolean };
+    activeStorageProvider: string;
+    secondaryStorageProvider: string | null;
+  };
+  assert.equal(disabledBody.studio.platformBackupEnabled, false);
+  assert.equal(disabledBody.activeStorageProvider, "google_drive");
+  assert.equal(disabledBody.secondaryStorageProvider, null);
+
+  const viewerDenied = await request(studioViewerId, "/api/studio/storage/platform-backup", {
+    method: "PATCH",
+    body: JSON.stringify({ enabled: true }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(viewerDenied.status, 403);
+
+  const onlyBackupCannotBeDisconnected = await request(inviteeId, "/api/studio/storage/connection", {
+    method: "DELETE",
+  });
+  assert.equal(onlyBackupCannotBeDisconnected.status, 409);
+
+  const enabled = await request(inviteeId, "/api/studio/storage/platform-backup", {
+    method: "PATCH",
+    body: JSON.stringify({ enabled: true }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(enabled.status, 200);
+  const enabledBody = await enabled.json() as {
+    studio: { platformBackupEnabled: boolean };
+    activeStorageProvider: string;
+    secondaryStorageProvider: string | null;
+  };
+  assert.equal(enabledBody.studio.platformBackupEnabled, true);
+  assert.equal(enabledBody.activeStorageProvider, "platform_google_drive");
+  assert.equal(enabledBody.secondaryStorageProvider, "google_drive");
 });
 
 test("lets the platform owner audit and control one studio without leaking credentials", async () => {

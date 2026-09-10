@@ -3,8 +3,8 @@ name: Studio storage fallback
 description: Rules for routing studio backups while studio-owned storage connections are pending or changed.
 ---
 
-The platform owner's connected Google Drive is the canonical primary backup for every studio. A fully authorized studio-owned Google Drive or Dropbox receives an optional second copy; pending, failed, or disconnected providers never replace the primary.
+The platform owner's Google Drive is enabled by default as a managed fallback. After a studio-owned Google Drive or Dropbox is verified, owners/admins may keep both destinations or disable the platform copy.
 
-**Why:** The platform owner needs a durable copy of every original JPEG and RAW file, while studios may want their own second destination. Upload success must not depend on a studio-owned connection.
+**Why:** Studios need immediate backup coverage before OAuth setup, but the platform Drive is an optional service rather than a mandatory copy once the studio has its own verified storage.
 
-**How to apply:** Write to the platform Drive first, then attempt the connected studio provider. Keep separate platform folders by studio. If the secondary copy fails, mark that connection unhealthy but keep the upload successful when the primary copy succeeded. Switching preferences must not move, rename, or delete existing files.
+**How to apply:** Require at least one verified destination. New studios start with platform backup enabled. Platform backup may be disabled only while a studio provider is active, and that last provider cannot be disconnected until platform backup is re-enabled. With two destinations enabled, one successful copy keeps the upload successful. Preference changes never move, rename, or delete existing files.

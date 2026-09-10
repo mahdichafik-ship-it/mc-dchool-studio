@@ -132,11 +132,16 @@ router.get("/", requireAuth, async (req, res): Promise<void> => {
       role: member.role,
       status: member.status,
     },
-    activeStorageProvider: "platform_google_drive",
-    secondaryStorageProvider: studio.storageStatus === "connected"
+    activeStorageProvider: studio.platformBackupEnabled
+      ? "platform_google_drive"
+      : studio.storageStatus === "connected" && isExternalProvider(studio.storageProvider)
+        ? studio.storageProvider
+        : null,
+    secondaryStorageProvider: studio.platformBackupEnabled
+      && studio.storageStatus === "connected"
       && isExternalProvider(studio.storageProvider)
-      ? studio.storageProvider
-      : null,
+        ? studio.storageProvider
+        : null,
     connections,
     storageAudit: audit,
   });
@@ -274,31 +279,113 @@ router.put("/storage", requireAuth, async (req, res): Promise<void> => {
   }
 
   const now = new Date();
-  const [updated] = await db
-    .update(studiosTable)
-    .set(provider === "platform_google_drive"
-      ? {
-        storageProvider: provider,
-        storageStatus: "using_platform",
-        storageRequestedAt: null,
-        storageConnectedAt: null,
-      }
-      : {
+  const [updated] = await db.transaction(async (tx) => {
+    const [saved] = await tx
+      .update(studiosTable)
+      .set(provider === "platform_google_drive"
+        ? {
+          platformBackupEnabled: true,
+          ...(studio.storageStatus === "connected" && isExternalProvider(studio.storageProvider)
+            ? {}
+            : {
+              storageProvider: provider,
+              storageStatus: "using_platform" as const,
+              storageRequestedAt: null,
+              storageConnectedAt: null,
+            }),
+        }
+        : {
         storageProvider: provider,
         storageStatus: "connection_requested",
         storageRequestedAt: now,
         storageConnectedAt: null,
       })
-    .where(eq(studiosTable.id, studio.id))
-    .returning();
+      .where(eq(studiosTable.id, studio.id))
+      .returning();
+    if (provider === "platform_google_drive") {
+      await tx.insert(studioStorageAuditTable).values({
+        studioId: studio.id,
+        actorMemberId: member.id,
+        action: "platform_backup_enabled",
+        provider,
+      });
+    }
+    return [saved];
+  });
 
   res.json({
     studio: updated,
-    activeStorageProvider: "platform_google_drive",
-    secondaryStorageProvider: updated.storageStatus === "connected"
+    activeStorageProvider: updated.platformBackupEnabled
+      ? "platform_google_drive"
+      : updated.storageStatus === "connected" && isExternalProvider(updated.storageProvider)
+        ? updated.storageProvider
+        : null,
+    secondaryStorageProvider: updated.platformBackupEnabled
+      && updated.storageStatus === "connected"
       && isExternalProvider(updated.storageProvider)
+        ? updated.storageProvider
+        : null,
+  });
+});
+
+router.patch("/storage/platform-backup", requireAuth, async (req, res): Promise<void> => {
+  const { member, studio } = await studioContext(getUserId(req));
+  if (!studio || member.status !== "active") {
+    res.status(404).json({ error: "Studio not found" });
+    return;
+  }
+  if (member.role !== "owner" && member.role !== "admin") {
+    res.status(403).json({ error: "Only studio owners and admins can manage storage" });
+    return;
+  }
+  if (typeof req.body?.enabled !== "boolean") {
+    res.status(400).json({ error: "Choose whether platform backup should be enabled" });
+    return;
+  }
+
+  const enabled = req.body.enabled;
+  if (!enabled) {
+    if (studio.storageStatus !== "connected" || !isExternalProvider(studio.storageProvider)) {
+      res.status(409).json({ error: "Connect and verify your own Google Drive or Dropbox before turning off platform backup" });
+      return;
+    }
+    const [activeConnection] = await db.select({ id: studioStorageConnectionsTable.id })
+      .from(studioStorageConnectionsTable)
+      .where(and(
+        eq(studioStorageConnectionsTable.studioId, studio.id),
+        eq(studioStorageConnectionsTable.provider, studio.storageProvider),
+        eq(studioStorageConnectionsTable.status, "active"),
+      ))
+      .limit(1);
+    if (!activeConnection) {
+      res.status(409).json({ error: "Your studio-owned storage must be active before turning off platform backup" });
+      return;
+    }
+  }
+
+  const [updated] = await db.transaction(async (tx) => {
+    const [saved] = await tx.update(studiosTable).set({
+      platformBackupEnabled: enabled,
+    }).where(eq(studiosTable.id, studio.id)).returning();
+    await tx.insert(studioStorageAuditTable).values({
+      studioId: studio.id,
+      actorMemberId: member.id,
+      action: enabled ? "platform_backup_enabled" : "platform_backup_disabled",
+      provider: "platform_google_drive",
+    });
+    return [saved];
+  });
+
+  const studioProvider = updated.storageStatus === "connected"
+    && isExternalProvider(updated.storageProvider)
       ? updated.storageProvider
-      : null,
+      : null;
+  res.json({
+    studio: updated,
+    activeStorageProvider: updated.platformBackupEnabled
+      ? "platform_google_drive"
+      : studioProvider,
+    secondaryStorageProvider: updated.platformBackupEnabled ? studioProvider : null,
   });
 });
 
@@ -324,6 +411,16 @@ router.post("/storage/oauth/:provider/start", requireAuth, async (req, res): Pro
     const redirectUri = `${publicOrigin(req)}/api/studio/storage/oauth/${provider}/callback`;
     const url = authorizationUrl(provider, state, challenge, redirectUri);
     const now = new Date();
+    const hasCurrentActiveProvider = studio.storageStatus === "connected"
+      && isExternalProvider(studio.storageProvider)
+      && Boolean((await db.select({ id: studioStorageConnectionsTable.id })
+        .from(studioStorageConnectionsTable)
+        .where(and(
+          eq(studioStorageConnectionsTable.studioId, studio.id),
+          eq(studioStorageConnectionsTable.provider, studio.storageProvider),
+          eq(studioStorageConnectionsTable.status, "active"),
+        ))
+        .limit(1))[0]);
     await db.transaction(async (tx) => {
       await tx.insert(studioStorageOauthStatesTable).values({
         studioId: studio.id,
@@ -334,12 +431,14 @@ router.post("/storage/oauth/:provider/start", requireAuth, async (req, res): Pro
         redirectUri,
         expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
       });
-      await tx.update(studiosTable).set({
-        storageProvider: provider,
-        storageStatus: "connection_requested",
-        storageRequestedAt: now,
-        storageConnectedAt: null,
-      }).where(eq(studiosTable.id, studio.id));
+      if (!hasCurrentActiveProvider) {
+        await tx.update(studiosTable).set({
+          storageProvider: provider,
+          storageStatus: "connection_requested",
+          storageRequestedAt: now,
+          storageConnectedAt: null,
+        }).where(eq(studiosTable.id, studio.id));
+      }
       await tx.insert(studioStorageAuditTable).values({
         studioId: studio.id,
         actorMemberId: member.id,
@@ -438,11 +537,28 @@ router.get("/storage/oauth/:provider/callback", async (req, res): Promise<void> 
     res.redirect("/studio/settings?storage=connected");
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 300) : "Connection failed";
+    const [currentStudio] = await db.select({
+      storageProvider: studiosTable.storageProvider,
+      storageStatus: studiosTable.storageStatus,
+    }).from(studiosTable).where(eq(studiosTable.id, oauthState.studioId)).limit(1);
+    const hasCurrentActiveProvider = Boolean(currentStudio
+      && currentStudio.storageStatus === "connected"
+      && isExternalProvider(currentStudio.storageProvider)
+      && (await db.select({ id: studioStorageConnectionsTable.id })
+        .from(studioStorageConnectionsTable)
+        .where(and(
+          eq(studioStorageConnectionsTable.studioId, oauthState.studioId),
+          eq(studioStorageConnectionsTable.provider, currentStudio.storageProvider),
+          eq(studioStorageConnectionsTable.status, "active"),
+        ))
+        .limit(1))[0]);
     await db.transaction(async (tx) => {
-      await tx.update(studiosTable).set({
-        storageStatus: "connection_error",
-        storageConnectedAt: null,
-      }).where(eq(studiosTable.id, oauthState.studioId));
+      if (!hasCurrentActiveProvider) {
+        await tx.update(studiosTable).set({
+          storageStatus: "connection_error",
+          storageConnectedAt: null,
+        }).where(eq(studiosTable.id, oauthState.studioId));
+      }
       await tx.insert(studioStorageAuditTable).values({
         studioId: oauthState.studioId,
         actorMemberId: oauthState.memberId,
@@ -468,6 +584,12 @@ router.delete("/storage/connection", requireAuth, async (req, res): Promise<void
   const provider = studio.storageProvider;
   if (!isExternalProvider(provider)) {
     res.status(204).end();
+    return;
+  }
+  if (!studio.platformBackupEnabled) {
+    res.status(409).json({
+      error: "Enable platform backup before disconnecting your studio's only backup destination",
+    });
     return;
   }
   const [connection] = await db.select({

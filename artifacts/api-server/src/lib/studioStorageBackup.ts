@@ -8,6 +8,7 @@ import {
 } from "@workspace/db";
 import {
   backupFileToGoogleDrive,
+  GoogleDriveBackupError,
   type DriveBackupInput,
   type DriveRequester,
 } from "./googleDriveBackup";
@@ -136,43 +137,73 @@ async function markConnectionError(
 }
 
 export async function backupFileForStudio(input: DriveBackupInput): Promise<void> {
-  // The platform owner's Google Drive is the canonical first backup for every studio.
-  // A studio-owned provider is an optional second copy, never the only copy.
-  await backupFileToGoogleDrive(input);
-
   const [studio] = await db.select({
     storageProvider: studiosTable.storageProvider,
     storageStatus: studiosTable.storageStatus,
+    platformBackupEnabled: studiosTable.platformBackupEnabled,
   }).from(studiosTable).where(eq(studiosTable.id, input.studioId)).limit(1);
   const provider = studio?.storageProvider;
-  if (!studio || studio.storageStatus !== "connected"
-    || (provider !== "google_drive" && provider !== "dropbox")) {
-    return;
+  if (!studio) {
+    throw new GoogleDriveBackupError("Could not resolve the studio backup configuration.");
   }
 
-  const [connection] = await db.select().from(studioStorageConnectionsTable).where(and(
-    eq(studioStorageConnectionsTable.studioId, input.studioId),
-    eq(studioStorageConnectionsTable.provider, provider),
-    eq(studioStorageConnectionsTable.status, "active"),
-  )).limit(1);
+  const hasStudioProvider = studio.storageStatus === "connected"
+    && (provider === "google_drive" || provider === "dropbox");
+  if (!studio.platformBackupEnabled && !hasStudioProvider) {
+    throw new GoogleDriveBackupError("No backup destination is enabled for this studio.");
+  }
 
-  try {
-    if (!connection || connection.studioId !== input.studioId) {
-      throw new Error("No active credential exists for this studio and provider");
+  let platformError: unknown;
+  let studioProviderError: unknown;
+  let successfulCopies = 0;
+
+  if (studio.platformBackupEnabled) {
+    try {
+      await backupFileToGoogleDrive(input);
+      successfulCopies += 1;
+    } catch (error) {
+      platformError = error;
+      logger.error({ err: error, studioId: input.studioId }, "Platform Google Drive backup failed");
     }
-    const credentials = await usableCredentials(connection);
-    if (provider === "google_drive") {
-      await backupFileToGoogleDrive(input, googleRequester(credentials.accessToken));
-    } else {
-      await backupToDropbox(input, credentials.accessToken);
+  }
+
+  if (hasStudioProvider) {
+    const [connection] = await db.select().from(studioStorageConnectionsTable).where(and(
+      eq(studioStorageConnectionsTable.studioId, input.studioId),
+      eq(studioStorageConnectionsTable.provider, provider),
+      eq(studioStorageConnectionsTable.status, "active"),
+    )).limit(1);
+
+    try {
+      if (!connection || connection.studioId !== input.studioId) {
+        throw new Error("No active credential exists for this studio and provider");
+      }
+      const credentials = await usableCredentials(connection);
+      if (provider === "google_drive") {
+        await backupFileToGoogleDrive(input, googleRequester(credentials.accessToken));
+      } else {
+        await backupToDropbox(input, credentials.accessToken);
+      }
+      successfulCopies += 1;
+      await db.update(studioStorageConnectionsTable).set({
+        lastVerifiedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(studioStorageConnectionsTable.id, connection.id));
+    } catch (error) {
+      studioProviderError = error;
+      const detail = error instanceof Error ? error.message : "Studio storage backup failed";
+      logger.error({
+        err: error,
+        studioId: input.studioId,
+        provider,
+        platformBackupEnabled: studio.platformBackupEnabled,
+      }, "Studio-owned storage backup failed");
+      await markConnectionError(input.studioId, provider, detail);
     }
-    await db.update(studioStorageConnectionsTable).set({
-      lastVerifiedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(studioStorageConnectionsTable.id, connection.id));
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Studio storage backup failed";
-    logger.error({ err: error, studioId: input.studioId, provider }, "Secondary studio storage failed; platform backup is safe");
-    await markConnectionError(input.studioId, provider, detail);
+  }
+
+  if (successfulCopies === 0) {
+    const cause = studioProviderError ?? platformError;
+    throw new GoogleDriveBackupError("All enabled backup destinations failed.", { cause });
   }
 }

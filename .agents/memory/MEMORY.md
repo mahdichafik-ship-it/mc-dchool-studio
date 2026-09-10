@@ -20,7 +20,7 @@
 - [macOS smoke cleanup](macos-smoke-cleanup.md) — native packaged-app smoke teardown can briefly race with Electron user-data removal, especially on Apple silicon.
 - [Native macOS release builds](native-macos-release-builds.md) — build each thin Mac package on its matching CPU architecture before combining updater metadata.
 - [Apple notarization timeouts](apple-notarization-timeouts.md) — distinguish transient notary API polling timeouts from Intel architecture or packaged-launch failures.
-- [Studio storage fallback](studio-storage-fallback.md) — platform Drive stays active until a studio-owned provider is fully connected; provider requests never create a backup gap.
+- [Studio storage fallback](studio-storage-fallback.md) — platform backup starts enabled but becomes optional after a studio-owned provider is verified; at least one destination must remain active.
 - [Platform studio oversight](platform-studio-oversight.md) — owner-equivalent support access is explicit and audited; archive blocks access without deleting studio data.
 - [Collaborative capture batches](collaborative-capture-batches.md) — each photographer finishes a retry-stable batch inside one canonical cloud project.
 - [Photo group membership](photo-group-membership.md) — default class groups auto-follow roster growth without undoing manual member removals across web/desktop sync.

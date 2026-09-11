@@ -18,6 +18,81 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+const CURRENCIES = [
+  { code: "mad", label: "Moroccan dirham (MAD)" },
+  { code: "eur", label: "Euro (EUR)" },
+  { code: "usd", label: "US dollar (USD)" },
+  { code: "sek", label: "Swedish krona (SEK)" },
+  { code: "dkk", label: "Danish krone (DKK)" },
+  { code: "nok", label: "Norwegian krone (NOK)" },
+  { code: "gbp", label: "British pound (GBP)" },
+  { code: "chf", label: "Swiss franc (CHF)" },
+  { code: "pln", label: "Polish złoty (PLN)" },
+  { code: "czk", label: "Czech koruna (CZK)" },
+] as const;
+
+function parsePriceInput(value: string) {
+  const normalized = value.trim().replace(/\s/g, "").replace(",", ".");
+  if (!/^\d+(?:\.\d{0,2})?$/.test(normalized)) return null;
+
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  const unitAmount = Math.round(amount * 100);
+  return Number.isSafeInteger(unitAmount) ? unitAmount : null;
+}
+
+function PriceInput({
+  offer,
+  onChange,
+}: {
+  offer: DeliveryOffer;
+  onChange: (unitAmount: number) => void;
+}) {
+  const [draft, setDraft] = useState(() => (offer.unitAmount / 100).toFixed(2));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft((offer.unitAmount / 100).toFixed(2));
+  }, [focused, offer.unitAmount]);
+
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-medium">
+        {offer.currency.toUpperCase()}
+      </span>
+      <Input
+        required
+        type="text"
+        inputMode="decimal"
+        value={draft}
+        onFocus={(event) => {
+          setFocused(true);
+          event.currentTarget.select();
+        }}
+        onChange={(event) => {
+          const next = event.target.value.replace(/[^\d.,\s]/g, "");
+          setDraft(next);
+          const parsed = parsePriceInput(next);
+          if (parsed !== null) onChange(parsed);
+        }}
+        onBlur={() => {
+          setFocused(false);
+          const parsed = parsePriceInput(draft);
+          if (parsed === null) {
+            setDraft((offer.unitAmount / 100).toFixed(2));
+            return;
+          }
+          onChange(parsed);
+          setDraft((parsed / 100).toFixed(2).replace(".", ","));
+        }}
+        aria-label={`Price in ${offer.currency.toUpperCase()}`}
+        placeholder="e.g. 75,50 or 3000"
+        className="pl-14 border-slate-200 focus-visible:ring-teal-500"
+      />
+    </div>
+  );
+}
+
 export default function PriceSheets() {
   const { data: priceSheets, isLoading } = useListStudioPriceSheets();
   const queryClient = useQueryClient();
@@ -312,31 +387,30 @@ export default function PriceSheets() {
 
                                 <div className="space-y-2 sm:col-span-1 md:col-span-4">
                                   <Label className="text-xs font-medium text-slate-500">Price <span className="text-red-500">*</span></Label>
-                                  <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                                    <Input
-                                      required
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      value={(offer.unitAmount / 100).toFixed(2)}
-                                      onChange={(e) => updateOffer(offer.id, { unitAmount: Math.round((Number(e.target.value) || 0) * 100) })}
-                                      className="pl-7 border-slate-200 focus-visible:ring-teal-500"
-                                    />
-                                  </div>
+                                   <PriceInput
+                                     offer={offer}
+                                     onChange={(unitAmount) => updateOffer(offer.id, { unitAmount })}
+                                   />
+                                   <p className="text-[11px] text-slate-400">Type any amount, for example 75,50 or 3000.</p>
                                 </div>
                                 
                                 <div className="space-y-2 sm:col-span-1 md:col-span-4">
                                   <Label className="text-xs font-medium text-slate-500">Currency <span className="text-red-500">*</span></Label>
-                                  <Input
-                                    required
-                                    type="text"
-                                    maxLength={3}
-                                    value={offer.currency.toUpperCase()}
-                                    onChange={(e) => updateOffer(offer.id, { currency: e.target.value.replace(/[^A-Za-z]/g, "").slice(0, 3).toLowerCase() })}
-                                    className="uppercase border-slate-200 focus-visible:ring-teal-500"
-                                    placeholder="USD"
-                                  />
+                                   <Select
+                                     value={offer.currency.toLowerCase()}
+                                     onValueChange={(currency) => updateOffer(offer.id, { currency })}
+                                   >
+                                     <SelectTrigger className="border-slate-200 focus:ring-teal-500">
+                                       <SelectValue placeholder="Choose currency" />
+                                     </SelectTrigger>
+                                     <SelectContent>
+                                       {CURRENCIES.map((currency) => (
+                                         <SelectItem key={currency.code} value={currency.code}>
+                                           {currency.label}
+                                         </SelectItem>
+                                       ))}
+                                     </SelectContent>
+                                   </Select>
                                 </div>
 
                                 <div className="space-y-2 sm:col-span-1 md:col-span-4">

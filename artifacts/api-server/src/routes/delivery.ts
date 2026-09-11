@@ -194,7 +194,7 @@ function parseOffers(raw: string | null): DeliveryOffer[] {
     const offer = value as Record<string, unknown>;
     const methods = offer.deliveryMethods;
     const paymentMethods = offer.paymentMethods === undefined ? ["stripe"] : offer.paymentMethods;
-    const unitAmount = Number.isInteger(offer.unitAmount) && Number(offer.unitAmount) >= 0
+    const unitAmount = Number.isSafeInteger(offer.unitAmount) && Number(offer.unitAmount) >= 0
       ? Number(offer.unitAmount)
       : null;
     const currency = typeof offer.currency === "string" && /^[A-Za-z]{3}$/.test(offer.currency)

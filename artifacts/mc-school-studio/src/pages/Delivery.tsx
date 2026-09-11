@@ -16,10 +16,7 @@ import {
   type DeliveryBasketItem
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-
-function formatPrice(amount: number, currency: string) {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
-}
+import { deliveryLocales, formatDeliveryPrice, getStoredDeliveryLocale, translate, type DeliveryLocale, type DeliveryMessageKey } from "../lib/deliveryLocale";
 
 // Local Basket Item representation
 type LocalBasketItem = {
@@ -28,6 +25,11 @@ type LocalBasketItem = {
   photoIds: number[];
   quantity: number;
 };
+
+type DeliveryNotice =
+  | { kind: "message"; key: DeliveryMessageKey }
+  | { kind: "added"; offerName: string }
+  | { kind: "order"; orderId: number; paymentInstructions?: string };
 
 function getCommonMethods(basketItems: LocalBasketItem[], contentOffers: DeliveryOffer[]) {
   if (basketItems.length === 0) return { delivery: [] as string[], payment: [] as string[], currency: null as string | null };
@@ -58,7 +60,7 @@ export default function Delivery() {
   const [token, setToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<DeliveryNotice | null>(null);
   const [paidPhotoIds, setPaidPhotoIds] = useState<Set<number>>(new Set());
   const [orderIdToCheck, setOrderIdToCheck] = useState<number | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string>("");
@@ -74,6 +76,34 @@ export default function Delivery() {
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryOrderInputDeliveryMethod>("digital");
   const [paymentMethod, setPaymentMethod] = useState<DeliveryOrderInputPaymentMethod>("establishment");
   const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [locale, setLocale] = useState<DeliveryLocale>(getStoredDeliveryLocale);
+  const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
+  const formatPrice = (amount: number, currency: string) => formatDeliveryPrice(amount, currency, locale);
+  const noticeText = notice?.kind === "message"
+    ? t(notice.key)
+    : notice?.kind === "added"
+      ? `${notice.offerName} ${t("added")}`
+      : notice?.kind === "order"
+        ? `${t("orderReceived")} #${notice.orderId}. ${notice.paymentInstructions || t("paymentFallback")}`
+        : null;
+
+  function LanguageSelector() {
+    return <label className="flex items-center gap-2 text-sm text-slate-500">
+      <span className="sr-only">{t("card")}</span>
+      <select aria-label={t("card")} value={locale} onChange={event => {
+        const next = event.target.value as DeliveryLocale;
+        setLocale(next);
+        localStorage.setItem("delivery-locale", next);
+        document.documentElement.lang = next;
+      }} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm">
+        {deliveryLocales.map(item => <option key={item} value={item}>{item.toUpperCase()}</option>)}
+      </select>
+    </label>;
+  }
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -81,7 +111,7 @@ export default function Delivery() {
     if (initialCode) setCode(initialCode);
     
     if (query.get("paid") === "1") {
-      setNotice("Payment received. We are confirming your order and preparing your downloads.");
+      setNotice({ kind: "message", key: "paymentReceived" });
     }
     
     const orderParam = query.get("order");
@@ -130,8 +160,8 @@ export default function Delivery() {
       const hasDownloads = orderData.downloadablePhotoIds && orderData.downloadablePhotoIds.length > 0;
       setNotice(
         hasDownloads 
-          ? "Payment confirmed. Your paid photos are ready to download."
-          : "Payment confirmed. We are preparing your order."
+          ? { kind: "message", key: "paidReady" }
+          : { kind: "message", key: "paidPreparing" }
       );
     }
   }, [orderData]);
@@ -224,13 +254,13 @@ export default function Delivery() {
       id: crypto.randomUUID(),
       offerId: activeOffer.id,
       photoIds: Array.from(selected),
-      quantity: activeOffer.productType === 'digital' ? 1 : quantity
+      quantity: activeOffer.productType === 'digital' ? selected.size : quantity
     };
     
     setBasket(prev => [...prev, newItem]);
     setSelected(new Set());
     setQuantity(1);
-    setNotice(`Added ${activeOffer.name} to your basket.`);
+    setNotice({ kind: "added", offerName: activeOffer.name });
     setTimeout(() => setNotice(null), 3000);
   }
 
@@ -282,22 +312,23 @@ export default function Delivery() {
         setOrderIdToCheck(res.orderId);
         setViewingBasket(false);
         setBasket([]);
-        setNotice(`Order #${res.orderId} received. ${res.paymentInstructions || "The studio will confirm payment before processing the order."}`);
+        setNotice({ kind: "order", orderId: res.orderId, paymentInstructions: res.paymentInstructions || undefined });
       }
     });
   }
 
   if (galleryLoading) {
-    return <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" />Loading gallery…</div>;
+    return <div className="flex min-h-[100dvh] flex-col gap-4 items-center justify-center bg-slate-50 text-slate-500"><LanguageSelector /><div><Loader2 className="mr-2 size-4 animate-spin" />{t("loading")}</div></div>;
   }
 
   if (!gallery || galleryError) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 p-6">
-        <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+           <div className="mb-4 flex justify-end"><LanguageSelector /></div>
           <LockKeyhole className="mx-auto size-10 text-slate-400" />
-          <h1 className="mt-4 text-xl font-semibold text-slate-900">Delivery unavailable</h1>
-          <p className="mt-2 text-sm text-slate-500">This gallery could not be found or is no longer active.</p>
+           <h1 className="mt-4 text-xl font-semibold text-slate-900">{t("unavailable")}</h1>
+           <p className="mt-2 text-sm text-slate-500">{t("unavailableText")}</p>
         </div>
       </div>
     );
@@ -314,19 +345,19 @@ export default function Delivery() {
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
             <div>
-              <p className="font-semibold" style={{ color: "var(--delivery-primary)" }}>{(gallery as any).studio?.name || "Studio"}</p>
+             <p className="font-semibold" style={{ color: "var(--delivery-primary)" }}>{(gallery as any).studio?.name || t("studio")}</p>
               {(gallery as any).studio?.tagline && <p className="text-sm text-slate-500">{(gallery as any).studio.tagline}</p>}
             </div>
-            <LockKeyhole className="size-5 text-slate-400" />
+             <div className="flex items-center gap-4"><LanguageSelector /><LockKeyhole className="size-5 text-slate-400" /></div>
           </div>
         </header>
         <main className="mx-auto flex max-w-md items-center px-6 py-20">
           <div className="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h1 className="text-2xl font-bold tracking-tight">Your private gallery</h1>
-            <p className="mt-2 text-sm leading-6 text-slate-500">Enter the access code from your photo card to view previews and order digital photos.</p>
+             <h1 className="text-2xl font-bold tracking-tight">{t("privateGallery")}</h1>
+             <p className="mt-2 text-sm leading-6 text-slate-500">{t("accessText")}</p>
             <form onSubmit={openGallery} className="mt-6 space-y-4">
               <label className="block text-sm font-medium text-slate-700">
-                Access code
+                 {t("accessCode")}
                 <input 
                   autoFocus 
                   value={code} 
@@ -339,10 +370,10 @@ export default function Delivery() {
               </label>
               
               {enterAccess.isError && (
-                <p role="alert" className="text-sm text-red-700">That access code is not valid.</p>
+                <p role="alert" className="text-sm text-red-700">{t("invalidCode")}</p>
               )}
               {contentIsError && (
-                <p role="alert" className="text-sm text-red-700">The gallery could not be opened. Please try again.</p>
+                <p role="alert" className="text-sm text-red-700">{t("openError")}</p>
               )}
               
               <button 
@@ -353,10 +384,10 @@ export default function Delivery() {
                 style={{ backgroundColor: "var(--delivery-primary)" }}
               >
                 {enterAccess.isPending || contentLoading ? <Loader2 className="size-4 animate-spin" /> : <LockKeyhole className="size-4" />}
-                Open gallery
+                 {t("openGallery")}
               </button>
             </form>
-            <p className="mt-6 text-center text-xs text-slate-400">If you cannot find your code, please contact the photography studio.</p>
+             <p className="mt-6 text-center text-xs text-slate-400">{t("contact")}</p>
           </div>
         </main>
       </div>
@@ -371,13 +402,14 @@ export default function Delivery() {
       <div style={brandStyle} className="min-h-[100dvh] bg-slate-50 text-slate-900 pb-32">
         <header className="border-b border-slate-200 bg-white sticky top-0 z-10 shadow-sm">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-            <h1 className="text-xl font-bold">Checkout</h1>
+             <h1 className="text-xl font-bold">{t("checkout")}</h1>
+             <LanguageSelector />
             <button 
               type="button"
               onClick={() => setViewingBasket(false)} 
               className="flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-900"
             >
-              <X className="size-4" /> Back to Gallery
+               <X className="size-4" /> {t("back")}
             </button>
           </div>
         </header>
@@ -386,18 +418,18 @@ export default function Delivery() {
           {basket.length === 0 ? (
             <div className="text-center py-20 rounded-2xl border border-slate-200 bg-white p-12">
               <ShoppingBag className="mx-auto size-12 text-slate-300" />
-              <h2 className="mt-4 text-lg font-semibold text-slate-900">Your basket is empty</h2>
+               <h2 className="mt-4 text-lg font-semibold text-slate-900">{t("empty")}</h2>
               <button 
                 onClick={() => setViewingBasket(false)}
                 className="mt-6 rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
               >
-                Return to Gallery
+                 {t("returnGallery")}
               </button>
             </div>
           ) : (
             <div className="grid gap-10 md:grid-cols-12">
               <div className="md:col-span-7 space-y-6">
-                <h2 className="text-lg font-semibold text-slate-900">Your Basket</h2>
+                 <h2 className="text-lg font-semibold text-slate-900">{t("basket")}</h2>
                 <div className="space-y-4">
                   {basket.map((item) => {
                     const offer = content.offers.find(o => o.id === item.offerId);
@@ -410,7 +442,7 @@ export default function Delivery() {
                           <div>
                             <h3 className="font-semibold text-slate-900">{offer.name}</h3>
                             <p className="text-sm text-slate-500 mt-1">
-                              {item.photoIds.length} photo{item.photoIds.length === 1 ? "" : "s"} selected
+                               {item.photoIds.length} {t("selected")}
                             </p>
                           </div>
                           <div className="text-right">
@@ -421,7 +453,7 @@ export default function Delivery() {
                         <div className="flex items-center justify-between border-t border-slate-100 pt-4">
                           {offer.productType === 'print' ? (
                             <div className="flex items-center gap-3">
-                              <label className="text-sm font-medium text-slate-700">Qty:</label>
+                               <label className="text-sm font-medium text-slate-700">{t("qty")}</label>
                               <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
                                 <button type="button" onClick={() => updateQuantityInBasket(item.id, item.quantity - 1)} className="px-3 py-1 text-slate-500 hover:bg-slate-100">-</button>
                                 <span className="px-3 text-sm font-medium">{item.quantity}</span>
@@ -429,12 +461,12 @@ export default function Delivery() {
                               </div>
                             </div>
                           ) : offer.productType === 'pack' ? (
-                            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Qty: {item.quantity} (Pack)</span>
+                             <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t("qty")} {item.quantity} (Pack)</span>
                           ) : (
-                            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Digital Delivery</span>
+                             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{t("digitalDelivery")}</span>
                           )}
                           <button type="button" onClick={() => removeFromBasket(item.id)} className="text-sm font-medium text-red-600 hover:text-red-700 transition-colors">
-                            Remove
+                             {t("remove")}
                           </button>
                         </div>
                       </div>
@@ -445,24 +477,24 @@ export default function Delivery() {
 
               <div className="md:col-span-5">
                 <form onSubmit={startCheckout} className="sticky top-24 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-lg font-semibold text-slate-900 mb-6">Delivery & Payment</h2>
+                   <h2 className="text-lg font-semibold text-slate-900 mb-6">{t("deliveryPayment")}</h2>
                   
                   <div className="space-y-5">
                     <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-slate-700">Your Name *</label>
+                       <label className="text-sm font-medium text-slate-700">{t("name")}</label>
                       <input
                         required
                         type="text"
                         value={customerName}
                         onChange={e => setCustomerName(e.target.value)}
                         className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                        placeholder="Jane Doe"
+                         placeholder={{ fr: "Marie Dupont", en: "Jane Doe", sv: "Anna Andersson", es: "Ana García" }[locale]}
                       />
                     </div>
 
                     <div className="space-y-1.5">
                         <label className="text-sm font-medium text-slate-700">
-                          Email Address {paymentMethod === "stripe" ? "*" : ""}
+                           {t("email")} {paymentMethod === "stripe" ? "*" : ""}
                         </label>
                       <input
                         type="email"
@@ -470,12 +502,12 @@ export default function Delivery() {
                         value={customerEmail}
                         onChange={e => setCustomerEmail(e.target.value)}
                         className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                        placeholder="you@example.com"
+                         placeholder={{ fr: "vous@exemple.com", en: "you@example.com", sv: "du@exempel.se", es: "tu@ejemplo.com" }[locale]}
                       />
                     </div>
                     
                     <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-slate-700">Delivery Method *</label>
+                       <label className="text-sm font-medium text-slate-700">{t("deliveryMethod")}</label>
                       <select
                         required
                         value={deliveryMethod}
@@ -483,32 +515,32 @@ export default function Delivery() {
                         className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm capitalize focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
                       >
                         {commonDelivery.map(m => (
-                          <option key={m} value={m} className="capitalize">{m}</option>
+                           <option key={m} value={m} className="capitalize">{m === "digital" ? t("digitalDelivery") : m === "shipping" ? ({ fr: "Expédition", en: "Shipping", sv: "Frakt", es: "Envío" }[locale]) : m}</option>
                         ))}
                       </select>
                     </div>
                     {checkoutUnavailable && (
                       <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        These products do not currently share an available payment and delivery method. Remove one product or try again when card payments are available.
+                         {t("checkoutUnavailable")}
                       </div>
                     )}
 
                     {deliveryMethod === 'shipping' && (
                       <div className="space-y-1.5">
-                        <label className="text-sm font-medium text-slate-700">Shipping Address *</label>
+                         <label className="text-sm font-medium text-slate-700">{t("address")}</label>
                         <textarea
                           required
                           rows={2}
                           value={deliveryAddress}
                           onChange={e => setDeliveryAddress(e.target.value)}
                           className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                          placeholder="123 Main St, City, State, ZIP"
+                           placeholder={{ fr: "12 rue principale, ville, code postal", en: "123 Main St, City, State, ZIP", sv: "Huvudgatan 12, stad, postnummer", es: "Calle Principal 123, ciudad, código postal" }[locale]}
                         />
                       </div>
                     )}
 
                     <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-slate-700">Payment Method *</label>
+                       <label className="text-sm font-medium text-slate-700">{t("paymentMethod")}</label>
                       <select
                         required
                         value={paymentMethod}
@@ -518,8 +550,8 @@ export default function Delivery() {
                         {availablePayments.map(method => (
                           <option key={method} value={method}>
                             {method === "stripe"
-                              ? "Card with Stripe"
-                              : method === "establishment" ? "Pay at establishment" : "Bank transfer"}
+                               ? t("payStripe")
+                               : method === "establishment" ? t("payEstablishment") : t("payBank")}
                           </option>
                         ))}
                       </select>
@@ -528,13 +560,13 @@ export default function Delivery() {
 
                   <div className="mt-8 border-t border-slate-100 pt-6">
                     <div className="flex items-center justify-between mb-6">
-                      <span className="text-base font-semibold text-slate-900">Total</span>
+                       <span className="text-base font-semibold text-slate-900">{t("total")}</span>
                       <span className="text-xl font-bold text-slate-900">{formatPrice(basketTotal, basketCurrency || 'USD')}</span>
                     </div>
                     
                     {createOrder.isError && (
                       <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 border border-red-200">
-                        There was an error placing your order. Please try again.
+                         {t("orderError")}
                       </div>
                     )}
 
@@ -545,7 +577,7 @@ export default function Delivery() {
                       style={{ backgroundColor: "var(--delivery-primary)" }}
                     >
                       {createOrder.isPending ? <Loader2 className="size-4 animate-spin" /> : <LockKeyhole className="size-4" />}
-                      Place Order
+                       {t("placeOrder")}
                     </button>
                   </div>
                 </form>
@@ -564,14 +596,15 @@ export default function Delivery() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
           <div>
-            <p className="font-semibold" style={{ color: "var(--delivery-primary)" }}>{(gallery as any).studio?.name || "Studio"}</p>
+            <p className="font-semibold" style={{ color: "var(--delivery-primary)" }}>{(gallery as any).studio?.name || t("studio")}</p>
             {(gallery as any).studio?.tagline && <p className="text-sm text-slate-500">{(gallery as any).studio.tagline}</p>}
           </div>
+          <LanguageSelector />
           <button 
             onClick={() => { setToken(null); setCode(""); setBasket([]); setSelected(new Set()); }} 
             className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-900"
           >
-            Use another code
+            {t("anotherCode")}
           </button>
         </div>
       </header>
@@ -579,19 +612,19 @@ export default function Delivery() {
       <main className="mx-auto max-w-6xl px-6 py-10 pb-40">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-slate-500">Private delivery</p>
+            <p className="text-sm font-medium text-slate-500">{t("privateDelivery")}</p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight">
               {(content.student as any)?.firstName} {(content.student as any)?.lastName}
             </h1>
           </div>
           <p className="text-sm text-slate-500">
-            {content.photos.length} preview{content.photos.length === 1 ? "" : "s"}
+            {content.photos.length} {content.photos.length === 1 ? t("preview") : t("previews")}
           </p>
         </div>
 
         {offers.length > 0 && (
           <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <label className="text-base font-semibold text-slate-900">Choose a product</label>
+            <label className="text-base font-semibold text-slate-900">{t("chooseProduct")}</label>
             <div className="mt-4 flex flex-wrap gap-2">
               {offers.map(offer => (
                 <button
@@ -620,15 +653,15 @@ export default function Delivery() {
                   {activeOffer.description}
                   {activeOffer.printSize ? ` · ${activeOffer.printSize}` : ""}
                   {activeOffer.productType === 'digital' 
-                    ? " · 1 unit per selected photo"
+                    ? ` · ${t("perPhoto")}`
                     : activeOffer.productType === 'print'
-                      ? " · Select 1 photo"
-                      : ` · Select ${activeOffer.photoCount} photo${activeOffer.photoCount === 1 ? "" : "s"} per pack`}
+                      ? ` · ${t("selectOne")}`
+                      : ` · ${t("selectOne").replace("1", String(activeOffer.photoCount))} ${t("perPack")}`}
                 </p>
 
                 {activeOffer.productType !== 'digital' && (
                   <div className="flex items-center gap-3">
-                    <label className="text-sm font-medium text-slate-700">Quantity:</label>
+                    <label className="text-sm font-medium text-slate-700">{t("quantity")}</label>
                     <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
                       <button type="button" onClick={() => setQuantity(Math.max(1, quantity - 1))} className="px-3 py-1.5 text-slate-500 hover:bg-slate-100">-</button>
                       <span className="px-3 text-sm font-medium">{quantity}</span>
@@ -639,7 +672,7 @@ export default function Delivery() {
 
                 {!canAddOffer(activeOffer) && (
                   <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 border border-amber-200">
-                    This product cannot be purchased together with items currently in your basket because they require different payment/delivery methods or use different currencies. Please complete your current order first, or clear your basket.
+                    {t("cannotCombine")}
                   </p>
                 )}
               </div>
@@ -650,26 +683,26 @@ export default function Delivery() {
         {notice && (
           <div className="mt-6 flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900 shadow-sm animate-in fade-in zoom-in duration-300">
             <Check className="mt-0.5 size-4 shrink-0 text-teal-700" />
-            {notice}
+            {noticeText}
           </div>
         )}
 
         {content.orderingAvailable === false && (
           <div role="status" className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Private photo access is available, but this studio has not configured an active offer yet.
+            {t("accessAvailable")}
           </div>
         )}
         
         {content.photos.length === 0 ? (
           <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-12 text-center">
             <ImageIcon className="mx-auto size-10 text-slate-300" />
-            <h2 className="mt-4 font-semibold text-slate-900">Photos are not ready yet</h2>
-            <p className="mt-2 text-sm text-slate-500">Please check again later or contact the studio.</p>
+            <h2 className="mt-4 font-semibold text-slate-900">{t("notReady")}</h2>
+            <p className="mt-2 text-sm text-slate-500">{t("checkLater")}</p>
             <button 
               onClick={() => refetchContent()} 
               className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-teal-700 transition-colors hover:text-teal-800"
             >
-              <RefreshCw className="size-4" /> Refresh
+              <RefreshCw className="size-4" /> {t("refresh")}
             </button>
           </div>
         ) : (
@@ -692,7 +725,7 @@ export default function Delivery() {
                   <div className="relative aspect-[4/5] bg-slate-100">
                     <img 
                       src={photo.fileUrl} 
-                      alt="Photo preview" 
+              alt={t("photoPreview")}
                       className="h-full w-full object-cover" 
                       loading="lazy"
                     />
@@ -710,12 +743,12 @@ export default function Delivery() {
                     {isPaid && (
                       <span className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-green-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm">
                         <Check className="size-3" />
-                        Purchased
+                        {t("purchased")}
                       </span>
                     )}
                     
                     <span className="absolute bottom-3 left-3 rounded bg-black/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur-sm">
-                      Preview
+                      {t("preview")}
                     </span>
                   </div>
                   
@@ -737,11 +770,11 @@ export default function Delivery() {
                 <Check className="size-5 text-teal-700" />
               </div>
               <div>
-                <h2 className="font-semibold text-teal-950">Order Successful</h2>
+                <h2 className="font-semibold text-teal-950">{t("success")}</h2>
                 <p className="mt-1 text-sm text-teal-800">
                   {orderData?.downloadablePhotoIds?.length
-                    ? "Your purchased photos are available to download below." 
-                    : "Your order has been received and will be processed soon."}
+                     ? t("downloadsReady")
+                     : t("processing")}
                 </p>
               </div>
             </div>
@@ -758,7 +791,7 @@ export default function Delivery() {
                       className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-teal-800 shadow-sm ring-1 ring-teal-200 transition-colors hover:bg-teal-50"
                     >
                       <Download className="size-4" />
-                      Download {photo.fileName}
+                      {t("download")} {photo.fileName}
                     </a>
                 ))}
               </div>
@@ -775,22 +808,22 @@ export default function Delivery() {
                 <>
                   <p className="font-semibold text-slate-900">
                     {requiredPhotoCount === null 
-                      ? `${selected.size} photo${selected.size === 1 ? "" : "s"} selected`
-                      : `${selected.size} of ${requiredPhotoCount} photo${requiredPhotoCount === 1 ? "" : "s"} selected`}
+                      ? `${selected.size} ${t("selected")}`
+                      : `${selected.size} of ${requiredPhotoCount} ${t("selected")}`}
                   </p>
                   {activeOffer && activeOffer.unitAmount > 0 && (
                     <p className="mt-0.5 text-sm font-medium text-slate-500">
-                      Current selection: {formatPrice(selectedTotal, activeOffer.currency)}
+                      {t("current")}: {formatPrice(selectedTotal, activeOffer.currency)}
                     </p>
                   )}
                 </>
               ) : (
                 <>
                   <p className="font-semibold text-slate-900">
-                    {basket.length} item{basket.length === 1 ? "" : "s"} in basket
+                    {basket.length} {t("item")}
                   </p>
                   <p className="mt-0.5 text-sm font-medium text-slate-500">
-                    Basket Total: {formatPrice(basketTotal, basketCurrency || 'USD')}
+                    {t("basketTotal")}: {formatPrice(basketTotal, basketCurrency || 'USD')}
                   </p>
                 </>
               )}
@@ -804,7 +837,7 @@ export default function Delivery() {
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-teal-50 px-6 text-sm font-semibold text-teal-800 shadow-sm transition-colors hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ color: "var(--delivery-primary)" }}
                 >
-                  Add to Basket
+                  {t("add")}
                 </button>
               )}
               {basket.length > 0 && (
@@ -820,7 +853,7 @@ export default function Delivery() {
                   style={{ backgroundColor: "var(--delivery-primary)" }}
                 >
                   <ShoppingBag className="size-4" />
-                  Checkout ({basket.length + (selected.size > 0 && isValidSelection && activeOffer && canAddOffer(activeOffer) ? 1 : 0)})
+                  {t("checkout")} ({basket.length + (selected.size > 0 && isValidSelection && activeOffer && canAddOffer(activeOffer) ? 1 : 0)})
                 </button>
               )}
             </div>

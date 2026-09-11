@@ -27,6 +27,7 @@ import { normalizeProjectType } from '../../shared/types'
 import { eq, and, or, isNull } from 'drizzle-orm'
 import type { LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
+import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
@@ -1103,7 +1104,7 @@ function emitLiveUploadState(projectId: number): void {
 
 function getProjectLiveUploadJobs(projectId: number, includeErrors: boolean): ProjectSyncJob[] {
   const db = getDb()
-  return getProjectSyncJobs(projectId).filter((job) => {
+  const jobs = getProjectSyncJobs(projectId).filter((job) => {
     const status = job.kind === 'capture-file'
       ? db.select({ value: imageFilesTable.uploadStatus }).from(imageFilesTable)
         .where(eq(imageFilesTable.id, job.fileId)).get()?.value
@@ -1112,9 +1113,10 @@ function getProjectLiveUploadJobs(projectId: number, includeErrors: boolean): Pr
           .where(eq(groupCaptureFilesTable.id, job.fileId)).get()?.value
         : db.select({ value: photosTable.uploadStatus }).from(photosTable)
           .where(eq(photosTable.id, job.photoId)).get()?.value
-    if (status !== 'error' || includeErrors) return true
-    return (failedUploadRetryAfter.get(projectSyncJobKey(job)) ?? 0) <= Date.now()
+    return status !== 'error' || includeErrors
   })
+  if (includeErrors) return jobs
+  return getEligibleUploadJobs(jobs, projectSyncJobKey, failedUploadRetryAfter, Date.now())
 }
 
 async function uploadProjectJob(job: ProjectSyncJob, captureBatchKey: string): Promise<void> {
@@ -1213,6 +1215,14 @@ function ensureLiveUploadTimer(projectId: number): void {
   }, LIVE_UPLOAD_INTERVAL_MS)
   timer.unref()
   liveUploadTimers.set(projectId, timer)
+  void runLiveUpload(projectId)
+}
+
+export function notifyLiveUploadJobQueued(projectId: number): void {
+  if (!isLiveUploadEnabled(projectId)) return
+  failedLiveRunRetryAfter.delete(projectId)
+  failedLiveRunAttempts.delete(projectId)
+  ensureLiveUploadTimer(projectId)
   void runLiveUpload(projectId)
 }
 
@@ -1342,8 +1352,10 @@ export async function finishProjectCaptureBatch(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerUploadHandlers() {
-  ipcMain.handle('upload:getLiveState', (_e, { projectId }: { projectId: number }) =>
-    getLiveUploadState(projectId))
+  ipcMain.handle('upload:getLiveState', (_e, { projectId }: { projectId: number }) => {
+    if (isLiveUploadEnabled(projectId)) ensureLiveUploadTimer(projectId)
+    return getLiveUploadState(projectId)
+  })
   ipcMain.handle('upload:setLiveEnabled', async (
     _e,
     { projectId, enabled }: { projectId: number; enabled: boolean },

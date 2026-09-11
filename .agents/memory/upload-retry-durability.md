@@ -15,6 +15,12 @@ Files in an error state must re-enter live upload automatically with exponential
 
 **How to apply:** Reset retry history after a confirmed success. Keep group reconciliation failures inside the group queue so portraits continue. Reconcile persisted batch manifests against files that still exist before calculating the expected count.
 
+Retry deadlines apply to every retryable job even when its persisted status is “pending,” and a newly persisted capture must wake the live-upload scheduler.
+
+**Why:** Retryable HTTP and network failures are intentionally returned to the queued state. Filtering delays only for the error state caused old timed-out jobs to be selected repeatedly while fresh captures accumulated behind them.
+
+**How to apply:** Exclude any job whose retry deadline is still in the future, prioritize jobs without retry history, and clear project-level delay when a new capture is ready.
+
 Never transfer or replace a capture batch across desktop connections without server-side accounting for durable files whose success response may have been lost.
 
 **Why:** Retrying an already-committed file can return an idempotent success while leaving that file credited to the original batch. A replacement batch would then remain permanently below its expected count.

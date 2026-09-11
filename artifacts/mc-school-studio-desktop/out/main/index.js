@@ -648,6 +648,14 @@ function assertCaptureBatchComplete(payload) {
     }
   }
 }
+function getEligibleUploadJobs(jobs, getKey, retryAfterByKey, now2) {
+  return jobs.filter((job) => (retryAfterByKey.get(getKey(job)) ?? 0) <= now2).sort((left, right) => {
+    const leftDeferred = retryAfterByKey.has(getKey(left));
+    const rightDeferred = retryAfterByKey.has(getKey(right));
+    if (leftDeferred === rightDeferred) return 0;
+    return leftDeferred ? 1 : -1;
+  });
+}
 function getSetting(key) {
   const db = getDb();
   const row = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
@@ -1430,11 +1438,12 @@ function emitLiveUploadState(projectId) {
 }
 function getProjectLiveUploadJobs(projectId, includeErrors) {
   const db = getDb();
-  return getProjectSyncJobs(projectId).filter((job) => {
+  const jobs = getProjectSyncJobs(projectId).filter((job) => {
     const status = job.kind === "capture-file" ? db.select({ value: imageFilesTable.uploadStatus }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, job.fileId)).get()?.value : job.kind === "group-capture-file" ? db.select({ value: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.id, job.fileId)).get()?.value : db.select({ value: photosTable.uploadStatus }).from(photosTable).where(drizzleOrm.eq(photosTable.id, job.photoId)).get()?.value;
-    if (status !== "error" || includeErrors) return true;
-    return (failedUploadRetryAfter.get(projectSyncJobKey(job)) ?? 0) <= Date.now();
+    return status !== "error" || includeErrors;
   });
+  if (includeErrors) return jobs;
+  return getEligibleUploadJobs(jobs, projectSyncJobKey, failedUploadRetryAfter, Date.now());
 }
 async function uploadProjectJob(job, captureBatchKey) {
   if (job.kind === "capture-file") {
@@ -1526,6 +1535,13 @@ function ensureLiveUploadTimer(projectId) {
   }, LIVE_UPLOAD_INTERVAL_MS);
   timer.unref();
   liveUploadTimers.set(projectId, timer);
+  void runLiveUpload(projectId);
+}
+function notifyLiveUploadJobQueued(projectId) {
+  if (!isLiveUploadEnabled(projectId)) return;
+  failedLiveRunRetryAfter.delete(projectId);
+  failedLiveRunAttempts.delete(projectId);
+  ensureLiveUploadTimer(projectId);
   void runLiveUpload(projectId);
 }
 function stopLiveUploadTimer(projectId) {
@@ -1626,7 +1642,10 @@ async function finishProjectCaptureBatch(projectId, batchKey, status, failedFile
   assertCaptureBatchComplete(payload);
 }
 function registerUploadHandlers() {
-  electron.ipcMain.handle("upload:getLiveState", (_e, { projectId }) => getLiveUploadState(projectId));
+  electron.ipcMain.handle("upload:getLiveState", (_e, { projectId }) => {
+    if (isLiveUploadEnabled(projectId)) ensureLiveUploadTimer(projectId);
+    return getLiveUploadState(projectId);
+  });
   electron.ipcMain.handle("upload:setLiveEnabled", async (_e, { projectId, enabled }) => {
     const project = getDb().select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
     if (!project || project.finishedAt) return getLiveUploadState(projectId);
@@ -43805,6 +43824,7 @@ function enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, re
       result.thumbnailData,
       { skipPreviewGeneration: true }
     );
+    notifyLiveUploadJobQueued(projectId);
   }).catch((error) => {
     session.seenPaths.delete(capture.filePath);
     console.error(`[Watcher] Could not persist ${capture.filePath}; it will be retried`, error);
@@ -44101,6 +44121,7 @@ async function handleNewPhoto(projectId, capture, session) {
       fileName: capture.fileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString()
     });
+    notifyLiveUploadJobQueued(projectId);
     getMainWindow()?.webContents.send("groupCapture:updated", {
       projectId,
       groupId: group.id
@@ -44428,6 +44449,7 @@ async function handleNewRaw(projectId, capture, session, db) {
       capturedAt: new Date(capture.capturedAtMs).toISOString()
     });
     if (result.kind === "duplicate") return;
+    notifyLiveUploadJobQueued(projectId);
     markImagePipeline(capture.diagnosticId, "database write complete", `capture=${result.captureId}`);
     const savedCapture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, result.captureId)).get();
     getMainWindow()?.webContents.send("capture:updated", {

@@ -14,7 +14,7 @@ import {
   studentsTable,
   groupsTable,
 } from '../db/schema'
-import { getSetting } from './upload'
+import { getSetting, notifyLiveUploadJobQueued } from './upload'
 import {
   extractStudentReference,
   formatGroupPhotoName,
@@ -372,6 +372,7 @@ function enqueueMatchedPhotoPersistence(
         result.thumbnailData,
         { skipPreviewGeneration: true },
       )
+      notifyLiveUploadJobQueued(projectId)
     })
     .catch((error) => {
       // The source remains untouched and can be retried after a removable or
@@ -726,6 +727,7 @@ async function handleNewPhoto(
       filePath: capture.filePath, storedPath, fileName: capture.fileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
     })
+    notifyLiveUploadJobQueued(projectId)
     getMainWindow()?.webContents.send('groupCapture:updated', {
       projectId,
       groupId: group.id,
@@ -1133,6 +1135,7 @@ async function handleNewRaw(
       })
 
       if (result.kind === 'duplicate') return
+      notifyLiveUploadJobQueued(projectId)
       markImagePipeline(capture.diagnosticId, 'database write complete', `capture=${result.captureId}`)
       const savedCapture = db
         .select()

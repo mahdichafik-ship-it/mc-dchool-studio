@@ -283,7 +283,9 @@ export function registerPhotoHandlers() {
         .set({
           ...(favorite === undefined ? {} : { favorite }),
           ...(rejected === undefined ? {} : { rejected }),
-          ...(selected === undefined ? {} : { selected }),
+          ...(rating === undefined
+            ? (selected === undefined ? {} : { selected })
+            : { selected: rating > 0 }),
           ...(rating === undefined ? {} : { rating: Math.max(0, Math.min(5, Math.round(rating))) }),
           ...(colorLabel === undefined ? {} : { colorLabel }),
           reviewSyncPending: true,

@@ -770,7 +770,10 @@ export async function syncGroupCaptureReview(captureId: number): Promise<void> {
     if (response.ok) {
       db.update(groupCapturesTable).set({ reviewSyncPending: false, updatedAt: new Date().toISOString() })
         .where(eq(groupCapturesTable.id, captureId)).run()
+      return
     }
+    const body = await response.text().catch(() => '')
+    console.warn(`[Review] Group review sync failed with HTTP ${response.status}${body ? `: ${body}` : ''}`)
   } catch (error) {
     console.warn('[Review] Group review sync deferred:', error)
   }
@@ -802,7 +805,7 @@ export async function syncCaptureReview(captureId: number): Promise<void> {
   if (!project?.cloudId || !student?.cloudId || !apiUrl || !connectionToken) return
   try {
     const response = await fetch(
-      `${apiUrl.replace(/\/+$/, '')}/api/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
       {
         method: 'PATCH',
         headers: {
@@ -830,9 +833,8 @@ export async function syncCaptureReview(captureId: number): Promise<void> {
         .run()
       return
     }
-    if (!response.ok && response.status !== 404) {
-      console.warn(`[Review] Cloud review sync failed with HTTP ${response.status}`)
-    }
+    const body = await response.text().catch(() => '')
+    console.warn(`[Review] Portrait review sync failed with HTTP ${response.status}${body ? `: ${body}` : ''}`)
   } catch (error) {
     console.warn('[Review] Cloud review sync deferred:', error)
   }

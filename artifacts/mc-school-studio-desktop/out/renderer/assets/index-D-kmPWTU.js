@@ -18753,8 +18753,34 @@ function CaptureReviewControls({
     ["blue", "bg-blue-500"],
     ["purple", "bg-purple-500"]
   ];
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative z-30 flex flex-col gap-1.5 border-t border-slate-200 bg-white p-2", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1.5", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative z-30 flex flex-col gap-2 border-t border-slate-200 bg-white p-3", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] font-extrabold uppercase tracking-wider text-slate-700", children: "Parent gallery" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: cn(
+          "text-[10px] font-semibold",
+          capture.rating > 0 ? "text-teal-700" : "text-slate-400"
+        ), children: capture.rating > 0 ? `Shared · ${capture.rating} star${capture.rating === 1 ? "" : "s"}` : "Not shared · choose 1–5 stars" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => onUpdateReview(capture.id, {
+            rating: capture.rating > 0 ? 0 : 5,
+            favorite: capture.rating <= 0,
+            selected: capture.rating <= 0,
+            rejected: false
+          }),
+          className: cn(
+            "rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition-colors",
+            capture.rating > 0 ? "bg-teal-100 text-teal-800 hover:bg-teal-200" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          ),
+          children: capture.rating > 0 ? "Remove" : "Share"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2", children: [
       [1, 2, 3, 4, 5].map((rating) => /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -18762,10 +18788,12 @@ function CaptureReviewControls({
           "aria-label": `Rate ${rating} star${rating === 1 ? "" : "s"}`,
           onClick: () => onUpdateReview(capture.id, {
             rating: capture.rating === rating ? 0 : rating,
-            favorite: rating >= 4
+            favorite: rating >= 4,
+            selected: capture.rating !== rating,
+            rejected: false
           }),
-          className: "p-1 text-amber-500 hover:text-amber-600",
-          children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-3.5", fill: capture.rating >= rating ? "currentColor" : "none" })
+          className: "p-1.5 text-amber-500 hover:text-amber-600",
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-5", fill: capture.rating >= rating ? "currentColor" : "none" })
         },
         rating
       )),

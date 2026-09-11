@@ -1191,7 +1191,10 @@ async function syncGroupCaptureReview(captureId) {
     if (response.status === 401) invalidateDesktopCredentials(true);
     if (response.ok) {
       db.update(groupCapturesTable).set({ reviewSyncPending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).run();
+      return;
     }
+    const body = await response.text().catch(() => "");
+    console.warn(`[Review] Group review sync failed with HTTP ${response.status}${body ? `: ${body}` : ""}`);
   } catch (error) {
     console.warn("[Review] Group review sync deferred:", error);
   }
@@ -1221,7 +1224,7 @@ async function syncCaptureReview(captureId) {
   if (!project?.cloudId || !student?.cloudId || !apiUrl || !connectionToken) return;
   try {
     const response = await fetch(
-      `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
       {
         method: "PATCH",
         headers: {
@@ -1246,9 +1249,8 @@ async function syncCaptureReview(captureId) {
       db.update(capturesTable).set({ reviewSyncPending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(capturesTable.id, captureId)).run();
       return;
     }
-    if (!response.ok && response.status !== 404) {
-      console.warn(`[Review] Cloud review sync failed with HTTP ${response.status}`);
-    }
+    const body = await response.text().catch(() => "");
+    console.warn(`[Review] Portrait review sync failed with HTTP ${response.status}${body ? `: ${body}` : ""}`);
   } catch (error) {
     console.warn("[Review] Cloud review sync deferred:", error);
   }
@@ -2686,7 +2688,7 @@ function registerPhotoHandlers() {
       db.update(capturesTable).set({
         ...favorite === void 0 ? {} : { favorite },
         ...rejected === void 0 ? {} : { rejected },
-        ...selected === void 0 ? {} : { selected },
+        ...rating === void 0 ? selected === void 0 ? {} : { selected } : { selected: rating > 0 },
         ...rating === void 0 ? {} : { rating: Math.max(0, Math.min(5, Math.round(rating))) },
         ...colorLabel === void 0 ? {} : { colorLabel },
         reviewSyncPending: true,

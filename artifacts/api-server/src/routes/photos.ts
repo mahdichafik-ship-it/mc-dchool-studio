@@ -1192,7 +1192,7 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
   const [capture] = await db.update(capturesTable).set({
     favorite: Boolean(req.body?.favorite),
     rejected: Boolean(req.body?.rejected),
-    selected: Boolean(req.body?.selected),
+    selected: rating > 0,
     rating,
     colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
     updatedAt: new Date(),

@@ -293,6 +293,7 @@ export interface LiveUploadState {
   uploading: number
   done: number
   error: number
+  blocked: number
   total: number
   lastUploadedAt?: string
   lastError?: string
@@ -305,7 +306,8 @@ export interface LiveUploadQueueItem {
   fileRole: 'JPEG' | 'RAW'
   subject: string
   capturedAt: string
-  status: 'queued' | 'uploading' | 'failed' | 'preparing_gallery'
+  status: 'queued' | 'uploading' | 'failed' | 'preparing_gallery' | 'blocked'
+  blockedReason?: string
   attempts: number
   retryAt?: string
   lastError?: string

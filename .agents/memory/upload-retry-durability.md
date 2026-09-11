@@ -21,6 +21,12 @@ Retry deadlines apply to every retryable job even when its persisted status is â
 
 **How to apply:** Exclude any job whose retry deadline is still in the future, prioritize jobs without retry history, and clear project-level delay when a new capture is ready.
 
+Files without a destination identity are blocked local captures, not queued uploads.
+
+**Why:** Counting unmatched capture files as queued created a permanent nonzero queue even though the uploader correctly excluded them; the detailed queue and headline count then disagreed.
+
+**How to apply:** Exclude unmatched files from uploadable pending counts, preserve them locally, and show them separately with the reason they cannot upload.
+
 Never transfer or replace a capture batch across desktop connections without server-side accounting for durable files whose success response may have been lost.
 
 **Why:** Retrying an already-committed file can return an idempotent success while leaving that file credited to the original batch. A replacement batch would then remain permanently below its expected count.

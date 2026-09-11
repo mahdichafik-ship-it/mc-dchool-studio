@@ -680,12 +680,13 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             Uploads can continue while you photograph and while this window is closed.
             They do not finish the shoot.
           </p>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-5 gap-2">
             {[
               ['Uploaded', liveUpload?.done ?? 0, 'text-emerald-700 bg-emerald-50'],
               ['Uploading', liveUpload?.uploading ?? 0, 'text-blue-700 bg-blue-50'],
               ['Queued', liveUpload?.pending ?? 0, 'text-amber-700 bg-amber-50'],
               ['Failed', liveUpload?.error ?? 0, 'text-red-700 bg-red-50'],
+              ['Blocked', liveUpload?.blocked ?? 0, 'text-slate-700 bg-slate-100'],
             ].map(([label, value, color]) => (
               <div key={String(label)} className={cn("rounded-lg p-3 text-center", String(color))}>
                 <div className="text-xl font-extrabold">{String(value)}</div>
@@ -731,11 +732,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                   ? 'Preparing gallery'
                   : item.status === 'blocked'
                     ? 'Waiting for match'
-                  : item.status === 'uploading'
-                    ? 'Uploading'
-                    : item.status === 'failed'
-                      ? 'Failed'
-                      : waitingForRetry ? 'Retry scheduled' : 'Queued'
+                    : item.status === 'uploading'
+                      ? 'Uploading'
+                      : item.status === 'failed'
+                        ? 'Failed'
+                        : waitingForRetry ? 'Retry scheduled' : 'Queued'
                 return (
                   <div key={item.key} className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
                     <div className="flex items-start justify-between gap-3">
@@ -757,7 +758,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                         {statusLabel}
                       </Badge>
                     </div>
-                    {(item.attempts > 0 || item.lastError) && (
+                    {(item.attempts > 0 || item.lastError || item.blockedReason) && (
                       <div className="mt-1.5 text-xs text-slate-500">
                         {item.attempts > 0 && (
                           <span>{item.attempts} attempt{item.attempts === 1 ? '' : 's'}</span>

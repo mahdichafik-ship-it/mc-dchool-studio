@@ -17496,11 +17496,12 @@ function ProjectView({ projectId, onBack, offline = false }) {
         className: "max-w-lg",
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: "Uploads can continue while you photograph and while this window is closed. They do not finish the shoot." }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-4 gap-2", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-5 gap-2", children: [
             ["Uploaded", liveUpload?.done ?? 0, "text-emerald-700 bg-emerald-50"],
             ["Uploading", liveUpload?.uploading ?? 0, "text-blue-700 bg-blue-50"],
             ["Queued", liveUpload?.pending ?? 0, "text-amber-700 bg-amber-50"],
-            ["Failed", liveUpload?.error ?? 0, "text-red-700 bg-red-50"]
+            ["Failed", liveUpload?.error ?? 0, "text-red-700 bg-red-50"],
+            ["Blocked", liveUpload?.blocked ?? 0, "text-slate-700 bg-slate-100"]
           ].map(([label, value, color]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn("rounded-lg p-3 text-center", String(color)), children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xl font-extrabold", children: String(value) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase tracking-wider", children: String(label) })
@@ -17519,11 +17520,15 @@ function ProjectView({ projectId, onBack, offline = false }) {
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-2 flex items-center justify-between", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-bold uppercase tracking-wider text-slate-500", children: "Files still waiting" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-slate-400", children: uploadQueue.length })
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-slate-400", children: [
+                liveUpload?.pending ?? uploadQueue.length,
+                " uploadable",
+                (liveUpload?.blocked ?? 0) > 0 ? ` · ${liveUpload?.blocked} blocked` : ""
+              ] })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2", children: uploadQueue.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "px-2 py-4 text-center text-sm text-slate-500", children: "No files are waiting." }) : uploadQueue.map((item) => {
               const waitingForRetry = item.retryAt && new Date(item.retryAt).getTime() > Date.now();
-              const statusLabel = item.status === "preparing_gallery" ? "Preparing gallery" : item.status === "uploading" ? "Uploading" : item.status === "failed" ? "Failed" : waitingForRetry ? "Retry scheduled" : "Queued";
+              const statusLabel = item.status === "preparing_gallery" ? "Preparing gallery" : item.status === "blocked" ? "Waiting for match" : item.status === "uploading" ? "Uploading" : item.status === "failed" ? "Failed" : waitingForRetry ? "Retry scheduled" : "Queued";
               return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-md border border-slate-100 bg-slate-50 px-3 py-2", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
@@ -17538,10 +17543,10 @@ function ProjectView({ projectId, onBack, offline = false }) {
                   ] }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: cn(
                     "shrink-0 border-0 text-[10px]",
-                    item.status === "failed" ? "bg-red-100 text-red-700" : item.status === "uploading" ? "bg-blue-100 text-blue-700" : item.status === "preparing_gallery" ? "bg-violet-100 text-violet-700" : waitingForRetry ? "bg-orange-100 text-orange-700" : "bg-amber-100 text-amber-700"
+                    item.status === "blocked" ? "bg-slate-200 text-slate-700" : item.status === "failed" ? "bg-red-100 text-red-700" : item.status === "uploading" ? "bg-blue-100 text-blue-700" : item.status === "preparing_gallery" ? "bg-violet-100 text-violet-700" : waitingForRetry ? "bg-orange-100 text-orange-700" : "bg-amber-100 text-amber-700"
                   ), children: statusLabel })
                 ] }),
-                (item.attempts > 0 || item.lastError) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1.5 text-xs text-slate-500", children: [
+                (item.attempts > 0 || item.lastError || item.blockedReason) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1.5 text-xs text-slate-500", children: [
                   item.attempts > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
                     item.attempts,
                     " attempt",
@@ -17551,6 +17556,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
                     " · retry at ",
                     new Date(item.retryAt).toLocaleTimeString()
                   ] }),
+                  item.blockedReason && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 break-words text-slate-600", children: item.blockedReason }),
                   item.lastError && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 break-words text-red-600", children: item.lastError })
                 ] })
               ] }, item.key);

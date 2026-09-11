@@ -1054,11 +1054,20 @@ function isLiveUploadEnabled(projectId: number): boolean {
 function getUploadStatusCounts(projectId: number) {
   const db = getDb()
   const statuses: UploadStatus[] = []
-  const captures = db.select({ id: capturesTable.id }).from(capturesTable)
+  let blocked = 0
+  const captures = db.select({
+    id: capturesTable.id,
+    studentId: capturesTable.studentId,
+  }).from(capturesTable)
     .where(eq(capturesTable.projectId, projectId)).all()
   for (const capture of captures) {
-    statuses.push(...db.select({ status: imageFilesTable.uploadStatus }).from(imageFilesTable)
-      .where(eq(imageFilesTable.captureId, capture.id)).all().map((row) => row.status))
+    const captureStatuses = db.select({ status: imageFilesTable.uploadStatus }).from(imageFilesTable)
+      .where(eq(imageFilesTable.captureId, capture.id)).all().map((row) => row.status)
+    if (capture.studentId === null) {
+      blocked += captureStatuses.filter((status) => status !== 'done').length
+    } else {
+      statuses.push(...captureStatuses)
+    }
   }
   const groupCaptures = db.select({ id: groupCapturesTable.id }).from(groupCapturesTable)
     .where(eq(groupCapturesTable.projectId, projectId)).all()
@@ -1085,7 +1094,8 @@ function getUploadStatusCounts(projectId: number) {
     uploading: statuses.filter((status) => status === 'uploading').length,
     done: statuses.filter((status) => status === 'done').length,
     error: statuses.filter((status) => status === 'error').length,
-    total: statuses.length,
+    blocked,
+    total: statuses.length + blocked,
   }
 }
 
@@ -1102,7 +1112,7 @@ export function getLiveUploadState(projectId: number): LiveUploadState {
 
 function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
   const db = getDb()
-  return getProjectSyncJobs(projectId).map((job) => {
+  const uploadableItems = getProjectSyncJobs(projectId).map((job) => {
     const key = projectSyncJobKey(job)
     const retryAt = failedUploadRetryAfter.get(key)
     const attempts = failedUploadAttempts.get(key) ?? 0
@@ -1168,6 +1178,25 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
       ...(lastError ? { lastError } : {}),
     } satisfies LiveUploadQueueItem
   })
+  const blockedItems = db.select().from(capturesTable)
+    .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.studentId)))
+    .all()
+    .flatMap((capture) => db.select().from(imageFilesTable)
+      .where(eq(imageFilesTable.captureId, capture.id))
+      .all()
+      .filter((file) => file.uploadStatus !== 'done')
+      .map((file): LiveUploadQueueItem => ({
+        key: `capture:${file.id}`,
+        kind: 'portrait',
+        fileName: file.originalFilename,
+        fileRole: file.fileRole,
+        subject: 'Waiting for student match',
+        capturedAt: capture.capturedAt,
+        status: 'blocked',
+        blockedReason: 'This capture has no student match yet.',
+        attempts: 0,
+      })))
+  return [...uploadableItems, ...blockedItems]
 }
 
 function emitLiveUploadState(projectId: number): void {

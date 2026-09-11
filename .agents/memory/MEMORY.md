@@ -30,6 +30,7 @@
 - [Project-type compatibility](project-type-compatibility.md) — corporate headshots reuse school data concepts internally; absent or unknown types must remain school-safe.
 - [Volume Capture delivery access](volume-capture-delivery-access.md) — private delivery uses guardian-friendly subject access codes, not child-managed accounts.
 - [Gallery publication boundary](gallery-publication-boundary.md) — publishing is the sole parent-sharing checkpoint; durable uploaded JPEGs need no second visibility flag.
+- [Gallery star selection](gallery-star-selection.md) — back up every capture, but expose and sell only positively starred JPEGs; group photos follow the same rule.
 - [Stripe migration compatibility](stripe-migration-compatibility.md) — modern Stripe schemas may need migration-ledger reconciliation before legacy sync migrations can start safely.
 - [Stripe sandbox claiming](stripe-sandbox-claiming.md) — a healthy Replit Stripe connection can still require claiming the development sandbox in Stripe Dashboard.
 - [Stripe managed webhook reuse](stripe-managed-webhook-reuse.md) — legacy sync bookkeeping exposes endpoint IDs under a different field; normalize before reuse and keep UUID routes active.

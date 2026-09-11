@@ -70,6 +70,7 @@ export interface GroupCaptureFileReview {
   fileSize: number | null
   uploadStatus: UploadStatus
   fileUrl: string | null
+  previewUrl?: string
 }
 
 export interface GroupCaptureReview {
@@ -79,6 +80,7 @@ export interface GroupCaptureReview {
   baseFilename: string
   capturedAt: string
   pairingStatus: CapturePairingStatus
+  rating: number
   files: GroupCaptureFileReview[]
 }
 

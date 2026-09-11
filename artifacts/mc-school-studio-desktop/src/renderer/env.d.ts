@@ -101,6 +101,7 @@ interface ElectronAPI {
   invoke(channel: 'groups:delete', args: { projectId: number; groupId: number }): Promise<void>
   invoke(channel: 'groupCaptures:list', args: { projectId: number; groupId: number }): Promise<GroupCaptureReview[]>
   invoke(channel: 'groupCaptures:summary', args: { projectId: number }): Promise<number>
+  invoke(channel: 'groupCaptures:updateReview', args: { captureId: number; rating: number }): Promise<GroupCaptureReview | null>
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
   invoke(channel: 'captures:list', args: { studentId: number }): Promise<StudentCaptureReview>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>

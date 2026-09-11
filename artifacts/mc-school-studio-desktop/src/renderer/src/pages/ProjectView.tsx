@@ -1406,8 +1406,11 @@ function StudentDetail({
 
             <div>
               <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
-                  2. Live Captures
+                <div>
+                  <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
+                    2. Live Captures
+                  </div>
+                  <p className="mt-2 text-xs font-semibold text-slate-500">Star a photo to include it in the parent gallery.</p>
                 </div>
                 <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
                   {captureFilterOptions.map((option) => (
@@ -1468,7 +1471,7 @@ function StudentDetail({
                   <p className="text-sm font-extrabold text-slate-500 uppercase tracking-wider">No captures match filter</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
                   {qrMarkers.map((marker) => (
                     <QrMarkerTile
                       key={marker.id}
@@ -1570,6 +1573,15 @@ function GroupDetail({
   onClearCaptureTarget: () => void
   onRefreshCaptures: () => void
 }) {
+  async function updateGroupRating(captureId: number, rating: number) {
+    try {
+      await window.api.invoke('groupCaptures:updateReview', { captureId, rating })
+      onRefreshCaptures()
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not update group selection', description: String(error) })
+    }
+  }
+
   return (
     <div className="flex flex-col h-full relative bg-slate-50">
       <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
@@ -1655,10 +1667,26 @@ function GroupDetail({
                 </Button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6">
                 {groupCaptures.map(capture => (
-                  <div key={capture.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col gap-4 relative overflow-hidden group/tile transition-shadow hover:shadow-md">
+                  <div key={capture.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md">
                     <div className="absolute top-0 left-0 w-1 h-full bg-teal-500" />
+                    {capture.files.find(file => file.fileRole === 'JPEG')?.previewUrl && (
+                      <button
+                        type="button"
+                        className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100"
+                        onClick={() => void window.api.invoke('photos:openInSystem', {
+                          filePath: capture.files.find(file => file.fileRole === 'JPEG')!.storedPath,
+                        })}
+                        title="Open full-size image to inspect focus and zoom"
+                      >
+                        <img
+                          src={capture.files.find(file => file.fileRole === 'JPEG')!.previewUrl}
+                          alt={capture.baseFilename}
+                          className="h-full w-full object-contain bg-slate-950"
+                        />
+                      </button>
+                    )}
                     <div>
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-extrabold text-base text-slate-900 truncate">{capture.baseFilename}</span>
@@ -1671,6 +1699,22 @@ function GroupDetail({
                           <ExternalLink className="size-3" /> {file.fileRole}
                         </button>
                       ))}
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery</span>
+                      <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map(rating => (
+                          <button
+                            key={rating}
+                            type="button"
+                            aria-label={`Rate group photo ${rating} stars`}
+                            onClick={() => void updateGroupRating(capture.id, capture.rating === rating ? 0 : rating)}
+                            className="p-1 text-amber-500 hover:text-amber-600"
+                          >
+                            <Star className="size-5" fill={capture.rating >= rating ? 'currentColor' : 'none'} />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2058,12 +2102,15 @@ function CaptureTile({
   retryingFileId?: number | null
   onUpdateReview?: (captureId: number, values: { favorite?: boolean; rejected?: boolean; selected?: boolean }) => void
 }) {
+  const [zoomOpen, setZoomOpen] = useState(false)
+  const [zoom, setZoom] = useState(1)
   const photo = capture.legacyPhoto
   const rawFile = capture.files.find((file) => file.fileRole === 'RAW')
+  const zoomSource = photo?.previewUrl ?? photo?.thumbnailData ?? undefined
 
   if (photo) {
     return (
-      <div className="group relative rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full w-full bg-slate-100">
+      <div className="group relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition-shadow h-full w-full bg-white">
         <PhotoTile
           photo={photo}
           uploadStatus={uploadStatus}
@@ -2078,6 +2125,33 @@ function CaptureTile({
         </div>
         <CaptureUploadBadge capture={capture} />
         <CaptureReviewControls capture={capture} onUpdateReview={onUpdateReview} />
+        {zoomSource && (
+          <button
+            type="button"
+            onClick={() => { setZoom(1); setZoomOpen(true) }}
+            className="absolute right-2 top-2 z-30 rounded-lg bg-black/70 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+          >
+            Inspect & zoom
+          </button>
+        )}
+        {zoomOpen && zoomSource && (
+          <div className="fixed inset-0 z-[100] flex flex-col bg-black/95" onClick={() => setZoomOpen(false)}>
+            <div className="flex items-center justify-between border-b border-white/15 px-5 py-3 text-white" onClick={(event) => event.stopPropagation()}>
+              <span className="text-sm font-bold">{capture.baseFilename}</span>
+              <div className="flex items-center gap-2">
+                <button type="button" className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20" onClick={() => setZoom(value => Math.max(0.5, value - 0.25))}>− Zoom out</button>
+                <span className="w-14 text-center text-xs font-bold">{Math.round(zoom * 100)}%</span>
+                <button type="button" className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20" onClick={() => setZoom(value => Math.min(4, value + 0.25))}>+ Zoom in</button>
+                <button type="button" className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-900" onClick={() => setZoomOpen(false)}>Close</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-6" onClick={(event) => event.stopPropagation()}>
+              <div className="flex min-h-full min-w-full items-center justify-center">
+                <img src={zoomSource} alt={capture.baseFilename} draggable={false} style={{ transform: `scale(${zoom})` }} className="max-h-[78vh] max-w-[90vw] origin-center object-contain transition-transform" />
+              </div>
+            </div>
+          </div>
+        )}
 
         {rawFile?.uploadStatus === 'error' && onRetryFile && (
           <button
@@ -2157,7 +2231,6 @@ function CaptureReviewControls({
   }) => void
 }) {
   if (!onUpdateReview) return null
-  const hasActiveState = capture.rating > 0 || capture.colorLabel !== 'none' || capture.rejected
   const colors = [
     ['red', 'bg-red-500'],
     ['yellow', 'bg-yellow-400'],
@@ -2166,13 +2239,8 @@ function CaptureReviewControls({
     ['purple', 'bg-purple-500'],
   ] as const
   return (
-    <div className={cn(
-      "absolute bottom-2 left-2 right-2 z-30 flex flex-col gap-1.5 transition-all duration-200",
-      hasActiveState
-        ? "opacity-100 translate-y-0"
-        : "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0"
-    )}>
-      <div className="flex items-center gap-0.5 rounded-lg border border-white/20 bg-black/65 px-1.5 py-1 backdrop-blur-md">
+    <div className="relative z-30 flex flex-col gap-1.5 border-t border-slate-200 bg-white p-2">
+      <div className="flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1.5">
         {[1, 2, 3, 4, 5].map((rating) => (
           <button
             key={rating}
@@ -2182,12 +2250,12 @@ function CaptureReviewControls({
               rating: capture.rating === rating ? 0 : rating,
               favorite: rating >= 4,
             })}
-            className="p-1 text-amber-300 hover:text-amber-200"
+            className="p-1 text-amber-500 hover:text-amber-600"
           >
             <Star className="size-3.5" fill={capture.rating >= rating ? 'currentColor' : 'none'} />
           </button>
         ))}
-        <span className="mx-1 h-4 w-px bg-white/20" />
+        <span className="mx-1 h-4 w-px bg-amber-200" />
         {colors.map(([label, color]) => (
           <button
             key={label}

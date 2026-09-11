@@ -44,6 +44,7 @@ test('capture migration is repeatable and keeps legacy rows as the compatibility
   const statements: string[] = []
   const columns = new Map<string, Set<string>>([
     ['groups', new Set()],
+    ['group_captures', new Set()],
     ['group_capture_files', new Set()],
   ])
   const sqlite = {
@@ -76,6 +77,8 @@ test('capture migration is repeatable and keeps legacy rows as the compatibility
   assert.match(migrationSql, /WHERE NOT EXISTS/)
   assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN membership_dirty')).length, 1)
   assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN gallery_ready')).length, 1)
+  assert.equal(statements.filter((statement) => statement.includes('group_captures ADD COLUMN rating')).length, 1)
+  assert.equal(statements.filter((statement) => statement.includes('group_captures ADD COLUMN review_sync_pending')).length, 1)
 })
 
 test('gallery reconciliation retries every legacy photo without deleting or moving it', () => {

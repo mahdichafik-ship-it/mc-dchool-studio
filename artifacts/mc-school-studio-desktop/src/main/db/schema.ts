@@ -80,6 +80,8 @@ export const groupCapturesTable = sqliteTable('group_captures', {
   baseFilename: text('base_filename').notNull(),
   capturedAt: text('captured_at').notNull(),
   pairingStatus: text('pairing_status').notNull().default('pending'),
+  rating: integer('rating').notNull().default(0),
+  reviewSyncPending: integer('review_sync_pending', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })

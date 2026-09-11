@@ -1125,6 +1125,7 @@ test("shows a class photo only for students in that class who have an individual
     baseFilename: `class-photo-${suffix}`,
     capturedAt: new Date().toISOString(),
     pairingStatus: "jpeg_only",
+    rating: 5,
   }).returning();
   const [file] = await db.insert(groupCaptureFilesTable).values({
     captureId: capture.id,
@@ -1148,6 +1149,7 @@ test("shows a class photo only for students in that class who have an individual
   let projected = await db.select().from(studentPhotosTable)
     .where(eq(studentPhotosTable.sourceGroupCaptureFileId, file.id));
   assert.deepEqual(projected.map((photo) => photo.studentId), [photographed.id]);
+  assert.equal(projected[0]?.rating, 5);
 
   await db.insert(studentPhotosTable).values({
     projectId,

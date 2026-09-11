@@ -18091,7 +18091,10 @@ function StudentDetail({
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-4 mb-4", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit", children: "2. Live Captures" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit", children: "2. Live Captures" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 text-xs font-semibold text-slate-500", children: "Star a photo to include it in the parent gallery." })
+            ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm", children: captureFilterOptions.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "button",
               {
@@ -18135,7 +18138,7 @@ function StudentDetail({
           ] }) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-64 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-3xl shadow-sm text-center", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-10 text-slate-300 mb-3" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-extrabold text-slate-500 uppercase tracking-wider", children: "No captures match filter" })
-          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4", children: [
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6", children: [
             qrMarkers.map((marker) => /* @__PURE__ */ jsxRuntimeExports.jsx(
               QrMarkerTile,
               {
@@ -18224,6 +18227,14 @@ function GroupDetail({
   onClearCaptureTarget,
   onRefreshCaptures
 }) {
+  async function updateGroupRating(captureId, rating) {
+    try {
+      await window.api.invoke("groupCaptures:updateReview", { captureId, rating });
+      onRefreshCaptures();
+    } catch (error) {
+      addToast({ type: "error", title: "Could not update group selection", description: String(error) });
+    }
+  }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full relative bg-slate-50", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative", children: [
       isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-full h-1 bg-teal-500" }),
@@ -18288,8 +18299,27 @@ function GroupDetail({
             /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-4 mr-2" }),
             " Check for Captures"
           ] })
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4", children: groupCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col gap-4 relative overflow-hidden group/tile transition-shadow hover:shadow-md", children: [
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 2xl:grid-cols-2 gap-6", children: groupCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-1 h-full bg-teal-500" }),
+          capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100",
+              onClick: () => void window.api.invoke("photos:openInSystem", {
+                filePath: capture.files.find((file) => file.fileRole === "JPEG").storedPath
+              }),
+              title: "Open full-size image to inspect focus and zoom",
+              children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "img",
+                {
+                  src: capture.files.find((file) => file.fileRole === "JPEG").previewUrl,
+                  alt: capture.baseFilename,
+                  className: "h-full w-full object-contain bg-slate-950"
+                }
+              )
+            }
+          ),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2 mb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-extrabold text-base text-slate-900 truncate", children: capture.baseFilename }) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", children: capture.pairingStatus })
@@ -18298,7 +18328,21 @@ function GroupDetail({
             /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
             " ",
             file.fileRole
-          ] }, file.id)) })
+          ] }, file.id)) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-extrabold uppercase tracking-wider text-amber-900", children: "Parent gallery" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-0.5", children: [1, 2, 3, 4, 5].map((rating) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                "aria-label": `Rate group photo ${rating} stars`,
+                onClick: () => void updateGroupRating(capture.id, capture.rating === rating ? 0 : rating),
+                className: "p-1 text-amber-500 hover:text-amber-600",
+                children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-5", fill: capture.rating >= rating ? "currentColor" : "none" })
+              },
+              rating
+            )) })
+          ] })
         ] }, capture.id)) })
       ] })
     ] }) })
@@ -18597,10 +18641,13 @@ function CaptureTile({
   retryingFileId,
   onUpdateReview
 }) {
+  const [zoomOpen, setZoomOpen] = reactExports.useState(false);
+  const [zoom, setZoom] = reactExports.useState(1);
   const photo = capture.legacyPhoto;
   const rawFile = capture.files.find((file) => file.fileRole === "RAW");
+  const zoomSource = photo?.previewUrl ?? photo?.thumbnailData ?? void 0;
   if (photo) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full w-full bg-slate-100", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition-shadow h-full w-full bg-white", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         PhotoTile,
         {
@@ -18616,6 +18663,33 @@ function CaptureTile({
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-2 left-2 z-10 pointer-events-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureCompleteness, { capture }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureUploadBadge, { capture }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(CaptureReviewControls, { capture, onUpdateReview }),
+      zoomSource && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => {
+            setZoom(1);
+            setZoomOpen(true);
+          },
+          className: "absolute right-2 top-2 z-30 rounded-lg bg-black/70 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100",
+          children: "Inspect & zoom"
+        }
+      ),
+      zoomOpen && zoomSource && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fixed inset-0 z-[100] flex flex-col bg-black/95", onClick: () => setZoomOpen(false), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between border-b border-white/15 px-5 py-3 text-white", onClick: (event) => event.stopPropagation(), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-bold", children: capture.baseFilename }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20", onClick: () => setZoom((value) => Math.max(0.5, value - 0.25)), children: "− Zoom out" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "w-14 text-center text-xs font-bold", children: [
+              Math.round(zoom * 100),
+              "%"
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20", onClick: () => setZoom((value) => Math.min(4, value + 0.25)), children: "+ Zoom in" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-900", onClick: () => setZoomOpen(false), children: "Close" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-auto p-6", onClick: (event) => event.stopPropagation(), children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex min-h-full min-w-full items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: zoomSource, alt: capture.baseFilename, draggable: false, style: { transform: `scale(${zoom})` }, className: "max-h-[78vh] max-w-[90vw] origin-center object-contain transition-transform" }) }) })
+      ] }),
       rawFile?.uploadStatus === "error" && onRetryFile && /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -18672,7 +18746,6 @@ function CaptureReviewControls({
   onUpdateReview
 }) {
   if (!onUpdateReview) return null;
-  const hasActiveState = capture.rating > 0 || capture.colorLabel !== "none" || capture.rejected;
   const colors = [
     ["red", "bg-red-500"],
     ["yellow", "bg-yellow-400"],
@@ -18680,11 +18753,8 @@ function CaptureReviewControls({
     ["blue", "bg-blue-500"],
     ["purple", "bg-purple-500"]
   ];
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn(
-    "absolute bottom-2 left-2 right-2 z-30 flex flex-col gap-1.5 transition-all duration-200",
-    hasActiveState ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0"
-  ), children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-0.5 rounded-lg border border-white/20 bg-black/65 px-1.5 py-1 backdrop-blur-md", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative z-30 flex flex-col gap-1.5 border-t border-slate-200 bg-white p-2", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1.5", children: [
       [1, 2, 3, 4, 5].map((rating) => /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -18694,12 +18764,12 @@ function CaptureReviewControls({
             rating: capture.rating === rating ? 0 : rating,
             favorite: rating >= 4
           }),
-          className: "p-1 text-amber-300 hover:text-amber-200",
+          className: "p-1 text-amber-500 hover:text-amber-600",
           children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-3.5", fill: capture.rating >= rating ? "currentColor" : "none" })
         },
         rating
       )),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mx-1 h-4 w-px bg-white/20" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mx-1 h-4 w-px bg-amber-200" }),
       colors.map(([label, color]) => /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {

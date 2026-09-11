@@ -671,6 +671,7 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
         projectId, groupId, captureKey, baseFilename: body.baseFilename?.trim() || path.basename(req.file!.originalname, path.extname(req.file!.originalname)),
         capturedAt: body.capturedAt?.trim() || null, sequence: body.sequence ? Number(body.sequence) : null,
         pairingStatus: role === "JPEG" ? "jpeg_only" : "raw_only",
+        rating: Math.max(0, Math.min(5, Number.parseInt(body.rating ?? "0", 10) || 0)),
       }).returning();
       const [existingRole] = await tx.select().from(groupCaptureFilesTable).where(and(eq(groupCaptureFilesTable.captureId, capture.id), eq(groupCaptureFilesTable.fileRole, role))).limit(1);
       if (existingRole) {
@@ -742,6 +743,48 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
       galleryReady: uploadedGroupFile.fileRole !== "JPEG" || Boolean(uploadedGroupFile.durableObjectPath),
     });
   } catch (error) { discardUploadedFile(req); next(error); }
+});
+
+router.patch("/projects/:projectId/groups/:groupId/captures/:captureKey/review", requireDesktopConnection, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const groupId = Number(req.params.groupId);
+  const rating = Number(req.body?.rating);
+  const connection = getDesktopConnection(req);
+  if (
+    !Number.isInteger(projectId)
+    || !Number.isInteger(groupId)
+    || !Number.isInteger(rating)
+    || rating < 0
+    || rating > 5
+    || !(await canAccessDesktopProject(connectionAccessMember(connection), projectId))
+  ) {
+    res.status(400).json({ error: "Invalid group capture review" });
+    return;
+  }
+  const [capture] = await db.update(groupCapturesTable).set({
+    rating,
+    favorite: rating >= 4,
+    selected: rating > 0,
+    rejected: false,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(groupCapturesTable.projectId, projectId),
+    eq(groupCapturesTable.groupId, groupId),
+    eq(groupCapturesTable.captureKey, String(req.params.captureKey)),
+  )).returning();
+  if (!capture) {
+    res.status(404).json({ error: "Group capture not found" });
+    return;
+  }
+  const [jpeg] = await db.select().from(groupCaptureFilesTable).where(and(
+    eq(groupCaptureFilesTable.captureId, capture.id),
+    eq(groupCaptureFilesTable.fileRole, "JPEG"),
+  )).limit(1);
+  if (jpeg) {
+    await db.update(studentPhotosTable).set({ rating }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, jpeg.id));
+    await projectGroupJpegToPhotographedStudents(capture, jpeg);
+  }
+  res.json({ capture });
 });
 
 // POST /api/projects/:projectId/students/:studentId/photos
@@ -1178,6 +1221,7 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
   await db.update(studentPhotosTable).set({
     rating,
     colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
+    shareWithParents: rating > 0,
   }).where(and(
     eq(studentPhotosTable.projectId, projectId),
     eq(studentPhotosTable.studentId, studentId),

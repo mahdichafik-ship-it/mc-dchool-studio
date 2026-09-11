@@ -88,6 +88,8 @@ const groupCapturesTable = sqliteCore.sqliteTable("group_captures", {
   baseFilename: sqliteCore.text("base_filename").notNull(),
   capturedAt: sqliteCore.text("captured_at").notNull(),
   pairingStatus: sqliteCore.text("pairing_status").notNull().default("pending"),
+  rating: sqliteCore.integer("rating").notNull().default(0),
+  reviewSyncPending: sqliteCore.integer("review_sync_pending", { mode: "boolean" }).notNull().default(false),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
   updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
@@ -102,6 +104,7 @@ const groupCaptureFilesTable = sqliteCore.sqliteTable("group_capture_files", {
   fileSize: sqliteCore.integer("file_size"),
   uploadStatus: sqliteCore.text("upload_status").$type(),
   fileUrl: sqliteCore.text("file_url"),
+  galleryReady: sqliteCore.integer("gallery_ready", { mode: "boolean" }).notNull().default(false),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
 const photosTable = sqliteCore.sqliteTable("photos", {
@@ -236,6 +239,8 @@ function ensureCaptureTables(sqlite) {
       base_filename TEXT NOT NULL,
       captured_at TEXT NOT NULL,
       pairing_status TEXT NOT NULL DEFAULT 'pending',
+      rating INTEGER NOT NULL DEFAULT 0,
+      review_sync_pending INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -324,6 +329,9 @@ function ensureCaptureTables(sqlite) {
   ensureColumn(sqlite, "captures", "rating", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "captures", "color_label", "TEXT NOT NULL DEFAULT 'none'");
   ensureColumn(sqlite, "captures", "review_sync_pending", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "group_capture_files", "gallery_ready", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "group_captures", "rating", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "group_captures", "review_sync_pending", "INTEGER NOT NULL DEFAULT 0");
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (
       capture_key, project_id, student_id, class_id, base_filename, captured_at,
@@ -1131,6 +1139,7 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
     formData.append("captureKey", capture.captureKey);
     formData.append("baseFilename", capture.baseFilename);
     formData.append("capturedAt", capture.capturedAt);
+    formData.append("rating", String(capture.rating));
     const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/groups/${group.cloudId}/captures`, {
       method: "POST",
       headers: {
@@ -1150,13 +1159,41 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
     const payload = await response.json().catch(() => ({}));
     db.update(groupCaptureFilesTable).set({
       uploadStatus: "done",
-      fileUrl: typeof payload.file?.fileUrl === "string" ? toServerFileUrl(payload.file.fileUrl) : null
+      fileUrl: typeof payload.file?.fileUrl === "string" ? toServerFileUrl(payload.file.fileUrl) : null,
+      galleryReady: file.fileRole !== "JPEG" || payload.galleryReady === true
     }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
   } catch (error) {
     const retryable = isRetryableUploadFailure(error);
     if (retryable) markCloudSessionUnavailable();
     db.update(groupCaptureFilesTable).set({ uploadStatus: retryable ? "pending" : "error" }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
     throw error;
+  }
+}
+async function syncGroupCaptureReview(captureId) {
+  if (!isCloudSessionVerified()) return;
+  const db = getDb();
+  const capture = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).get();
+  if (!capture) return;
+  const group = db.select().from(groupsTable).where(drizzleOrm.eq(groupsTable.id, capture.groupId)).get();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!group?.cloudId || !project?.cloudId || !apiUrl || !connectionToken) return;
+  try {
+    const response = await fetch(
+      `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/groups/${group.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${connectionToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: capture.rating }),
+        signal: AbortSignal.timeout(1e4)
+      }
+    );
+    if (response.status === 401) invalidateDesktopCredentials(true);
+    if (response.ok) {
+      db.update(groupCapturesTable).set({ reviewSyncPending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).run();
+    }
+  } catch (error) {
+    console.warn("[Review] Group review sync deferred:", error);
   }
 }
 function uploadCaptureFile(captureId, fileId, captureBatchKey) {
@@ -1225,6 +1262,15 @@ async function syncPendingCaptureReviews(projectId) {
     await syncCaptureReview(capture.id);
   }
 }
+async function syncPendingGroupCaptureReviews(projectId) {
+  if (!isCloudSessionVerified()) return;
+  const db = getDb();
+  const captures = db.select({ id: groupCapturesTable.id }).from(groupCapturesTable).where(projectId === void 0 ? drizzleOrm.eq(groupCapturesTable.reviewSyncPending, true) : drizzleOrm.and(drizzleOrm.eq(groupCapturesTable.reviewSyncPending, true), drizzleOrm.eq(groupCapturesTable.projectId, projectId))).all();
+  for (const capture of captures) {
+    if (!isCloudSessionVerified()) return;
+    await syncGroupCaptureReview(capture.id);
+  }
+}
 function uploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
   const task = performUploadGroupCaptureFile(captureId, fileId, captureBatchKey);
@@ -1241,7 +1287,9 @@ function getProjectSyncJobs(projectId) {
   const groupCaptures = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all();
   for (const capture of groupCaptures) {
     for (const file of db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, capture.id)).all()) {
-      if (file.uploadStatus !== "done") jobs.push({ kind: "group-capture-file", captureId: capture.id, fileId: file.id });
+      if (file.uploadStatus !== "done" || file.fileRole === "JPEG" && !file.galleryReady) {
+        jobs.push({ kind: "group-capture-file", captureId: capture.id, fileId: file.id });
+      }
     }
   }
   for (const capture of captures) {
@@ -1312,7 +1360,13 @@ function getUploadStatusCounts(projectId) {
   }
   const groupCaptures = db.select({ id: groupCapturesTable.id }).from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all();
   for (const capture of groupCaptures) {
-    statuses.push(...db.select({ status: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, capture.id)).all().map((row) => row.status));
+    statuses.push(...db.select({
+      status: groupCaptureFilesTable.uploadStatus,
+      fileRole: groupCaptureFilesTable.fileRole,
+      galleryReady: groupCaptureFilesTable.galleryReady
+    }).from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, capture.id)).all().map(
+      (row) => row.fileRole === "JPEG" && row.status === "done" && !row.galleryReady ? "pending" : row.status
+    ));
   }
   const mirroredPhotoIds = new Set(
     db.select({ id: capturesTable.legacyPhotoId }).from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().flatMap((row) => row.id === null ? [] : [row.id])
@@ -1529,11 +1583,13 @@ function registerUploadHandlers() {
   electron.ipcMain.handle("upload:runNow", async (_e, { projectId }) => {
     await runLiveUpload(projectId);
     await syncPendingCaptureReviews(projectId);
+    await syncPendingGroupCaptureReviews(projectId);
     return getLiveUploadState(projectId);
   });
   electron.ipcMain.handle("upload:retryProjectFailed", async (_e, { projectId }) => {
     await runLiveUpload(projectId, true);
     await syncPendingCaptureReviews(projectId);
+    await syncPendingGroupCaptureReviews(projectId);
     return getLiveUploadState(projectId);
   });
   electron.ipcMain.handle("upload:testConnection", async () => {
@@ -1550,6 +1606,7 @@ function registerUploadHandlers() {
       if (response.ok) {
         markCloudSessionVerified();
         await syncPendingCaptureReviews();
+        await syncPendingGroupCaptureReviews();
         return { ok: true };
       }
       if (response.status === 401) invalidateDesktopCredentials(true);
@@ -2449,17 +2506,37 @@ function registerPhotoHandlers() {
   const db = getDb();
   electron.ipcMain.handle("groupCaptures:list", async (_e, { projectId, groupId }) => {
     const rows = db.select().from(groupCapturesTable).where(drizzleOrm.and(drizzleOrm.eq(groupCapturesTable.projectId, projectId), drizzleOrm.eq(groupCapturesTable.groupId, groupId))).all();
-    return rows.map((row) => ({
+    return Promise.all(rows.map(async (row) => ({
       id: row.id,
       projectId: row.projectId,
       groupId: row.groupId,
       baseFilename: row.baseFilename,
       capturedAt: row.capturedAt,
       pairingStatus: row.pairingStatus,
-      files: db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, row.id)).all().map(rowToGroupCaptureFile)
-    }));
+      rating: row.rating,
+      files: await Promise.all(db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, row.id)).all().map(async (file) => {
+        const mapped = rowToGroupCaptureFile(file);
+        if (file.fileRole !== "JPEG") return mapped;
+        const previewPath = await generateLivePreview(file.storedPath, {
+          previewKey: `group-capture-${row.id}`,
+          cacheDir: getLivePreviewCacheDir(electron.app.getPath("home"))
+        });
+        return { ...mapped, previewUrl: previewPath ? createLocalPreviewUrl(previewPath, `group-capture-${row.id}`) : void 0 };
+      }))
+    })));
   });
   electron.ipcMain.handle("groupCaptures:summary", async (_e, { projectId }) => db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all().length);
+  electron.ipcMain.handle("groupCaptures:updateReview", async (_e, { captureId, rating }) => {
+    const capture = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).get();
+    if (!capture) return null;
+    db.update(groupCapturesTable).set({
+      rating: Math.max(0, Math.min(5, Math.round(rating))),
+      reviewSyncPending: true,
+      updatedAt: now$2()
+    }).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).run();
+    void syncGroupCaptureReview(captureId);
+    return db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).get() ?? null;
+  });
   electron.ipcMain.handle("photos:list", async (_e, { studentId }) => {
     const rows = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.studentId, studentId)).orderBy(photosTable.capturedAt).all();
     const result = [];

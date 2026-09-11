@@ -52,6 +52,7 @@ export const groupCapturesTable = pgTable("group_captures", {
   favorite: boolean("favorite").notNull().default(false),
   rejected: boolean("rejected").notNull().default(false),
   selected: boolean("selected").notNull().default(false),
+  rating: integer("rating").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [

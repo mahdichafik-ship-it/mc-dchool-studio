@@ -66,6 +66,8 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       base_filename TEXT NOT NULL,
       captured_at TEXT NOT NULL,
       pairing_status TEXT NOT NULL DEFAULT 'pending',
+      rating INTEGER NOT NULL DEFAULT 0,
+      review_sync_pending INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -157,6 +159,8 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   ensureColumn(sqlite, 'captures', 'color_label', "TEXT NOT NULL DEFAULT 'none'")
   ensureColumn(sqlite, 'captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(sqlite, 'group_capture_files', 'gallery_ready', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'group_captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'group_captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
 
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (

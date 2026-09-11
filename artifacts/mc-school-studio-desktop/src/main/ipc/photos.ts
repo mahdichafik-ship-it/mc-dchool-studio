@@ -7,7 +7,7 @@ import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTa
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
-import { syncCaptureReview } from './upload'
+import { syncCaptureReview, syncGroupCaptureReview } from './upload'
 import type {
   CaptureCompletenessSummary,
   CaptureReview,
@@ -90,19 +90,39 @@ export function registerPhotoHandlers() {
     const rows = db.select().from(groupCapturesTable)
       .where(and(eq(groupCapturesTable.projectId, projectId), eq(groupCapturesTable.groupId, groupId)))
       .all()
-    return rows.map((row) => ({
+    return Promise.all(rows.map(async (row) => ({
       id: row.id,
       projectId: row.projectId,
       groupId: row.groupId,
       baseFilename: row.baseFilename,
       capturedAt: row.capturedAt,
       pairingStatus: row.pairingStatus,
-      files: db.select().from(groupCaptureFilesTable)
-        .where(eq(groupCaptureFilesTable.captureId, row.id)).all().map(rowToGroupCaptureFile),
-    }))
+      rating: row.rating,
+      files: await Promise.all(db.select().from(groupCaptureFilesTable)
+        .where(eq(groupCaptureFilesTable.captureId, row.id)).all().map(async (file) => {
+          const mapped = rowToGroupCaptureFile(file)
+          if (file.fileRole !== 'JPEG') return mapped
+          const previewPath = await generateLivePreview(file.storedPath, {
+            previewKey: `group-capture-${row.id}`,
+            cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+          })
+          return { ...mapped, previewUrl: previewPath ? createLocalPreviewUrl(previewPath, `group-capture-${row.id}`) : undefined }
+        })),
+    })))
   })
   ipcMain.handle('groupCaptures:summary', async (_e, { projectId }: { projectId: number }) =>
     db.select().from(groupCapturesTable).where(eq(groupCapturesTable.projectId, projectId)).all().length)
+  ipcMain.handle('groupCaptures:updateReview', async (_e, { captureId, rating }: { captureId: number; rating: number }) => {
+    const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get()
+    if (!capture) return null
+    db.update(groupCapturesTable).set({
+      rating: Math.max(0, Math.min(5, Math.round(rating))),
+      reviewSyncPending: true,
+      updatedAt: now(),
+    }).where(eq(groupCapturesTable.id, captureId)).run()
+    void syncGroupCaptureReview(captureId)
+    return db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get() ?? null
+  })
 
   ipcMain.handle('photos:list', async (_e, { studentId }: { studentId: number }): Promise<Photo[]> => {
     const rows = db

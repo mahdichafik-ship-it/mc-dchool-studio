@@ -18,7 +18,7 @@ import {
   studentsTable,
   studiosTable,
 } from "@workspace/db";
-import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, isNotNull } from "drizzle-orm";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject } from "../lib/studioAccess";
@@ -431,6 +431,7 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       eq(studentPhotosTable.projectId, row.gallery.projectId),
       eq(studentPhotosTable.studentId, access.student.id),
       isNotNull(studentPhotosTable.durableObjectPath),
+      gt(studentPhotosTable.rating, 0),
     ))
     .orderBy(studentPhotosTable.createdAt);
 
@@ -510,6 +511,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       eq(studentPhotosTable.studentId, access.student.id),
       inArray(studentPhotosTable.id, photoIds),
       isNotNull(studentPhotosTable.durableObjectPath),
+      gt(studentPhotosTable.rating, 0),
     ));
   if (photos.length !== photoIds.length) {
     res.status(400).json({ error: "One or more selected photos are not available for ordering" });
@@ -731,6 +733,7 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
       eq(deliveryAccessesTable.id, verified.accessId),
       eq(deliveryAccessesTable.galleryId, row.gallery.id),
       isNull(deliveryAccessesTable.revokedAt),
+      gt(studentPhotosTable.rating, 0),
     ))
     .limit(1);
   if (!photo) {

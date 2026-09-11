@@ -40,6 +40,8 @@ export interface Project {
   contactPhone?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  priceSheetId?: number | null;
   classCount: number;
   studentCount: number;
   createdAt: string;
@@ -70,6 +72,7 @@ export interface ProjectInput {
   contactPhone?: string | null;
   /** @nullable */
   notes?: string | null;
+  priceSheetId: number;
 }
 
 export type ProjectPatchProjectType = typeof ProjectPatchProjectType[keyof typeof ProjectPatchProjectType];

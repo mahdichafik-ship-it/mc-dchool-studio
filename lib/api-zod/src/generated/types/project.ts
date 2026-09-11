@@ -23,6 +23,8 @@ export interface Project {
   contactPhone?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  priceSheetId?: number | null;
   classCount: number;
   studentCount: number;
   createdAt: string;

@@ -11,10 +11,13 @@ import {
   studentPhotosTable,
   studentsTable,
   studioMembersTable,
+  deliveryGalleriesTable,
+  deliveryPriceSheetsTable,
 } from "@workspace/db";
 import { and, eq, count, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { accessibleProjectIds, canAccessProject, getStudioMember, isStudioManager } from "../lib/studioAccess";
+import { randomBytes } from "node:crypto";
 
 const router = Router();
 
@@ -77,7 +80,7 @@ router.post("/", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const member = await getStudioMember(userId);
   if (member.status !== "active" || !["owner", "admin", "assistant"].includes(member.role)) { res.status(403).json({ error: "You do not have permission to create projects" }); return; }
-  const { projectType = "school", schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes } =
+  const { projectType = "school", schoolName, photoDate, address, contactName, contactEmail, contactPhone, notes, priceSheetId } =
     req.body;
 
   if (!schoolName) {
@@ -88,10 +91,22 @@ router.post("/", requireAuth, async (req, res) => {
     res.status(400).json({ error: "projectType must be school or corporate" });
     return;
   }
+  const selectedPriceSheetId = Number(priceSheetId);
+  if (!Number.isInteger(selectedPriceSheetId)) {
+    res.status(400).json({ error: "Select a price sheet before creating the project", code: "PRICE_SHEET_REQUIRED" });
+    return;
+  }
+  const [selectedPriceSheet] = await db.select().from(deliveryPriceSheetsTable).where(and(
+    eq(deliveryPriceSheetsTable.id, selectedPriceSheetId),
+    eq(deliveryPriceSheetsTable.studioId, member.studioId),
+  )).limit(1);
+  if (!selectedPriceSheet) {
+    res.status(400).json({ error: "Selected price sheet is not available to this studio" });
+    return;
+  }
 
-  const [project] = await db
-    .insert(projectsTable)
-    .values({
+  const project = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(projectsTable).values({
       userId,
       studioId: member.studioId,
       projectType,
@@ -102,11 +117,21 @@ router.post("/", requireAuth, async (req, res) => {
       contactEmail: contactEmail ?? null,
       contactPhone: contactPhone ?? null,
       notes: notes ?? null,
-    })
-    .returning();
+    }).returning();
+    await tx.insert(deliveryGalleriesTable).values({
+      projectId: created.id,
+      studioId: member.studioId,
+      priceSheetId: selectedPriceSheet.id,
+      priceSheetJson: selectedPriceSheet.offersJson,
+      slug: `vc-${randomBytes(8).toString("hex")}`,
+      status: "draft",
+    });
+    return created;
+  });
 
   res.status(201).json({
     ...project,
+    priceSheetId: selectedPriceSheet.id,
     classCount: 0,
     studentCount: 0,
     createdAt: project.createdAt.toISOString(),

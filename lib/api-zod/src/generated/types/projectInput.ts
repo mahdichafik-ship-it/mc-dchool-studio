@@ -23,4 +23,5 @@ export interface ProjectInput {
   contactPhone?: string | null;
   /** @nullable */
   notes?: string | null;
+  priceSheetId: number;
 }

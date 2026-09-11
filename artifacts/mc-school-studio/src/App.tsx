@@ -18,6 +18,7 @@ import Platform from "./pages/Platform";
 import StudioInvite from "./pages/StudioInvite";
 import StudioSettings from "./pages/StudioSettings";
 import PlatformStudio from "./pages/PlatformStudio";
+import PriceSheets from "./pages/PriceSheets";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import Delivery from "./pages/Delivery";
@@ -194,6 +195,7 @@ function Router() {
       <Route path="/projects/:projectId/qr-preview" component={() => <AuthenticatedRoute component={ProjectQrPreview} />} />
       <Route path="/team" component={() => <AuthenticatedRoute component={Team} />} />
       <Route path="/studio/settings" component={() => <AuthenticatedRoute component={StudioSettings} />} />
+      <Route path="/price-sheets" component={() => <AuthenticatedRoute component={PriceSheets} />} />
       <Route path="/platform" component={() => <AuthenticatedRoute component={Platform} />} />
       <Route path="/platform/studios/:studioId" component={() => <AuthenticatedRoute component={PlatformStudio} />} />
       

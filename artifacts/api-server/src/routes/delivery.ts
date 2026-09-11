@@ -21,7 +21,7 @@ import {
 import { and, eq, gt, inArray, isNull, isNotNull } from "drizzle-orm";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
-import { canAccessProject } from "../lib/studioAccess";
+import { canAccessProject, getStudioMember } from "../lib/studioAccess";
 import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
 import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { getUncachableStripeClient } from "../lib/stripeClient";
@@ -814,6 +814,19 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     res.status(404).json({ error: "Project not found" });
     return;
   }
+  let [gallery] = await db.select().from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
+  if (!gallery?.priceSheetId) {
+    res.status(409).json({ error: "Select a price sheet before publishing the gallery", code: "PRICE_SHEET_REQUIRED" });
+    return;
+  }
+  const [selectedPriceSheet] = await db.select().from(deliveryPriceSheetsTable).where(and(
+    eq(deliveryPriceSheetsTable.id, gallery.priceSheetId),
+    eq(deliveryPriceSheetsTable.studioId, project.studioId!),
+  )).limit(1);
+  if (!selectedPriceSheet || parseOffers(selectedPriceSheet.offersJson).length === 0) {
+    res.status(409).json({ error: "The selected price sheet is unavailable or has no products", code: "PRICE_SHEET_INVALID" });
+    return;
+  }
   await materializeCaptureJpegsForDelivery(projectId);
   await materializeGroupJpegsForDelivery(projectId);
   const [undeliverablePhoto] = await db
@@ -832,24 +845,13 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     return;
   }
 
-  let [gallery] = await db.select().from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
   const now = new Date();
-  if (!gallery) {
-    [gallery] = await db.insert(deliveryGalleriesTable).values({
-      projectId,
-      studioId: project.studioId,
-      slug: `vc-${randomBytes(8).toString("hex")}`,
-      status: "published",
-      publishedAt: now,
-      updatedAt: now,
-    }).returning();
-  } else {
-    [gallery] = await db.update(deliveryGalleriesTable).set({
-      status: "published",
-      publishedAt: gallery.publishedAt ?? now,
-      updatedAt: now,
-    }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
-  }
+  [gallery] = await db.update(deliveryGalleriesTable).set({
+    status: "published",
+    priceSheetJson: selectedPriceSheet.offersJson,
+    publishedAt: gallery.publishedAt ?? now,
+    updatedAt: now,
+  }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
 
   const students = await db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId));
   const existing = await db.select().from(deliveryAccessesTable).where(eq(deliveryAccessesTable.galleryId, gallery.id));
@@ -930,6 +932,76 @@ function priceSheetResponse(sheet: typeof deliveryPriceSheetsTable.$inferSelect)
   };
 }
 
+async function activeStudioMember(userId: string) {
+  const member = await getStudioMember(userId);
+  return member.status === "active" ? member : null;
+}
+
+async function manageableStudioMember(userId: string) {
+  const member = await activeStudioMember(userId);
+  return member && ["owner", "admin"].includes(member.role) ? member : null;
+}
+
+function validPriceSheetInput(body: unknown): { name: string; offers: DeliveryOffer[] } | null {
+  const input = body as { name?: unknown; offers?: unknown } | null;
+  const name = typeof input?.name === "string" ? input.name.trim() : "";
+  try {
+    const offers = parseOffers(JSON.stringify({ offers: input?.offers }));
+    if (!name || name.length > 120 || !offers.length || offers.some((offer) => offer.unitAmount === null || !offer.currency)) return null;
+    return { name, offers };
+  } catch {
+    return null;
+  }
+}
+
+router.get("/studio/delivery/price-sheets", requireAuth, async (req, res): Promise<void> => {
+  const member = await activeStudioMember(getUserId(req));
+  if (!member) { res.status(403).json({ error: "Studio membership is required" }); return; }
+  const sheets = await db.select().from(deliveryPriceSheetsTable)
+    .where(eq(deliveryPriceSheetsTable.studioId, member.studioId))
+    .orderBy(deliveryPriceSheetsTable.name);
+  res.json(sheets.map(priceSheetResponse));
+});
+
+router.post("/studio/delivery/price-sheets", requireAuth, async (req, res): Promise<void> => {
+  const member = await manageableStudioMember(getUserId(req));
+  if (!member) { res.status(403).json({ error: "Studio owner or admin access is required" }); return; }
+  const input = validPriceSheetInput(req.body);
+  if (!input) { res.status(400).json({ error: "Enter a name and at least one complete product" }); return; }
+  try {
+    const [sheet] = await db.insert(deliveryPriceSheetsTable).values({
+      studioId: member.studioId,
+      name: input.name,
+      offersJson: JSON.stringify({ offers: input.offers }),
+    }).returning();
+    res.status(201).json(priceSheetResponse(sheet));
+  } catch {
+    res.status(409).json({ error: "A price sheet with this name already exists" });
+  }
+});
+
+router.patch("/studio/delivery/price-sheets/:priceSheetId", requireAuth, async (req, res): Promise<void> => {
+  const member = await manageableStudioMember(getUserId(req));
+  const priceSheetId = Number(req.params.priceSheetId);
+  if (!member || !Number.isInteger(priceSheetId)) { res.status(404).json({ error: "Price sheet not found" }); return; }
+  const input = validPriceSheetInput(req.body);
+  if (!input) { res.status(400).json({ error: "Enter a name and at least one complete product" }); return; }
+  try {
+    const [sheet] = await db.update(deliveryPriceSheetsTable).set({
+      name: input.name,
+      offersJson: JSON.stringify({ offers: input.offers }),
+      updatedAt: new Date(),
+    }).where(and(
+      eq(deliveryPriceSheetsTable.id, priceSheetId),
+      eq(deliveryPriceSheetsTable.studioId, member.studioId),
+    )).returning();
+    if (!sheet) { res.status(404).json({ error: "Price sheet not found" }); return; }
+    res.json(priceSheetResponse(sheet));
+  } catch {
+    res.status(409).json({ error: "A price sheet with this name already exists" });
+  }
+});
+
 async function manageableProject(projectId: number, userId: string) {
   if (!Number.isInteger(projectId) || !(await canAccessProject(userId, projectId, "manage"))) return null;
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
@@ -986,9 +1058,6 @@ router.patch("/projects/:projectId/delivery/price-sheets/:priceSheetId", require
     eq(deliveryPriceSheetsTable.studioId, project.studioId),
   )).returning();
   if (!sheet) { res.status(404).json({ error: "Price sheet not found" }); return; }
-  await db.update(deliveryGalleriesTable).set({
-    priceSheetJson: sheet.offersJson, updatedAt: new Date(),
-  }).where(eq(deliveryGalleriesTable.priceSheetId, sheet.id));
   res.json(priceSheetResponse(sheet));
 });
 
@@ -1017,6 +1086,14 @@ router.patch("/projects/:projectId/delivery", requireAuth, async (req, res): Pro
       slug: `vc-${randomBytes(8).toString("hex")}`,
       status: "draft",
     }).returning();
+  }
+  if (
+    gallery.status === "published"
+    && body.priceSheetId !== undefined
+    && Number(body.priceSheetId) !== gallery.priceSheetId
+  ) {
+    res.status(409).json({ error: "Revoke the published gallery before changing its price sheet" });
+    return;
   }
   let assignedPriceSheet: typeof deliveryPriceSheetsTable.$inferSelect | null = null;
   if (body.priceSheetId !== undefined && body.priceSheetId !== null) {

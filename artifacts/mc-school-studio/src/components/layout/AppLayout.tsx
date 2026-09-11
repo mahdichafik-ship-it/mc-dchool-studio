@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, LayoutDashboard, FolderKanban, LogOut, Users, ShieldCheck, Settings } from 'lucide-react';
+import { Camera, LayoutDashboard, FolderKanban, LogOut, Users, ShieldCheck, Settings, FileText } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
@@ -66,9 +66,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
-    { label: 'Projects', icon: FolderKanban, href: '/dashboard' }, // We just link to dashboard for projects list, or we could have a separate route. Let's just use dashboard for both.
+    { label: 'Projects', icon: FolderKanban, href: '/dashboard' },
     { label: 'Team', icon: Users, href: '/team' },
-    ...(canManageStudio ? [{ label: 'Studio settings', icon: Settings, href: '/studio/settings' }] : []),
+    ...(canManageStudio ? [
+      { label: 'Price sheets', icon: FileText, href: '/price-sheets' },
+      { label: 'Studio settings', icon: Settings, href: '/studio/settings' }
+    ] : []),
     ...(isPlatformOwner ? [{ label: 'Platform', icon: ShieldCheck, href: '/platform' }] : []),
   ];
 
@@ -83,7 +86,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = location === item.href;
+            const isActive = location === item.href || (item.href !== '/dashboard' && location.startsWith(item.href));
             return (
               <Link key={item.label} href={item.href}>
                 <div className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent/50 text-sidebar-foreground/80 hover:text-sidebar-foreground'}`}>

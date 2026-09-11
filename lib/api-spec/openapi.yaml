@@ -884,6 +884,27 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/DeliverySettingsInput" } } }
       responses: { "200": { description: Updated settings, content: { application/json: { schema: { $ref: "#/components/schemas/DeliverySettingsResponse" } } } } }
+  /studio/delivery/price-sheets:
+    get:
+      operationId: listStudioPriceSheets
+      tags: [delivery]
+      responses: { "200": { description: Studio price sheets, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } } }
+    post:
+      operationId: createStudioPriceSheet
+      tags: [delivery]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "201": { description: Price sheet created, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
+  /studio/delivery/price-sheets/{priceSheetId}:
+    patch:
+      operationId: updateStudioPriceSheet
+      tags: [delivery]
+      parameters: [{ name: priceSheetId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "200": { description: Price sheet updated, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
   /projects/{projectId}/delivery/price-sheets:
     get:
       operationId: listDeliveryPriceSheets
@@ -1035,6 +1056,8 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        priceSheetId:
+          type: ["integer", "null"]
         classCount:
           type: integer
         studentCount:
@@ -1046,7 +1069,7 @@ components:
 
     ProjectInput:
       type: object
-      required: [schoolName]
+      required: [schoolName, priceSheetId]
       properties:
         projectType:
           type: string
@@ -1067,6 +1090,8 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        priceSheetId:
+          type: integer
 
     ProjectPatch:
       type: object

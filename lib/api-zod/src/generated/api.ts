@@ -42,6 +42,7 @@ export const ListProjectsResponseItem = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -64,7 +65,8 @@ export const CreateProjectBody = zod.object({
   "contactName": zod.string().nullish(),
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "priceSheetId": zod.number()
 })
 
 export const CreateProjectResponse = zod.object({
@@ -77,6 +79,7 @@ export const CreateProjectResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -101,6 +104,7 @@ export const GetProjectResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -139,6 +143,7 @@ export const UpdateProjectResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -607,6 +612,7 @@ export const GetPlatformOverviewResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -1059,6 +1065,192 @@ export const UpdateDeliverySettingsResponse = zod.object({
   "status": zod.string().optional()
 }),
   "accessCount": zod.number().optional()
+})
+
+
+export const listStudioPriceSheetsResponseOffersItemUnitAmountMin = 0;
+
+export const listStudioPriceSheetsResponseOffersItemCurrencyMin = 3;
+export const listStudioPriceSheetsResponseOffersItemCurrencyMax = 3;
+
+
+
+export const listStudioPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const ListStudioPriceSheetsResponseItem = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(listStudioPriceSheetsResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(listStudioPriceSheetsResponseOffersItemCurrencyMin).max(listStudioPriceSheetsResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(listStudioPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListStudioPriceSheetsResponse = zod.array(ListStudioPriceSheetsResponseItem)
+
+
+export const createStudioPriceSheetBodyNameMax = 120;
+
+export const createStudioPriceSheetBodyOffersItemUnitAmountMin = 0;
+
+export const createStudioPriceSheetBodyOffersItemCurrencyMin = 3;
+export const createStudioPriceSheetBodyOffersItemCurrencyMax = 3;
+
+
+
+export const createStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
+
+
+export const CreateStudioPriceSheetBody = zod.object({
+  "name": zod.string().min(1).max(createStudioPriceSheetBodyNameMax),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(createStudioPriceSheetBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(createStudioPriceSheetBodyOffersItemCurrencyMin).max(createStudioPriceSheetBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(createStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).min(1)
+})
+
+export const createStudioPriceSheetResponseOffersItemUnitAmountMin = 0;
+
+export const createStudioPriceSheetResponseOffersItemCurrencyMin = 3;
+export const createStudioPriceSheetResponseOffersItemCurrencyMax = 3;
+
+
+
+export const createStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const CreateStudioPriceSheetResponse = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(createStudioPriceSheetResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(createStudioPriceSheetResponseOffersItemCurrencyMin).max(createStudioPriceSheetResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(createStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+export const UpdateStudioPriceSheetParams = zod.object({
+  "priceSheetId": zod.coerce.number()
+})
+
+export const updateStudioPriceSheetBodyNameMax = 120;
+
+export const updateStudioPriceSheetBodyOffersItemUnitAmountMin = 0;
+
+export const updateStudioPriceSheetBodyOffersItemCurrencyMin = 3;
+export const updateStudioPriceSheetBodyOffersItemCurrencyMax = 3;
+
+
+
+export const updateStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
+
+
+export const UpdateStudioPriceSheetBody = zod.object({
+  "name": zod.string().min(1).max(updateStudioPriceSheetBodyNameMax),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateStudioPriceSheetBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateStudioPriceSheetBodyOffersItemCurrencyMin).max(updateStudioPriceSheetBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updateStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).min(1)
+})
+
+export const updateStudioPriceSheetResponseOffersItemUnitAmountMin = 0;
+
+export const updateStudioPriceSheetResponseOffersItemCurrencyMin = 3;
+export const updateStudioPriceSheetResponseOffersItemCurrencyMax = 3;
+
+
+
+export const updateStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const UpdateStudioPriceSheetResponse = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateStudioPriceSheetResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateStudioPriceSheetResponseOffersItemCurrencyMin).max(updateStudioPriceSheetResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updateStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
 })
 
 

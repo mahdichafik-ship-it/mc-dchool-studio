@@ -3,9 +3,9 @@ import { db, deliveryOrdersTable } from "@workspace/db";
 import { getStripeSync } from "./stripeClient";
 
 export class WebhookHandlers {
-  static async processWebhook(payload: Buffer, signature: string): Promise<void> {
+  static async processWebhook(payload: Buffer, signature: string, managedWebhookUuid?: string): Promise<void> {
     const sync = await getStripeSync();
-    await sync.processWebhook(payload, signature);
+    await sync.processWebhook(payload, signature, managedWebhookUuid);
 
     // StripeSync has already verified the signature and processed the event.
     // Parse the now-authenticated payload to apply the application-level order update.

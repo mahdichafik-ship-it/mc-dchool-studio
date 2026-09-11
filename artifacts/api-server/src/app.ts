@@ -22,14 +22,15 @@ app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
 
-app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+app.post(["/api/stripe/webhook", "/api/stripe/webhook/:uuid"], express.raw({ type: "application/json" }), async (req, res) => {
   const signature = req.headers["stripe-signature"];
   if (!signature || Array.isArray(signature)) {
     res.status(400).json({ error: "Missing Stripe signature" });
     return;
   }
   try {
-    await WebhookHandlers.processWebhook(req.body as Buffer, signature);
+    const managedWebhookUuid = Array.isArray(req.params.uuid) ? req.params.uuid[0] : req.params.uuid;
+    await WebhookHandlers.processWebhook(req.body as Buffer, signature, managedWebhookUuid);
     res.json({ received: true });
   } catch (error) {
     logger.error({ err: error }, "Stripe webhook processing failed");

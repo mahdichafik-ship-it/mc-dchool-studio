@@ -15,6 +15,10 @@ import {
   captureFilesTable,
   db,
   desktopConnectionsTable,
+  groupCaptureFilesTable,
+  groupCapturesTable,
+  groupMembersTable,
+  groupsTable,
   pool,
   projectAssignmentsTable,
   projectsTable,
@@ -32,6 +36,10 @@ import {
   setPlatformDriveRequesterForTests,
   type DriveRequester,
 } from "../src/lib/googleDriveBackup";
+import {
+  projectAvailableGroupJpegsToStudent,
+  projectGroupJpegToPhotographedStudents,
+} from "../src/lib/groupDeliveryPhotos";
 
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
 const jpegBytes = Buffer.from(
@@ -1085,4 +1093,75 @@ test("rejects encoded traversal identifiers before writing an upload", async () 
   );
   assert.equal(response.status, 400);
   assert(!fs.existsSync(path.resolve(process.cwd(), "uploads", "outside")), "invalid identifiers must not create an upload directory");
+});
+
+test("shows a class photo only for students in that class who have an individual portrait", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const [testClass] = await db.insert(classesTable).values({
+    projectId,
+    className: `5EM A ${suffix}`,
+  }).returning();
+  const [photographed, absent] = await db.insert(studentsTable).values([
+    {
+      projectId, classId: testClass.id, firstName: "Photographed", lastName: "Student",
+      generatedStudentId: `GROUP-PHOTO-${suffix}`,
+    },
+    {
+      projectId, classId: testClass.id, firstName: "Absent", lastName: "Student",
+      generatedStudentId: `GROUP-ABSENT-${suffix}`,
+    },
+  ]).returning();
+  const [group] = await db.insert(groupsTable).values({
+    projectId, classId: testClass.id, name: `Class ${suffix}`, isDefaultClassGroup: true,
+  }).returning();
+  await db.insert(groupMembersTable).values([
+    { groupId: group.id, studentId: photographed.id },
+    { groupId: group.id, studentId: absent.id },
+  ]);
+  const [capture] = await db.insert(groupCapturesTable).values({
+    projectId,
+    groupId: group.id,
+    captureKey: `class-photo-${suffix}`,
+    baseFilename: `class-photo-${suffix}`,
+    capturedAt: new Date().toISOString(),
+    pairingStatus: "jpeg_only",
+  }).returning();
+  const [file] = await db.insert(groupCaptureFilesTable).values({
+    captureId: capture.id,
+    fileRole: "JPEG",
+    fileFormat: "jpg",
+    originalFilename: `class-photo-${suffix}.jpg`,
+    fileUrl: `/uploads/groups/${suffix}.jpg`,
+    durableObjectPath: `/objects/groups/${suffix}.jpg`,
+    mimeType: "image/jpeg",
+  }).returning();
+  await db.insert(studentPhotosTable).values({
+    projectId,
+    studentId: photographed.id,
+    fileName: `portrait-${suffix}.jpg`,
+    fileUrl: `/uploads/portraits/${suffix}.jpg`,
+    durableObjectPath: `/objects/portraits/${suffix}.jpg`,
+    mimeType: "image/jpeg",
+  });
+
+  await projectGroupJpegToPhotographedStudents(capture, file);
+  let projected = await db.select().from(studentPhotosTable)
+    .where(eq(studentPhotosTable.sourceGroupCaptureFileId, file.id));
+  assert.deepEqual(projected.map((photo) => photo.studentId), [photographed.id]);
+
+  await db.insert(studentPhotosTable).values({
+    projectId,
+    studentId: absent.id,
+    fileName: `late-portrait-${suffix}.jpg`,
+    fileUrl: `/uploads/portraits/late-${suffix}.jpg`,
+    durableObjectPath: `/objects/portraits/late-${suffix}.jpg`,
+    mimeType: "image/jpeg",
+  });
+  await projectAvailableGroupJpegsToStudent(projectId, absent.id);
+  projected = await db.select().from(studentPhotosTable)
+    .where(eq(studentPhotosTable.sourceGroupCaptureFileId, file.id));
+  assert.deepEqual(
+    new Set(projected.map((photo) => photo.studentId)),
+    new Set([photographed.id, absent.id]),
+  );
 });

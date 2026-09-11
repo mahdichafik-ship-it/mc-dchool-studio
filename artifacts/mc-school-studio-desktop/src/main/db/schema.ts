@@ -95,6 +95,7 @@ export const groupCaptureFilesTable = sqliteTable('group_capture_files', {
   fileSize: integer('file_size'),
   uploadStatus: text('upload_status').$type<'pending' | 'uploading' | 'done' | 'error' | null>(),
   fileUrl: text('file_url'),
+  galleryReady: integer('gallery_ready', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
 })
 

@@ -727,10 +727,14 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
       if (response.status === 429 || response.status >= 500) throw new RetryableUploadError(`HTTP ${response.status}: ${text}`)
       throw new Error(`HTTP ${response.status}: ${text}`)
     }
-    const payload = await response.json().catch(() => ({})) as { file?: { fileUrl?: unknown } }
+    const payload = await response.json().catch(() => ({})) as {
+      file?: { fileUrl?: unknown }
+      galleryReady?: unknown
+    }
     db.update(groupCaptureFilesTable).set({
       uploadStatus: 'done',
       fileUrl: typeof payload.file?.fileUrl === 'string' ? toServerFileUrl(payload.file.fileUrl) : null,
+      galleryReady: file.fileRole !== 'JPEG' || payload.galleryReady === true,
     }).where(eq(groupCaptureFilesTable.id, fileId)).run()
   } catch (error) {
     const retryable = isRetryableUploadFailure(error)
@@ -871,7 +875,9 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
   const groupCaptures = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.projectId, projectId)).all()
   for (const capture of groupCaptures) {
     for (const file of db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.captureId, capture.id)).all()) {
-      if (file.uploadStatus !== 'done') jobs.push({ kind: 'group-capture-file', captureId: capture.id, fileId: file.id })
+      if (file.uploadStatus !== 'done' || (file.fileRole === 'JPEG' && !file.galleryReady)) {
+        jobs.push({ kind: 'group-capture-file', captureId: capture.id, fileId: file.id })
+      }
     }
   }
 
@@ -968,8 +974,14 @@ function getUploadStatusCounts(projectId: number) {
   const groupCaptures = db.select({ id: groupCapturesTable.id }).from(groupCapturesTable)
     .where(eq(groupCapturesTable.projectId, projectId)).all()
   for (const capture of groupCaptures) {
-    statuses.push(...db.select({ status: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable)
-      .where(eq(groupCaptureFilesTable.captureId, capture.id)).all().map((row) => row.status))
+    statuses.push(...db.select({
+      status: groupCaptureFilesTable.uploadStatus,
+      fileRole: groupCaptureFilesTable.fileRole,
+      galleryReady: groupCaptureFilesTable.galleryReady,
+    }).from(groupCaptureFilesTable)
+      .where(eq(groupCaptureFilesTable.captureId, capture.id)).all().map((row) =>
+        row.fileRole === 'JPEG' && row.status === 'done' && !row.galleryReady ? 'pending' : row.status,
+      ))
   }
   const mirroredPhotoIds = new Set(
     db.select({ id: capturesTable.legacyPhotoId }).from(capturesTable)

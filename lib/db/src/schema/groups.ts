@@ -65,6 +65,7 @@ export const groupCaptureFilesTable = pgTable("group_capture_files", {
   fileFormat: text("file_format").notNull(),
   originalFilename: text("original_filename").notNull(),
   fileUrl: text("file_url").notNull(),
+  durableObjectPath: text("durable_object_path"),
   mimeType: text("mime_type").notNull(),
   fileSize: integer("file_size"),
   captureBatchId: integer("capture_batch_id").references(() => captureBatchesTable.id, { onDelete: "set null" }),

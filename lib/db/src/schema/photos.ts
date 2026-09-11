@@ -2,6 +2,7 @@ import { boolean, pgTable, serial, text, timestamp, integer, uniqueIndex } from 
 import { projectsTable } from "./projects";
 import { studentsTable } from "./students";
 import { captureBatchesTable } from "./captures";
+import { groupCaptureFilesTable } from "./groups";
 
 export const studentPhotosTable = pgTable("student_photos", {
   id: serial("id").primaryKey(),
@@ -20,6 +21,8 @@ export const studentPhotosTable = pgTable("student_photos", {
     .references(() => captureBatchesTable.id, { onDelete: "set null" }),
   desktopConnectionId: integer("desktop_connection_id"),
   clientUploadId: text("client_upload_id"),
+  sourceGroupCaptureFileId: integer("source_group_capture_file_id")
+    .references(() => groupCaptureFilesTable.id, { onDelete: "cascade" }),
   rating: integer("rating").notNull().default(0),
   colorLabel: text("color_label", { enum: ["none", "red", "yellow", "green", "blue", "purple"] }).notNull().default("none"),
   shareWithParents: boolean("share_with_parents").notNull().default(false),
@@ -27,6 +30,8 @@ export const studentPhotosTable = pgTable("student_photos", {
 }, (table) => [
   uniqueIndex("student_photos_desktop_upload_unique")
     .on(table.desktopConnectionId, table.clientUploadId),
+  uniqueIndex("student_photos_group_file_student_unique")
+    .on(table.sourceGroupCaptureFileId, table.studentId),
 ]);
 
 export type StudentPhoto = typeof studentPhotosTable.$inferSelect;

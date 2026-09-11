@@ -25,6 +25,10 @@ import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
 import { canonicalStudentFolderName, GoogleDriveBackupError } from "../lib/googleDriveBackup";
 import { backupFileForStudio } from "../lib/studioStorageBackup";
 import { storePhotoDurably } from "../lib/durablePhotoStorage";
+import {
+  projectAvailableGroupJpegsToStudent,
+  projectGroupJpegToPhotographedStudents,
+} from "../lib/groupDeliveryPhotos";
 
 const router = Router({ mergeParams: true });
 
@@ -577,21 +581,23 @@ async function projectCaptureJpegToDeliveryPhoto(
       eq(studentPhotosTable.studentId, capture.studentId),
       eq(studentPhotosTable.fileName, file.originalFilename),
     )).limit(1);
-  if (existing.length) return;
-  await db.insert(studentPhotosTable).values({
-    projectId: capture.projectId,
-    studentId: capture.studentId,
-    fileName: file.originalFilename,
-    fileUrl: file.fileUrl,
-    durableObjectPath: file.durableObjectPath,
-    mimeType: file.mimeType,
-    capturedAt: capture.capturedAt,
-    desktopConnectionId: file.desktopConnectionId,
-    clientUploadId: file.clientUploadId,
-    rating: capture.rating,
-    colorLabel: capture.colorLabel,
-    shareWithParents: capture.colorLabel === "green",
-  }).onConflictDoNothing();
+  if (!existing.length) {
+    await db.insert(studentPhotosTable).values({
+      projectId: capture.projectId,
+      studentId: capture.studentId,
+      fileName: file.originalFilename,
+      fileUrl: file.fileUrl,
+      durableObjectPath: file.durableObjectPath,
+      mimeType: file.mimeType,
+      capturedAt: capture.capturedAt,
+      desktopConnectionId: file.desktopConnectionId,
+      clientUploadId: file.clientUploadId,
+      rating: capture.rating,
+      colorLabel: capture.colorLabel,
+      shareWithParents: capture.colorLabel === "green",
+    }).onConflictDoNothing();
+  }
+  await projectAvailableGroupJpegsToStudent(capture.projectId, capture.studentId);
 }
 
 // ---------------------------------------------------------------------------
@@ -697,10 +703,44 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
       [capture] = await tx.update(groupCapturesTable).set({ pairingStatus: captureStatusForFiles(files), updatedAt: new Date() }).where(eq(groupCapturesTable.id, capture.id)).returning();
       return { capture, file, backupFilePath: req.file!.path, reused: false };
     });
-    try { await backupGroupUploadedFile(projectId, groupId, result.backupFilePath, result.file.originalFilename, result.file.fileRole as "JPEG" | "RAW", result.file.fileFormat, `group-capture:${result.capture.id}:${result.file.fileRole}`); }
+    let uploadedGroupFile = result.file;
+    if (uploadedGroupFile.fileRole === "JPEG" && !uploadedGroupFile.durableObjectPath) {
+      try {
+        const durableObjectPath = await storePhotoDurably(req.file.path, req.file.mimetype || "image/jpeg");
+        const [updatedFile] = await db.update(groupCaptureFilesTable)
+          .set({ durableObjectPath })
+          .where(and(
+            eq(groupCaptureFilesTable.id, uploadedGroupFile.id),
+            isNull(groupCaptureFilesTable.durableObjectPath),
+          ))
+          .returning();
+        if (updatedFile) uploadedGroupFile = updatedFile;
+        else {
+          const [currentFile] = await db.select().from(groupCaptureFilesTable)
+            .where(eq(groupCaptureFilesTable.id, uploadedGroupFile.id)).limit(1);
+          if (currentFile) uploadedGroupFile = currentFile;
+        }
+      } catch (error) {
+        logger.error({ err: error, projectId, groupId }, "Durable group photo storage failed");
+        res.status(503).json({
+          error: "Group photo could not be stored safely for galleries. Please retry the upload.",
+          code: "GROUP_PHOTO_STORAGE_FAILED",
+        });
+        return;
+      }
+    }
+    try { await backupGroupUploadedFile(projectId, groupId, result.backupFilePath, uploadedGroupFile.originalFilename, uploadedGroupFile.fileRole as "JPEG" | "RAW", uploadedGroupFile.fileFormat, `group-capture:${result.capture.id}:${uploadedGroupFile.fileRole}`); }
     catch (error) { if (error instanceof GoogleDriveBackupError) { res.status(503).json({ error: "Capture saved locally, but Google Drive backup failed. Retry the upload.", code: "GOOGLE_DRIVE_BACKUP_FAILED" }); return; } throw error; }
+    await projectGroupJpegToPhotographedStudents(result.capture, uploadedGroupFile);
     if (result.reused) discardUploadedFile(req);
-    res.status(result.reused ? 200 : 201).json({ captureId: result.capture.id, captureKey: result.capture.captureKey, pairingStatus: result.capture.pairingStatus, file: result.file, reused: result.reused });
+    res.status(result.reused ? 200 : 201).json({
+      captureId: result.capture.id,
+      captureKey: result.capture.captureKey,
+      pairingStatus: result.capture.pairingStatus,
+      file: uploadedGroupFile,
+      reused: result.reused,
+      galleryReady: uploadedGroupFile.fileRole !== "JPEG" || Boolean(uploadedGroupFile.durableObjectPath),
+    });
   } catch (error) { discardUploadedFile(req); next(error); }
 });
 
@@ -845,6 +885,7 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       }
       throw error;
     }
+    await projectAvailableGroupJpegsToStudent(projectId, studentId);
     if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json(photoToResponse(result.photo));
   } catch (error) {
@@ -1240,6 +1281,12 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
 
   if (!photo) {
     res.status(404).json({ error: "Photo not found" });
+    return;
+  }
+
+  if (photo.sourceGroupCaptureFileId !== null) {
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photo.id));
+    res.status(204).send();
     return;
   }
 

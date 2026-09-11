@@ -156,6 +156,7 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   ensureColumn(sqlite, 'captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(sqlite, 'captures', 'color_label', "TEXT NOT NULL DEFAULT 'none'")
   ensureColumn(sqlite, 'captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'group_capture_files', 'gallery_ready', 'INTEGER NOT NULL DEFAULT 0')
 
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (

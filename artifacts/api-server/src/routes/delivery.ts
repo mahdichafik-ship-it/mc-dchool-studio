@@ -26,6 +26,7 @@ import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
 import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
+import { materializeGroupJpegsForDelivery } from "../lib/groupDeliveryPhotos";
 
 const router = Router();
 const DELIVERY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -811,6 +812,7 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     return;
   }
   await materializeCaptureJpegsForDelivery(projectId);
+  await materializeGroupJpegsForDelivery(projectId);
   const [undeliverablePhoto] = await db
     .select({ id: studentPhotosTable.id })
     .from(studentPhotosTable)

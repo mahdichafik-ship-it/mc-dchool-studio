@@ -894,6 +894,10 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     const capturedAt = body.capturedAt?.trim() || null;
     const sequence = body.sequence ? Number(body.sequence) : null;
     const parsedSequence = sequence !== null && Number.isInteger(sequence) ? sequence : null;
+    const rating = Math.max(0, Math.min(5, Number.parseInt(body.rating ?? "0", 10) || 0));
+    const colorLabel = ["none", "red", "yellow", "green", "blue", "purple"].includes(body.colorLabel ?? "")
+      ? body.colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple"
+      : "none";
 
     const result = await db.transaction(async (tx) => {
       if (clientUploadId) {
@@ -936,6 +940,8 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
             favorite: body.favorite === "true",
             rejected: body.rejected === "true",
             selected: body.selected === "true",
+            rating,
+            colorLabel,
           })
           .returning();
       }
@@ -949,6 +955,14 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         ))
         .limit(1);
       if (existingByRole) {
+        [capture] = await tx.update(capturesTable).set({
+          favorite: body.favorite === "true",
+          rejected: body.rejected === "true",
+          selected: body.selected === "true",
+          rating,
+          colorLabel,
+          updatedAt: new Date(),
+        }).where(eq(capturesTable.id, capture.id)).returning();
         return { capture, file: existingByRole, backupFilePath: uploadedFile.path, reused: true };
       }
 
@@ -1031,6 +1045,44 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     discardUploadedFile(req);
     next(error);
   }
+});
+
+router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const studentId = Number(req.params.studentId);
+  const captureKey = String(req.params.captureKey);
+  const connection = getDesktopConnection(req);
+  if (
+    !Number.isInteger(projectId)
+    || !Number.isInteger(studentId)
+    || !(await canAccessDesktopProject(connectionAccessMember(connection), projectId))
+  ) {
+    res.status(404).json({ error: "Capture not found" });
+    return;
+  }
+  const colorLabel = String(req.body?.colorLabel ?? "none");
+  const rating = Number(req.body?.rating ?? 0);
+  if (!["none", "red", "yellow", "green", "blue", "purple"].includes(colorLabel) || !Number.isInteger(rating) || rating < 0 || rating > 5) {
+    res.status(400).json({ error: "Invalid rating or color label" });
+    return;
+  }
+  const [capture] = await db.update(capturesTable).set({
+    favorite: Boolean(req.body?.favorite),
+    rejected: Boolean(req.body?.rejected),
+    selected: Boolean(req.body?.selected),
+    rating,
+    colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
+    updatedAt: new Date(),
+  }).where(and(
+    eq(capturesTable.projectId, projectId),
+    eq(capturesTable.studentId, studentId),
+    eq(capturesTable.captureKey, captureKey),
+  )).returning();
+  if (!capture) {
+    res.status(404).json({ error: "Capture not found" });
+    return;
+  }
+  res.json({ capture });
 });
 
 // GET /api/projects/:projectId/students/:studentId/photos

@@ -648,6 +648,8 @@ async function performUploadCaptureFile(captureId: number, fileId: number, captu
     formData.append('favorite', String(capture.favorite))
     formData.append('rejected', String(capture.rejected))
     formData.append('selected', String(capture.selected))
+    formData.append('rating', String(capture.rating))
+    formData.append('colorLabel', capture.colorLabel)
 
     const url = `${apiUrl.replace(/\/+$/, '')}/api/projects/${project.cloudId}/students/${student.cloudId}/captures`
     const response = await fetch(url, {
@@ -752,6 +754,69 @@ export function uploadCaptureFile(captureId: number, fileId: number, captureBatc
     activeCaptureFileUploads.delete(fileId)
   }).catch(() => {})
   return task
+}
+
+export async function syncCaptureReview(captureId: number): Promise<void> {
+  if (!isCloudSessionVerified()) return
+  const db = getDb()
+  const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
+  if (!capture?.studentId) return
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, capture.projectId)).get()
+  const student = db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get()
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!project?.cloudId || !student?.cloudId || !apiUrl || !connectionToken) return
+  try {
+    const response = await fetch(
+      `${apiUrl.replace(/\/+$/, '')}/api/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${connectionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          favorite: capture.favorite,
+          rejected: capture.rejected,
+          selected: capture.selected,
+          rating: capture.rating,
+          colorLabel: capture.colorLabel,
+        }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    )
+    if (response.status === 401) {
+      invalidateDesktopCredentials(true)
+      return
+    }
+    if (response.ok) {
+      db.update(capturesTable)
+        .set({ reviewSyncPending: false, updatedAt: new Date().toISOString() })
+        .where(eq(capturesTable.id, captureId))
+        .run()
+      return
+    }
+    if (!response.ok && response.status !== 404) {
+      console.warn(`[Review] Cloud review sync failed with HTTP ${response.status}`)
+    }
+  } catch (error) {
+    console.warn('[Review] Cloud review sync deferred:', error)
+  }
+}
+
+async function syncPendingCaptureReviews(projectId?: number): Promise<void> {
+  if (!isCloudSessionVerified()) return
+  const db = getDb()
+  const captures = db
+    .select({ id: capturesTable.id })
+    .from(capturesTable)
+    .where(projectId === undefined
+      ? eq(capturesTable.reviewSyncPending, true)
+      : and(eq(capturesTable.reviewSyncPending, true), eq(capturesTable.projectId, projectId)))
+    .all()
+  for (const capture of captures) {
+    if (!isCloudSessionVerified()) return
+    await syncCaptureReview(capture.id)
+  }
 }
 
 function uploadGroupCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
@@ -1174,10 +1239,12 @@ export function registerUploadHandlers() {
   })
   ipcMain.handle('upload:runNow', async (_e, { projectId }: { projectId: number }) => {
     await runLiveUpload(projectId)
+    await syncPendingCaptureReviews(projectId)
     return getLiveUploadState(projectId)
   })
   ipcMain.handle('upload:retryProjectFailed', async (_e, { projectId }: { projectId: number }) => {
     await runLiveUpload(projectId, true)
+    await syncPendingCaptureReviews(projectId)
     return getLiveUploadState(projectId)
   })
 
@@ -1195,6 +1262,7 @@ export function registerUploadHandlers() {
       })
       if (response.ok) {
         markCloudSessionVerified()
+        await syncPendingCaptureReviews()
         return { ok: true }
       }
       if (response.status === 401) invalidateDesktopCredentials(true)

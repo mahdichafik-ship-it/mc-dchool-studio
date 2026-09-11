@@ -439,6 +439,8 @@ export function useCaptures(studentId: number | null) {
           favorite: false,
           rejected: false,
           selected: false,
+          rating: 0,
+          colorLabel: 'none',
           pairingStatus: 'jpeg_only',
           assignmentLocked: true,
           files: [jpegFile],

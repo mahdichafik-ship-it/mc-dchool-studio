@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import { studentsTable } from "./students";
 import { captureBatchesTable } from "./captures";
@@ -20,6 +20,9 @@ export const studentPhotosTable = pgTable("student_photos", {
     .references(() => captureBatchesTable.id, { onDelete: "set null" }),
   desktopConnectionId: integer("desktop_connection_id"),
   clientUploadId: text("client_upload_id"),
+  rating: integer("rating").notNull().default(0),
+  colorLabel: text("color_label", { enum: ["none", "red", "yellow", "green", "blue", "purple"] }).notNull().default("none"),
+  shareWithParents: boolean("share_with_parents").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("student_photos_desktop_upload_unique")

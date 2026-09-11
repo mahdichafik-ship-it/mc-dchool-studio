@@ -145,6 +145,7 @@ export interface ImagePipelineRendererStage {
 }
 
 export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
+export type CaptureColorLabel = 'none' | 'red' | 'yellow' | 'green' | 'blue' | 'purple'
 
 export interface CaptureFileReview {
   id: number
@@ -168,6 +169,8 @@ export interface CaptureReview {
   favorite: boolean
   rejected: boolean
   selected: boolean
+  rating: number
+  colorLabel: CaptureColorLabel
   pairingStatus: CapturePairingStatus
   assignmentLocked: boolean
   files: CaptureFileReview[]

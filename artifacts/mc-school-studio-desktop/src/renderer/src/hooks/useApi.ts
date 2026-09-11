@@ -257,6 +257,17 @@ export function useGroupCaptures(projectId: number | null, groupId: number | nul
     setData(await api.invoke('groupCaptures:list', { projectId, groupId }))
   }, [projectId, groupId])
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (!projectId || !groupId) return
+    const unsubscribe = api.on('groupCapture:updated', (event: { projectId: number; groupId: number }) => {
+      if (event.projectId === projectId && event.groupId === groupId) void load()
+    })
+    const intervalId = window.setInterval(() => void load(), 3000)
+    return () => {
+      unsubscribe()
+      window.clearInterval(intervalId)
+    }
+  }, [projectId, groupId, load])
   return { data, reload: load }
 }
 

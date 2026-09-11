@@ -37,7 +37,6 @@ import {
   type DriveRequester,
 } from "../src/lib/googleDriveBackup";
 import {
-  projectAvailableGroupJpegsToStudent,
   projectGroupJpegToPhotographedStudents,
 } from "../src/lib/groupDeliveryPhotos";
 
@@ -1108,7 +1107,7 @@ test("rejects encoded traversal identifiers before writing an upload", async () 
   assert(!fs.existsSync(path.resolve(process.cwd(), "uploads", "outside")), "invalid identifiers must not create an upload directory");
 });
 
-test("shows a class photo only for students in that class who have an individual portrait", async () => {
+test("shows a class photo for every group member even without an individual portrait", async () => {
   const suffix = `${process.pid}-${Date.now()}`;
   const [testClass] = await db.insert(classesTable).values({
     projectId,
@@ -1149,34 +1148,12 @@ test("shows a class photo only for students in that class who have an individual
     durableObjectPath: `/objects/groups/${suffix}.jpg`,
     mimeType: "image/jpeg",
   }).returning();
-  await db.insert(studentPhotosTable).values({
-    projectId,
-    studentId: photographed.id,
-    fileName: `portrait-${suffix}.jpg`,
-    fileUrl: `/uploads/portraits/${suffix}.jpg`,
-    durableObjectPath: `/objects/portraits/${suffix}.jpg`,
-    mimeType: "image/jpeg",
-  });
-
   await projectGroupJpegToPhotographedStudents(capture, file);
-  let projected = await db.select().from(studentPhotosTable)
-    .where(eq(studentPhotosTable.sourceGroupCaptureFileId, file.id));
-  assert.deepEqual(projected.map((photo) => photo.studentId), [photographed.id]);
-  assert.equal(projected[0]?.rating, 5);
-
-  await db.insert(studentPhotosTable).values({
-    projectId,
-    studentId: absent.id,
-    fileName: `late-portrait-${suffix}.jpg`,
-    fileUrl: `/uploads/portraits/late-${suffix}.jpg`,
-    durableObjectPath: `/objects/portraits/late-${suffix}.jpg`,
-    mimeType: "image/jpeg",
-  });
-  await projectAvailableGroupJpegsToStudent(projectId, absent.id);
-  projected = await db.select().from(studentPhotosTable)
+  const projected = await db.select().from(studentPhotosTable)
     .where(eq(studentPhotosTable.sourceGroupCaptureFileId, file.id));
   assert.deepEqual(
     new Set(projected.map((photo) => photo.studentId)),
     new Set([photographed.id, absent.id]),
   );
+  assert(projected.every((photo) => photo.rating === 5));
 });

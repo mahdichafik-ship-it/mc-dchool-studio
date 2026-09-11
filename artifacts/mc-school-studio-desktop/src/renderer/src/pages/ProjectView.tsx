@@ -111,6 +111,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [finishDialogOpen, setFinishDialogOpen] = useState(false)
   const [uploadActionRunning, setUploadActionRunning] = useState(false)
+  const [reviewSummary, setReviewSummary] = useState<{
+    unratedPortraits: number
+    unratedGroups: number
+  }>({ unratedPortraits: 0, unratedGroups: 0 })
   const autoStartAttemptedRef = useRef<number | null>(null)
   const pendingUploadCount = liveUpload
     ? liveUpload.pending + liveUpload.uploading
@@ -412,6 +416,33 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
+  async function loadReviewSummary() {
+    const summary = await window.api.invoke('captures:reviewSummary', { projectId }) as {
+      unratedPortraits: number
+      unratedGroups: number
+    }
+    setReviewSummary(summary)
+    return summary
+  }
+
+  async function openUploadDialog() {
+    try {
+      await loadReviewSummary()
+      setUploadDialogOpen(true)
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not check photo ratings', description: String(error) })
+    }
+  }
+
+  async function openFinishDialog() {
+    try {
+      await loadReviewSummary()
+      setFinishDialogOpen(true)
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not check photo ratings', description: String(error) })
+    }
+  }
+
   async function handleToggleLiveUpload() {
     if (!liveUpload || project?.finishedAt) return
     setUploadActionRunning(true)
@@ -437,6 +468,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       if (retryFailed) await retryProjectFailed()
       else await runUploadNow()
       await reloadUploadStatus()
+      addToast({
+        type: 'success',
+        title: retryFailed ? 'Retry started' : 'Upload started',
+        description: 'Upload continues in the background. Keep this window open to monitor progress.',
+      })
     } catch (error) {
       addToast({ type: 'error', title: 'Upload could not continue', description: String(error) })
     } finally {
@@ -546,7 +582,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                </button>
                <div className={cn("w-px h-full", liveUpload?.enabled ? "bg-blue-500/30" : "bg-slate-800")} />
                <button
-                 onClick={() => setUploadDialogOpen(true)}
+                  onClick={() => void openUploadDialog()}
                  className="h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold"
                  title="Open upload activity"
                >
@@ -579,9 +615,25 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                    </button>
                 </div>
              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void openUploadDialog()}
+                disabled={uploadActionRunning || Boolean(project?.finishedAt) || (captureSummary.total === 0 && groupCaptureCount === 0)}
+                className="h-8 px-3 border-blue-500/50 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 hover:text-white text-[10px] font-bold uppercase tracking-wider"
+              >
+                {liveUpload?.running || uploadActionRunning
+                  ? <Loader className="size-3.5 mr-1.5 animate-spin" />
+                  : <Upload className="size-3.5 mr-1.5" />}
+                {liveUpload?.uploading
+                  ? `Uploading ${liveUpload.uploading}`
+                  : pendingUploadCount > 0
+                    ? `Upload ${pendingUploadCount}`
+                    : 'Upload'}
+              </Button>
              <Button
                size="sm"
-               onClick={() => setFinishDialogOpen(true)}
+                onClick={() => void openFinishDialog()}
                disabled={finishing || Boolean(project?.finishedAt) || (captureSummary.total === 0 && groupCaptureCount === 0)}
                className={cn(
                  "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
@@ -625,6 +677,25 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               </div>
             ))}
           </div>
+          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <div className="flex gap-3">
+                <AlertCircle className="size-5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="font-bold text-amber-900">Review photos before uploading</p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    {reviewSummary.unratedPortraits > 0
+                      ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? '' : 's'} need a rating or “Do not share”.`
+                      : ''}
+                    {reviewSummary.unratedPortraits > 0 && reviewSummary.unratedGroups > 0 ? ' ' : ''}
+                    {reviewSummary.unratedGroups > 0
+                      ? `${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'} need a rating.`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-700">Cloud connection</span>
@@ -659,7 +730,12 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               </Button>
             )}
             <Button
-              disabled={uploadActionRunning || !liveUpload?.cloudReady || (liveUpload?.pending ?? 0) === 0}
+              disabled={
+                uploadActionRunning
+                || !liveUpload?.cloudReady
+                || reviewSummary.unratedPortraits > 0
+                || reviewSummary.unratedGroups > 0
+              }
               onClick={() => void handleUploadNow()}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
@@ -703,6 +779,23 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               <div className="text-[10px] font-bold uppercase text-red-700">Need retry</div>
             </div>
           </div>
+          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+            <div className="rounded-xl border border-red-300 bg-red-50 p-4">
+              <div className="flex gap-3">
+                <AlertCircle className="size-5 shrink-0 text-red-600" />
+                <div>
+                  <p className="font-bold text-red-900">Photo review is not complete</p>
+                  <p className="mt-1 text-sm text-red-800">
+                    Review {reviewSummary.unratedPortraits} portrait{reviewSummary.unratedPortraits === 1 ? '' : 's'}
+                    {reviewSummary.unratedGroups > 0
+                      ? ` and ${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'}`
+                      : ''}.
+                    Rate photos to share, or choose “Do not share” for portraits that must stay private.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           {!liveUpload?.cloudReady && (
             <p className="text-sm font-medium text-red-600">
               Connect to Volume Capture before finishing. Your local captures remain safe.
@@ -713,7 +806,12 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               Keep Shooting
             </Button>
             <Button
-              disabled={finishing || !liveUpload?.cloudReady}
+              disabled={
+                finishing
+                || !liveUpload?.cloudReady
+                || reviewSummary.unratedPortraits > 0
+                || reviewSummary.unratedGroups > 0
+              }
               onClick={() => void handleUploadAndFinish()}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
@@ -1471,7 +1569,7 @@ function StudentDetail({
                   <p className="text-sm font-extrabold text-slate-500 uppercase tracking-wider">No captures match filter</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
                   {qrMarkers.map((marker) => (
                     <QrMarkerTile
                       key={marker.id}
@@ -2247,26 +2345,46 @@ function CaptureReviewControls({
             "text-[10px] font-semibold",
             capture.rating > 0 ? "text-teal-700" : "text-slate-400",
           )}>
-            {capture.rating > 0 ? `Shared · ${capture.rating} star${capture.rating === 1 ? '' : 's'}` : 'Not shared · choose 1–5 stars'}
+            {capture.rating > 0
+              ? `Shared · ${capture.rating} star${capture.rating === 1 ? '' : 's'}`
+              : capture.rejected
+                ? 'Not shared · reviewed'
+                : 'Not reviewed · choose 1–5 stars'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onUpdateReview(capture.id, {
-            rating: capture.rating > 0 ? 0 : 5,
-            favorite: capture.rating <= 0,
-            selected: capture.rating <= 0,
-            rejected: false,
-          })}
-          className={cn(
-            "rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition-colors",
-            capture.rating > 0
-              ? "bg-teal-100 text-teal-800 hover:bg-teal-200"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+        <div className="flex items-center gap-1.5">
+          {capture.rating <= 0 && (
+            <button
+              type="button"
+              onClick={() => onUpdateReview(capture.id, {
+                rating: 0,
+                favorite: false,
+                selected: false,
+                rejected: !capture.rejected,
+              })}
+              className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-200"
+            >
+              {capture.rejected ? 'Review again' : 'Do not share'}
+            </button>
           )}
-        >
-          {capture.rating > 0 ? 'Remove' : 'Share'}
-        </button>
+          <button
+            type="button"
+            onClick={() => onUpdateReview(capture.id, {
+              rating: capture.rating > 0 ? 0 : 5,
+              favorite: capture.rating <= 0,
+              selected: capture.rating <= 0,
+              rejected: capture.rating > 0,
+            })}
+            className={cn(
+              "rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition-colors",
+              capture.rating > 0
+                ? "bg-teal-100 text-teal-800 hover:bg-teal-200"
+                : "bg-blue-600 text-white hover:bg-blue-700",
+            )}
+          >
+            {capture.rating > 0 ? 'Remove' : 'Share'}
+          </button>
+        </div>
       </div>
       <div className="flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2">
         {[1, 2, 3, 4, 5].map((rating) => (

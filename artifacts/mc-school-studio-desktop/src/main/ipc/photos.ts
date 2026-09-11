@@ -112,6 +112,32 @@ export function registerPhotoHandlers() {
   })
   ipcMain.handle('groupCaptures:summary', async (_e, { projectId }: { projectId: number }) =>
     db.select().from(groupCapturesTable).where(eq(groupCapturesTable.projectId, projectId)).all().length)
+  ipcMain.handle('captures:reviewSummary', async (_e, { projectId }: { projectId: number }) => {
+    const portraitCaptures = db.select().from(capturesTable)
+      .where(eq(capturesTable.projectId, projectId)).all()
+      .filter((capture) => capture.studentId !== null)
+    const portraitJpegCaptureIds = new Set(
+      db.select({ captureId: imageFilesTable.captureId }).from(imageFilesTable)
+        .where(eq(imageFilesTable.fileRole, 'JPEG')).all()
+        .map((file) => file.captureId),
+    )
+    const groupCaptures = db.select().from(groupCapturesTable)
+      .where(eq(groupCapturesTable.projectId, projectId)).all()
+    const groupJpegCaptureIds = new Set(
+      db.select({ captureId: groupCaptureFilesTable.captureId }).from(groupCaptureFilesTable)
+        .where(eq(groupCaptureFilesTable.fileRole, 'JPEG')).all()
+        .map((file) => file.captureId),
+    )
+    return {
+      unratedPortraits: portraitCaptures.filter((capture) =>
+        portraitJpegCaptureIds.has(capture.id)
+        && capture.rating <= 0
+        && !capture.rejected).length,
+      unratedGroups: groupCaptures.filter((capture) =>
+        groupJpegCaptureIds.has(capture.id)
+        && capture.rating <= 0).length,
+    }
+  })
   ipcMain.handle('groupCaptures:updateReview', async (_e, { captureId, rating }: { captureId: number; rating: number }) => {
     const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get()
     if (!capture) return null

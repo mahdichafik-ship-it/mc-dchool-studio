@@ -726,6 +726,10 @@ async function handleNewPhoto(
       filePath: capture.filePath, storedPath, fileName: capture.fileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
     })
+    getMainWindow()?.webContents.send('groupCapture:updated', {
+      projectId,
+      groupId: group.id,
+    })
     return
   }
 

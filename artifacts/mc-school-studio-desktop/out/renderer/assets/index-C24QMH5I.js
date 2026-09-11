@@ -12090,18 +12090,18 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$y = [
+const __iconNode$x = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$y);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$x);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$x = [
+const __iconNode$w = [
   ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
   [
     "path",
@@ -12111,14 +12111,14 @@ const __iconNode$x = [
     }
   ]
 ];
-const Bell = createLucideIcon("bell", __iconNode$x);
+const Bell = createLucideIcon("bell", __iconNode$w);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$w = [
+const __iconNode$v = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12128,14 +12128,14 @@ const __iconNode$w = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$w);
+const BookOpen = createLucideIcon("book-open", __iconNode$v);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$v = [
+const __iconNode$u = [
   [
     "path",
     {
@@ -12145,15 +12145,7 @@ const __iconNode$v = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$v);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$u = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-const Check = createLucideIcon("check", __iconNode$u);
+const Camera = createLucideIcon("camera", __iconNode$u);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -16281,6 +16273,8 @@ function useCaptures(studentId) {
           favorite: false,
           rejected: false,
           selected: false,
+          rating: 0,
+          colorLabel: "none",
           pairingStatus: "jpeg_only",
           assignmentLocked: true,
           files: [jpegFile],
@@ -18678,39 +18672,54 @@ function CaptureReviewControls({
   onUpdateReview
 }) {
   if (!onUpdateReview) return null;
-  const hasActiveState = capture.favorite || capture.selected || capture.rejected;
+  const hasActiveState = capture.rating > 0 || capture.colorLabel !== "none" || capture.rejected;
+  const colors = [
+    ["red", "bg-red-500"],
+    ["yellow", "bg-yellow-400"],
+    ["green", "bg-emerald-500"],
+    ["blue", "bg-blue-500"],
+    ["purple", "bg-purple-500"]
+  ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn(
-    "absolute bottom-2 left-2 z-30 flex gap-1.5 transition-all duration-200",
+    "absolute bottom-2 left-2 right-2 z-30 flex flex-col gap-1.5 transition-all duration-200",
     hasActiveState ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0"
   ), children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "button",
-      {
-        type: "button",
-        "aria-label": capture.favorite ? "Remove favorite" : "Mark favorite",
-        title: capture.favorite ? "Remove favorite" : "Mark favorite",
-        onClick: () => onUpdateReview(capture.id, { favorite: !capture.favorite }),
-        className: cn(
-          "rounded-full p-2 shadow-sm transition-colors border",
-          capture.favorite ? "border-amber-300 bg-amber-100 text-amber-600" : "border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40"
-        ),
-        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-3.5", fill: capture.favorite ? "currentColor" : "none" })
-      }
-    ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "button",
-      {
-        type: "button",
-        "aria-label": capture.selected ? "Remove from selection" : "Add to selection",
-        title: capture.selected ? "Remove from selection" : "Add to selection",
-        onClick: () => onUpdateReview(capture.id, { selected: !capture.selected, rejected: false }),
-        className: cn(
-          "rounded-full p-2 shadow-sm transition-colors border",
-          capture.selected ? "border-teal-300 bg-teal-100 text-teal-700" : "border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40"
-        ),
-        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { className: "size-3.5" })
-      }
-    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-0.5 rounded-lg border border-white/20 bg-black/65 px-1.5 py-1 backdrop-blur-md", children: [
+      [1, 2, 3, 4, 5].map((rating) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          "aria-label": `Rate ${rating} star${rating === 1 ? "" : "s"}`,
+          onClick: () => onUpdateReview(capture.id, {
+            rating: capture.rating === rating ? 0 : rating,
+            favorite: rating >= 4
+          }),
+          className: "p-1 text-amber-300 hover:text-amber-200",
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-3.5", fill: capture.rating >= rating ? "currentColor" : "none" })
+        },
+        rating
+      )),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mx-1 h-4 w-px bg-white/20" }),
+      colors.map(([label, color]) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          "aria-label": `${label} color label${label === "green" ? " — share with parents" : ""}`,
+          title: label === "green" ? "Green — share with parents" : `${label} label`,
+          onClick: () => onUpdateReview(capture.id, {
+            colorLabel: capture.colorLabel === label ? "none" : label,
+            selected: label === "green" ? capture.colorLabel !== "green" : capture.selected,
+            rejected: false
+          }),
+          className: cn(
+            "size-5 rounded-full border-2 transition-transform hover:scale-110",
+            color,
+            capture.colorLabel === label ? "border-white ring-2 ring-white/70" : "border-black/30"
+          )
+        },
+        label
+      ))
+    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
@@ -18719,7 +18728,7 @@ function CaptureReviewControls({
         title: capture.rejected ? "Restore capture" : "Reject capture",
         onClick: () => onUpdateReview(capture.id, { rejected: !capture.rejected, selected: false }),
         className: cn(
-          "rounded-full p-2 shadow-sm transition-colors border",
+          "self-start rounded-full p-2 shadow-sm transition-colors border",
           capture.rejected ? "border-red-300 bg-red-100 text-red-700" : "border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40"
         ),
         children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3.5" })

@@ -50,6 +50,10 @@ export const capturesTable = pgTable("captures", {
   favorite: boolean("favorite").notNull().default(false),
   rejected: boolean("rejected").notNull().default(false),
   selected: boolean("selected").notNull().default(false),
+  rating: integer("rating").notNull().default(0),
+  colorLabel: text("color_label", {
+    enum: ["none", "red", "yellow", "green", "blue", "purple"],
+  }).notNull().default("none"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [

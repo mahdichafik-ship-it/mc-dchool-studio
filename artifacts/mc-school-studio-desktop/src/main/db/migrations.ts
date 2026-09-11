@@ -153,6 +153,9 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   // This column was added after groups shipped; run it after CREATE TABLE so
   // fresh databases and existing installations follow the same path.
   ensureColumn(sqlite, 'groups', 'membership_dirty', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'color_label', "TEXT NOT NULL DEFAULT 'none'")
+  ensureColumn(sqlite, 'captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
 
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (

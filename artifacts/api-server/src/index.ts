@@ -6,7 +6,8 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { recoverPhotoDeleteBackups } from "./routes/photos";
 import { runMigrations } from "stripe-replit-sync";
-import { getStripeSync } from "./lib/stripeClient";
+import { getStripeSync, getUncachableStripeClient } from "./lib/stripeClient";
+import { ensureSingleManagedWebhook } from "./lib/managedStripeWebhook";
 import { pool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -91,8 +92,9 @@ try {
     }
     await runMigrations({ databaseUrl: process.env.DATABASE_URL!, schema: "stripe" });
     const stripeSync = await getStripeSync();
+    const stripe = await getUncachableStripeClient();
     const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0] ?? "localhost"}`;
-    await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`, {
+    await ensureSingleManagedWebhook(stripeSync, stripe, `${webhookBaseUrl}/api/stripe/webhook`, {
       enabled_events: [
         "checkout.session.completed",
         "payment_intent.succeeded",

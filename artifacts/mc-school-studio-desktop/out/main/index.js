@@ -131,6 +131,9 @@ const capturesTable = sqliteCore.sqliteTable("captures", {
   favorite: sqliteCore.integer("favorite", { mode: "boolean" }).notNull().default(false),
   rejected: sqliteCore.integer("rejected", { mode: "boolean" }).notNull().default(false),
   selected: sqliteCore.integer("selected", { mode: "boolean" }).notNull().default(false),
+  rating: sqliteCore.integer("rating").notNull().default(0),
+  colorLabel: sqliteCore.text("color_label").$type().notNull().default("none"),
+  reviewSyncPending: sqliteCore.integer("review_sync_pending", { mode: "boolean" }).notNull().default(false),
   notes: sqliteCore.text("notes"),
   shootSessionId: sqliteCore.text("shoot_session_id"),
   cameraSerial: sqliteCore.text("camera_serial"),
@@ -318,6 +321,9 @@ function ensureCaptureTables(sqlite) {
     CREATE INDEX IF NOT EXISTS idx_group_capture_files_capture ON group_capture_files(capture_id);
   `);
   ensureColumn(sqlite, "groups", "membership_dirty", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "captures", "rating", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "captures", "color_label", "TEXT NOT NULL DEFAULT 'none'");
+  ensureColumn(sqlite, "captures", "review_sync_pending", "INTEGER NOT NULL DEFAULT 0");
   sqlite.exec(`
     INSERT OR IGNORE INTO captures (
       capture_key, project_id, student_id, class_id, base_filename, captured_at,
@@ -1066,6 +1072,8 @@ async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
     formData.append("favorite", String(capture.favorite));
     formData.append("rejected", String(capture.rejected));
     formData.append("selected", String(capture.selected));
+    formData.append("rating", String(capture.rating));
+    formData.append("colorLabel", capture.colorLabel);
     const url = `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/captures`;
     const response = await fetch(url, {
       method: "POST",
@@ -1164,6 +1172,58 @@ function uploadCaptureFile(captureId, fileId, captureBatchKey) {
   }).catch(() => {
   });
   return task;
+}
+async function syncCaptureReview(captureId) {
+  if (!isCloudSessionVerified()) return;
+  const db = getDb();
+  const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+  if (!capture?.studentId) return;
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, capture.projectId)).get();
+  const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get();
+  const { apiUrl, connectionToken } = getUploadConfig$1();
+  if (!project?.cloudId || !student?.cloudId || !apiUrl || !connectionToken) return;
+  try {
+    const response = await fetch(
+      `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${connectionToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          favorite: capture.favorite,
+          rejected: capture.rejected,
+          selected: capture.selected,
+          rating: capture.rating,
+          colorLabel: capture.colorLabel
+        }),
+        signal: AbortSignal.timeout(1e4)
+      }
+    );
+    if (response.status === 401) {
+      invalidateDesktopCredentials(true);
+      return;
+    }
+    if (response.ok) {
+      db.update(capturesTable).set({ reviewSyncPending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(capturesTable.id, captureId)).run();
+      return;
+    }
+    if (!response.ok && response.status !== 404) {
+      console.warn(`[Review] Cloud review sync failed with HTTP ${response.status}`);
+    }
+  } catch (error) {
+    console.warn("[Review] Cloud review sync deferred:", error);
+  }
+}
+async function syncPendingCaptureReviews(projectId) {
+  if (!isCloudSessionVerified()) return;
+  const db = getDb();
+  const captures = db.select({ id: capturesTable.id }).from(capturesTable).where(projectId === void 0 ? drizzleOrm.eq(capturesTable.reviewSyncPending, true) : drizzleOrm.and(drizzleOrm.eq(capturesTable.reviewSyncPending, true), drizzleOrm.eq(capturesTable.projectId, projectId))).all();
+  for (const capture of captures) {
+    if (!isCloudSessionVerified()) return;
+    await syncCaptureReview(capture.id);
+  }
 }
 function uploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
@@ -1468,10 +1528,12 @@ function registerUploadHandlers() {
   });
   electron.ipcMain.handle("upload:runNow", async (_e, { projectId }) => {
     await runLiveUpload(projectId);
+    await syncPendingCaptureReviews(projectId);
     return getLiveUploadState(projectId);
   });
   electron.ipcMain.handle("upload:retryProjectFailed", async (_e, { projectId }) => {
     await runLiveUpload(projectId, true);
+    await syncPendingCaptureReviews(projectId);
     return getLiveUploadState(projectId);
   });
   electron.ipcMain.handle("upload:testConnection", async () => {
@@ -1487,6 +1549,7 @@ function registerUploadHandlers() {
       });
       if (response.ok) {
         markCloudSessionVerified();
+        await syncPendingCaptureReviews();
         return { ok: true };
       }
       if (response.status === 401) invalidateDesktopCredentials(true);
@@ -2443,6 +2506,8 @@ function registerPhotoHandlers() {
           favorite: capture.favorite,
           rejected: capture.rejected,
           selected: capture.selected,
+          rating: capture.rating,
+          colorLabel: capture.colorLabel,
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
           files: files.map(rowToCaptureFile),
@@ -2486,7 +2551,9 @@ function registerPhotoHandlers() {
       captureId,
       favorite,
       rejected,
-      selected
+      selected,
+      rating,
+      colorLabel
     }) => {
       const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
       if (!capture) return null;
@@ -2494,9 +2561,14 @@ function registerPhotoHandlers() {
         ...favorite === void 0 ? {} : { favorite },
         ...rejected === void 0 ? {} : { rejected },
         ...selected === void 0 ? {} : { selected },
+        ...rating === void 0 ? {} : { rating: Math.max(0, Math.min(5, Math.round(rating))) },
+        ...colorLabel === void 0 ? {} : { colorLabel },
+        reviewSyncPending: true,
         updatedAt: now$2()
       }).where(drizzleOrm.eq(capturesTable.id, captureId)).run();
-      return db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get() ?? null;
+      const updated = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get() ?? null;
+      if (updated) void syncCaptureReview(updated.id);
+      return updated;
     }
   );
   electron.ipcMain.handle(

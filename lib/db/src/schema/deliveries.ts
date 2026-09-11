@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import { studiosTable } from "./studios";
 import { studentsTable } from "./students";
@@ -16,6 +16,9 @@ export const deliveryGalleriesTable = pgTable("delivery_galleries", {
     .default("draft"),
   publishedAt: timestamp("published_at", { withTimezone: true }),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  watermarkEnabled: boolean("watermark_enabled").notNull().default(true),
+  watermarkText: text("watermark_text"),
+  priceSheetJson: text("price_sheet_json"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
@@ -34,6 +37,10 @@ export const deliveryAccessesTable = pgTable("delivery_accesses", {
   accessCodeEncrypted: text("access_code_encrypted").notNull(),
   accessCodeLast4: text("access_code_last4").notNull(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("delivery_accesses_gallery_student_unique").on(table.galleryId, table.studentId),

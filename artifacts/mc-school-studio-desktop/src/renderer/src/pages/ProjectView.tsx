@@ -1340,7 +1340,13 @@ function StudentDetail({
 
   async function handleUpdateCaptureReview(
     captureId: number,
-    values: { favorite?: boolean; rejected?: boolean; selected?: boolean },
+    values: {
+      favorite?: boolean
+      rejected?: boolean
+      selected?: boolean
+      rating?: number
+      colorLabel?: CaptureReview['colorLabel']
+    },
   ) {
     try {
       await window.api.invoke('captures:updateReview', { captureId, ...values })
@@ -2142,52 +2148,72 @@ function CaptureReviewControls({
   onUpdateReview,
 }: {
   capture: CaptureReview
-  onUpdateReview?: (captureId: number, values: { favorite?: boolean; rejected?: boolean; selected?: boolean }) => void
+  onUpdateReview?: (captureId: number, values: {
+    favorite?: boolean
+    rejected?: boolean
+    selected?: boolean
+    rating?: number
+    colorLabel?: CaptureReview['colorLabel']
+  }) => void
 }) {
   if (!onUpdateReview) return null
-  const hasActiveState = capture.favorite || capture.selected || capture.rejected
+  const hasActiveState = capture.rating > 0 || capture.colorLabel !== 'none' || capture.rejected
+  const colors = [
+    ['red', 'bg-red-500'],
+    ['yellow', 'bg-yellow-400'],
+    ['green', 'bg-emerald-500'],
+    ['blue', 'bg-blue-500'],
+    ['purple', 'bg-purple-500'],
+  ] as const
   return (
     <div className={cn(
-      "absolute bottom-2 left-2 z-30 flex gap-1.5 transition-all duration-200",
+      "absolute bottom-2 left-2 right-2 z-30 flex flex-col gap-1.5 transition-all duration-200",
       hasActiveState
         ? "opacity-100 translate-y-0"
         : "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0"
     )}>
-      <button
-        type="button"
-        aria-label={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
-        title={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
-        onClick={() => onUpdateReview(capture.id, { favorite: !capture.favorite })}
-        className={cn(
-          'rounded-full p-2 shadow-sm transition-colors border',
-          capture.favorite
-            ? 'border-amber-300 bg-amber-100 text-amber-600'
-            : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',
-        )}
-      >
-        <Star className="size-3.5" fill={capture.favorite ? 'currentColor' : 'none'} />
-      </button>
-      <button
-        type="button"
-        aria-label={capture.selected ? 'Remove from selection' : 'Add to selection'}
-        title={capture.selected ? 'Remove from selection' : 'Add to selection'}
-        onClick={() => onUpdateReview(capture.id, { selected: !capture.selected, rejected: false })}
-        className={cn(
-          'rounded-full p-2 shadow-sm transition-colors border',
-          capture.selected
-            ? 'border-teal-300 bg-teal-100 text-teal-700'
-            : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',
-        )}
-      >
-        <Check className="size-3.5" />
-      </button>
+      <div className="flex items-center gap-0.5 rounded-lg border border-white/20 bg-black/65 px-1.5 py-1 backdrop-blur-md">
+        {[1, 2, 3, 4, 5].map((rating) => (
+          <button
+            key={rating}
+            type="button"
+            aria-label={`Rate ${rating} star${rating === 1 ? '' : 's'}`}
+            onClick={() => onUpdateReview(capture.id, {
+              rating: capture.rating === rating ? 0 : rating,
+              favorite: rating >= 4,
+            })}
+            className="p-1 text-amber-300 hover:text-amber-200"
+          >
+            <Star className="size-3.5" fill={capture.rating >= rating ? 'currentColor' : 'none'} />
+          </button>
+        ))}
+        <span className="mx-1 h-4 w-px bg-white/20" />
+        {colors.map(([label, color]) => (
+          <button
+            key={label}
+            type="button"
+            aria-label={`${label} color label${label === 'green' ? ' — share with parents' : ''}`}
+            title={label === 'green' ? 'Green — share with parents' : `${label} label`}
+            onClick={() => onUpdateReview(capture.id, {
+              colorLabel: capture.colorLabel === label ? 'none' : label,
+              selected: label === 'green' ? capture.colorLabel !== 'green' : capture.selected,
+              rejected: false,
+            })}
+            className={cn(
+              'size-5 rounded-full border-2 transition-transform hover:scale-110',
+              color,
+              capture.colorLabel === label ? 'border-white ring-2 ring-white/70' : 'border-black/30',
+            )}
+          />
+        ))}
+      </div>
       <button
         type="button"
         aria-label={capture.rejected ? 'Restore capture' : 'Reject capture'}
         title={capture.rejected ? 'Restore capture' : 'Reject capture'}
         onClick={() => onUpdateReview(capture.id, { rejected: !capture.rejected, selected: false })}
         className={cn(
-          'rounded-full p-2 shadow-sm transition-colors border',
+          'self-start rounded-full p-2 shadow-sm transition-colors border',
           capture.rejected
             ? 'border-red-300 bg-red-100 text-red-700'
             : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',

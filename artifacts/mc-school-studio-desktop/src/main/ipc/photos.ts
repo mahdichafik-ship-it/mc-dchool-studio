@@ -7,6 +7,7 @@ import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTa
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
+import { syncCaptureReview } from './upload'
 import type {
   CaptureCompletenessSummary,
   CaptureReview,
@@ -178,6 +179,8 @@ export function registerPhotoHandlers() {
           favorite: capture.favorite,
           rejected: capture.rejected,
           selected: capture.selected,
+          rating: capture.rating,
+          colorLabel: capture.colorLabel,
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
           files: files.map(rowToCaptureFile),
@@ -243,11 +246,15 @@ export function registerPhotoHandlers() {
         favorite,
         rejected,
         selected,
+        rating,
+        colorLabel,
       }: {
         captureId: number
         favorite?: boolean
         rejected?: boolean
         selected?: boolean
+        rating?: number
+        colorLabel?: 'none' | 'red' | 'yellow' | 'green' | 'blue' | 'purple'
       },
     ) => {
       const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
@@ -257,11 +264,16 @@ export function registerPhotoHandlers() {
           ...(favorite === undefined ? {} : { favorite }),
           ...(rejected === undefined ? {} : { rejected }),
           ...(selected === undefined ? {} : { selected }),
+          ...(rating === undefined ? {} : { rating: Math.max(0, Math.min(5, Math.round(rating))) }),
+          ...(colorLabel === undefined ? {} : { colorLabel }),
+          reviewSyncPending: true,
           updatedAt: now(),
         })
         .where(eq(capturesTable.id, captureId))
         .run()
-      return db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null
+      const updated = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null
+      if (updated) void syncCaptureReview(updated.id)
+      return updated
     },
   )
 

@@ -372,3 +372,266 @@ export interface PlatformOverview {
   invites: PlatformInvite[];
 }
 
+export interface DeliveryAccessInput {
+  /**
+     * @minLength 8
+     * @maxLength 8
+     */
+  code: string;
+}
+
+export type DeliveryOrderInputDeliveryMethod = typeof DeliveryOrderInputDeliveryMethod[keyof typeof DeliveryOrderInputDeliveryMethod];
+
+
+export const DeliveryOrderInputDeliveryMethod = {
+  digital: 'digital',
+  school: 'school',
+  collection: 'collection',
+  shipping: 'shipping',
+} as const;
+
+export interface DeliveryOrderInput {
+  token?: string;
+  offerId?: string;
+  /** @minItems 1 */
+  photoIds: number[];
+  /** @minimum 1 */
+  quantity?: number;
+  customerName?: string;
+  deliveryMethod?: DeliveryOrderInputDeliveryMethod;
+  deliveryAddress?: string;
+}
+
+export type DeliveryOfferProductType = typeof DeliveryOfferProductType[keyof typeof DeliveryOfferProductType];
+
+
+export const DeliveryOfferProductType = {
+  digital: 'digital',
+  print: 'print',
+  pack: 'pack',
+} as const;
+
+export type DeliveryOfferDeliveryMethodsItem = typeof DeliveryOfferDeliveryMethodsItem[keyof typeof DeliveryOfferDeliveryMethodsItem];
+
+
+export const DeliveryOfferDeliveryMethodsItem = {
+  digital: 'digital',
+  school: 'school',
+  collection: 'collection',
+  shipping: 'shipping',
+} as const;
+
+export type DeliveryOfferPricingRules = {
+  selection?: string;
+  quantity?: string;
+};
+
+export interface DeliveryOffer {
+  id: string;
+  name: string;
+  description?: string;
+  productType: DeliveryOfferProductType;
+  stripePriceId: string;
+  /** @minimum 1 */
+  photoCount: number;
+  printSize?: string;
+  deliveryMethods: DeliveryOfferDeliveryMethodsItem[];
+  active: boolean;
+  includesDigitalDownloads?: boolean;
+  /** @minimum 0 */
+  unitAmount?: number;
+  currency?: string;
+  pricingRules?: DeliveryOfferPricingRules;
+}
+
+export interface DeliverySettingsInput {
+  watermarkEnabled?: boolean;
+  /** @nullable */
+  watermarkText?: string | null;
+  /** @nullable */
+  expiresAt?: string | null;
+  offers?: DeliveryOffer[];
+}
+
+export type FulfillmentInputFulfillmentStatus = typeof FulfillmentInputFulfillmentStatus[keyof typeof FulfillmentInputFulfillmentStatus];
+
+
+export const FulfillmentInputFulfillmentStatus = {
+  not_required: 'not_required',
+  paid: 'paid',
+  preparing: 'preparing',
+  printed: 'printed',
+  ready: 'ready',
+  dispatched: 'dispatched',
+  delivered: 'delivered',
+} as const;
+
+export interface FulfillmentInput {
+  fulfillmentStatus: FulfillmentInputFulfillmentStatus;
+}
+
+export type DeliveryGalleryPhotosItem = {
+  id?: number;
+  fileName?: string;
+  fileUrl?: string;
+  downloadUrl?: string;
+};
+
+export interface DeliveryGallery {
+  slug: string;
+  status: string;
+  photos: DeliveryGalleryPhotosItem[];
+}
+
+export interface DeliveryAccessResponse {
+  token: string;
+  expiresIn: number;
+}
+
+export interface DeliveryCodeResponse {
+  studentId: number;
+  accessCode: string;
+}
+
+export interface DeliveryAccessUpdateInput {
+  revoked?: boolean;
+  /** @nullable */
+  expiresAt?: string | null;
+}
+
+export type DeliveryAccessMutationResponseAccess = {
+  studentId?: number;
+  /** @nullable */
+  revokedAt?: string | null;
+  /** @nullable */
+  expiresAt?: string | null;
+};
+
+export interface DeliveryAccessMutationResponse {
+  access: DeliveryAccessMutationResponseAccess;
+}
+
+export type DeliveryPhotosResponseGallery = {
+  slug?: string;
+  status?: string;
+  /** @nullable */
+  expiresAt?: string | null;
+};
+
+export type DeliveryPhotosResponseStudent = { [key: string]: unknown };
+
+export type DeliveryPhotosResponsePrice = { [key: string]: unknown };
+
+export interface DeliveryPhotosResponse {
+  gallery: DeliveryPhotosResponseGallery;
+  student: DeliveryPhotosResponseStudent;
+  price?: DeliveryPhotosResponsePrice;
+  offers: DeliveryOffer[];
+  photos: DeliveryGalleryPhotosItem[];
+}
+
+export interface DeliveryCatalogPrice {
+  productId: string;
+  priceId: string;
+  name: string;
+  amount: number;
+  currency: string;
+}
+
+export interface DeliveryCatalogResponse {
+  prices: DeliveryCatalogPrice[];
+  offers?: DeliveryOffer[];
+}
+
+export interface DeliveryCheckoutResponse {
+  /** @nullable */
+  checkoutUrl: string | null;
+  orderId: number;
+}
+
+export interface DeliveryOrderResponse {
+  orderId: number;
+  status: string;
+  amountTotal: number;
+  currency: string;
+  /** @nullable */
+  paidAt?: string | null;
+  photoIds: number[];
+  downloadablePhotoIds?: number[];
+}
+
+export type DeliverySettingsResponseGallery = {
+  id?: number;
+  slug?: string;
+  status?: string;
+};
+
+export interface DeliverySettingsResponse {
+  gallery: DeliverySettingsResponseGallery;
+  accessCount?: number;
+}
+
+export type DeliveryMutationResponseGallery = {
+  id?: number;
+  slug?: string;
+  status?: string;
+};
+
+export interface DeliveryMutationResponse {
+  gallery: DeliveryMutationResponseGallery;
+  publicUrl?: string;
+  message?: string;
+}
+
+export type DeliveryAccessCardsResponseItem = {
+  firstName?: string;
+  lastName?: string;
+  accessCode?: string;
+  accessUrl?: string;
+  qrDataUrl?: string;
+};
+
+export type DeliveryAccessCardsResponse = DeliveryAccessCardsResponseItem[];
+
+export type DeliveryOrdersResponseOrdersItem = { [key: string]: unknown };
+
+export interface DeliveryOrdersResponse {
+  orders: DeliveryOrdersResponseOrdersItem[];
+}
+
+export type DeliveryOrderDetailResponseOrder = { [key: string]: unknown };
+
+export type DeliveryOrderDetailResponseItemsItem = { [key: string]: unknown };
+
+export interface DeliveryOrderDetailResponse {
+  order: DeliveryOrderDetailResponseOrder;
+  items: DeliveryOrderDetailResponseItemsItem[];
+}
+
+export type DeliveryOrderMutationResponseOrder = { [key: string]: unknown };
+
+export interface DeliveryOrderMutationResponse {
+  order: DeliveryOrderMutationResponseOrder;
+}
+
+export interface PhotoShareInput {
+  shareWithParents: boolean;
+}
+
+export type PhotoShareResponsePhoto = {
+  id: number;
+  projectId: number;
+  studentId: number;
+  fileName: string;
+  fileUrl?: string;
+  mimeType?: string;
+  rating?: number;
+  colorLabel?: string;
+  shareWithParents: boolean;
+};
+
+export interface PhotoShareResponse {
+  photo: PhotoShareResponsePhoto;
+  offers?: DeliveryOffer[];
+}
+

@@ -109,6 +109,8 @@ interface ElectronAPI {
     favorite?: boolean
     rejected?: boolean
     selected?: boolean
+    rating?: number
+    colorLabel?: import('../shared/types').CaptureColorLabel
   }): Promise<CaptureReview | null>
   invoke(channel: 'photos:getThumbnail', args: { filePath: string }): Promise<string | null>
   invoke(channel: 'photos:reassign', args: { photoId: number; studentId: number }): Promise<void>

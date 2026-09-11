@@ -11,6 +11,8 @@ await build({
     path.resolve(artifactDir, "test/platform.integration.test.ts"),
     path.resolve(artifactDir, "test/groupMembership.test.ts"),
     path.resolve(artifactDir, "test/googleDriveBackup.test.ts"),
+    path.resolve(artifactDir, "test/managedStripeWebhook.test.ts"),
+    path.resolve(artifactDir, "test/deliveryOffers.integration.test.ts"),
   ],
   outdir: path.resolve(artifactDir, "test"),
   entryNames: "[name]",

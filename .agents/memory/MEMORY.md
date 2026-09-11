@@ -31,5 +31,8 @@
 - [Volume Capture delivery access](volume-capture-delivery-access.md) — private delivery uses guardian-friendly subject access codes, not child-managed accounts.
 - [Stripe migration compatibility](stripe-migration-compatibility.md) — modern Stripe schemas may need migration-ledger reconciliation before legacy sync migrations can start safely.
 - [Stripe sandbox claiming](stripe-sandbox-claiming.md) — a healthy Replit Stripe connection can still require claiming the development sandbox in Stripe Dashboard.
+- [Stripe managed webhook reuse](stripe-managed-webhook-reuse.md) — legacy sync bookkeeping exposes endpoint IDs under a different field; normalize before reuse and keep UUID routes active.
 - [Google Drive large uploads](google-drive-large-uploads.md) — send file bytes through resumable Google upload sessions, not large connector-proxy multipart bodies.
 - [Cloud backup test isolation](cloud-backup-test-isolation.md) — a development database does not isolate connected cloud accounts; tests must replace external backup requesters.
+- [Delivery commerce entitlements](delivery-commerce-entitlements.md) — Stripe quantity, selection rules, displayed price, and original-download access must all derive from one persisted offer contract.
+- [Publish-time schema changes](publish-time-schema-changes.md) — production schema changes are applied by Replit Publish’s development-to-production diff, not custom app migrations or startup DDL.

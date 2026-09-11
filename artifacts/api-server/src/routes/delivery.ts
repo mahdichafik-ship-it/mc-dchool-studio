@@ -372,13 +372,21 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
 
   let offers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
   let displayPrice: { unitAmount: number | null; currency: string } | null = null;
-  if (offers.length === 0) {
-    const price = await getDeliveryPrice();
-    displayPrice = { unitAmount: price.unit_amount, currency: price.currency };
-    offers = [{ id: "digital-single", name: "Digital photo", productType: "digital", stripePriceId: price.id,
-      photoCount: 1, deliveryMethods: ["digital"], active: true, includesDigitalDownloads: true }];
+  let orderingAvailable = true;
+  let priced: Awaited<ReturnType<typeof pricedOffers>> = [];
+  try {
+    if (offers.length === 0) {
+      const price = await getDeliveryPrice();
+      displayPrice = { unitAmount: price.unit_amount, currency: price.currency };
+      offers = [{ id: "digital-single", name: "Digital photo", productType: "digital", stripePriceId: price.id,
+        photoCount: 1, deliveryMethods: ["digital"], active: true, includesDigitalDownloads: true }];
+    }
+    priced = await pricedOffers(offers);
+  } catch (error) {
+    orderingAvailable = false;
+    req.log.error({ err: error, galleryId: row.gallery.id }, "delivery ordering unavailable");
   }
-  const priced = await pricedOffers(offers);
+
   res.json({
     gallery: publicGallery(row.gallery, row.studio),
     student: {
@@ -387,6 +395,7 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
     },
     price: displayPrice,
     offers: priced,
+    orderingAvailable,
     photos: photos.map((photo) => ({
       id: photo.id,
       fileName: photo.fileName,

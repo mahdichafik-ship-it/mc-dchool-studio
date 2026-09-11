@@ -355,6 +355,12 @@ export default function Delivery() {
             {notice}
           </div>
         )}
+
+        {content.orderingAvailable === false && (
+          <div role="status" className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Private photo access is available, but online ordering is temporarily unavailable. Please contact the photography studio for help with an order.
+          </div>
+        )}
         
         {createOrder.isError && (
           <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">

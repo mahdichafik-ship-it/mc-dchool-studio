@@ -527,6 +527,8 @@ export interface DeliveryPhotosResponse {
   student: DeliveryPhotosResponseStudent;
   price?: DeliveryPhotosResponsePrice;
   offers: DeliveryOffer[];
+  /** Whether the live Stripe catalog is available for checkout. */
+  orderingAvailable: boolean;
   photos: DeliveryGalleryPhotosItem[];
 }
 

@@ -872,6 +872,7 @@ export const GetDeliveryPhotosResponse = zod.object({
   "quantity": zod.string().optional()
 }).optional()
 })),
+  "orderingAvailable": zod.boolean().describe('Whether the live Stripe catalog is available for checkout.'),
   "photos": zod.array(zod.object({
   "id": zod.number(),
   "fileName": zod.string(),

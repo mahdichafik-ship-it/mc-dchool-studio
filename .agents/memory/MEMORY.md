@@ -35,4 +35,5 @@
 - [Google Drive large uploads](google-drive-large-uploads.md) — send file bytes through resumable Google upload sessions, not large connector-proxy multipart bodies.
 - [Cloud backup test isolation](cloud-backup-test-isolation.md) — a development database does not isolate connected cloud accounts; tests must replace external backup requesters.
 - [Delivery commerce entitlements](delivery-commerce-entitlements.md) — Stripe quantity, selection rules, displayed price, and original-download access must all derive from one persisted offer contract.
+- [Delivery access and payment availability](delivery-access-and-payment-availability.md) — a payment outage must not prevent families from opening valid private galleries.
 - [Publish-time schema changes](publish-time-schema-changes.md) — production schema changes are applied by Replit Publish’s development-to-production diff, not custom app migrations or startup DDL.

@@ -18529,7 +18529,7 @@ function PhotoTile({
   onRetry,
   retrying
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md", children: [
     photo.thumbnailData || photo.previewUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       GalleryThumbnail,
       {
@@ -18647,7 +18647,7 @@ function CaptureTile({
   const rawFile = capture.files.find((file) => file.fileRole === "RAW");
   const zoomSource = photo?.previewUrl ?? photo?.thumbnailData ?? void 0;
   if (photo) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition-shadow h-full w-full bg-white", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         PhotoTile,
         {

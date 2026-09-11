@@ -17536,7 +17536,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
               Button,
               {
-                disabled: uploadActionRunning || !liveUpload?.cloudReady || (liveUpload?.pending ?? 0) === 0 || reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0,
+                disabled: uploadActionRunning || !liveUpload?.cloudReady || reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0,
                 onClick: () => void handleUploadNow(),
                 className: "bg-blue-600 hover:bg-blue-700 text-white",
                 children: [

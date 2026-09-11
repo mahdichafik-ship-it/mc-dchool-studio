@@ -465,6 +465,14 @@ function isRetryableUploadFailure(error: unknown): boolean {
     || error.name === 'TypeError'
 }
 
+function isConnectivityFailure(error: unknown): boolean {
+  if (error instanceof RetryableUploadError) return false
+  if (!(error instanceof Error)) return false
+  return error.name === 'AbortError'
+    || error.name === 'TimeoutError'
+    || error.name === 'TypeError'
+}
+
 async function performUploadPhoto(
   projectId: number,
   studentId: number,
@@ -547,7 +555,7 @@ async function performUploadPhoto(
     console.log(`[Upload] Photo ${photoId} uploaded successfully`)
   } catch (err) {
     const retryable = isRetryableUploadFailure(err)
-    if (retryable) markCloudSessionUnavailable()
+    if (isConnectivityFailure(err)) markCloudSessionUnavailable()
     console.error(`[Upload] Upload ${retryable ? 'waiting for connectivity' : 'failed'}:`, err)
     db.update(photosTable)
       .set({ uploadStatus: retryable ? 'pending' : 'error' })
@@ -684,7 +692,7 @@ async function performUploadCaptureFile(captureId: number, fileId: number, captu
     console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`)
   } catch (error) {
     const retryable = isRetryableUploadFailure(error)
-    if (retryable) markCloudSessionUnavailable()
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable()
     console.error(`[Upload] Capture file ${retryable ? 'waiting for connectivity' : 'failed'}:`, error)
     setCaptureFileStatus(captureId, fileId, retryable ? 'pending' : 'error', undefined)
     throw error
@@ -740,7 +748,7 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
     }).where(eq(groupCaptureFilesTable.id, fileId)).run()
   } catch (error) {
     const retryable = isRetryableUploadFailure(error)
-    if (retryable) markCloudSessionUnavailable()
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable()
     db.update(groupCaptureFilesTable).set({ uploadStatus: retryable ? 'pending' : 'error' })
       .where(eq(groupCaptureFilesTable.id, fileId)).run()
     throw error

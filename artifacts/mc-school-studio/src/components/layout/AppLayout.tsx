@@ -20,9 +20,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    void fetch('/api/platform')
-      .then((response) => {
-        if (active) setIsPlatformOwner(response.ok);
+    void fetch('/api/platform/status')
+      .then(async (response) => {
+        const data = response.ok
+          ? await response.json() as { isPlatformOwner: boolean }
+          : null;
+        if (active) setIsPlatformOwner(Boolean(data?.isPlatformOwner));
       })
       .catch(() => {
         if (active) setIsPlatformOwner(false);

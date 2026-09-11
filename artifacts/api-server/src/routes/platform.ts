@@ -16,7 +16,7 @@ import {
 } from "@workspace/db";
 import { getUserId, requireAuth } from "../lib/auth";
 import { getUserEmail } from "../lib/studioAccess";
-import { platformOwnerIsConfigured, requirePlatformOwner } from "../lib/platformAccess";
+import { isPlatformOwner, platformOwnerIsConfigured, requirePlatformOwner } from "../lib/platformAccess";
 
 const router = Router();
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -91,6 +91,11 @@ function parseStudioUpdate(body: unknown): {
 
   return result;
 }
+
+router.get("/status", requireAuth, async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  res.json({ isPlatformOwner: await isPlatformOwner(userId) });
+});
 
 router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<void> => {
   const [studios, members, projectCounts, projectRows, invites, desktopConnections] = await Promise.all([

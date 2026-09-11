@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Link } from "wouter";
+import React, { useState, useEffect } from "react";
 import { 
   useListStudioPriceSheets, 
   useCreateStudioPriceSheet, 
@@ -11,22 +10,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Loader2, Save, Trash2, Tag, Copy, FileText, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 export default function PriceSheets() {
   const { data: priceSheets, isLoading } = useListStudioPriceSheets();
@@ -39,7 +29,6 @@ export default function PriceSheets() {
   const [selectedSheetId, setSelectedSheetId] = useState<number | "new">("new");
   const [sheetName, setSheetName] = useState("");
   const [offers, setOffers] = useState<DeliveryOffer[]>([]);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   // Sync state when selection changes or data loads
   useEffect(() => {
@@ -58,13 +47,6 @@ export default function PriceSheets() {
     }
   }, [selectedSheetId, priceSheets]);
 
-  // Set default selection to the first sheet if available and currently on "new"
-  useEffect(() => {
-    if (priceSheets && priceSheets.length > 0 && selectedSheetId === "new" && !sheetName) {
-      setSelectedSheetId(priceSheets[0].id);
-    }
-  }, [priceSheets, selectedSheetId, sheetName]);
-
   const addOffer = () => {
     setOffers([
       ...offers,
@@ -73,7 +55,7 @@ export default function PriceSheets() {
         name: "",
         productType: "digital",
         unitAmount: 0,
-        currency: "usd",
+        currency: "mad",
         paymentMethods: ["stripe", "establishment", "bank_transfer"],
         photoCount: 1,
         deliveryMethods: ["digital"],

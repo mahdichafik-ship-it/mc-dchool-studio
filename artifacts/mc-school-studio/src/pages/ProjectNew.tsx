@@ -115,8 +115,7 @@ export default function ProjectNew() {
               </div>
             ) : (
               <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                  
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                   <FormField
                     control={form.control}
                     name="projectType"
@@ -175,7 +174,7 @@ export default function ProjectNew() {
                           <FormLabel>Price Sheet <span className="text-red-500">*</span></FormLabel>
                           <Select
                             onValueChange={(val) => field.onChange(Number(val))}
-                            value={field.value ? String(field.value) : undefined}
+                            value={field.value ? String(field.value) : ""}
                           >
                             <FormControl>
                               <SelectTrigger disabled={isLoadingPriceSheets}>
@@ -277,10 +276,10 @@ export default function ProjectNew() {
                       <FormItem>
                         <FormLabel>Internal Notes</FormLabel>
                         <FormControl>
-                          <Textarea 
-                            placeholder="Any special requirements for this shoot..." 
+                          <Textarea
+                            placeholder="Any special requirements for this shoot..."
                             className="resize-none h-24"
-                            {...field} 
+                            {...field}
                           />
                         </FormControl>
                         <FormMessage />
@@ -289,18 +288,18 @@ export default function ProjectNew() {
                   />
 
                   <div className="flex justify-end pt-4">
-                    <Button 
-                      type="button" 
-                      variant="outline" 
+                    <Button
+                      type="button"
+                      variant="outline"
                       className="mr-3"
                       onClick={() => setLocation('/dashboard')}
                     >
                       Cancel
                     </Button>
-                    <Button 
-                      type="submit" 
+                    <Button
+                      type="submit"
                       className="bg-teal-600 hover:bg-teal-700 text-white"
-                      disabled={createProject.isPending || !form.formState.isValid}
+                      disabled={createProject.isPending}
                     >
                       {createProject.isPending ? (
                         <>

@@ -17,7 +17,6 @@ import {
   useUpdateDeliveryPayment,
   useListStudioPriceSheets,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 
 type StudioBranding = {
@@ -119,8 +118,6 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
 function OverviewTab({ projectId }: { projectId: number }) {
   const { data: settings, isLoading: settingsLoading, refetch: refetchSettings } = useGetDeliverySettings(projectId);
   const { data: priceSheets, isLoading: sheetsLoading } = useListStudioPriceSheets();
-  const queryClient = useQueryClient();
-  
   const publishMutation = usePublishDelivery({
     mutation: { onSuccess: () => refetchSettings() }
   });
@@ -143,7 +140,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
       initializedForId.current = projectId;
       const gallery = settings.gallery as any;
       const assignedId = gallery?.priceSheetId;
-      
+
       if (assignedId) {
         setSelectedSheetId(assignedId);
       }
@@ -263,7 +260,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
                 <button
                   type="button"
                   onClick={() => publishMutation.mutate({ projectId })}
-                  disabled={publishMutation.isPending}
+                  disabled={publishMutation.isPending || !selectedSheetId}
                   className="flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm"
                 >
                   {publishMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
@@ -366,6 +363,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
                   <select
                     value={selectedSheetId}
                     onChange={(e) => setSelectedSheetId(e.target.value ? Number(e.target.value) : "")}
+                    disabled={isPublished}
                     className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none"
                     required
                   >
@@ -383,7 +381,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
               {isPublished && (
                 <div className="mt-4 flex gap-2 text-xs text-amber-700 bg-amber-50 p-3 rounded border border-amber-200">
                   <AlertCircle className="w-4 h-4 shrink-0" />
-                  <p>Changing the price sheet while the gallery is published will immediately update the prices for all customers.</p>
+                  <p>This gallery uses a fixed pricing snapshot. Revoke it before selecting another price sheet and publishing again.</p>
                 </div>
               )}
             </div>

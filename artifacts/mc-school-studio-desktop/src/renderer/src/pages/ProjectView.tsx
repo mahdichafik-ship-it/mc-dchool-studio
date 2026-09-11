@@ -42,6 +42,7 @@ import type {
   CaptureExportLayout,
   ProjectSyncProgressEvent,
   CreateStudentResult,
+  LiveUploadQueueItem,
   StudentGroup,
   GroupCaptureReview,
 } from '@/hooks/useApi'
@@ -109,6 +110,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [renameValue, setRenameValue] = useState('')
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [uploadQueue, setUploadQueue] = useState<LiveUploadQueueItem[]>([])
   const [finishDialogOpen, setFinishDialogOpen] = useState(false)
   const [uploadActionRunning, setUploadActionRunning] = useState(false)
   const [reviewSummary, setReviewSummary] = useState<{
@@ -126,6 +128,20 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   useEffect(() => {
     void window.api.invoke('groupCaptures:summary', { projectId }).then(setGroupCaptureCount)
   }, [projectId, groupCaptures])
+
+  useEffect(() => {
+    if (!uploadDialogOpen) return
+    void window.api.invoke('upload:getQueue', { projectId })
+      .then((items) => setUploadQueue(items as LiveUploadQueueItem[]))
+  }, [
+    uploadDialogOpen,
+    projectId,
+    liveUpload?.pending,
+    liveUpload?.uploading,
+    liveUpload?.error,
+    liveUpload?.lastUploadedAt,
+    liveUpload?.lastError,
+  ])
 
   useEffect(() => {
     return window.api.on('project:syncProgress', (event) => {
@@ -696,6 +712,63 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               </div>
             </div>
           )}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Files still waiting
+              </span>
+              <span className="text-xs text-slate-400">{uploadQueue.length}</span>
+            </div>
+            <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+              {uploadQueue.length === 0 ? (
+                <p className="px-2 py-4 text-center text-sm text-slate-500">No files are waiting.</p>
+              ) : uploadQueue.map((item) => {
+                const waitingForRetry = item.retryAt && new Date(item.retryAt).getTime() > Date.now()
+                const statusLabel = item.status === 'preparing_gallery'
+                  ? 'Preparing gallery'
+                  : item.status === 'uploading'
+                    ? 'Uploading'
+                    : item.status === 'failed'
+                      ? 'Failed'
+                      : waitingForRetry ? 'Retry scheduled' : 'Queued'
+                return (
+                  <div key={item.key} className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-800">{item.fileName}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {item.subject} · {item.kind === 'group' ? 'Group' : 'Portrait'} · {item.fileRole}
+                        </p>
+                      </div>
+                      <Badge className={cn(
+                        "shrink-0 border-0 text-[10px]",
+                        item.status === 'failed' ? "bg-red-100 text-red-700"
+                          : item.status === 'uploading' ? "bg-blue-100 text-blue-700"
+                            : item.status === 'preparing_gallery' ? "bg-violet-100 text-violet-700"
+                              : waitingForRetry ? "bg-orange-100 text-orange-700"
+                                : "bg-amber-100 text-amber-700",
+                      )}>
+                        {statusLabel}
+                      </Badge>
+                    </div>
+                    {(item.attempts > 0 || item.lastError) && (
+                      <div className="mt-1.5 text-xs text-slate-500">
+                        {item.attempts > 0 && (
+                          <span>{item.attempts} attempt{item.attempts === 1 ? '' : 's'}</span>
+                        )}
+                        {waitingForRetry && (
+                          <span> · retry at {new Date(item.retryAt!).toLocaleTimeString()}</span>
+                        )}
+                        {item.lastError && (
+                          <p className="mt-1 break-words text-red-600">{item.lastError}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-700">Cloud connection</span>

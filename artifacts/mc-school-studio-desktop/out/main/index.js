@@ -1344,6 +1344,7 @@ const failedUploadRetryAfter = /* @__PURE__ */ new Map();
 const failedLiveRunRetryAfter = /* @__PURE__ */ new Map();
 const failedUploadAttempts = /* @__PURE__ */ new Map();
 const failedLiveRunAttempts = /* @__PURE__ */ new Map();
+const failedUploadErrors = /* @__PURE__ */ new Map();
 function retryDelay(attempt) {
   const exponential = Math.min(
     FAILED_UPLOAD_RETRY_MAX_MS,
@@ -1354,11 +1355,12 @@ function retryDelay(attempt) {
     Math.round(exponential * (0.8 + Math.random() * 0.4))
   );
 }
-function deferFailedJob(job) {
+function deferFailedJob(job, error) {
   const key = projectSyncJobKey(job);
   const attempt = (failedUploadAttempts.get(key) ?? 0) + 1;
   failedUploadAttempts.set(key, attempt);
   failedUploadRetryAfter.set(key, Date.now() + retryDelay(attempt));
+  failedUploadErrors.set(key, error instanceof Error ? error.message : String(error));
 }
 function deferFailedRun(projectId) {
   const attempt = (failedLiveRunAttempts.get(projectId) ?? 0) + 1;
@@ -1433,6 +1435,63 @@ function getLiveUploadState(projectId) {
     ...liveUploadActivity.get(projectId)
   };
 }
+function getLiveUploadQueue(projectId) {
+  const db = getDb();
+  return getProjectSyncJobs(projectId).map((job) => {
+    const key = projectSyncJobKey(job);
+    const retryAt = failedUploadRetryAfter.get(key);
+    const attempts = failedUploadAttempts.get(key) ?? 0;
+    const lastError = failedUploadErrors.get(key);
+    if (job.kind === "capture-file") {
+      const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, job.captureId)).get();
+      const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, job.fileId)).get();
+      const student2 = capture?.studentId == null ? void 0 : db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get();
+      return {
+        key,
+        kind: "portrait",
+        fileName: file?.originalFilename ?? node_path.basename(file?.storedPath ?? key),
+        fileRole: file?.fileRole ?? "JPEG",
+        subject: student2 ? `${student2.firstName} ${student2.lastName}` : "Unassigned portrait",
+        capturedAt: capture?.capturedAt ?? file?.createdAt ?? "",
+        status: file?.uploadStatus === "uploading" ? "uploading" : file?.uploadStatus === "error" ? "failed" : "queued",
+        attempts,
+        ...retryAt ? { retryAt: new Date(retryAt).toISOString() } : {},
+        ...lastError ? { lastError } : {}
+      };
+    }
+    if (job.kind === "group-capture-file") {
+      const capture = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, job.captureId)).get();
+      const file = db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.id, job.fileId)).get();
+      const group = capture ? db.select().from(groupsTable).where(drizzleOrm.eq(groupsTable.id, capture.groupId)).get() : void 0;
+      return {
+        key,
+        kind: "group",
+        fileName: file?.originalFilename ?? node_path.basename(file?.storedPath ?? key),
+        fileRole: file?.fileRole ?? "JPEG",
+        subject: group?.name ?? "Group photo",
+        capturedAt: capture?.capturedAt ?? file?.createdAt ?? "",
+        status: file?.fileRole === "JPEG" && file.uploadStatus === "done" && !file.galleryReady ? "preparing_gallery" : file?.uploadStatus === "uploading" ? "uploading" : file?.uploadStatus === "error" ? "failed" : "queued",
+        attempts,
+        ...retryAt ? { retryAt: new Date(retryAt).toISOString() } : {},
+        ...lastError ? { lastError } : {}
+      };
+    }
+    const photo = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.id, job.photoId)).get();
+    const student = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, job.studentId)).get();
+    return {
+      key,
+      kind: "legacy",
+      fileName: photo?.fileName ?? node_path.basename(job.filePath),
+      fileRole: "JPEG",
+      subject: student ? `${student.firstName} ${student.lastName}` : "Legacy portrait",
+      capturedAt: photo?.capturedAt ?? job.capturedAt,
+      status: photo?.uploadStatus === "uploading" ? "uploading" : photo?.uploadStatus === "error" ? "failed" : "queued",
+      attempts,
+      ...retryAt ? { retryAt: new Date(retryAt).toISOString() } : {},
+      ...lastError ? { lastError } : {}
+    };
+  });
+}
 function emitLiveUploadState(projectId) {
   electron.BrowserWindow.getAllWindows()[0]?.webContents.send("upload:liveStateChanged", getLiveUploadState(projectId));
 }
@@ -1502,9 +1561,10 @@ async function runLiveUpload(projectId, includeErrors = false) {
           await uploadProjectJob(job, captureBatchKey);
           failedUploadRetryAfter.delete(projectSyncJobKey(job));
           failedUploadAttempts.delete(projectSyncJobKey(job));
+          failedUploadErrors.delete(projectSyncJobKey(job));
           liveUploadActivity.set(projectId, { lastUploadedAt: (/* @__PURE__ */ new Date()).toISOString() });
         } catch (error) {
-          deferFailedJob(job);
+          deferFailedJob(job, error);
           liveUploadActivity.set(projectId, {
             ...liveUploadActivity.get(projectId),
             lastError: String(error)
@@ -1646,6 +1706,7 @@ function registerUploadHandlers() {
     if (isLiveUploadEnabled(projectId)) ensureLiveUploadTimer(projectId);
     return getLiveUploadState(projectId);
   });
+  electron.ipcMain.handle("upload:getQueue", (_e, { projectId }) => getLiveUploadQueue(projectId));
   electron.ipcMain.handle("upload:setLiveEnabled", async (_e, { projectId, enabled }) => {
     const project = getDb().select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
     if (!project || project.finishedAt) return getLiveUploadState(projectId);

@@ -298,6 +298,19 @@ export interface LiveUploadState {
   lastError?: string
 }
 
+export interface LiveUploadQueueItem {
+  key: string
+  kind: 'portrait' | 'group' | 'legacy'
+  fileName: string
+  fileRole: 'JPEG' | 'RAW'
+  subject: string
+  capturedAt: string
+  status: 'queued' | 'uploading' | 'failed' | 'preparing_gallery'
+  attempts: number
+  retryAt?: string
+  lastError?: string
+}
+
 export interface PhotoMatchedEvent {
   photo: Photo
   student: Student

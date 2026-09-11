@@ -28,6 +28,7 @@ import type {
   CreateStudentResult,
   StudentGroup,
   GroupCaptureReview,
+  LiveUploadQueueItem,
 } from '../../../shared/types'
 import { mergeMatchedPhoto } from '../lib/captureEventReconciliation'
 
@@ -61,6 +62,7 @@ export type {
   CreateStudentResult,
   StudentGroup,
   GroupCaptureReview,
+  LiveUploadQueueItem,
 }
 
 const api = window.api

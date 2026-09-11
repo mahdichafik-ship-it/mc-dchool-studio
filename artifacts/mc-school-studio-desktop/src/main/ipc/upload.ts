@@ -25,7 +25,7 @@ import {
 } from '../db/schema'
 import { normalizeProjectType } from '../../shared/types'
 import { eq, and, or, isNull } from 'drizzle-orm'
-import type { LiveUploadState, UploadStatus } from '../../shared/types'
+import type { LiveUploadQueueItem, LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
 
@@ -990,6 +990,7 @@ const failedUploadRetryAfter = new Map<string, number>()
 const failedLiveRunRetryAfter = new Map<number, number>()
 const failedUploadAttempts = new Map<string, number>()
 const failedLiveRunAttempts = new Map<number, number>()
+const failedUploadErrors = new Map<string, string>()
 
 function retryDelay(attempt: number): number {
   const exponential = Math.min(
@@ -1002,11 +1003,12 @@ function retryDelay(attempt: number): number {
   )
 }
 
-function deferFailedJob(job: ProjectSyncJob): void {
+function deferFailedJob(job: ProjectSyncJob, error: unknown): void {
   const key = projectSyncJobKey(job)
   const attempt = (failedUploadAttempts.get(key) ?? 0) + 1
   failedUploadAttempts.set(key, attempt)
   failedUploadRetryAfter.set(key, Date.now() + retryDelay(attempt))
+  failedUploadErrors.set(key, error instanceof Error ? error.message : String(error))
 }
 
 function deferFailedRun(projectId: number): void {
@@ -1098,6 +1100,76 @@ export function getLiveUploadState(projectId: number): LiveUploadState {
   }
 }
 
+function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
+  const db = getDb()
+  return getProjectSyncJobs(projectId).map((job) => {
+    const key = projectSyncJobKey(job)
+    const retryAt = failedUploadRetryAfter.get(key)
+    const attempts = failedUploadAttempts.get(key) ?? 0
+    const lastError = failedUploadErrors.get(key)
+    if (job.kind === 'capture-file') {
+      const capture = db.select().from(capturesTable).where(eq(capturesTable.id, job.captureId)).get()
+      const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, job.fileId)).get()
+      const student = capture?.studentId == null
+        ? undefined
+        : db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get()
+      return {
+        key,
+        kind: 'portrait',
+        fileName: file?.originalFilename ?? basename(file?.storedPath ?? key),
+        fileRole: file?.fileRole ?? 'JPEG',
+        subject: student ? `${student.firstName} ${student.lastName}` : 'Unassigned portrait',
+        capturedAt: capture?.capturedAt ?? file?.createdAt ?? '',
+        status: file?.uploadStatus === 'uploading'
+          ? 'uploading'
+          : file?.uploadStatus === 'error' ? 'failed' : 'queued',
+        attempts,
+        ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}),
+        ...(lastError ? { lastError } : {}),
+      } satisfies LiveUploadQueueItem
+    }
+    if (job.kind === 'group-capture-file') {
+      const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, job.captureId)).get()
+      const file = db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, job.fileId)).get()
+      const group = capture
+        ? db.select().from(groupsTable).where(eq(groupsTable.id, capture.groupId)).get()
+        : undefined
+      return {
+        key,
+        kind: 'group',
+        fileName: file?.originalFilename ?? basename(file?.storedPath ?? key),
+        fileRole: file?.fileRole ?? 'JPEG',
+        subject: group?.name ?? 'Group photo',
+        capturedAt: capture?.capturedAt ?? file?.createdAt ?? '',
+        status: file?.fileRole === 'JPEG' && file.uploadStatus === 'done' && !file.galleryReady
+          ? 'preparing_gallery'
+          : file?.uploadStatus === 'uploading'
+            ? 'uploading'
+            : file?.uploadStatus === 'error' ? 'failed' : 'queued',
+        attempts,
+        ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}),
+        ...(lastError ? { lastError } : {}),
+      } satisfies LiveUploadQueueItem
+    }
+    const photo = db.select().from(photosTable).where(eq(photosTable.id, job.photoId)).get()
+    const student = db.select().from(studentsTable).where(eq(studentsTable.id, job.studentId)).get()
+    return {
+      key,
+      kind: 'legacy',
+      fileName: photo?.fileName ?? basename(job.filePath),
+      fileRole: 'JPEG',
+      subject: student ? `${student.firstName} ${student.lastName}` : 'Legacy portrait',
+      capturedAt: photo?.capturedAt ?? job.capturedAt,
+      status: photo?.uploadStatus === 'uploading'
+        ? 'uploading'
+        : photo?.uploadStatus === 'error' ? 'failed' : 'queued',
+      attempts,
+      ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}),
+      ...(lastError ? { lastError } : {}),
+    } satisfies LiveUploadQueueItem
+  })
+}
+
 function emitLiveUploadState(projectId: number): void {
   BrowserWindow.getAllWindows()[0]?.webContents.send('upload:liveStateChanged', getLiveUploadState(projectId))
 }
@@ -1181,9 +1253,10 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
           await uploadProjectJob(job, captureBatchKey)
           failedUploadRetryAfter.delete(projectSyncJobKey(job))
           failedUploadAttempts.delete(projectSyncJobKey(job))
+          failedUploadErrors.delete(projectSyncJobKey(job))
           liveUploadActivity.set(projectId, { lastUploadedAt: new Date().toISOString() })
         } catch (error) {
-          deferFailedJob(job)
+          deferFailedJob(job, error)
           liveUploadActivity.set(projectId, {
             ...liveUploadActivity.get(projectId),
             lastError: String(error),
@@ -1356,6 +1429,8 @@ export function registerUploadHandlers() {
     if (isLiveUploadEnabled(projectId)) ensureLiveUploadTimer(projectId)
     return getLiveUploadState(projectId)
   })
+  ipcMain.handle('upload:getQueue', (_e, { projectId }: { projectId: number }) =>
+    getLiveUploadQueue(projectId))
   ipcMain.handle('upload:setLiveEnabled', async (
     _e,
     { projectId, enabled }: { projectId: number; enabled: boolean },

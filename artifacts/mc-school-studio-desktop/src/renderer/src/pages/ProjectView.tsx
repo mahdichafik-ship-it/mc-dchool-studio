@@ -717,7 +717,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
                 Files still waiting
               </span>
-              <span className="text-xs text-slate-400">{uploadQueue.length}</span>
+              <span className="text-xs text-slate-400">
+                {liveUpload?.pending ?? uploadQueue.length} uploadable
+                {(liveUpload?.blocked ?? 0) > 0 ? ` · ${liveUpload?.blocked} blocked` : ''}
+              </span>
             </div>
             <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
               {uploadQueue.length === 0 ? (
@@ -726,6 +729,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 const waitingForRetry = item.retryAt && new Date(item.retryAt).getTime() > Date.now()
                 const statusLabel = item.status === 'preparing_gallery'
                   ? 'Preparing gallery'
+                  : item.status === 'blocked'
+                    ? 'Waiting for match'
                   : item.status === 'uploading'
                     ? 'Uploading'
                     : item.status === 'failed'
@@ -742,7 +747,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                       </div>
                       <Badge className={cn(
                         "shrink-0 border-0 text-[10px]",
-                        item.status === 'failed' ? "bg-red-100 text-red-700"
+                        item.status === 'blocked' ? "bg-slate-200 text-slate-700"
+                          : item.status === 'failed' ? "bg-red-100 text-red-700"
                           : item.status === 'uploading' ? "bg-blue-100 text-blue-700"
                             : item.status === 'preparing_gallery' ? "bg-violet-100 text-violet-700"
                               : waitingForRetry ? "bg-orange-100 text-orange-700"
@@ -758,6 +764,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                         )}
                         {waitingForRetry && (
                           <span> · retry at {new Date(item.retryAt!).toLocaleTimeString()}</span>
+                        )}
+                        {item.blockedReason && (
+                          <p className="mt-1 break-words text-slate-600">{item.blockedReason}</p>
                         )}
                         {item.lastError && (
                           <p className="mt-1 break-words text-red-600">{item.lastError}</p>

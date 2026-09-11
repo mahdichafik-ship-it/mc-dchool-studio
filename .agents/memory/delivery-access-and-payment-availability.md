@@ -3,8 +3,8 @@ name: Delivery access and payment availability
 description: Keep a private gallery’s access path available even if Stripe configuration or catalog access fails.
 ---
 
-Private-gallery access and photo visibility must remain available when Stripe is unavailable. Return the authenticated subject’s approved photos with ordering disabled, and tell the visitor that checkout is temporarily unavailable.
+Private-gallery access and photo visibility must remain available when any payment provider is unavailable. Disable only the unavailable method; keep Volume Capture orders and all other configured payment methods available.
 
-**Why:** A Stripe connection or catalog configuration failure is an operations problem, not evidence that a family’s private access code is invalid. Conflating the two blocks legitimate photo access and creates misleading support reports.
+**Why:** A provider connection failure is an operations problem, not evidence that a family’s private access code or order is invalid. Conflating them blocks legitimate access and manual payment methods.
 
-**How to apply:** Any gallery request that needs live Stripe prices must isolate that pricing work from access-token validation and photo retrieval. Treat checkout as unavailable until Stripe is restored; do not expose payment-provider diagnostics to public visitors.
+**How to apply:** Keep provider capability checks separate from access-token validation, photo retrieval, offer pricing, and order persistence. Do not expose provider diagnostics publicly. A failed online checkout may cancel only its matching provider attempt, never the gallery or another method.

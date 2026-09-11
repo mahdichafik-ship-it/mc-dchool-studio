@@ -19,6 +19,8 @@ export const deliveryGalleriesTable = pgTable("delivery_galleries", {
   watermarkEnabled: boolean("watermark_enabled").notNull().default(true),
   watermarkText: text("watermark_text"),
   priceSheetJson: text("price_sheet_json"),
+  establishmentPaymentInstructions: text("establishment_payment_instructions"),
+  bankTransferInstructions: text("bank_transfer_instructions"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [

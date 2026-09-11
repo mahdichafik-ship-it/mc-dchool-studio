@@ -56,6 +56,7 @@ import type {
   ImportFileForm,
   ImportResult,
   ParseResult,
+  PaymentStatusInput,
   PhotoShareInput,
   PhotoShareResponse,
   PlatformInvite,
@@ -3845,6 +3846,74 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getUpdateDeliveryFulfillmentMutationOptions(options));
+    }
+
+export const getUpdateDeliveryPaymentUrl = (projectId: number,
+    orderId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/orders/${orderId}/payment`
+}
+
+export const updateDeliveryPayment = async (projectId: number,
+    orderId: number,
+    paymentStatusInput: PaymentStatusInput, options?: RequestInit): Promise<DeliveryOrderMutationResponse> => {
+
+  return customFetch<DeliveryOrderMutationResponse>(getUpdateDeliveryPaymentUrl(projectId,orderId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(paymentStatusInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateDeliveryPaymentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDeliveryPayment>>, TError,{projectId: number;orderId: number;data: BodyType<PaymentStatusInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateDeliveryPayment>>, TError,{projectId: number;orderId: number;data: BodyType<PaymentStatusInput>}, TContext> => {
+
+const mutationKey = ['updateDeliveryPayment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateDeliveryPayment>>, {projectId: number;orderId: number;data: BodyType<PaymentStatusInput>}> = (props) => {
+          const {projectId,orderId,data} = props ?? {};
+
+          return  updateDeliveryPayment(projectId,orderId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateDeliveryPaymentMutationResult = NonNullable<Awaited<ReturnType<typeof updateDeliveryPayment>>>
+    export type UpdateDeliveryPaymentMutationBody = BodyType<PaymentStatusInput>
+    export type UpdateDeliveryPaymentMutationError = ErrorType<unknown>
+
+    export const useUpdateDeliveryPayment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDeliveryPayment>>, TError,{projectId: number;orderId: number;data: BodyType<PaymentStatusInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateDeliveryPayment>>,
+        TError,
+        {projectId: number;orderId: number;data: BodyType<PaymentStatusInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateDeliveryPaymentMutationOptions(options));
     }
 
 export const getExportDeliveryOrdersUrl = (projectId: number,) => {

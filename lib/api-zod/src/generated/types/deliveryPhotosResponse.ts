@@ -16,7 +16,9 @@ export interface DeliveryPhotosResponse {
   student: DeliveryPhotosResponseStudent;
   price?: DeliveryPhotosResponsePrice;
   offers: DeliveryOffer[];
-  /** Whether the live Stripe catalog is available for checkout. */
+  /** Whether at least one complete Volume Capture offer is available. */
   orderingAvailable: boolean;
+  /** Whether Stripe checkout is currently available as an optional payment method. */
+  stripeAvailable: boolean;
   photos: DeliveryGalleryPhotosItem[];
 }

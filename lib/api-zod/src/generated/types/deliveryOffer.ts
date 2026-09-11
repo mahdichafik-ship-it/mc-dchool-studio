@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DeliveryOfferDeliveryMethodsItem } from './deliveryOfferDeliveryMethodsItem';
+import type { DeliveryOfferPaymentMethodsItem } from './deliveryOfferPaymentMethodsItem';
 import type { DeliveryOfferPricingRules } from './deliveryOfferPricingRules';
 import type { DeliveryOfferProductType } from './deliveryOfferProductType';
 
@@ -14,15 +15,21 @@ export interface DeliveryOffer {
   name: string;
   description?: string;
   productType: DeliveryOfferProductType;
-  stripePriceId: string;
+  stripePriceId?: string;
+  /** @minimum 0 */
+  unitAmount: number;
+  /**
+     * @minLength 3
+     * @maxLength 3
+     */
+  currency: string;
+  /** @minItems 1 */
+  paymentMethods: DeliveryOfferPaymentMethodsItem[];
   /** @minimum 1 */
   photoCount: number;
   printSize?: string;
   deliveryMethods: DeliveryOfferDeliveryMethodsItem[];
   active: boolean;
   includesDigitalDownloads?: boolean;
-  /** @minimum 0 */
-  unitAmount?: number;
-  currency?: string;
   pricingRules?: DeliveryOfferPricingRules;
 }

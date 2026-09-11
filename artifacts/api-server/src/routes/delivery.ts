@@ -16,13 +16,13 @@ import {
   studiosTable,
 } from "@workspace/db";
 import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject } from "../lib/studioAccess";
 import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
 import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { getUncachableStripeClient } from "../lib/stripeClient";
-import { deliveryStripeQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
+import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
 
 const router = Router();
 const DELIVERY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -122,22 +122,11 @@ function activeGallery(gallery: typeof deliveryGalleriesTable.$inferSelect): boo
   return gallery.status === "published" && (!gallery.expiresAt || gallery.expiresAt > new Date());
 }
 
-async function getDeliveryPrice(): Promise<Stripe.Price> {
-  const stripe = await getUncachableStripeClient();
-  const products = await stripe.products.search({
-    query: "name:'Volume Capture digital photo' AND active:'true'",
-  });
-  const product = products.data[0];
-  if (!product) throw new Error("The delivery photo price has not been configured");
-  const prices = await stripe.prices.list({ product: product.id, active: true, type: "one_time", limit: 20 });
-  const price = prices.data.find((candidate) => candidate.metadata.kind === "delivery_photo") ?? prices.data[0];
-  if (!price || !price.unit_amount) throw new Error("The delivery photo price has not been configured");
-  return price;
-}
-
 type DeliveryOffer = {
   id: string; name: string; description?: string; productType: "digital" | "print" | "pack";
-  stripePriceId: string; photoCount: number; printSize?: string;
+  stripePriceId?: string; unitAmount: number | null; currency: string | null;
+  paymentMethods: Array<"stripe" | "establishment" | "bank_transfer">;
+  photoCount: number; printSize?: string;
   deliveryMethods: Array<"digital" | "school" | "collection" | "shipping">; active: boolean;
   includesDigitalDownloads: boolean;
 };
@@ -154,18 +143,30 @@ function parseOffers(raw: string | null): DeliveryOffer[] {
     if (!value || typeof value !== "object") throw new Error("Delivery offer must be an object");
     const offer = value as Record<string, unknown>;
     const methods = offer.deliveryMethods;
+    const paymentMethods = offer.paymentMethods === undefined ? ["stripe"] : offer.paymentMethods;
+    const unitAmount = Number.isInteger(offer.unitAmount) && Number(offer.unitAmount) >= 0
+      ? Number(offer.unitAmount)
+      : null;
+    const currency = typeof offer.currency === "string" && /^[A-Za-z]{3}$/.test(offer.currency)
+      ? offer.currency.toLowerCase()
+      : null;
     if (typeof offer.id !== "string" || typeof offer.name !== "string"
       || !["digital", "print", "pack"].includes(String(offer.productType))
-      || typeof offer.stripePriceId !== "string"
       || !Number.isInteger(offer.photoCount) || Number(offer.photoCount) < 1
       || !Array.isArray(methods) || methods.length === 0
       || methods.some((method) => !["digital", "school", "collection", "shipping"].includes(String(method)))
+      || !Array.isArray(paymentMethods) || paymentMethods.length === 0
+      || paymentMethods.some((method) => !["stripe", "establishment", "bank_transfer"].includes(String(method)))
       || typeof offer.active !== "boolean") {
-      throw new Error("Invalid delivery offer; check product type, price, photo count, methods, and active flag");
+      throw new Error("Invalid delivery offer; check product type, photo count, delivery methods, payment methods, and active flag");
     }
     return {
       id: offer.id, name: offer.name, description: typeof offer.description === "string" ? offer.description : undefined,
-      productType: offer.productType as DeliveryOffer["productType"], stripePriceId: offer.stripePriceId,
+      productType: offer.productType as DeliveryOffer["productType"],
+      stripePriceId: typeof offer.stripePriceId === "string" ? offer.stripePriceId : undefined,
+      unitAmount,
+      currency,
+      paymentMethods: paymentMethods as DeliveryOffer["paymentMethods"],
       photoCount: Number(offer.photoCount), printSize: typeof offer.printSize === "string" ? offer.printSize : undefined,
       deliveryMethods: methods as DeliveryOffer["deliveryMethods"], active: offer.active,
       includesDigitalDownloads: offer.includesDigitalDownloads === true,
@@ -183,17 +184,15 @@ async function activeStripeCatalog(): Promise<Array<{ productId: string; priceId
     });
 }
 
-async function pricedOffers(offers: DeliveryOffer[]): Promise<Array<DeliveryOffer & {
+function pricedOffers(offers: DeliveryOffer[]): Array<Omit<DeliveryOffer, "unitAmount" | "currency"> & {
   unitAmount: number; currency: string; pricingRules: { selection: string; quantity: string };
-}>> {
-  const catalog = await activeStripeCatalog();
-  return offers.map((offer) => {
-    const price = catalog.find((entry) => entry.priceId === offer.stripePriceId);
-    if (!price) throw new Error(`Configured Stripe price ${offer.stripePriceId} is not active`);
+}> {
+  return offers.flatMap((offer) => {
+    if (offer.unitAmount === null || !offer.currency) return [];
     return {
       ...offer,
-      unitAmount: price.amount,
-      currency: price.currency,
+      unitAmount: offer.unitAmount,
+      currency: offer.currency,
       pricingRules: {
         selection: offer.productType === "digital" && offer.photoCount === 1
           ? "1..100 selected photos"
@@ -206,6 +205,27 @@ async function pricedOffers(offers: DeliveryOffer[]): Promise<Array<DeliveryOffe
       },
     };
   });
+}
+
+async function stripeIsAvailable(): Promise<boolean> {
+  try {
+    await getUncachableStripeClient();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function manualPaymentInstructions(
+  gallery: typeof deliveryGalleriesTable.$inferSelect,
+  paymentMethod: "establishment" | "bank_transfer",
+): string {
+  if (paymentMethod === "bank_transfer") {
+    return gallery.bankTransferInstructions?.trim()
+      || "Use the order number as your bank transfer reference, then contact the photography studio to confirm payment.";
+  }
+  return gallery.establishmentPaymentInstructions?.trim()
+    || "Pay at the establishment and provide the order number so the photography studio can confirm payment.";
 }
 
 async function getAccessForToken(galleryId: number, accessId: number) {
@@ -274,13 +294,8 @@ router.get("/delivery/:slug", async (req, res): Promise<void> => {
 router.get("/delivery/:slug/catalog", async (req, res): Promise<void> => {
   const row = await getGalleryBySlug(String(req.params.slug));
   if (!row || !activeGallery(row.gallery)) { res.status(404).json({ error: "Delivery gallery not found or no longer available" }); return; }
-  let offers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
-  if (!offers.length) {
-    const price = await getDeliveryPrice();
-    offers = [{ id: "digital-single", name: "Digital photo", productType: "digital", stripePriceId: price.id,
-      photoCount: 1, deliveryMethods: ["digital"], active: true, includesDigitalDownloads: true }];
-  }
-  res.json({ offers: await pricedOffers(offers) });
+  const offers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
+  res.json({ offers: pricedOffers(offers) });
 });
 
 router.post("/delivery/:slug/access", async (req, res): Promise<void> => {
@@ -370,22 +385,10 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
     ))
     .orderBy(studentPhotosTable.createdAt);
 
-  let offers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
-  let displayPrice: { unitAmount: number | null; currency: string } | null = null;
-  let orderingAvailable = true;
-  let priced: Awaited<ReturnType<typeof pricedOffers>> = [];
-  try {
-    if (offers.length === 0) {
-      const price = await getDeliveryPrice();
-      displayPrice = { unitAmount: price.unit_amount, currency: price.currency };
-      offers = [{ id: "digital-single", name: "Digital photo", productType: "digital", stripePriceId: price.id,
-        photoCount: 1, deliveryMethods: ["digital"], active: true, includesDigitalDownloads: true }];
-    }
-    priced = await pricedOffers(offers);
-  } catch (error) {
-    orderingAvailable = false;
-    req.log.error({ err: error, galleryId: row.gallery.id }, "delivery ordering unavailable");
-  }
+  const offers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
+  const priced = pricedOffers(offers);
+  const stripeOffered = priced.some((offer) => offer.paymentMethods.includes("stripe"));
+  const stripeAvailable = stripeOffered ? await stripeIsAvailable() : false;
 
   res.json({
     gallery: publicGallery(row.gallery, row.studio),
@@ -393,9 +396,10 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       firstName: access.student.firstName,
       lastName: access.student.lastName,
     },
-    price: displayPrice,
+    price: priced[0] ? { unitAmount: priced[0].unitAmount, currency: priced[0].currency } : null,
     offers: priced,
-    orderingAvailable,
+    orderingAvailable: priced.length > 0,
+    stripeAvailable,
     photos: photos.map((photo) => ({
       id: photo.id,
       fileName: photo.fileName,
@@ -450,22 +454,22 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
 
   try {
     const savedOffers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
-    let offers: DeliveryOffer[] = savedOffers;
-    if (!offers.length) {
-      const fallback = await getDeliveryPrice();
-      offers = [{
-        id: "digital-single", name: "Digital photo", productType: "digital",
-        stripePriceId: fallback.id, photoCount: 1, deliveryMethods: ["digital"], active: true, includesDigitalDownloads: true,
-      }];
-    }
+    const offers: DeliveryOffer[] = savedOffers;
     const offer = offers.find((candidate) => candidate.id === (req.body?.offerId ?? "digital-single"));
     if (!offer) { res.status(400).json({ error: "Selected delivery offer is not available" }); return; }
+    if (offer.unitAmount === null || !offer.currency) {
+      res.status(400).json({ error: "The selected offer does not have a valid price" }); return;
+    }
     const quantityProvided = req.body?.quantity !== undefined;
     const quantity = Number(req.body?.quantity ?? 1);
     const deliveryMethod = String(req.body?.deliveryMethod ?? offer.deliveryMethods[0]);
+    const paymentMethod = String(req.body?.paymentMethod ?? "");
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100
       || !offer.deliveryMethods.includes(deliveryMethod as DeliveryOffer["deliveryMethods"][number])) {
       res.status(400).json({ error: "Invalid quantity or delivery method for this offer" }); return;
+    }
+    if (!offer.paymentMethods.includes(paymentMethod as DeliveryOffer["paymentMethods"][number])) {
+      res.status(400).json({ error: "Invalid payment method for this offer" }); return;
     }
     try {
       validateDeliverySelection(offer.productType, offer.photoCount, photos.length, quantity, quantityProvided);
@@ -475,23 +479,28 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     if (deliveryMethod === "shipping" && (typeof req.body?.deliveryAddress !== "string" || !req.body.deliveryAddress.trim())) {
       res.status(400).json({ error: "A shipping address is required" }); return;
     }
-    const stripe = await getUncachableStripeClient();
-    const price = await stripe.prices.retrieve(offer.stripePriceId);
-    if (!price.active || price.type !== "one_time" || !price.unit_amount) {
-      res.status(400).json({ error: "The selected Stripe price is not active" }); return;
+    const customerName = typeof req.body?.customerName === "string" ? req.body.customerName.trim() : "";
+    const customerEmail = typeof req.body?.customerEmail === "string" ? req.body.customerEmail.trim() : "";
+    if (!customerName) {
+      res.status(400).json({ error: "Customer name is required" }); return;
     }
-    const orderQuantity = deliveryStripeQuantity(offer.productType, offer.photoCount, photos.length, quantity);
+    if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+      res.status(400).json({ error: "Enter a valid customer email" }); return;
+    }
+    const orderQuantity = deliveryOrderQuantity(offer.productType, offer.photoCount, photos.length, quantity);
     const [order] = await db.insert(deliveryOrdersTable).values({
       galleryId: row.gallery.id,
       accessId: access.access.id,
       status: "pending",
-      stripeCheckoutSessionId: `pending-${randomUUID()}`,
-      customerName: typeof req.body?.customerName === "string" ? req.body.customerName.trim() : null,
+      paymentMethod: paymentMethod as "stripe" | "establishment" | "bank_transfer",
+      stripeCheckoutSessionId: null,
+      customerName,
+      customerEmail: customerEmail || null,
       deliveryMethod: deliveryMethod as "digital" | "school" | "collection" | "shipping",
       deliveryAddress: deliveryMethod === "shipping" ? req.body.deliveryAddress.trim() : null,
-      fulfillmentStatus: deliveryMethod === "digital" ? "not_required" : "paid",
-      amountTotal: price.unit_amount! * orderQuantity,
-      currency: price.currency,
+      fulfillmentStatus: "not_required",
+      amountTotal: deliveryAmount(offer.unitAmount, orderQuantity),
+      currency: offer.currency,
     }).returning();
     const itemRows = offer.productType === "print"
       ? [{ photoId: photos[0].id, quantity }]
@@ -505,27 +514,63 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       includesDigitalDownloads: offer.includesDigitalDownloads,
       printSize: offer.printSize ?? null,
       quantity: itemQuantity,
-      unitAmount: price.unit_amount!,
-      currency: price.currency,
+      unitAmount: offer.unitAmount!,
+      currency: offer.currency!,
     })));
 
+    if (paymentMethod !== "stripe") {
+      res.json({
+        checkoutUrl: null,
+        orderId: order.id,
+        status: order.status,
+        paymentMethod,
+        paymentInstructions: manualPaymentInstructions(row.gallery, paymentMethod as "establishment" | "bank_transfer"),
+      });
+      return;
+    }
+
+    const stripe = await getUncachableStripeClient();
     const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
     const origin = `${forwardedProto || req.protocol}://${req.get("host")}`;
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [{ price: price.id, quantity: orderQuantity }],
-      customer_creation: "always",
-      ...(deliveryMethod === "shipping" ? {
-        shipping_address_collection: { allowed_countries: ["US", "CA", "GB", "AU", "NZ"] },
-      } : {}),
-      metadata: { orderId: String(order.id), gallerySlug: row.gallery.slug },
-      success_url: `${origin}/delivery/${row.gallery.slug}?paid=1&order=${order.id}`,
-      cancel_url: `${origin}/delivery/${row.gallery.slug}?cancelled=1`,
-    });
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: [{
+          price_data: {
+            currency: offer.currency,
+            unit_amount: offer.unitAmount,
+            product_data: {
+              name: offer.name,
+              ...(offer.description ? { description: offer.description } : {}),
+            },
+          },
+          quantity: orderQuantity,
+        }],
+        customer_creation: "always",
+        ...(customerEmail ? { customer_email: customerEmail } : {}),
+        ...(deliveryMethod === "shipping" ? {
+          shipping_address_collection: { allowed_countries: ["MA", "US", "CA", "GB", "AU", "NZ"] },
+        } : {}),
+        metadata: { orderId: String(order.id), gallerySlug: row.gallery.slug },
+        success_url: `${origin}/delivery/${row.gallery.slug}?paid=1&order=${order.id}`,
+        cancel_url: `${origin}/delivery/${row.gallery.slug}?cancelled=1&order=${order.id}`,
+      });
+    } catch (error) {
+      await db.update(deliveryOrdersTable).set({ status: "cancelled" })
+        .where(eq(deliveryOrdersTable.id, order.id));
+      throw error;
+    }
     await db.update(deliveryOrdersTable).set({
       stripeCheckoutSessionId: session.id,
     }).where(eq(deliveryOrdersTable.id, order.id));
-    res.json({ checkoutUrl: session.url, orderId: order.id });
+    res.json({
+      checkoutUrl: session.url,
+      orderId: order.id,
+      status: order.status,
+      paymentMethod,
+      paymentInstructions: null,
+    });
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : "Checkout is not available yet" });
   }
@@ -565,6 +610,7 @@ router.get("/delivery/:slug/orders/:orderId", async (req, res): Promise<void> =>
     status: order.status,
     amountTotal: order.amountTotal,
     currency: order.currency,
+    paymentMethod: order.paymentMethod,
     paidAt: order.paidAt?.toISOString() ?? null,
     photoIds: items.map((item) => item.photoId),
     downloadablePhotoIds: order.status === "paid"
@@ -798,10 +844,8 @@ router.patch("/projects/:projectId/delivery", requireAuth, async (req, res): Pro
   if (body.offers !== undefined) {
     try {
       const offers = parseOffers(JSON.stringify({ offers: body.offers }));
-      const catalog = await activeStripeCatalog();
-      const ids = new Set(catalog.map((entry) => entry.priceId));
-      if (offers.some((offer) => !ids.has(offer.stripePriceId))) {
-        res.status(400).json({ error: "Every offer must reference an active one-time Stripe price" }); return;
+      if (offers.some((offer) => offer.unitAmount === null || !offer.currency)) {
+        res.status(400).json({ error: "Every offer must have a valid amount and three-letter currency" }); return;
       }
       priceSheetJson = JSON.stringify({ offers });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Invalid offers" }); return; }
@@ -812,6 +856,12 @@ router.patch("/projects/:projectId/delivery", requireAuth, async (req, res): Pro
     watermarkEnabled: typeof body.watermarkEnabled === "boolean" ? body.watermarkEnabled : gallery.watermarkEnabled,
     watermarkText: body.watermarkText === null || typeof body.watermarkText === "string" ? body.watermarkText : gallery.watermarkText,
     expiresAt: body.expiresAt === null ? null : body.expiresAt ? new Date(body.expiresAt) : gallery.expiresAt,
+    establishmentPaymentInstructions: body.establishmentPaymentInstructions === null || typeof body.establishmentPaymentInstructions === "string"
+      ? body.establishmentPaymentInstructions
+      : gallery.establishmentPaymentInstructions,
+    bankTransferInstructions: body.bankTransferInstructions === null || typeof body.bankTransferInstructions === "string"
+      ? body.bankTransferInstructions
+      : gallery.bankTransferInstructions,
     ...(priceSheetJson ? { priceSheetJson } : {}),
     updatedAt: new Date(),
   }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
@@ -823,7 +873,12 @@ router.get("/projects/:projectId/delivery/catalog", requireAuth, async (req, res
   if (!Number.isInteger(projectId) || !(await canAccessProject(getUserId(req), projectId, "manage"))) {
     res.status(404).json({ error: "Project not found" }); return;
   }
-  res.json({ prices: await activeStripeCatalog() });
+  try {
+    res.json({ prices: await activeStripeCatalog() });
+  } catch (error) {
+    req.log.warn({ err: error, projectId }, "optional Stripe catalog unavailable");
+    res.json({ prices: [] });
+  }
 });
 
 router.post("/projects/:projectId/delivery/access/:studentId/regenerate", requireAuth, async (req, res): Promise<void> => {
@@ -907,6 +962,35 @@ router.patch("/projects/:projectId/delivery/orders/:orderId/fulfillment", requir
   res.json({ order: updated });
 });
 
+router.patch("/projects/:projectId/delivery/orders/:orderId/payment", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId), orderId = Number(req.params.orderId);
+  const status = String(req.body?.status ?? "");
+  const valid = ["pending", "paid", "cancelled", "refunded"];
+  if (!Number.isInteger(projectId) || !Number.isInteger(orderId) || !valid.includes(status)) {
+    res.status(400).json({ error: "Invalid payment update" }); return;
+  }
+  const [ownedOrder] = await db.select({ order: deliveryOrdersTable })
+    .from(deliveryOrdersTable)
+    .innerJoin(deliveryGalleriesTable, eq(deliveryOrdersTable.galleryId, deliveryGalleriesTable.id))
+    .where(and(eq(deliveryOrdersTable.id, orderId), eq(deliveryGalleriesTable.projectId, projectId))).limit(1);
+  if (!ownedOrder || !(await canAccessProject(getUserId(req), projectId, "manage"))) {
+    res.status(404).json({ error: "Order not found" }); return;
+  }
+  if (ownedOrder.order.paymentMethod === "stripe") {
+    res.status(400).json({ error: "Stripe payment status is updated automatically by its verified webhook" }); return;
+  }
+  const items = await db.select({ productType: deliveryOrderItemsTable.productType })
+    .from(deliveryOrderItemsTable).where(eq(deliveryOrderItemsTable.orderId, orderId));
+  const hasPhysicalItem = items.some((item) => item.productType === "print" || item.productType === "pack");
+  const [updated] = await db.update(deliveryOrdersTable).set({
+    status: status as "pending" | "paid" | "cancelled" | "refunded",
+    paidAt: status === "paid" ? (ownedOrder.order.paidAt ?? new Date()) : null,
+    ...(status === "paid" ? { fulfillmentStatus: hasPhysicalItem ? "paid" as const : "not_required" as const } : {}),
+  }).where(eq(deliveryOrdersTable.id, orderId)).returning();
+  if (!updated) { res.status(404).json({ error: "Order not found" }); return; }
+  res.json({ order: updated });
+});
+
 router.get("/projects/:projectId/delivery/orders/export.csv", requireAuth, async (req, res): Promise<void> => {
   const projectId = Number(req.params.projectId);
   if (!Number.isInteger(projectId) || !(await canAccessProject(getUserId(req), projectId, "view"))) {
@@ -915,8 +999,8 @@ router.get("/projects/:projectId/delivery/orders/export.csv", requireAuth, async
   const [gallery] = await db.select({ id: deliveryGalleriesTable.id }).from(deliveryGalleriesTable)
     .where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
   const orders = gallery ? await db.select().from(deliveryOrdersTable).where(eq(deliveryOrdersTable.galleryId, gallery.id)) : [];
-  const csv = ["orderId,status,fulfillmentStatus,deliveryMethod,customerName,customerEmail,total,currency,date",
-    ...orders.map((order) => [order.id, order.status, order.fulfillmentStatus, order.deliveryMethod,
+  const csv = ["orderId,status,paymentMethod,fulfillmentStatus,deliveryMethod,customerName,customerEmail,total,currency,date",
+    ...orders.map((order) => [order.id, order.status, order.paymentMethod, order.fulfillmentStatus, order.deliveryMethod,
       order.customerName ?? "", order.customerEmail ?? "", order.amountTotal, order.currency, order.createdAt.toISOString()]
       .map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))].join("\n");
   res.type("text/csv").send(`${csv}\n`);

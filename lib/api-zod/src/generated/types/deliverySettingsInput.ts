@@ -13,5 +13,9 @@ export interface DeliverySettingsInput {
   watermarkText?: string | null;
   /** @nullable */
   expiresAt?: Date | null;
+  /** @nullable */
+  establishmentPaymentInstructions?: string | null;
+  /** @nullable */
+  bankTransferInstructions?: string | null;
   offers?: DeliveryOffer[];
 }

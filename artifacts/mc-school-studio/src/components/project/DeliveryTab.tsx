@@ -13,7 +13,7 @@ import {
   useListDeliveryAccessCards,
   useListDeliveryOrders,
   useUpdateDeliveryFulfillment,
-  useListDeliveryStripeCatalog,
+  useUpdateDeliveryPayment,
   type DeliveryOffer
 } from "@workspace/api-client-react";
 import { format } from "date-fns";
@@ -116,7 +116,6 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
 
 function OverviewTab({ projectId }: { projectId: number }) {
   const { data: settings, isLoading, refetch } = useGetDeliverySettings(projectId);
-  const { data: catalog, isLoading: catalogLoading } = useListDeliveryStripeCatalog(projectId);
   
   const publishMutation = usePublishDelivery({
     mutation: {
@@ -143,7 +142,19 @@ function OverviewTab({ projectId }: { projectId: number }) {
       try {
         const parsed = JSON.parse(rawPriceSheet);
         if (parsed?.offers) {
-          setOffers(parsed.offers);
+          setOffers(parsed.offers.map((offer: Partial<DeliveryOffer>) => ({
+            ...offer,
+            id: offer.id || crypto.randomUUID(),
+            name: offer.name || "",
+            productType: offer.productType || "digital",
+            unitAmount: Number.isInteger(offer.unitAmount) ? offer.unitAmount : 0,
+            currency: offer.currency || "mad",
+            paymentMethods: offer.paymentMethods?.length ? offer.paymentMethods : ["stripe"],
+            photoCount: offer.photoCount || 1,
+            deliveryMethods: offer.deliveryMethods?.length ? offer.deliveryMethods : ["digital"],
+            active: offer.active ?? true,
+            includesDigitalDownloads: offer.includesDigitalDownloads ?? offer.productType === "digital",
+          } as DeliveryOffer)));
         }
       } catch {}
     } else {
@@ -151,7 +162,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
     }
   }, [settings]);
 
-  if (isLoading || catalogLoading) {
+  if (isLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading delivery settings...</div>;
   }
 
@@ -175,10 +186,13 @@ function OverviewTab({ projectId }: { projectId: number }) {
         id: crypto.randomUUID(),
         name: "",
         productType: "digital",
-        stripePriceId: "",
+        unitAmount: 0,
+        currency: "mad",
+        paymentMethods: ["stripe", "establishment", "bank_transfer"],
         photoCount: 1,
         deliveryMethods: ["digital"],
         active: true,
+        includesDigitalDownloads: true,
       },
     ]);
   };
@@ -274,8 +288,8 @@ function OverviewTab({ projectId }: { projectId: number }) {
           onSubmit={(e) => {
             e.preventDefault();
             // Validate offers
-            if (offers.some(o => !o.name.trim() || !o.stripePriceId || o.photoCount < 1)) {
-              alert("Please complete all required fields for offers (Name, Price, Photo count >= 1).");
+            if (offers.some(o => !o.name.trim() || o.unitAmount < 0 || !/^[A-Za-z]{3}$/.test(o.currency) || o.photoCount < 1 || o.paymentMethods.length < 1)) {
+              alert("Complete every offer with a name, valid amount and currency, photo count, and at least one payment method.");
               return;
             }
             const formData = new FormData(e.currentTarget);
@@ -285,6 +299,8 @@ function OverviewTab({ projectId }: { projectId: number }) {
                 watermarkEnabled: formData.get("watermarkEnabled") === "on",
                 watermarkText: (formData.get("watermarkText") as string) || null,
                 expiresAt: (formData.get("expiresAt") as string) ? new Date(formData.get("expiresAt") as string).toISOString() : null,
+                establishmentPaymentInstructions: (formData.get("establishmentPaymentInstructions") as string) || null,
+                bankTransferInstructions: (formData.get("bankTransferInstructions") as string) || null,
                 offers,
               }
             });
@@ -325,6 +341,29 @@ function OverviewTab({ projectId }: { projectId: number }) {
                 />
                 <p className="text-[11px] text-slate-400">Leave blank for no expiration.</p>
               </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 border-t border-slate-100 pt-6 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-500">Pay at establishment instructions</label>
+              <textarea
+                name="establishmentPaymentInstructions"
+                defaultValue={(gallery as any)?.establishmentPaymentInstructions || ""}
+                rows={3}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                placeholder="Where and when the customer can pay, and what order reference to bring."
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-500">Bank transfer instructions</label>
+              <textarea
+                name="bankTransferInstructions"
+                defaultValue={(gallery as any)?.bankTransferInstructions || ""}
+                rows={3}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                placeholder="Bank details and instructions. Ask customers to include their order number."
+              />
             </div>
           </div>
 
@@ -390,22 +429,30 @@ function OverviewTab({ projectId }: { projectId: number }) {
                         </select>
                       </div>
 
-                      <div className="space-y-1 md:col-span-2">
-                        <label className="text-xs font-medium text-slate-500">Stripe Price *</label>
-                        <select
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-500">Price *</label>
+                        <input
                           required
-                          value={offer.stripePriceId}
-                          data-testid={`select-offer-price-${offer.id}`}
-                          onChange={(e) => updateOffer(offer.id, { stripePriceId: e.target.value })}
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={(offer.unitAmount / 100).toFixed(2)}
+                          data-testid={`input-offer-price-${offer.id}`}
+                          onChange={(e) => updateOffer(offer.id, { unitAmount: Math.round((Number(e.target.value) || 0) * 100) })}
                           className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
-                        >
-                          <option value="" disabled>Select a catalog price</option>
-                          {(catalog as any)?.prices?.map((price: any) => (
-                            <option key={price.priceId} value={price.priceId}>
-                              {price.name} - {new Intl.NumberFormat(undefined, { style: "currency", currency: price.currency }).format(price.amount / 100)}
-                            </option>
-                          ))}
-                        </select>
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-500">Currency *</label>
+                        <input
+                          required
+                          type="text"
+                          maxLength={3}
+                          value={offer.currency.toUpperCase()}
+                          onChange={(e) => updateOffer(offer.id, { currency: e.target.value.replace(/[^A-Za-z]/g, "").slice(0, 3).toLowerCase() })}
+                          className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm uppercase focus:border-teal-500 focus:outline-none"
+                          placeholder="MAD"
+                        />
                       </div>
 
                       <div className="space-y-1">
@@ -465,6 +512,34 @@ function OverviewTab({ projectId }: { projectId: number }) {
                             </label>
                           ))}
                         </div>
+                      </div>
+
+                      <div className="md:col-span-3 space-y-2 mt-2">
+                        <label className="text-xs font-medium text-slate-500">Payment Methods</label>
+                        <div className="flex flex-wrap gap-4">
+                          {([
+                            ["stripe", "Card with Stripe"],
+                            ["establishment", "Pay at establishment"],
+                            ["bank_transfer", "Bank transfer"],
+                          ] as const).map(([method, label]) => (
+                            <label key={method} className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={offer.paymentMethods.includes(method)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    updateOffer(offer.id, { paymentMethods: [...offer.paymentMethods, method] });
+                                  } else {
+                                    updateOffer(offer.id, { paymentMethods: offer.paymentMethods.filter(value => value !== method) });
+                                  }
+                                }}
+                                className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                              />
+                              <span>{label}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-slate-400">Stripe is optional. Manual payment orders remain available when Stripe is disconnected.</p>
                       </div>
 
                       <div className="md:col-span-3 flex flex-wrap gap-6 mt-2 pt-4 border-t border-slate-200">
@@ -704,6 +779,11 @@ function OrdersTab({ projectId }: { projectId: number }) {
       onSuccess: () => refetch()
     }
   });
+  const updatePayment = useUpdateDeliveryPayment({
+    mutation: {
+      onSuccess: () => refetch()
+    }
+  });
 
   if (isLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading orders...</div>;
@@ -721,7 +801,7 @@ function OrdersTab({ projectId }: { projectId: number }) {
         <div>
           <h3 className="text-lg font-semibold text-slate-900">Customer Orders</h3>
           <p className="text-sm text-slate-500">
-            View and manage paid delivery orders from this gallery.
+            Review Stripe and manual-payment orders from this gallery.
           </p>
         </div>
         <button 
@@ -741,6 +821,7 @@ function OrdersTab({ projectId }: { projectId: number }) {
                 <th className="px-4 py-3 font-medium text-slate-500">Order #</th>
                 <th className="px-4 py-3 font-medium text-slate-500">Customer</th>
                 <th className="px-4 py-3 font-medium text-slate-500">Amount</th>
+                <th className="px-4 py-3 font-medium text-slate-500">Payment method</th>
                 <th className="px-4 py-3 font-medium text-slate-500">Date</th>
                 <th className="px-4 py-3 font-medium text-slate-500">Status</th>
                 <th className="px-4 py-3 font-medium text-slate-500 text-right">Fulfillment</th>
@@ -749,7 +830,7 @@ function OrdersTab({ projectId }: { projectId: number }) {
             <tbody className="divide-y divide-slate-100">
               {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                     <ShoppingBag className="mx-auto mb-3 size-8 text-slate-300" />
                     No orders placed yet.
                   </td>
@@ -765,15 +846,41 @@ function OrdersTab({ projectId }: { projectId: number }) {
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {(order.amountTotal / 100).toLocaleString('en-US', { style: 'currency', currency: order.currency || 'USD' })}
                     </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {order.paymentMethod === "establishment"
+                        ? "At establishment"
+                        : order.paymentMethod === "bank_transfer"
+                          ? "Bank transfer"
+                          : "Stripe"}
+                    </td>
                     <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
                       {order.createdAt ? format(new Date(order.createdAt), "MMM d, yyyy") : "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                        order.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
-                      }`}>
-                        {order.status}
-                      </span>
+                      {order.paymentMethod === "stripe" ? (
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          order.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {order.status}
+                        </span>
+                      ) : (
+                        <select
+                          value={order.status}
+                          onChange={(e) => updatePayment.mutate({
+                            projectId,
+                            orderId: order.id,
+                            data: { status: e.target.value as any },
+                          })}
+                          disabled={updatePayment.isPending}
+                          aria-label={`Payment status for order ${order.id}`}
+                          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-teal-500 focus:outline-none"
+                        >
+                          <option value="pending">Awaiting payment</option>
+                          <option value="paid">Paid</option>
+                          <option value="cancelled">Cancelled</option>
+                          <option value="refunded">Refunded</option>
+                        </select>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <select 

@@ -11,7 +11,7 @@ export class WebhookHandlers {
     // Parse the now-authenticated payload to apply the application-level order update.
     const event = JSON.parse(payload.toString("utf8")) as {
       type: string;
-      data: { object: { metadata?: Record<string, string>; payment_intent?: string | null; customer_details?: { email?: string | null; name?: string | null; address?: Record<string, string | null> | null } | null; customer_email?: string | null; amount_total?: number | null } };
+      data: { object: { id?: string; metadata?: Record<string, string>; payment_intent?: string | null; customer_details?: { email?: string | null; name?: string | null; address?: Record<string, string | null> | null } | null; customer_email?: string | null; amount_total?: number | null } };
     };
     if (event.type !== "checkout.session.completed") return;
 
@@ -36,6 +36,8 @@ export class WebhookHandlers {
       paidAt: new Date(),
     }).where(and(
       eq(deliveryOrdersTable.id, orderId),
+      eq(deliveryOrdersTable.paymentMethod, "stripe"),
+      ...(session.id ? [eq(deliveryOrdersTable.stripeCheckoutSessionId, session.id)] : []),
       eq(deliveryOrdersTable.status, "pending"),
     ));
   }

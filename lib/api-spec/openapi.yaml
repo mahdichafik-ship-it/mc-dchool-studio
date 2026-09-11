@@ -948,6 +948,15 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/FulfillmentInput" } } }
       responses: { "200": { description: Updated fulfillment, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderMutationResponse" } } } } }
+  /projects/{projectId}/delivery/orders/{orderId}/payment:
+    patch:
+      operationId: updateDeliveryPayment
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }, { name: orderId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PaymentStatusInput" } } }
+      responses: { "200": { description: Updated payment status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderMutationResponse" } } } } }
   /projects/{projectId}/delivery/orders/export.csv:
     get:
       operationId: exportDeliveryOrders
@@ -1468,31 +1477,34 @@ components:
       properties: { code: { type: string, minLength: 8, maxLength: 8 } }
     DeliveryOrderInput:
       type: object
-      required: [photoIds]
+      required: [photoIds, paymentMethod]
       properties:
         token: { type: string }
         offerId: { type: string }
         photoIds: { type: array, minItems: 1, items: { type: integer } }
         quantity: { type: integer, minimum: 1 }
         customerName: { type: string }
+        customerEmail: { type: string }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
         deliveryMethod: { type: string, enum: [digital, school, collection, shipping] }
         deliveryAddress: { type: string }
     DeliveryOffer:
       type: object
-      required: [id, name, productType, stripePriceId, photoCount, deliveryMethods, active]
+      required: [id, name, productType, unitAmount, currency, paymentMethods, photoCount, deliveryMethods, active]
       properties:
         id: { type: string }
         name: { type: string }
         description: { type: string }
         productType: { type: string, enum: [digital, print, pack] }
         stripePriceId: { type: string }
+        unitAmount: { type: integer, minimum: 0 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        paymentMethods: { type: array, minItems: 1, items: { type: string, enum: [stripe, establishment, bank_transfer] } }
         photoCount: { type: integer, minimum: 1 }
         printSize: { type: string }
         deliveryMethods: { type: array, items: { type: string, enum: [digital, school, collection, shipping] } }
         active: { type: boolean }
         includesDigitalDownloads: { type: boolean, default: false }
-        unitAmount: { type: integer, minimum: 0 }
-        currency: { type: string }
         pricingRules:
           type: object
           properties:
@@ -1504,12 +1516,19 @@ components:
         watermarkEnabled: { type: boolean }
         watermarkText: { type: ["string", "null"] }
         expiresAt: { type: ["string", "null"], format: date-time }
+        establishmentPaymentInstructions: { type: ["string", "null"] }
+        bankTransferInstructions: { type: ["string", "null"] }
         offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
     FulfillmentInput:
       type: object
       required: [fulfillmentStatus]
       properties:
         fulfillmentStatus: { type: string, enum: [not_required, paid, preparing, printed, ready, dispatched, delivered] }
+    PaymentStatusInput:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [pending, paid, cancelled, refunded] }
     DeliveryGallery:
       type: object
       required: [slug, status, photos, offers]
@@ -1554,7 +1573,7 @@ components:
             expiresAt: { type: ["string", "null"] }
     DeliveryPhotosResponse:
       type: object
-      required: [gallery, student, photos, offers, orderingAvailable]
+      required: [gallery, student, photos, offers, orderingAvailable, stripeAvailable]
       properties:
         gallery:
           type: object
@@ -1567,7 +1586,10 @@ components:
         offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
         orderingAvailable:
           type: boolean
-          description: Whether the live Stripe catalog is available for checkout.
+          description: Whether at least one complete Volume Capture offer is available.
+        stripeAvailable:
+          type: boolean
+          description: Whether Stripe checkout is currently available as an optional payment method.
         photos: { type: array, items: { $ref: "#/components/schemas/DeliveryGalleryPhotosItem" } }
     DeliveryGalleryPhotosItem:
       type: object
@@ -1595,18 +1617,22 @@ components:
         currency: { type: string }
     DeliveryCheckoutResponse:
       type: object
-      required: [checkoutUrl, orderId]
+      required: [checkoutUrl, orderId, status, paymentMethod]
       properties:
         checkoutUrl: { type: ["string", "null"] }
         orderId: { type: integer }
+        status: { type: string }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
+        paymentInstructions: { type: ["string", "null"] }
     DeliveryOrderResponse:
       type: object
-      required: [orderId, status, amountTotal, currency, photoIds]
+      required: [orderId, status, amountTotal, currency, paymentMethod, photoIds]
       properties:
         orderId: { type: integer }
         status: { type: string }
         amountTotal: { type: integer }
         currency: { type: string }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
         paidAt: { type: ["string", "null"] }
         photoIds: { type: array, items: { type: integer } }
         downloadablePhotoIds: { type: array, items: { type: integer } }

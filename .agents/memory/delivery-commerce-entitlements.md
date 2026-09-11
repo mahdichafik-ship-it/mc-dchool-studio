@@ -3,8 +3,8 @@ name: Delivery commerce entitlements
 description: Rules that keep gallery offer pricing, payment quantities, and original-file access consistent.
 ---
 
-Price-sheet offers must use their own active Stripe Price ID and a single selection/quantity rule across the public gallery, checkout creation, and persisted order items. Access to original digital files must be derived from paid, persisted item entitlements rather than browser state; print-only orders never entitle an original download.
+Volume Capture is the source of truth for price-sheet offers and orders. Each offer persists its own amount, currency, selection rule, delivery methods, and allowed payment methods; Stripe, establishment payment, bank transfer, and future providers only settle an existing Volume Capture order. Access to original digital files must be derived from a paid, persisted item entitlement rather than browser state; print-only orders never entitle an original download.
 
-**Why:** Divergent client and server rules can show a different price than Stripe charges, reject a valid pack or multi-copy print purchase, or expose digital originals after a physical-only order.
+**Why:** Stripe is optional and does not support every customer card market. Making its catalog authoritative blocks manual and local payment methods, while divergent client/server rules can still misprice packs or expose downloads incorrectly.
 
-**How to apply:** When changing digital, print, or pack offers, update the shared server rule and return the same calculated pricing/selection information to the client. Preserve the entitlement snapshot on every order item and use it as the sole authorization source for downloads.
+**How to apply:** Calculate and persist the order before invoking an online provider. Every provider must use the order’s amount and currency, and only a verified provider callback or an authorized studio confirmation may mark it paid. Preserve the entitlement snapshot on every item and use it as the sole download authorization source.

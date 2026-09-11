@@ -774,11 +774,14 @@ export const UpdatePhotoSharingBody = zod.object({
   "shareWithParents": zod.boolean()
 })
 
-
-export const updatePhotoSharingResponseOffersItemIncludesDigitalDownloadsDefault = false;
 export const updatePhotoSharingResponseOffersItemUnitAmountMin = 0;
 
+export const updatePhotoSharingResponseOffersItemCurrencyMin = 3;
+export const updatePhotoSharingResponseOffersItemCurrencyMax = 3;
 
+
+
+export const updatePhotoSharingResponseOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const UpdatePhotoSharingResponse = zod.object({
   "photo": zod.object({
@@ -797,14 +800,15 @@ export const UpdatePhotoSharingResponse = zod.object({
   "name": zod.string(),
   "description": zod.string().optional(),
   "productType": zod.enum(['digital', 'print', 'pack']),
-  "stripePriceId": zod.string(),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updatePhotoSharingResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(updatePhotoSharingResponseOffersItemCurrencyMin).max(updatePhotoSharingResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
   "photoCount": zod.number().min(1),
   "printSize": zod.string().optional(),
   "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
   "active": zod.boolean(),
   "includesDigitalDownloads": zod.boolean().default(updatePhotoSharingResponseOffersItemIncludesDigitalDownloadsDefault),
-  "unitAmount": zod.number().min(updatePhotoSharingResponseOffersItemUnitAmountMin).optional(),
-  "currency": zod.string().optional(),
   "pricingRules": zod.object({
   "selection": zod.string().optional(),
   "quantity": zod.string().optional()
@@ -840,11 +844,14 @@ export const GetDeliveryPhotosHeader = zod.object({
   "x-delivery-token": zod.string()
 })
 
-
-export const getDeliveryPhotosResponseOffersItemIncludesDigitalDownloadsDefault = false;
 export const getDeliveryPhotosResponseOffersItemUnitAmountMin = 0;
 
+export const getDeliveryPhotosResponseOffersItemCurrencyMin = 3;
+export const getDeliveryPhotosResponseOffersItemCurrencyMax = 3;
 
+
+
+export const getDeliveryPhotosResponseOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const GetDeliveryPhotosResponse = zod.object({
   "gallery": zod.object({
@@ -859,20 +866,22 @@ export const GetDeliveryPhotosResponse = zod.object({
   "name": zod.string(),
   "description": zod.string().optional(),
   "productType": zod.enum(['digital', 'print', 'pack']),
-  "stripePriceId": zod.string(),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(getDeliveryPhotosResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(getDeliveryPhotosResponseOffersItemCurrencyMin).max(getDeliveryPhotosResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
   "photoCount": zod.number().min(1),
   "printSize": zod.string().optional(),
   "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
   "active": zod.boolean(),
   "includesDigitalDownloads": zod.boolean().default(getDeliveryPhotosResponseOffersItemIncludesDigitalDownloadsDefault),
-  "unitAmount": zod.number().min(getDeliveryPhotosResponseOffersItemUnitAmountMin).optional(),
-  "currency": zod.string().optional(),
   "pricingRules": zod.object({
   "selection": zod.string().optional(),
   "quantity": zod.string().optional()
 }).optional()
 })),
-  "orderingAvailable": zod.boolean().describe('Whether the live Stripe catalog is available for checkout.'),
+  "orderingAvailable": zod.boolean().describe('Whether at least one complete Volume Capture offer is available.'),
+  "stripeAvailable": zod.boolean().describe('Whether Stripe checkout is currently available as an optional payment method.'),
   "photos": zod.array(zod.object({
   "id": zod.number(),
   "fileName": zod.string(),
@@ -887,11 +896,14 @@ export const GetDeliveryCatalogParams = zod.object({
   "slug": zod.coerce.string()
 })
 
-
-export const getDeliveryCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
 export const getDeliveryCatalogResponseOffersItemUnitAmountMin = 0;
 
+export const getDeliveryCatalogResponseOffersItemCurrencyMin = 3;
+export const getDeliveryCatalogResponseOffersItemCurrencyMax = 3;
 
+
+
+export const getDeliveryCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const GetDeliveryCatalogResponse = zod.object({
   "prices": zod.array(zod.object({
@@ -906,14 +918,15 @@ export const GetDeliveryCatalogResponse = zod.object({
   "name": zod.string(),
   "description": zod.string().optional(),
   "productType": zod.enum(['digital', 'print', 'pack']),
-  "stripePriceId": zod.string(),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(getDeliveryCatalogResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(getDeliveryCatalogResponseOffersItemCurrencyMin).max(getDeliveryCatalogResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
   "photoCount": zod.number().min(1),
   "printSize": zod.string().optional(),
   "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
   "active": zod.boolean(),
   "includesDigitalDownloads": zod.boolean().default(getDeliveryCatalogResponseOffersItemIncludesDigitalDownloadsDefault),
-  "unitAmount": zod.number().min(getDeliveryCatalogResponseOffersItemUnitAmountMin).optional(),
-  "currency": zod.string().optional(),
   "pricingRules": zod.object({
   "selection": zod.string().optional(),
   "quantity": zod.string().optional()
@@ -936,13 +949,18 @@ export const CreateDeliveryOrderBody = zod.object({
   "photoIds": zod.array(zod.number()).min(1),
   "quantity": zod.number().min(1).optional(),
   "customerName": zod.string().optional(),
+  "customerEmail": zod.string().optional(),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
   "deliveryMethod": zod.enum(['digital', 'school', 'collection', 'shipping']).optional(),
   "deliveryAddress": zod.string().optional()
 })
 
 export const CreateDeliveryOrderResponse = zod.object({
   "checkoutUrl": zod.string().nullable(),
-  "orderId": zod.number()
+  "orderId": zod.number(),
+  "status": zod.string(),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "paymentInstructions": zod.string().nullish()
 })
 
 
@@ -960,6 +978,7 @@ export const GetDeliveryOrderResponse = zod.object({
   "status": zod.string(),
   "amountTotal": zod.number(),
   "currency": zod.string(),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
   "paidAt": zod.string().nullish(),
   "photoIds": zod.array(zod.number()),
   "downloadablePhotoIds": zod.array(zod.number()).optional()
@@ -984,29 +1003,35 @@ export const UpdateDeliverySettingsParams = zod.object({
   "projectId": zod.coerce.number()
 })
 
-
-export const updateDeliverySettingsBodyOffersItemIncludesDigitalDownloadsDefault = false;
 export const updateDeliverySettingsBodyOffersItemUnitAmountMin = 0;
 
+export const updateDeliverySettingsBodyOffersItemCurrencyMin = 3;
+export const updateDeliverySettingsBodyOffersItemCurrencyMax = 3;
 
+
+
+export const updateDeliverySettingsBodyOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const UpdateDeliverySettingsBody = zod.object({
   "watermarkEnabled": zod.boolean().optional(),
   "watermarkText": zod.string().nullish(),
   "expiresAt": zod.coerce.date().nullish(),
+  "establishmentPaymentInstructions": zod.string().nullish(),
+  "bankTransferInstructions": zod.string().nullish(),
   "offers": zod.array(zod.object({
   "id": zod.string(),
   "name": zod.string(),
   "description": zod.string().optional(),
   "productType": zod.enum(['digital', 'print', 'pack']),
-  "stripePriceId": zod.string(),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateDeliverySettingsBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateDeliverySettingsBodyOffersItemCurrencyMin).max(updateDeliverySettingsBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
   "photoCount": zod.number().min(1),
   "printSize": zod.string().optional(),
   "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
   "active": zod.boolean(),
   "includesDigitalDownloads": zod.boolean().default(updateDeliverySettingsBodyOffersItemIncludesDigitalDownloadsDefault),
-  "unitAmount": zod.number().min(updateDeliverySettingsBodyOffersItemUnitAmountMin).optional(),
-  "currency": zod.string().optional(),
   "pricingRules": zod.object({
   "selection": zod.string().optional(),
   "quantity": zod.string().optional()
@@ -1072,11 +1097,14 @@ export const ListDeliveryStripeCatalogParams = zod.object({
   "projectId": zod.coerce.number()
 })
 
-
-export const listDeliveryStripeCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
 export const listDeliveryStripeCatalogResponseOffersItemUnitAmountMin = 0;
 
+export const listDeliveryStripeCatalogResponseOffersItemCurrencyMin = 3;
+export const listDeliveryStripeCatalogResponseOffersItemCurrencyMax = 3;
 
+
+
+export const listDeliveryStripeCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const ListDeliveryStripeCatalogResponse = zod.object({
   "prices": zod.array(zod.object({
@@ -1091,14 +1119,15 @@ export const ListDeliveryStripeCatalogResponse = zod.object({
   "name": zod.string(),
   "description": zod.string().optional(),
   "productType": zod.enum(['digital', 'print', 'pack']),
-  "stripePriceId": zod.string(),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(listDeliveryStripeCatalogResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(listDeliveryStripeCatalogResponseOffersItemCurrencyMin).max(listDeliveryStripeCatalogResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
   "photoCount": zod.number().min(1),
   "printSize": zod.string().optional(),
   "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
   "active": zod.boolean(),
   "includesDigitalDownloads": zod.boolean().default(listDeliveryStripeCatalogResponseOffersItemIncludesDigitalDownloadsDefault),
-  "unitAmount": zod.number().min(listDeliveryStripeCatalogResponseOffersItemUnitAmountMin).optional(),
-  "currency": zod.string().optional(),
   "pricingRules": zod.object({
   "selection": zod.string().optional(),
   "quantity": zod.string().optional()
@@ -1167,6 +1196,20 @@ export const UpdateDeliveryFulfillmentBody = zod.object({
 })
 
 export const UpdateDeliveryFulfillmentResponse = zod.object({
+  "order": zod.record(zod.string(), zod.unknown())
+})
+
+
+export const UpdateDeliveryPaymentParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "orderId": zod.coerce.number()
+})
+
+export const UpdateDeliveryPaymentBody = zod.object({
+  "status": zod.enum(['pending', 'paid', 'cancelled', 'refunded'])
+})
+
+export const UpdateDeliveryPaymentResponse = zod.object({
   "order": zod.record(zod.string(), zod.unknown())
 })
 

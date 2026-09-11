@@ -380,6 +380,15 @@ export interface DeliveryAccessInput {
   code: string;
 }
 
+export type DeliveryOrderInputPaymentMethod = typeof DeliveryOrderInputPaymentMethod[keyof typeof DeliveryOrderInputPaymentMethod];
+
+
+export const DeliveryOrderInputPaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
 export type DeliveryOrderInputDeliveryMethod = typeof DeliveryOrderInputDeliveryMethod[keyof typeof DeliveryOrderInputDeliveryMethod];
 
 
@@ -398,6 +407,8 @@ export interface DeliveryOrderInput {
   /** @minimum 1 */
   quantity?: number;
   customerName?: string;
+  customerEmail?: string;
+  paymentMethod: DeliveryOrderInputPaymentMethod;
   deliveryMethod?: DeliveryOrderInputDeliveryMethod;
   deliveryAddress?: string;
 }
@@ -409,6 +420,15 @@ export const DeliveryOfferProductType = {
   digital: 'digital',
   print: 'print',
   pack: 'pack',
+} as const;
+
+export type DeliveryOfferPaymentMethodsItem = typeof DeliveryOfferPaymentMethodsItem[keyof typeof DeliveryOfferPaymentMethodsItem];
+
+
+export const DeliveryOfferPaymentMethodsItem = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
 } as const;
 
 export type DeliveryOfferDeliveryMethodsItem = typeof DeliveryOfferDeliveryMethodsItem[keyof typeof DeliveryOfferDeliveryMethodsItem];
@@ -431,16 +451,22 @@ export interface DeliveryOffer {
   name: string;
   description?: string;
   productType: DeliveryOfferProductType;
-  stripePriceId: string;
+  stripePriceId?: string;
+  /** @minimum 0 */
+  unitAmount: number;
+  /**
+     * @minLength 3
+     * @maxLength 3
+     */
+  currency: string;
+  /** @minItems 1 */
+  paymentMethods: DeliveryOfferPaymentMethodsItem[];
   /** @minimum 1 */
   photoCount: number;
   printSize?: string;
   deliveryMethods: DeliveryOfferDeliveryMethodsItem[];
   active: boolean;
   includesDigitalDownloads?: boolean;
-  /** @minimum 0 */
-  unitAmount?: number;
-  currency?: string;
   pricingRules?: DeliveryOfferPricingRules;
 }
 
@@ -450,6 +476,10 @@ export interface DeliverySettingsInput {
   watermarkText?: string | null;
   /** @nullable */
   expiresAt?: string | null;
+  /** @nullable */
+  establishmentPaymentInstructions?: string | null;
+  /** @nullable */
+  bankTransferInstructions?: string | null;
   offers?: DeliveryOffer[];
 }
 
@@ -468,6 +498,20 @@ export const FulfillmentInputFulfillmentStatus = {
 
 export interface FulfillmentInput {
   fulfillmentStatus: FulfillmentInputFulfillmentStatus;
+}
+
+export type PaymentStatusInputStatus = typeof PaymentStatusInputStatus[keyof typeof PaymentStatusInputStatus];
+
+
+export const PaymentStatusInputStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  cancelled: 'cancelled',
+  refunded: 'refunded',
+} as const;
+
+export interface PaymentStatusInput {
+  status: PaymentStatusInputStatus;
 }
 
 export type DeliveryGalleryPhotosItem = {
@@ -527,8 +571,10 @@ export interface DeliveryPhotosResponse {
   student: DeliveryPhotosResponseStudent;
   price?: DeliveryPhotosResponsePrice;
   offers: DeliveryOffer[];
-  /** Whether the live Stripe catalog is available for checkout. */
+  /** Whether at least one complete Volume Capture offer is available. */
   orderingAvailable: boolean;
+  /** Whether Stripe checkout is currently available as an optional payment method. */
+  stripeAvailable: boolean;
   photos: DeliveryGalleryPhotosItem[];
 }
 
@@ -545,17 +591,40 @@ export interface DeliveryCatalogResponse {
   offers?: DeliveryOffer[];
 }
 
+export type DeliveryCheckoutResponsePaymentMethod = typeof DeliveryCheckoutResponsePaymentMethod[keyof typeof DeliveryCheckoutResponsePaymentMethod];
+
+
+export const DeliveryCheckoutResponsePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
 export interface DeliveryCheckoutResponse {
   /** @nullable */
   checkoutUrl: string | null;
   orderId: number;
+  status: string;
+  paymentMethod: DeliveryCheckoutResponsePaymentMethod;
+  /** @nullable */
+  paymentInstructions?: string | null;
 }
+
+export type DeliveryOrderResponsePaymentMethod = typeof DeliveryOrderResponsePaymentMethod[keyof typeof DeliveryOrderResponsePaymentMethod];
+
+
+export const DeliveryOrderResponsePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
 
 export interface DeliveryOrderResponse {
   orderId: number;
   status: string;
   amountTotal: number;
   currency: string;
+  paymentMethod: DeliveryOrderResponsePaymentMethod;
   /** @nullable */
   paidAt?: string | null;
   photoIds: number[];

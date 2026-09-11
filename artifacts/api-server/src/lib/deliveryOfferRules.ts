@@ -15,7 +15,7 @@ export function validateDeliverySelection(
   }
 }
 
-export function deliveryStripeQuantity(
+export function deliveryOrderQuantity(
   productType: DeliveryProductType,
   photoCount: number,
   selectedCount: number,
@@ -24,6 +24,6 @@ export function deliveryStripeQuantity(
   return productType === "digital" && photoCount === 1 ? selectedCount : quantity;
 }
 
-export function deliveryAmount(unitAmount: number, stripeQuantity: number): number {
-  return unitAmount * stripeQuantity;
+export function deliveryAmount(unitAmount: number, orderQuantity: number): number {
+  return unitAmount * orderQuantity;
 }

@@ -5,9 +5,14 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeliveryCheckoutResponsePaymentMethod } from './deliveryCheckoutResponsePaymentMethod';
 
 export interface DeliveryCheckoutResponse {
   /** @nullable */
   checkoutUrl: string | null;
   orderId: number;
+  status: string;
+  paymentMethod: DeliveryCheckoutResponsePaymentMethod;
+  /** @nullable */
+  paymentInstructions?: string | null;
 }

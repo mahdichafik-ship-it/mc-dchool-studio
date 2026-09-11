@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DeliveryOrderInputDeliveryMethod } from './deliveryOrderInputDeliveryMethod';
+import type { DeliveryOrderInputPaymentMethod } from './deliveryOrderInputPaymentMethod';
 
 export interface DeliveryOrderInput {
   token?: string;
@@ -15,6 +16,8 @@ export interface DeliveryOrderInput {
   /** @minimum 1 */
   quantity?: number;
   customerName?: string;
+  customerEmail?: string;
+  paymentMethod: DeliveryOrderInputPaymentMethod;
   deliveryMethod?: DeliveryOrderInputDeliveryMethod;
   deliveryAddress?: string;
 }

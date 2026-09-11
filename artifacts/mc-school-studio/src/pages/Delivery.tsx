@@ -11,7 +11,8 @@ import {
   getGetDeliveryGalleryQueryKey,
   getGetDeliveryOrderQueryKey,
   type DeliveryOffer,
-  type DeliveryOrderInputDeliveryMethod
+  type DeliveryOrderInputDeliveryMethod,
+  type DeliveryOrderInputPaymentMethod
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -35,7 +36,9 @@ export default function Delivery() {
 
   // Form states for checkout
   const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryOrderInputDeliveryMethod>("digital");
+  const [paymentMethod, setPaymentMethod] = useState<DeliveryOrderInputPaymentMethod>("establishment");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [quantity, setQuantity] = useState(1);
 
@@ -77,6 +80,8 @@ export default function Delivery() {
         ? "digital" 
         : content.offers[0].deliveryMethods[0];
       setDeliveryMethod(method as any);
+      const availablePayments = content.offers[0].paymentMethods.filter(method => method !== "stripe" || content.stripeAvailable);
+      setPaymentMethod((availablePayments[0] || content.offers[0].paymentMethods[0]) as DeliveryOrderInputPaymentMethod);
     }
   }, [content?.offers, selectedOfferId]);
 
@@ -85,7 +90,7 @@ export default function Delivery() {
       enabled: !!slug && !!token && !!orderIdToCheck,
       queryKey: getGetDeliveryOrderQueryKey(slug as string, orderIdToCheck as number),
       refetchInterval: (query) => {
-        if (query.state.data?.status === "paid") return false;
+        if (["paid", "cancelled", "refunded", "expired"].includes(query.state.data?.status || "")) return false;
         return 2500; // Poll every 2.5s until paid
       }
     },
@@ -168,7 +173,9 @@ export default function Delivery() {
         offerId: activeOffer.id,
         photoIds: Array.from(selected),
         quantity: activeOffer.productType === 'digital' ? 1 : quantity,
-        customerName: customerName.trim() || undefined,
+        customerName: customerName.trim(),
+        customerEmail: customerEmail.trim() || undefined,
+        paymentMethod,
         deliveryMethod,
         deliveryAddress: deliveryAddress.trim() || undefined
       } 
@@ -176,7 +183,12 @@ export default function Delivery() {
       onSuccess: (res) => {
         if (res.checkoutUrl) {
           window.location.assign(res.checkoutUrl);
+          return;
         }
+        setOrderIdToCheck(res.orderId);
+        setShowCheckoutForm(false);
+        setSelected(new Set());
+        setNotice(`Order #${res.orderId} received. ${res.paymentInstructions || "The studio will confirm payment before processing the order."}`);
       }
     });
   }
@@ -324,6 +336,10 @@ export default function Delivery() {
                     if (!offer.deliveryMethods.includes(deliveryMethod)) {
                       setDeliveryMethod(offer.deliveryMethods.includes("digital" as any) ? "digital" : offer.deliveryMethods[0] as any);
                     }
+                    const availablePayments = offer.paymentMethods.filter(method => method !== "stripe" || content.stripeAvailable);
+                    if (!availablePayments.includes(paymentMethod)) {
+                      setPaymentMethod((availablePayments[0] || offer.paymentMethods[0]) as DeliveryOrderInputPaymentMethod);
+                    }
                   }}
                   className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
                     selectedOfferId === offer.id
@@ -358,13 +374,13 @@ export default function Delivery() {
 
         {content.orderingAvailable === false && (
           <div role="status" className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Private photo access is available, but online ordering is temporarily unavailable. Please contact the photography studio for help with an order.
+            Private photo access is available, but this studio has not configured an active offer yet.
           </div>
         )}
         
         {createOrder.isError && (
           <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            Checkout is not available right now. Please try again.
+            The order could not be placed with this payment method. Choose another method or try again.
           </div>
         )}
         
@@ -524,6 +540,17 @@ export default function Delivery() {
                     placeholder="Jane Doe"
                   />
                 </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-500">Email</label>
+                  <input
+                    type="email"
+                    value={customerEmail}
+                    onChange={e => setCustomerEmail(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
+                    placeholder="you@example.com"
+                  />
+                </div>
                 
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-slate-500">Delivery Method *</label>
@@ -535,6 +562,24 @@ export default function Delivery() {
                   >
                     {activeOffer.deliveryMethods.map(m => (
                       <option key={m} value={m} className="capitalize">{m}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-500">Payment Method *</label>
+                  <select
+                    required
+                    value={paymentMethod}
+                    onChange={e => setPaymentMethod(e.target.value as DeliveryOrderInputPaymentMethod)}
+                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
+                  >
+                    {activeOffer.paymentMethods.map(method => (
+                      <option key={method} value={method} disabled={method === "stripe" && !content.stripeAvailable}>
+                        {method === "stripe"
+                          ? content.stripeAvailable ? "Card with Stripe" : "Card with Stripe (unavailable)"
+                          : method === "establishment" ? "Pay at establishment" : "Bank transfer"}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -583,7 +628,7 @@ export default function Delivery() {
                   style={{ backgroundColor: "var(--delivery-primary)" }}
                 >
                   {createOrder.isPending ? <Loader2 className="size-4 animate-spin" /> : <ShoppingBag className="size-4" />}
-                  Place Order
+                   {paymentMethod === "stripe" ? "Continue to card payment" : "Place Order"}
                 </button>
               </div>
             </form>

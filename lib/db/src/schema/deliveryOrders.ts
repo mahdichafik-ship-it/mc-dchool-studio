@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, boolean } from "drizzle-orm/pg-core";
 import { deliveryGalleriesTable } from "./deliveries";
 import { studentPhotosTable } from "./photos";
 
@@ -27,6 +27,7 @@ export const deliveryOrderItemsTable = pgTable("delivery_order_items", {
   offerId: text("offer_id").notNull().default("digital-single"),
   productName: text("product_name").notNull().default("Digital photo"),
   productType: text("product_type", { enum: ["digital", "print", "pack"] }).notNull().default("digital"),
+  includesDigitalDownloads: boolean("includes_digital_downloads").notNull().default(false),
   printSize: text("print_size"),
   quantity: integer("quantity").notNull().default(1),
   unitAmount: integer("unit_amount").notNull(),

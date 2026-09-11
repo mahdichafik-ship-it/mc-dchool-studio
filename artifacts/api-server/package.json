@@ -7,7 +7,7 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "test:integration": "NODE_ENV=test node ./build.mjs && NODE_ENV=test node ./build-test.mjs && NODE_ENV=test node --test ./test/photos.integration.test.mjs ./test/access.integration.test.mjs ./test/platform.integration.test.mjs ./test/groupMembership.test.mjs ./test/googleDriveBackup.test.mjs ./test/managedStripeWebhook.test.mjs",
+    "test:integration": "NODE_ENV=test node ./build.mjs && NODE_ENV=test node ./build-test.mjs && NODE_ENV=test node --test ./test/photos.integration.test.mjs ./test/access.integration.test.mjs ./test/platform.integration.test.mjs ./test/groupMembership.test.mjs ./test/googleDriveBackup.test.mjs ./test/managedStripeWebhook.test.mjs ./test/deliveryOffers.integration.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

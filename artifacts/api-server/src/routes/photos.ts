@@ -461,6 +461,9 @@ function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
     fileName: photo.fileName,
     fileUrl: photo.fileUrl,
     mimeType: photo.mimeType,
+    rating: photo.rating,
+    colorLabel: photo.colorLabel,
+    shareWithParents: photo.shareWithParents,
     capturedAt: photo.capturedAt,
     createdAt: photo.createdAt.toISOString(),
   };
@@ -556,6 +559,39 @@ async function backupGroupUploadedFile(projectId: number, groupId: number, fileP
     studentFolderName: `Group_${groupId}`, filePath, fileName, fileRole: role,
     fileFormat: format, backupKey: key, subjectType: "group",
   });
+}
+
+/** Materialize the current capture pipeline into the legacy delivery table.
+ * JPEG is the delivery representation; RAW files never create gallery rows.
+ * The desktop connection/upload identity makes retries idempotent.
+ */
+async function projectCaptureJpegToDeliveryPhoto(
+  capture: typeof capturesTable.$inferSelect,
+  file: typeof captureFilesTable.$inferSelect,
+): Promise<void> {
+  if (file.fileRole !== "JPEG" || !file.durableObjectPath) return;
+  const existing = await db.select({ id: studentPhotosTable.id })
+    .from(studentPhotosTable)
+    .where(and(
+      eq(studentPhotosTable.projectId, capture.projectId),
+      eq(studentPhotosTable.studentId, capture.studentId),
+      eq(studentPhotosTable.fileName, file.originalFilename),
+    )).limit(1);
+  if (existing.length) return;
+  await db.insert(studentPhotosTable).values({
+    projectId: capture.projectId,
+    studentId: capture.studentId,
+    fileName: file.originalFilename,
+    fileUrl: file.fileUrl,
+    durableObjectPath: file.durableObjectPath,
+    mimeType: file.mimeType,
+    capturedAt: capture.capturedAt,
+    desktopConnectionId: file.desktopConnectionId,
+    clientUploadId: file.clientUploadId,
+    rating: capture.rating,
+    colorLabel: capture.colorLabel,
+    shareWithParents: capture.colorLabel === "green",
+  }).onConflictDoNothing();
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,6 +1069,12 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       throw error;
     }
 
+    // Delivery projection is materialized once the photographer approves the
+    // capture. This keeps unreviewed captures out of the parent gallery while
+    // still making the current capture pipeline durable on review.
+    if (result.capture.colorLabel === "green") {
+      await projectCaptureJpegToDeliveryPhoto(result.capture, result.file);
+    }
     if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,
@@ -1082,11 +1124,66 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
     res.status(404).json({ error: "Capture not found" });
     return;
   }
+  const [jpeg] = await db.select({
+    file: captureFilesTable,
+    originalFilename: captureFilesTable.originalFilename,
+    desktopConnectionId: captureFilesTable.desktopConnectionId,
+    clientUploadId: captureFilesTable.clientUploadId,
+  }).from(captureFilesTable).where(and(
+    eq(captureFilesTable.captureId, capture.id),
+    eq(captureFilesTable.fileRole, "JPEG"),
+  )).limit(1);
+  if (jpeg) {
+    await projectCaptureJpegToDeliveryPhoto(capture, jpeg.file);
+  }
+  // The delivery table is the durable publication snapshot. Keep it in sync
+  // with the desktop review decision and the projected JPEG identity.
+  await db.update(studentPhotosTable).set({
+    shareWithParents: colorLabel === "green",
+    rating,
+    colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
+  }).where(and(
+    eq(studentPhotosTable.projectId, projectId),
+    eq(studentPhotosTable.studentId, studentId),
+    jpeg?.clientUploadId
+      ? and(
+        eq(studentPhotosTable.desktopConnectionId, jpeg.desktopConnectionId!),
+        eq(studentPhotosTable.clientUploadId, jpeg.clientUploadId),
+      )
+      : eq(studentPhotosTable.fileName, jpeg?.originalFilename ?? capture.baseFilename),
+  ));
   res.json({ capture });
 });
 
 // GET /api/projects/:projectId/students/:studentId/photos
 // Web app: Clerk authenticated + assignment-aware project access.
+router.patch("/:studentId/photos/:photoId/share", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const studentId = Number(req.params.studentId);
+  const photoId = Number(req.params.photoId);
+  if (![projectId, studentId, photoId].every((value) => Number.isSafeInteger(value) && value > 0)
+    || typeof req.body?.shareWithParents !== "boolean") {
+    res.status(400).json({ error: "A boolean shareWithParents value and valid photo identifiers are required" });
+    return;
+  }
+  if (!(await canAccessProject(getUserId(req), projectId, "manage"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [photo] = await db.update(studentPhotosTable).set({
+    shareWithParents: req.body.shareWithParents,
+  }).where(and(
+    eq(studentPhotosTable.id, photoId),
+    eq(studentPhotosTable.projectId, projectId),
+    eq(studentPhotosTable.studentId, studentId),
+  )).returning();
+  if (!photo) {
+    res.status(404).json({ error: "Photo not found" });
+    return;
+  }
+  res.json({ photo: photoToResponse(photo) });
+});
+
 router.get("/:studentId/photos", requireAuth, async (req, res) => {
   const userId = getUserId(req);
   const projectId = parseInt(req.params.projectId as string);

@@ -121,3 +121,67 @@ test('keeps unassigned first-file ownership instead of using a later active stud
   assert.equal(second.capture.studentId, null)
   assert.equal(second.capture.status, 'complete')
 })
+
+test('strict drops do not pair a JPEG-first capture across students', () => {
+  const engine = new CapturePairingEngine()
+  const jpeg = engine.ingest({
+    projectId: 2,
+    studentId: 10452,
+    classId: 7,
+    shootSessionId: 'drop-1',
+    filePath: '/drop/student-a/DSC_8400.JPG',
+    fileName: 'DSC_8400.JPG',
+    capturedAt: '2026-08-30T12:00:00.000Z',
+    strictStudentOwnership: true,
+  })
+  const raw = engine.ingest({
+    projectId: 2,
+    studentId: 99999,
+    classId: 99,
+    shootSessionId: 'drop-1',
+    filePath: '/drop/student-b/DSC_8400.NEF',
+    fileName: 'DSC_8400.NEF',
+    capturedAt: '2026-08-30T12:00:03.000Z',
+    strictStudentOwnership: true,
+  })
+
+  assert.equal(jpeg.kind, 'created')
+  assert.equal(raw.kind, 'created')
+  assert.notEqual(raw.capture.captureKey, jpeg.capture.captureKey)
+  assert.equal(jpeg.capture.studentId, 10452)
+  assert.equal(raw.capture.studentId, 99999)
+  assert.equal(jpeg.capture.files[0]?.filePath, '/drop/student-a/DSC_8400.JPG')
+  assert.equal(raw.capture.files[0]?.filePath, '/drop/student-b/DSC_8400.NEF')
+})
+
+test('strict drops do not pair a RAW-first capture across students', () => {
+  const engine = new CapturePairingEngine()
+  const raw = engine.ingest({
+    projectId: 2,
+    studentId: 10452,
+    classId: 7,
+    shootSessionId: 'drop-2',
+    filePath: '/drop/student-a/DSC_8401.NEF',
+    fileName: 'DSC_8401.NEF',
+    capturedAt: '2026-08-30T12:00:00.000Z',
+    strictStudentOwnership: true,
+  })
+  const jpeg = engine.ingest({
+    projectId: 2,
+    studentId: 99999,
+    classId: 99,
+    shootSessionId: 'drop-2',
+    filePath: '/drop/student-b/DSC_8401.JPG',
+    fileName: 'DSC_8401.JPG',
+    capturedAt: '2026-08-30T12:00:03.000Z',
+    strictStudentOwnership: true,
+  })
+
+  assert.equal(raw.kind, 'created')
+  assert.equal(jpeg.kind, 'created')
+  assert.notEqual(jpeg.capture.captureKey, raw.capture.captureKey)
+  assert.equal(raw.capture.studentId, 10452)
+  assert.equal(jpeg.capture.studentId, 99999)
+  assert.equal(raw.capture.files[0]?.filePath, '/drop/student-a/DSC_8401.NEF')
+  assert.equal(jpeg.capture.files[0]?.filePath, '/drop/student-b/DSC_8401.JPG')
+})

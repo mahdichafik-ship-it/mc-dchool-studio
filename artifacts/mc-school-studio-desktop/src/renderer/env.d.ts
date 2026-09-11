@@ -131,12 +131,11 @@ interface ElectronAPI {
   invoke(channel: 'watcher:setActiveStudent', args: { projectId: number; studentId: number | null }): Promise<number | null>
   invoke(channel: 'watcher:getActiveTarget', args: { projectId: number }): Promise<{ studentId: number | null; groupId: number | null; targetType: 'student' | 'group' | 'none' }>
   invoke(channel: 'watcher:setActiveGroup', args: { projectId: number; groupId: number | null }): Promise<number | null>
-  invoke(channel: 'watcher:ingestDroppedFiles', args: {
-    projectId: number
-    studentId: number
-    filePaths: string[]
-  }): Promise<DroppedCaptureBatchResult>
-  getPathForFile(file: File): string
+  ingestDroppedFiles(
+    projectId: number,
+    studentId: number,
+    files: File[],
+  ): Promise<DroppedCaptureBatchResult>
   invoke(channel: 'dialog:openFile', args?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>

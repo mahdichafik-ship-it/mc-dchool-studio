@@ -27,6 +27,13 @@ interface CaptureFileInput {
   fileName: string
   capturedAt: string
   groupId?: string | null
+  /**
+   * Explicit renderer drops must never pair a file with another student's
+   * capture just because the camera basename and timestamps happen to match.
+   * Ordinary watcher imports leave this unset to preserve their legacy
+   * basename/timestamp pairing behavior.
+   */
+  strictStudentOwnership?: boolean
 }
 
 function timestampMs(value: string): number {
@@ -66,8 +73,9 @@ function findPairCandidate(db: DesktopDb, input: CaptureFileInput) {
     .all()
     .map((capture) => ({ capture, files: getCaptureFiles(db, capture.id) }))
     .filter(({ capture, files }) =>
-       sameCaptureWindow(input.capturedAt, capture.capturedAt)
-       && (input.groupId === undefined || capture.groupId === input.groupId)
+      sameCaptureWindow(input.capturedAt, capture.capturedAt)
+      && (input.groupId === undefined || capture.groupId === input.groupId)
+      && (!input.strictStudentOwnership || capture.studentId === input.studentId)
       && !files.some((file) => file.fileRole === role),
     )
     .sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0]
@@ -257,7 +265,12 @@ export function recordRawCapture(db: DesktopDb, input: CaptureFileInput): {
  * newly processed JPEG a capture/file representation while the legacy gallery
  * and upload flows remain the compatibility surface.
  */
-export function mirrorPhotoAsCapture(db: DesktopDb, photo: PhotoRow, sourcePath = photo.filePath): void {
+export function mirrorPhotoAsCapture(
+  db: DesktopDb,
+  photo: PhotoRow,
+  sourcePath = photo.filePath,
+  options: { strictStudentOwnership?: boolean } = {},
+): void {
   const existing = db
     .select()
     .from(capturesTable)
@@ -290,6 +303,7 @@ export function mirrorPhotoAsCapture(db: DesktopDb, photo: PhotoRow, sourcePath 
     storedPath: photo.filePath,
     fileName: photo.fileName,
     capturedAt: photo.capturedAt,
+    strictStudentOwnership: options.strictStudentOwnership,
   })
 
   if (candidate) {

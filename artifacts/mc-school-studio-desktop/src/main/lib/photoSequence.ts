@@ -11,6 +11,11 @@ export interface CaptureFile {
    */
   selectedStudentId?: number | null
   selectedGroupId?: number | null
+  /**
+   * Set only for explicit renderer drops. Ordinary watcher captures retain
+   * legacy basename/timestamp pairing unless this is true.
+   */
+  strictStudentOwnership?: boolean
 }
 
 export interface SequenceState {

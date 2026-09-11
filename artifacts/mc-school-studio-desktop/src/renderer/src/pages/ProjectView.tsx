@@ -47,7 +47,6 @@ import type {
   GroupCaptureReview,
 } from '@/hooks/useApi'
 import type {
-  DroppedCaptureBatchResult,
   DroppedCaptureFileResult,
   DroppedCaptureProgressEvent,
 } from '@shared/types'
@@ -392,33 +391,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       return
     }
 
-    const filePaths: string[] = []
-    let pathErrors = 0
-    for (const file of droppedFiles) {
-      try {
-        const filePath = window.api.getPathForFile(file)
-        if (filePath) filePaths.push(filePath)
-        else pathErrors++
-      } catch {
-        pathErrors++
-      }
-    }
-    if (filePaths.length === 0) {
-      addToast({
-        type: 'error',
-        title: 'Could not read dropped files',
-        description: `${pathErrors} file${pathErrors === 1 ? '' : 's'} could not be opened by the desktop app.`,
-      })
-      return
-    }
-
-    setDropProgress({ studentId, completed: 0, total: filePaths.length, results: [] })
+    setDropProgress({ studentId, completed: 0, total: droppedFiles.length, results: [] })
     try {
-      const result = await window.api.invoke('watcher:ingestDroppedFiles', {
-        projectId,
-        studentId,
-        filePaths,
-      }) as DroppedCaptureBatchResult
+      const result = await window.api.ingestDroppedFiles(projectId, studentId, droppedFiles)
       await reloadStudents()
       if (result.imported > 0) {
         addToast({
@@ -429,11 +404,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             result.duplicates > 0 ? `${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} skipped` : null,
             result.skipped > 0 ? `${result.skipped} unsupported skipped` : null,
             result.errors > 0 ? `${result.errors} error${result.errors === 1 ? '' : 's'}` : null,
-            pathErrors > 0 ? `${pathErrors} file path error${pathErrors === 1 ? '' : 's'}` : null,
           ].filter(Boolean).join(' · '),
         })
       } else {
-        const hasErrors = result.errors > 0 || pathErrors > 0
+        const hasErrors = result.errors > 0
         addToast({
           type: hasErrors ? 'error' : 'info',
           title: hasErrors ? 'No photos imported' : 'No new photos imported',
@@ -441,7 +415,6 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             result.duplicates > 0 ? `${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'}` : null,
             result.skipped > 0 ? `${result.skipped} unsupported` : null,
             result.errors > 0 ? `${result.errors} error${result.errors === 1 ? '' : 's'}` : null,
-            pathErrors > 0 ? `${pathErrors} file path error${pathErrors === 1 ? '' : 's'}` : null,
           ].filter(Boolean).join(' · ') || 'The dropped files could not be imported.',
         })
       }

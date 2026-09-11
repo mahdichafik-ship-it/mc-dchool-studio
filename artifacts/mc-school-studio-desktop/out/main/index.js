@@ -2438,7 +2438,7 @@ function findPairCandidate(db, input) {
     drizzleOrm.eq(capturesTable.projectId, input.projectId),
     drizzleOrm.eq(capturesTable.baseFilename, normalizeBaseFilename(input.fileName))
   )).all().map((capture) => ({ capture, files: getCaptureFiles(db, capture.id) })).filter(
-    ({ capture, files }) => sameCaptureWindow(input.capturedAt, capture.capturedAt) && (input.groupId === void 0 || capture.groupId === input.groupId) && !files.some((file) => file.fileRole === role)
+    ({ capture, files }) => sameCaptureWindow(input.capturedAt, capture.capturedAt) && (input.groupId === void 0 || capture.groupId === input.groupId) && (!input.strictStudentOwnership || capture.studentId === input.studentId) && !files.some((file) => file.fileRole === role)
   ).sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0];
 }
 function recordGroupCapture(db, input) {
@@ -2583,7 +2583,7 @@ function recordRawCapture(db, input) {
   insertImageFile(db, capture.id, input);
   return { kind: "created", captureId: capture.id };
 }
-function mirrorPhotoAsCapture(db, photo, sourcePath = photo.filePath) {
+function mirrorPhotoAsCapture(db, photo, sourcePath = photo.filePath, options = {}) {
   const existing = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.legacyPhotoId, photo.id)).get();
   if (existing) return;
   const role = getCaptureFileRole(photo.fileName);
@@ -2603,7 +2603,8 @@ function mirrorPhotoAsCapture(db, photo, sourcePath = photo.filePath) {
     classId: classRow?.id ?? null,
     storedPath: photo.filePath,
     fileName: photo.fileName,
-    capturedAt: photo.capturedAt
+    capturedAt: photo.capturedAt,
+    strictStudentOwnership: options.strictStudentOwnership
   });
   if (candidate) {
     db.update(capturesTable).set({
@@ -43539,7 +43540,7 @@ function advanceSequence(state, capture) {
   }
   return { kind: "matched", studentId: state.activeStudentId };
 }
-function createWatchedPhotoStore(db, sourcePath) {
+function createWatchedPhotoStore(db, sourcePath, options = {}) {
   return {
     findProject: (projectId) => db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get(),
     listStudents: (projectId) => db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all(),
@@ -43547,7 +43548,9 @@ function createWatchedPhotoStore(db, sourcePath) {
     findClass: (classId) => db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, classId)).get(),
     insertPhoto: (photo) => {
       const saved = db.insert(photosTable).values(photo).returning().get();
-      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath);
+      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath, {
+        strictStudentOwnership: options.strictStudentOwnership
+      });
       return saved;
     }
   };
@@ -43769,6 +43772,7 @@ const watchers = /* @__PURE__ */ new Map();
 const pendingManualTargets = /* @__PURE__ */ new Map();
 const pendingGroupTargets = /* @__PURE__ */ new Map();
 const activeDropBatches = /* @__PURE__ */ new Set();
+const dropCapabilityTokens = /* @__PURE__ */ new Map();
 let dropBatchTail = Promise.resolve();
 let desktopRetiring = false;
 function createWatchSession(watcher, sequenceState = createSequenceState(), awaitDurability = false) {
@@ -43985,6 +43989,11 @@ function enqueueLocalPreview(scheduler, win, projectId, capture, student, contex
   });
   return null;
 }
+function createCaptureStore(db, capture) {
+  return createWatchedPhotoStore(db, capture.filePath, {
+    strictStudentOwnership: capture.strictStudentOwnership
+  });
+}
 function enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result) {
   const task = session.persistence.then(async () => {
     await session.previewScheduler.waitForIdle();
@@ -44020,6 +44029,15 @@ function registerWatcherHandlers() {
     }
     markImagePipelineRendererStage(stage);
     return { ok: true };
+  });
+  electron.ipcMain.on("watcher:registerDropCapability", (event, token) => {
+    if (typeof token !== "string" || token.length < 32) return;
+    dropCapabilityTokens.set(event.sender.id, token);
+    event.sender.once("destroyed", () => {
+      if (dropCapabilityTokens.get(event.sender.id) === token) {
+        dropCapabilityTokens.delete(event.sender.id);
+      }
+    });
   });
   electron.ipcMain.handle("watcher:start", async (_e, { projectId }) => {
     if (desktopRetiring || getSetting("desktop_retired") === "1") {
@@ -44148,9 +44166,12 @@ function registerWatcherHandlers() {
   );
   electron.ipcMain.handle(
     "watcher:ingestDroppedFiles",
-    async (_e, input) => {
-      if (!Number.isInteger(input?.projectId) || !Number.isInteger(input?.studentId)) {
-        throw new Error("A valid project and student are required for dropped photos");
+    async (event, input) => {
+      if (typeof input?.capabilityToken !== "string" || dropCapabilityTokens.get(event.sender.id) !== input.capabilityToken) {
+        throw new Error("Dropped photo import is only available through the preload capability");
+      }
+      if (!Number.isInteger(input.projectId) || !Number.isInteger(input.studentId) || !Array.isArray(input.filePaths) || input.filePaths.some((filePath) => typeof filePath !== "string" || !filePath.trim())) {
+        throw new Error("A valid project, student, and dropped file paths are required");
       }
       return queueDroppedCaptureBatch(input.projectId, input.studentId, input.filePaths);
     }
@@ -44231,7 +44252,8 @@ async function enqueueCapture(projectId, filePath, diagnosticId, options = {}) {
       // photographer may select another student or scan another QR during
       // that delay.
       selectedStudentId: options.selectedStudentId !== void 0 ? options.selectedStudentId : session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId,
-      selectedGroupId: options.selectedGroupId !== void 0 ? options.selectedGroupId : pendingGroupTargets.get(projectId) ?? null
+      selectedGroupId: options.selectedGroupId !== void 0 ? options.selectedGroupId : pendingGroupTargets.get(projectId) ?? null,
+      strictStudentOwnership: options.strictStudentOwnership
     });
     if (options.processImmediately) {
       const [capture] = session.pendingFiles.splice(0);
@@ -44335,6 +44357,7 @@ async function ingestDroppedFiles(projectId, studentId, filePaths) {
           session,
           selectedStudentId: studentId,
           selectedGroupId: null,
+          strictStudentOwnership: true,
           processImmediately: true
         });
         if (status === "duplicate") {
@@ -44444,7 +44467,7 @@ async function handleNewPhoto(projectId, capture, session) {
   );
   if (filenameReference) {
     const result2 = await processWatchedPhoto(projectId, capture.filePath, {
-      store: createWatchedPhotoStore(db, capture.filePath),
+      store: createCaptureStore(db, capture),
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
@@ -44474,7 +44497,7 @@ async function handleNewPhoto(projectId, capture, session) {
   }
   if (manualStudentId !== null) {
     const result2 = await processWatchedPhoto(projectId, capture.filePath, {
-      store: createWatchedPhotoStore(db, capture.filePath),
+      store: createCaptureStore(db, capture),
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
@@ -44544,7 +44567,7 @@ async function handleNewPhoto(projectId, capture, session) {
   if (session.sequenceState.activeStudentId === null) {
     if (looksLikeSmartShooterName(capture.fileName)) {
       const result2 = await processWatchedPhoto(projectId, capture.filePath, {
-        store: createWatchedPhotoStore(db, capture.filePath),
+        store: createCaptureStore(db, capture),
         photosDir: getPhotosDir(),
         projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
         readQr: async () => null,
@@ -44589,7 +44612,7 @@ async function handleNewPhoto(projectId, capture, session) {
     return "unmatched";
   }
   const result = await processWatchedPhoto(projectId, capture.filePath, {
-    store: createWatchedPhotoStore(db, capture.filePath),
+    store: createCaptureStore(db, capture),
     photosDir: getPhotosDir(),
     projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
     readQr: async () => null,
@@ -44754,7 +44777,8 @@ async function handleNewRaw(projectId, capture, session, db) {
       filePath: capture.filePath,
       storedPath,
       fileName: outputFileName,
-      capturedAt: new Date(capture.capturedAtMs).toISOString()
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      strictStudentOwnership: capture.strictStudentOwnership
     });
     if (result.kind === "duplicate") return;
     notifyLiveUploadJobQueued(projectId);

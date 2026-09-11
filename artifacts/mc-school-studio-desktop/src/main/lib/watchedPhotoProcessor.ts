@@ -26,7 +26,11 @@ export interface WatchedPhotoStore {
   insertPhoto(photo: typeof photosTable.$inferInsert): PhotoRow
 }
 
-export function createWatchedPhotoStore(db: DesktopDb, sourcePath?: string): WatchedPhotoStore {
+export function createWatchedPhotoStore(
+  db: DesktopDb,
+  sourcePath?: string,
+  options: { strictStudentOwnership?: boolean } = {},
+): WatchedPhotoStore {
   return {
     findProject: (projectId) =>
       db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get(),
@@ -45,7 +49,9 @@ export function createWatchedPhotoStore(db: DesktopDb, sourcePath?: string): Wat
       db.select().from(classesTable).where(eq(classesTable.id, classId)).get(),
     insertPhoto: (photo) => {
       const saved = db.insert(photosTable).values(photo).returning().get()
-      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath)
+      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath, {
+        strictStudentOwnership: options.strictStudentOwnership,
+      })
       return saved
     },
   }

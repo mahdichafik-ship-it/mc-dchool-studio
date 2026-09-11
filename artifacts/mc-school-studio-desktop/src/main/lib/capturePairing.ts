@@ -19,6 +19,11 @@ export interface IncomingCaptureFile extends CaptureAssignment {
   fileSize?: number | null
   checksum?: string | null
   role?: CaptureFileRole
+  /**
+   * Explicit renderer drops use strict ownership; legacy watcher callers
+   * leave this unset and retain basename/timestamp pairing behavior.
+   */
+  strictStudentOwnership?: boolean
 }
 
 export interface PairedCaptureFile {
@@ -107,6 +112,7 @@ export class CapturePairingEngine {
     const baseFilename = normalizeBaseFilename(file.fileName)
     const existingDuplicate = this.captures.find((capture) =>
       sameAssignmentScope(capture, file)
+      && (!file.strictStudentOwnership || capture.studentId === file.studentId)
       && capture.files.some((candidate) =>
         candidate.role === role
         && ((file.checksum && candidate.checksum === file.checksum) || candidate.filePath === file.filePath),
@@ -119,6 +125,7 @@ export class CapturePairingEngine {
       .filter((capture) =>
         sameAssignmentScope(capture, file)
         && !capture.files.some((candidateFile) => candidateFile.role === role)
+        && (!file.strictStudentOwnership || capture.studentId === file.studentId)
         && (fileTime === 0 || timestampMs(capture.capturedAt) === 0
           || Math.abs(timestampMs(capture.capturedAt) - fileTime) <= PAIR_TIMESTAMP_TOLERANCE_MS),
       )
@@ -147,6 +154,7 @@ export class CapturePairingEngine {
         file.cameraSerial ?? 'unknown',
         baseFilename,
         file.capturedAt,
+        ...(file.strictStudentOwnership ? [file.studentId ?? 'unassigned'] : []),
       ].map((part) => encodeURIComponent(part)).join(':'),
       projectId: file.projectId,
       studentId: file.studentId,

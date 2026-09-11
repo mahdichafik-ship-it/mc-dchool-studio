@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Check, Copy, Download, ExternalLink, Loader2, LockKeyhole, 
   Printer, QrCode, Send, Settings, ShoppingBag, Search, Ban, Play, Image as ImageIcon,
@@ -14,8 +14,13 @@ import {
   useListDeliveryOrders,
   useUpdateDeliveryFulfillment,
   useUpdateDeliveryPayment,
+  useListDeliveryPriceSheets,
+  useCreateDeliveryPriceSheet,
+  useUpdateDeliveryPriceSheet,
+  getListDeliveryPriceSheetsQueryKey,
   type DeliveryOffer
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 
 type StudioBranding = {
@@ -115,54 +120,57 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
 }
 
 function OverviewTab({ projectId }: { projectId: number }) {
-  const { data: settings, isLoading, refetch } = useGetDeliverySettings(projectId);
+  const { data: settings, isLoading: settingsLoading, refetch: refetchSettings } = useGetDeliverySettings(projectId);
+  const { data: priceSheets, isLoading: sheetsLoading } = useListDeliveryPriceSheets(projectId);
+  const queryClient = useQueryClient();
   
   const publishMutation = usePublishDelivery({
-    mutation: {
-      onSuccess: () => refetch()
-    }
+    mutation: { onSuccess: () => refetchSettings() }
   });
   const revokeMutation = useRevokeDelivery({
-    mutation: {
-      onSuccess: () => refetch()
-    }
+    mutation: { onSuccess: () => refetchSettings() }
   });
-  const updateSettingsMutation = useUpdateDeliverySettings({
-    mutation: {
-      onSuccess: () => refetch()
-    }
-  });
+  const updateSettingsMutation = useUpdateDeliverySettings();
+  const createSheetMutation = useCreateDeliveryPriceSheet();
+  const updateSheetMutation = useUpdateDeliveryPriceSheet();
 
   const [copied, setCopied] = useState(false);
+  
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [saveMessage, setSaveMessage] = useState("");
+
+  const [selectedSheetId, setSelectedSheetId] = useState<number | "new">("new");
+  const [sheetName, setSheetName] = useState("");
   const [offers, setOffers] = useState<DeliveryOffer[]>([]);
 
-  useEffect(() => {
-    const rawPriceSheet = (settings?.gallery as any)?.priceSheetJson;
-    if (rawPriceSheet) {
-      try {
-        const parsed = JSON.parse(rawPriceSheet);
-        if (parsed?.offers) {
-          setOffers(parsed.offers.map((offer: Partial<DeliveryOffer>) => ({
-            ...offer,
-            id: offer.id || crypto.randomUUID(),
-            name: offer.name || "",
-            productType: offer.productType || "digital",
-            unitAmount: Number.isInteger(offer.unitAmount) ? offer.unitAmount : 0,
-            currency: offer.currency || "mad",
-            paymentMethods: offer.paymentMethods?.length ? offer.paymentMethods : ["stripe"],
-            photoCount: offer.photoCount || 1,
-            deliveryMethods: offer.deliveryMethods?.length ? offer.deliveryMethods : ["digital"],
-            active: offer.active ?? true,
-            includesDigitalDownloads: offer.includesDigitalDownloads ?? offer.productType === "digital",
-          } as DeliveryOffer)));
-        }
-      } catch {}
-    } else {
-      setOffers([]);
-    }
-  }, [settings]);
+  const initializedForId = useRef<number | null>(null);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (settings && priceSheets && initializedForId.current !== projectId) {
+      initializedForId.current = projectId;
+      const gallery = settings.gallery as any;
+      const assignedId = gallery?.priceSheetId;
+      const rawPriceSheet = gallery?.priceSheetJson;
+
+      if (assignedId && priceSheets.find((s: any) => s.id === assignedId)) {
+        const sheet = priceSheets.find((s: any) => s.id === assignedId)!;
+        setSelectedSheetId(sheet.id);
+        setSheetName(sheet.name);
+        setOffers(sheet.offers || []);
+      } else if (rawPriceSheet) {
+        try {
+          const parsed = JSON.parse(rawPriceSheet);
+          setSheetName(parsed.name || "Legacy Offers");
+          setOffers(parsed.offers || []);
+          setSelectedSheetId("new");
+        } catch {}
+      } else if (priceSheets.length > 0) {
+        setSelectedSheetId("new");
+      }
+    }
+  }, [settings, priceSheets, projectId]);
+
+  if (settingsLoading || sheetsLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading delivery settings...</div>;
   }
 
@@ -176,6 +184,22 @@ function OverviewTab({ projectId }: { projectId: number }) {
       navigator.clipboard.writeText(publicUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleSheetSelect = (id: string) => {
+    if (id === "new") {
+      setSelectedSheetId("new");
+      setSheetName("");
+      setOffers([]);
+    } else {
+      const numId = Number(id);
+      const sheet = priceSheets?.find((s: any) => s.id === numId);
+      if (sheet) {
+        setSelectedSheetId(sheet.id);
+        setSheetName(sheet.name);
+        setOffers(sheet.offers || []);
+      }
     }
   };
 
@@ -204,6 +228,79 @@ function OverviewTab({ projectId }: { projectId: number }) {
   const removeOffer = (id: string) => {
     setOffers(offers.filter((o) => o.id !== id));
   };
+
+  const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaveStatus("saving");
+
+    if (!sheetName.trim()) {
+      setSaveStatus("error");
+      setSaveMessage("Please provide a name for the price sheet.");
+      return;
+    }
+
+    if (offers.length === 0) {
+      setSaveStatus("error");
+      setSaveMessage("Please add at least one offer.");
+      return;
+    }
+
+    if (offers.some(o => !o.name.trim() || o.unitAmount < 0 || !/^[A-Za-z]{3}$/.test(o.currency) || o.photoCount < 1 || o.paymentMethods.length < 1 || o.deliveryMethods.length < 1)) {
+      setSaveStatus("error");
+      setSaveMessage("Complete every offer with a name, valid amount and currency, photo count, delivery and payment methods.");
+      return;
+    }
+
+    const formData = new FormData(e.currentTarget);
+    const watermarkEnabled = formData.get("watermarkEnabled") === "on";
+    const watermarkText = (formData.get("watermarkText") as string) || null;
+    const expiresAt = (formData.get("expiresAt") as string) ? new Date(formData.get("expiresAt") as string).toISOString() : null;
+    const establishmentPaymentInstructions = (formData.get("establishmentPaymentInstructions") as string) || null;
+    const bankTransferInstructions = (formData.get("bankTransferInstructions") as string) || null;
+
+    try {
+      let sheetId = selectedSheetId === "new" ? null : (selectedSheetId as number);
+      
+      if (sheetId === null) {
+        const newSheet = await createSheetMutation.mutateAsync({
+          projectId,
+          data: { name: sheetName, offers }
+        });
+        sheetId = newSheet.id;
+        setSelectedSheetId(sheetId);
+      } else {
+        await updateSheetMutation.mutateAsync({
+          projectId,
+          priceSheetId: sheetId,
+          data: { name: sheetName, offers }
+        });
+      }
+
+      await updateSettingsMutation.mutateAsync({
+        projectId,
+        data: {
+          watermarkEnabled,
+          watermarkText,
+          expiresAt,
+          establishmentPaymentInstructions,
+          bankTransferInstructions,
+          priceSheetId: sheetId,
+          offers // Fallback for backwards compatibility if needed
+        }
+      });
+
+      queryClient.invalidateQueries({ queryKey: getListDeliveryPriceSheetsQueryKey(projectId) });
+      refetchSettings();
+      setSaveStatus("success");
+      setSaveMessage("Settings and price sheet saved.");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch (err) {
+      setSaveStatus("error");
+      setSaveMessage("Failed to save settings. Please try again.");
+    }
+  };
+
+  const isSaving = saveStatus === "saving";
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -253,6 +350,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
             <div className="flex shrink-0 gap-3">
               {isPublished ? (
                 <button
+                  type="button"
                   onClick={() => revokeMutation.mutate({ projectId })}
                   disabled={revokeMutation.isPending}
                   className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
@@ -262,6 +360,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={() => publishMutation.mutate({ projectId })}
                   disabled={publishMutation.isPending}
                   className="flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm"
@@ -283,29 +382,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
             Delivery Settings
           </h3>
         </div>
-        <form 
-          className="space-y-8 p-6"
-          onSubmit={(e) => {
-            e.preventDefault();
-            // Validate offers
-            if (offers.some(o => !o.name.trim() || o.unitAmount < 0 || !/^[A-Za-z]{3}$/.test(o.currency) || o.photoCount < 1 || o.paymentMethods.length < 1)) {
-              alert("Complete every offer with a name, valid amount and currency, photo count, and at least one payment method.");
-              return;
-            }
-            const formData = new FormData(e.currentTarget);
-            updateSettingsMutation.mutate({
-              projectId,
-              data: {
-                watermarkEnabled: formData.get("watermarkEnabled") === "on",
-                watermarkText: (formData.get("watermarkText") as string) || null,
-                expiresAt: (formData.get("expiresAt") as string) ? new Date(formData.get("expiresAt") as string).toISOString() : null,
-                establishmentPaymentInstructions: (formData.get("establishmentPaymentInstructions") as string) || null,
-                bankTransferInstructions: (formData.get("bankTransferInstructions") as string) || null,
-                offers,
-              }
-            });
-          }}
-        >
+        <form className="space-y-8 p-6" onSubmit={handleSave}>
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="space-y-3">
               <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -367,12 +444,40 @@ function OverviewTab({ projectId }: { projectId: number }) {
             </div>
           </div>
 
-          <div className="space-y-4 pt-6 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="font-semibold text-slate-900">Price Sheet Offers</h4>
-                <p className="text-sm text-slate-500">Configure what customers can buy.</p>
+          <div className="space-y-6 pt-6 border-t border-slate-100">
+            <div>
+              <h4 className="font-semibold text-slate-900">Price Sheet</h4>
+              <p className="text-sm text-slate-500">Select an existing price sheet to assign, or create a new one.</p>
+            </div>
+
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-500">Selected Price Sheet</label>
+                <select
+                  value={selectedSheetId}
+                  onChange={(e) => handleSheetSelect(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none"
+                >
+                  <option value="new">+ Create New Price Sheet</option>
+                  {priceSheets?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               </div>
+              
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-500">Sheet Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={sheetName}
+                  onChange={(e) => setSheetName(e.target.value)}
+                  placeholder="e.g. Fall Portraits 2024"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-slate-100 pt-6">
+              <h5 className="font-medium text-slate-900">Offers</h5>
               <button
                 type="button"
                 onClick={addOffer}
@@ -525,10 +630,10 @@ function OverviewTab({ projectId }: { projectId: number }) {
                             <label key={method} className="flex items-center gap-2 text-sm text-slate-700">
                               <input
                                 type="checkbox"
-                                checked={offer.paymentMethods.includes(method)}
+                                checked={offer.paymentMethods.includes(method as any)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    updateOffer(offer.id, { paymentMethods: [...offer.paymentMethods, method] });
+                                    updateOffer(offer.id, { paymentMethods: [...offer.paymentMethods, method as any] });
                                   } else {
                                     updateOffer(offer.id, { paymentMethods: offer.paymentMethods.filter(value => value !== method) });
                                   }
@@ -573,16 +678,28 @@ function OverviewTab({ projectId }: { projectId: number }) {
             </div>
           </div>
           
-          <div className="flex justify-end pt-4 border-t border-slate-100">
-            <button
-              type="submit"
-              data-testid="button-save-settings"
-              disabled={updateSettingsMutation.isPending}
-              className="flex items-center gap-2 rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-            >
-              {updateSettingsMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              Save Settings & Offers
-            </button>
+          <div className="pt-6 border-t border-slate-100">
+            {saveStatus === "error" && (
+              <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+                {saveMessage}
+              </div>
+            )}
+            {saveStatus === "success" && (
+              <div className="mb-4 rounded-lg bg-teal-50 p-3 text-sm text-teal-800 border border-teal-200">
+                {saveMessage}
+              </div>
+            )}
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                data-testid="button-save-settings"
+                disabled={isSaving}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                Save Settings & Offers
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -618,296 +735,440 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
     link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     link.download = `access-cards-${projectId}.csv`;
     link.click();
-    URL.revokeObjectURL(link.href);
   };
 
   const printCards = () => {
     if (!visibleCards.length) return;
-    const entity = isCorporate ? "employee" : "student";
-    const entityPlural = isCorporate ? "employees" : "students";
-    const publicOrigin = window.location.origin;
-    const logoUrl = branding.logoObjectPath
-      ? `/api/studio/branding/logo?rev=${encodeURIComponent(branding.brandingUpdatedAt ?? "")}`
-      : "";
-    const cardMarkup = visibleCards.map((card: any) => {
-      const fullUrl = `${publicOrigin}${card.accessUrl}`;
+
+    const cardsHtml = visibleCards.map((card: any) => {
+      const url = `${window.location.origin}${card.accessUrl}`;
+      const escapedUrl = escapeHtml(url);
+      const isCardCorporate = isCorporate || false;
+      const organizationType = isCardCorporate ? "Company" : "School";
+      const orgNameLabel = isCardCorporate ? "Company" : "School";
+      const subjectLabel = isCardCorporate ? "Employee" : "Student";
+      const departmentLabel = isCardCorporate ? "Department" : "Class";
+
       return `
-        <article class="access-card">
-          <div class="card-name">${escapeHtml(card.firstName)} ${escapeHtml(card.lastName)}</div>
-          <div class="card-id">${escapeHtml(card.generatedStudentId || "")}</div>
-          <img class="qr" src="${escapeHtml(card.qrDataUrl || "")}" alt="QR code" />
-          <div class="scan-label">Scan to view private photos</div>
-          <div class="code-label">Access code</div>
-          <div class="code">${escapeHtml(card.accessCode)}</div>
-          <div class="url">${escapeHtml(fullUrl)}</div>
-          <p class="instruction">Keep this card private. It provides access to this ${entity}'s photos.</p>
-        </article>`;
+        <div class="card">
+          <div class="card-inner">
+            <div class="card-header" style="background-color: ${escapeHtml(branding.primaryColor)};">
+              <h1 class="studio-name">${escapeHtml(branding.name)}</h1>
+              ${branding.tagline ? `<p class="studio-tagline">${escapeHtml(branding.tagline)}</p>` : ''}
+            </div>
+            
+            <div class="card-body">
+              <h2 class="card-title">Private Photo Gallery</h2>
+              
+              <div class="student-info">
+                <div class="info-row">
+                  <span class="info-label">${subjectLabel}:</span>
+                  <span class="info-value"><strong>${escapeHtml(card.firstName)} ${escapeHtml(card.lastName)}</strong></span>
+                </div>
+                ${card.className ? `
+                <div class="info-row">
+                  <span class="info-label">${departmentLabel}:</span>
+                  <span class="info-value">${escapeHtml(card.className)}</span>
+                </div>
+                ` : ''}
+                ${projectName ? `
+                <div class="info-row">
+                  <span class="info-label">${orgNameLabel}:</span>
+                  <span class="info-value">${escapeHtml(projectName)}</span>
+                </div>
+                ` : ''}
+              </div>
+
+              <div class="access-section">
+                <div class="qr-container">
+                  ${card.qrDataUrl ? `<img src="${card.qrDataUrl}" alt="QR Code" class="qr-code" />` : '<div class="qr-placeholder">QR Code</div>'}
+                </div>
+                
+                <div class="instructions">
+                  <p class="step"><strong>1.</strong> Scan the QR code or visit:</p>
+                  <p class="url">${escapedUrl}</p>
+                  <p class="step"><strong>2.</strong> Enter your secure access code:</p>
+                  <div class="code-box">
+                    <span class="code-text" style="color: ${escapeHtml(branding.primaryColor)};">${escapeHtml(card.accessCode)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
     }).join("");
-    
-    const html = `<!doctype html>
-      <html><head><meta charset="utf-8"><title>${escapeHtml(branding.name)} — ${escapeHtml(projectName ?? "Photo delivery")}</title>
-      <style>
-        @page { size: letter; margin: 0.35in; }
-        * { box-sizing: border-box; }
-        body { margin: 0; color: #172033; font-family: Arial, Helvetica, sans-serif; background: #fff; }
-        .sheet-header { display: flex; align-items: center; gap: 14px; padding: 0 0 16px; border-bottom: 4px solid ${escapeHtml(branding.accentColor)}; margin-bottom: 16px; }
-        .logo { width: 58px; height: 58px; object-fit: contain; border-radius: 10px; }
-        .brand-name { color: ${escapeHtml(branding.primaryColor)}; font-size: 19px; font-weight: 700; }
-        .tagline { color: #657084; font-size: 11px; margin-top: 3px; }
-        .sheet-title { margin-left: auto; text-align: right; }
-        .sheet-title h1 { margin: 0; font-size: 16px; }
-        .sheet-title p { margin: 4px 0 0; color: #657084; font-size: 11px; }
-        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .access-card { min-height: 3.55in; padding: 14px; border: 1px solid #dbe2ea; border-top: 5px solid ${escapeHtml(branding.primaryColor)}; border-radius: 10px; text-align: center; page-break-inside: avoid; }
-        .card-name { font-size: 17px; font-weight: 700; }
-        .card-id { color: #657084; font-size: 10px; margin-top: 3px; }
-        .qr { display: block; width: 1.48in; height: 1.48in; margin: 10px auto 5px; image-rendering: pixelated; }
-        .scan-label { color: #657084; font-size: 10px; }
-        .code-label { color: #657084; font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; margin-top: 9px; }
-        .code { color: ${escapeHtml(branding.primaryColor)}; font-family: monospace; font-size: 18px; font-weight: 700; letter-spacing: 0.12em; margin-top: 3px; }
-        .url { color: #657084; font-size: 8px; overflow-wrap: anywhere; margin-top: 5px; }
-        .instruction { color: #657084; font-size: 9px; line-height: 1.35; margin: 8px 0 0; }
-        .footer { color: #657084; font-size: 9px; margin-top: 14px; text-align: center; }
-        @media print { .footer { display: none; } }
-      </style></head>
-      <body>
-        <header class="sheet-header">
-          ${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(branding.name)} logo" />` : ""}
-          <div><div class="brand-name">${escapeHtml(branding.name)}</div><div class="tagline">${escapeHtml(branding.tagline ?? "Private photo delivery")}</div></div>
-          <div class="sheet-title"><h1>Private ${entity} photo access</h1><p>${escapeHtml(projectName ?? "Photo delivery")} · ${visibleCards.length} ${entityPlural}${classFilter === "all" ? "" : ` · ${escapeHtml(classFilter)}`}</p></div>
-        </header>
-        <main class="grid">${cardMarkup}</main>
-        <div class="footer">Print this sheet and give each card only to the matching ${entity} or family.</div>
-        <script>window.addEventListener("load", () => window.print());<\/script>
-      </body></html>`;
-      
+
     const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert("Allow pop-ups to print the branded QR sheet.");
-      return;
-    }
-    printWindow.document.write(html);
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Print Access Cards - ${escapeHtml(projectName || "Project")}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            
+            :root {
+              --primary: ${escapeHtml(branding.primaryColor)};
+              --accent: ${escapeHtml(branding.accentColor)};
+            }
+
+            body {
+              margin: 0;
+              padding: 0;
+              background-color: #fff;
+              font-family: 'Inter', sans-serif;
+              color: #0f172a;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+
+            @page {
+              size: A4;
+              margin: 0;
+            }
+
+            .print-grid {
+              display: grid;
+              grid-template-columns: repeat(2, 1fr);
+              gap: 0;
+              width: 210mm;
+              margin: 0 auto;
+            }
+
+            .card {
+              width: 105mm;
+              height: 148.5mm; /* A4 height divided by 2 */
+              padding: 10mm;
+              box-sizing: border-box;
+              page-break-inside: avoid;
+              border-right: 1px dashed #e2e8f0;
+              border-bottom: 1px dashed #e2e8f0;
+            }
+
+            /* Remove borders from edges to keep it clean */
+            .card:nth-child(even) { border-right: none; }
+            
+            .card-inner {
+              height: 100%;
+              border: 1px solid #cbd5e1;
+              border-radius: 12px;
+              overflow: hidden;
+              display: flex;
+              flex-direction: column;
+            }
+
+            .card-header {
+              padding: 20px;
+              text-align: center;
+              color: white;
+            }
+
+            .studio-name {
+              margin: 0;
+              font-size: 20px;
+              font-weight: 700;
+              letter-spacing: -0.02em;
+            }
+
+            .studio-tagline {
+              margin: 4px 0 0 0;
+              font-size: 12px;
+              opacity: 0.9;
+            }
+
+            .card-body {
+              padding: 24px;
+              flex: 1;
+              display: flex;
+              flex-direction: column;
+              background-color: white;
+            }
+
+            .card-title {
+              margin: 0 0 20px 0;
+              font-size: 16px;
+              font-weight: 600;
+              text-align: center;
+              color: #334155;
+            }
+
+            .student-info {
+              background-color: #f8fafc;
+              border-radius: 8px;
+              padding: 16px;
+              margin-bottom: 24px;
+            }
+
+            .info-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 14px;
+              margin-bottom: 8px;
+              line-height: 1.4;
+            }
+            .info-row:last-child { margin-bottom: 0; }
+
+            .info-label { color: #64748b; }
+            .info-value { color: #0f172a; text-align: right; }
+
+            .access-section {
+              display: flex;
+              gap: 20px;
+              align-items: center;
+              margin-top: auto;
+            }
+
+            .qr-container {
+              flex-shrink: 0;
+              width: 100px;
+              height: 100px;
+              padding: 8px;
+              border: 1px solid #e2e8f0;
+              border-radius: 8px;
+              background: white;
+            }
+
+            .qr-code {
+              width: 100%;
+              height: 100%;
+              display: block;
+            }
+
+            .instructions {
+              flex: 1;
+            }
+
+            .step {
+              margin: 0 0 4px 0;
+              font-size: 12px;
+              color: #475569;
+            }
+
+            .url {
+              margin: 0 0 16px 0;
+              font-size: 11px;
+              font-weight: 500;
+              color: #0f172a;
+              word-break: break-all;
+            }
+
+            .code-box {
+              background-color: #f1f5f9;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              padding: 10px;
+              text-align: center;
+            }
+
+            .code-text {
+              font-family: monospace;
+              font-size: 20px;
+              font-weight: 700;
+              letter-spacing: 0.1em;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="print-grid">
+            ${cardsHtml}
+          </div>
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
     printWindow.document.close();
   };
 
   if (isLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading access cards...</div>;
   }
-  
+
   if (error) {
-    return <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">Failed to load access cards. The gallery may not be published yet.</div>;
+    return <div className="p-6 text-sm text-red-600">Failed to load access cards.</div>;
+  }
+
+  if (cards.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center p-16 text-center">
+        <QrCode className="mb-4 size-10 text-slate-300" />
+        <h3 className="font-semibold text-slate-900">No Access Cards</h3>
+        <p className="mt-2 text-sm text-slate-500 max-w-sm">
+          Access cards are generated automatically when a gallery is published. To generate cards, go to the Overview tab and publish the gallery.
+        </p>
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-900">Access Cards</h3>
-          <p className="text-sm text-slate-500">
-            Print QR sheets or download a CSV to distribute to {isCorporate ? "employees" : "students"}.
-          </p>
-        </div>
+    <div className="mx-auto max-w-4xl space-y-6">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {classOptions.length > 0 && (
-             <select 
-               value={classFilter} 
-               onChange={(e) => setClassFilter(e.target.value)} 
-               className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-             >
-               <option value="all">All Groups</option>
-               {classOptions.map((className) => <option key={className} value={className}>{className}</option>)}
-             </select>
-           )}
-           <button 
-             onClick={printCards}
-             disabled={visibleCards.length === 0}
-             className="flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
-           >
-             <Printer className="size-4" /> Print PDF
-           </button>
-           <button 
-             onClick={downloadCards}
-             disabled={visibleCards.length === 0}
-             className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-           >
-             <Download className="size-4" /> CSV
-           </button>
+          <select 
+            value={classFilter} 
+            onChange={(e) => setClassFilter(e.target.value)}
+            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+          >
+            <option value="all">All Classes ({cards.length})</option>
+            {classOptions.map((className) => (
+              <option key={className} value={className}>{className}</option>
+            ))}
+          </select>
+        </div>
+        
+        <div className="flex gap-3">
+          <button 
+            onClick={downloadCards}
+            className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            <Download className="size-4" /> Download CSV
+          </button>
+          <button 
+            onClick={printCards}
+            className="flex h-9 items-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
+          >
+            <Printer className="size-4" /> Print Cards
+          </button>
         </div>
       </div>
-      
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 font-medium text-slate-500">Name</th>
-                <th className="px-4 py-3 font-medium text-slate-500">Group</th>
-                <th className="px-4 py-3 font-medium text-slate-500">Access Code</th>
+
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50">
+              <th className="px-4 py-3 font-semibold text-slate-900">Name</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Class</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Access Code</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Gallery Link</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {visibleCards.map((card: any, idx: number) => (
+              <tr key={idx} className="hover:bg-slate-50/50">
+                <td className="px-4 py-3 font-medium text-slate-900">{card.firstName} {card.lastName}</td>
+                <td className="px-4 py-3 text-slate-500">{card.className || "—"}</td>
+                <td className="px-4 py-3">
+                  <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-600">{card.accessCode}</code>
+                </td>
+                <td className="px-4 py-3">
+                  <a href={card.accessUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-teal-600 hover:text-teal-700">
+                    Open <ExternalLink className="size-3" />
+                  </a>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visibleCards.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-4 py-8 text-center text-slate-500">No cards found.</td>
-                </tr>
-              ) : (
-                visibleCards.slice(0, 100).map((card: any, i: number) => (
-                  <tr key={i} className="hover:bg-slate-50/50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{card.lastName}, {card.firstName}</td>
-                    <td className="px-4 py-3 text-slate-500">{card.className || "—"}</td>
-                    <td className="px-4 py-3 font-mono text-slate-600">{card.accessCode}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        {visibleCards.length > 100 && (
-          <div className="border-t border-slate-100 bg-slate-50 p-3 text-center text-xs text-slate-500">
-            Showing first 100 of {visibleCards.length} cards. Download CSV for full list.
-          </div>
-        )}
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
 
 function OrdersTab({ projectId }: { projectId: number }) {
-  const { data: response, isLoading, refetch } = useListDeliveryOrders(projectId);
-  const updateFulfillment = useUpdateDeliveryFulfillment({
-    mutation: {
-      onSuccess: () => refetch()
-    }
-  });
-  const updatePayment = useUpdateDeliveryPayment({
-    mutation: {
-      onSuccess: () => refetch()
-    }
-  });
+  const { data, isLoading, refetch } = useListDeliveryOrders(projectId);
+  const updateFulfillment = useUpdateDeliveryFulfillment({ mutation: { onSuccess: () => refetch() } });
+  const updatePayment = useUpdateDeliveryPayment({ mutation: { onSuccess: () => refetch() } });
 
   if (isLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading orders...</div>;
   }
 
-  const orders = response?.orders || [];
+  const orders = data?.orders || [];
 
-  const handleExport = () => {
-    window.open(`/api/projects/${projectId}/delivery/orders/export.csv`, "_blank");
+  if (orders.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center p-16 text-center">
+        <ShoppingBag className="mb-4 size-10 text-slate-300" />
+        <h3 className="font-semibold text-slate-900">No Orders Yet</h3>
+        <p className="mt-2 text-sm text-slate-500">
+          When parents place orders through the private delivery gallery, they will appear here.
+        </p>
+      </div>
+    );
+  }
+
+  const statusColors: Record<string, string> = {
+    pending: "bg-amber-100 text-amber-800 border-amber-200",
+    paid: "bg-green-100 text-green-800 border-green-200",
+    cancelled: "bg-slate-100 text-slate-600 border-slate-200",
+    refunded: "bg-slate-100 text-slate-600 border-slate-200",
+  };
+
+  const fulfillmentColors: Record<string, string> = {
+    not_required: "bg-slate-100 text-slate-600 border-slate-200",
+    paid: "bg-slate-100 text-slate-800 border-slate-200",
+    preparing: "bg-blue-100 text-blue-800 border-blue-200",
+    printed: "bg-indigo-100 text-indigo-800 border-indigo-200",
+    ready: "bg-purple-100 text-purple-800 border-purple-200",
+    dispatched: "bg-teal-100 text-teal-800 border-teal-200",
+    delivered: "bg-green-100 text-green-800 border-green-200",
   };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-900">Customer Orders</h3>
-          <p className="text-sm text-slate-500">
-            Review Stripe and manual-payment orders from this gallery.
-          </p>
-        </div>
-        <button 
-          onClick={handleExport}
-          disabled={orders.length === 0}
-          className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-        >
-          <Download className="size-4" /> Export Orders
-        </button>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 font-medium text-slate-500">Order #</th>
-                <th className="px-4 py-3 font-medium text-slate-500">Customer</th>
-                <th className="px-4 py-3 font-medium text-slate-500">Amount</th>
-                <th className="px-4 py-3 font-medium text-slate-500">Payment method</th>
-                <th className="px-4 py-3 font-medium text-slate-500">Date</th>
-                <th className="px-4 py-3 font-medium text-slate-500">Status</th>
-                <th className="px-4 py-3 font-medium text-slate-500 text-right">Fulfillment</th>
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50">
+              <th className="px-4 py-3 font-semibold text-slate-900">Order ID</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Date</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Customer</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Amount</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Payment</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Fulfillment</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {orders.map((order: any) => (
+              <tr key={order.id} className="hover:bg-slate-50/50">
+                <td className="px-4 py-3 font-mono font-medium text-slate-900">#{order.id}</td>
+                <td className="px-4 py-3 text-slate-500">{format(new Date(order.createdAt), "MMM d, yyyy")}</td>
+                <td className="px-4 py-3">
+                  <div className="font-medium text-slate-900">{order.customerName}</div>
+                  {order.customerEmail && <div className="text-xs text-slate-500">{order.customerEmail}</div>}
+                </td>
+                <td className="px-4 py-3 font-medium text-slate-900">
+                  {new Intl.NumberFormat(undefined, { style: "currency", currency: order.currency.toUpperCase() }).format(order.amountTotal / 100)}
+                </td>
+                <td className="px-4 py-3">
+                  <select
+                    value={order.status}
+                    onChange={(e) => updatePayment.mutate({ projectId, orderId: order.id, data: { status: e.target.value as any } })}
+                    className={`rounded-md border px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 ${statusColors[order.status] || statusColors.pending}`}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="paid">Paid</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="refunded">Refunded</option>
+                  </select>
+                </td>
+                <td className="px-4 py-3">
+                  <select
+                    value={order.fulfillmentStatus}
+                    onChange={(e) => updateFulfillment.mutate({ projectId, orderId: order.id, data: { fulfillmentStatus: e.target.value as any } })}
+                    className={`rounded-md border px-2 py-1 text-xs font-medium capitalize focus:outline-none focus:ring-2 focus:ring-teal-500 ${fulfillmentColors[order.fulfillmentStatus] || fulfillmentColors.not_required}`}
+                  >
+                    <option value="not_required">Not Required</option>
+                    <option value="paid">Paid</option>
+                    <option value="preparing">Preparing</option>
+                    <option value="printed">Printed</option>
+                    <option value="ready">Ready</option>
+                    <option value="dispatched">Dispatched</option>
+                    <option value="delivered">Delivered</option>
+                  </select>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {orders.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
-                    <ShoppingBag className="mx-auto mb-3 size-8 text-slate-300" />
-                    No orders placed yet.
-                  </td>
-                </tr>
-              ) : (
-                orders.map((order: any) => (
-                  <tr key={order.id} className="hover:bg-slate-50/50">
-                    <td className="px-4 py-3 font-mono text-slate-500">#{order.id}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900">{order.customerName || "Unknown"}</div>
-                      <div className="text-xs text-slate-500">{order.customerEmail}</div>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-slate-900">
-                      {(order.amountTotal / 100).toLocaleString('en-US', { style: 'currency', currency: order.currency || 'USD' })}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {order.paymentMethod === "establishment"
-                        ? "At establishment"
-                        : order.paymentMethod === "bank_transfer"
-                          ? "Bank transfer"
-                          : "Stripe"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                      {order.createdAt ? format(new Date(order.createdAt), "MMM d, yyyy") : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {order.paymentMethod === "stripe" ? (
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          order.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {order.status}
-                        </span>
-                      ) : (
-                        <select
-                          value={order.status}
-                          onChange={(e) => updatePayment.mutate({
-                            projectId,
-                            orderId: order.id,
-                            data: { status: e.target.value as any },
-                          })}
-                          disabled={updatePayment.isPending}
-                          aria-label={`Payment status for order ${order.id}`}
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-teal-500 focus:outline-none"
-                        >
-                          <option value="pending">Awaiting payment</option>
-                          <option value="paid">Paid</option>
-                          <option value="cancelled">Cancelled</option>
-                          <option value="refunded">Refunded</option>
-                        </select>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <select 
-                        value={order.fulfillmentStatus || 'not_required'}
-                        onChange={(e) => updateFulfillment.mutate({ 
-                          projectId, 
-                          orderId: order.id, 
-                          data: { fulfillmentStatus: e.target.value as any } 
-                        })}
-                        disabled={updateFulfillment.isPending}
-                        className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-teal-500 focus:outline-none"
-                      >
-                        <option value="not_required">Digital Only</option>
-                        <option value="paid">Paid (Pending)</option>
-                        <option value="preparing">Preparing</option>
-                        <option value="printed">Printed</option>
-                        <option value="ready">Ready</option>
-                        <option value="dispatched">Dispatched</option>
-                        <option value="delivered">Delivered</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

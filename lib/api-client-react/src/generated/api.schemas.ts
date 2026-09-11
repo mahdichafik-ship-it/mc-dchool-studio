@@ -399,11 +399,30 @@ export const DeliveryOrderInputDeliveryMethod = {
   shipping: 'shipping',
 } as const;
 
+export interface DeliveryBasketItem {
+  offerId: string;
+  /**
+     * @minItems 1
+     * @maxItems 100
+     */
+  photoIds: number[];
+  /**
+     * @minimum 1
+     * @maximum 100
+     */
+  quantity: number;
+}
+
 export interface DeliveryOrderInput {
   token?: string;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  items?: DeliveryBasketItem[];
   offerId?: string;
   /** @minItems 1 */
-  photoIds: number[];
+  photoIds?: number[];
   /** @minimum 1 */
   quantity?: number;
   customerName?: string;
@@ -480,7 +499,28 @@ export interface DeliverySettingsInput {
   establishmentPaymentInstructions?: string | null;
   /** @nullable */
   bankTransferInstructions?: string | null;
+  /** @nullable */
+  priceSheetId?: number | null;
   offers?: DeliveryOffer[];
+}
+
+export interface DeliveryPriceSheetInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  /** @minItems 1 */
+  offers: DeliveryOffer[];
+}
+
+export interface DeliveryPriceSheet {
+  id: number;
+  studioId: number;
+  name: string;
+  offers: DeliveryOffer[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type FulfillmentInputFulfillmentStatus = typeof FulfillmentInputFulfillmentStatus[keyof typeof FulfillmentInputFulfillmentStatus];
@@ -558,6 +598,8 @@ export interface DeliveryAccessMutationResponse {
 export type DeliveryPhotosResponseGallery = {
   slug?: string;
   status?: string;
+  /** @nullable */
+  priceSheetId?: number | null;
   /** @nullable */
   expiresAt?: string | null;
 };

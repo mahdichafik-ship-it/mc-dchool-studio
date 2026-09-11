@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useRoute } from "wouter";
-import { Check, Download, Image as ImageIcon, Loader2, LockKeyhole, RefreshCw, ShoppingBag } from "lucide-react";
+import { Check, Download, Image as ImageIcon, Loader2, LockKeyhole, RefreshCw, ShoppingBag, X } from "lucide-react";
 import { 
   useGetDeliveryGallery,
   useEnterDeliveryAccess,
@@ -12,12 +12,42 @@ import {
   getGetDeliveryOrderQueryKey,
   type DeliveryOffer,
   type DeliveryOrderInputDeliveryMethod,
-  type DeliveryOrderInputPaymentMethod
+  type DeliveryOrderInputPaymentMethod,
+  type DeliveryBasketItem
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 function formatPrice(amount: number, currency: string) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
+}
+
+// Local Basket Item representation
+type LocalBasketItem = {
+  id: string; // unique local ID
+  offerId: string;
+  photoIds: number[];
+  quantity: number;
+};
+
+function getCommonMethods(basketItems: LocalBasketItem[], contentOffers: DeliveryOffer[]) {
+  if (basketItems.length === 0) return { delivery: [] as string[], payment: [] as string[], currency: null as string | null };
+
+  const firstOffer = contentOffers.find(o => o.id === basketItems[0].offerId);
+  if (!firstOffer) return { delivery: [] as string[], payment: [] as string[], currency: null as string | null };
+
+  let commonDelivery = [...firstOffer.deliveryMethods] as string[];
+  let commonPayment = [...firstOffer.paymentMethods] as string[];
+  const currency = firstOffer.currency;
+
+  for (const item of basketItems) {
+    const offer = contentOffers.find(o => o.id === item.offerId);
+    if (offer) {
+      commonDelivery = commonDelivery.filter(m => offer.deliveryMethods.includes(m as any));
+      commonPayment = commonPayment.filter(m => offer.paymentMethods.includes(m as any));
+    }
+  }
+
+  return { delivery: commonDelivery, payment: commonPayment, currency };
 }
 
 export default function Delivery() {
@@ -32,15 +62,18 @@ export default function Delivery() {
   const [paidPhotoIds, setPaidPhotoIds] = useState<Set<number>>(new Set());
   const [orderIdToCheck, setOrderIdToCheck] = useState<number | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string>("");
-  const [showCheckoutForm, setShowCheckoutForm] = useState(false);
+  const [quantity, setQuantity] = useState(1);
 
-  // Form states for checkout
+  // Basket State
+  const [basket, setBasket] = useState<LocalBasketItem[]>([]);
+  const [viewingBasket, setViewingBasket] = useState(false);
+
+  // Checkout Form State
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryOrderInputDeliveryMethod>("digital");
   const [paymentMethod, setPaymentMethod] = useState<DeliveryOrderInputPaymentMethod>("establishment");
   const [deliveryAddress, setDeliveryAddress] = useState("");
-  const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -75,13 +108,6 @@ export default function Delivery() {
   useEffect(() => {
     if (content?.offers && content.offers.length > 0 && !selectedOfferId) {
       setSelectedOfferId(content.offers[0].id);
-      // Auto-select digital delivery if available
-      const method = content.offers[0].deliveryMethods.includes("digital" as any) 
-        ? "digital" 
-        : content.offers[0].deliveryMethods[0];
-      setDeliveryMethod(method as any);
-      const availablePayments = content.offers[0].paymentMethods.filter(method => method !== "stripe" || content.stripeAvailable);
-      setPaymentMethod((availablePayments[0] || content.offers[0].paymentMethods[0]) as DeliveryOrderInputPaymentMethod);
     }
   }, [content?.offers, selectedOfferId]);
 
@@ -118,6 +144,7 @@ export default function Delivery() {
       onSuccess: (res) => {
         setToken(res.token);
         setSelected(new Set());
+        setBasket([]);
       }
     });
   }
@@ -149,30 +176,97 @@ export default function Delivery() {
     });
   }
 
+  const { delivery: commonDelivery, payment: commonPayment, currency: basketCurrency } = getCommonMethods(basket, content?.offers || []);
+
+  useEffect(() => {
+    if (viewingBasket && basket.length > 0 && content) {
+      if (!commonDelivery.includes(deliveryMethod as any)) {
+        setDeliveryMethod(commonDelivery.includes("digital" as any) ? "digital" : commonDelivery[0] as any);
+      }
+      const availablePayments = commonPayment.filter(m => m !== "stripe" || content.stripeAvailable);
+      if (!availablePayments.includes(paymentMethod as any)) {
+        setPaymentMethod((availablePayments[0] || commonPayment[0]) as any);
+      }
+    }
+  }, [viewingBasket, basket, commonDelivery, commonPayment, content?.stripeAvailable]);
+
+  function canAddOffer(offer: DeliveryOffer) {
+    if (basket.length === 0) return true;
+    if (basketCurrency !== offer.currency) return false;
+    
+    const intersectionDelivery = commonDelivery.filter(m => offer.deliveryMethods.includes(m as any));
+    const intersectionPayment = commonPayment.filter(m => offer.paymentMethods.includes(m as any));
+    
+    return intersectionDelivery.length > 0 && intersectionPayment.length > 0;
+  }
+
+  let requiredPhotoCount: number | null = null;
+  let selectedTotal = 0;
+  if (activeOffer) {
+    if (activeOffer.productType === 'digital') {
+      selectedTotal = activeOffer.unitAmount * selected.size;
+    } else if (activeOffer.productType === 'print') {
+      requiredPhotoCount = 1;
+      selectedTotal = activeOffer.unitAmount * quantity;
+    } else if (activeOffer.productType === 'pack') {
+      requiredPhotoCount = activeOffer.photoCount * quantity;
+      selectedTotal = activeOffer.unitAmount * quantity;
+    }
+  }
+
+  const isValidSelection = requiredPhotoCount === null ? selected.size > 0 : selected.size === requiredPhotoCount;
+
+  function addToBasket(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!activeOffer || !isValidSelection || !canAddOffer(activeOffer)) return;
+    
+    const newItem: LocalBasketItem = {
+      id: crypto.randomUUID(),
+      offerId: activeOffer.id,
+      photoIds: Array.from(selected),
+      quantity: activeOffer.productType === 'digital' ? 1 : quantity
+    };
+    
+    setBasket(prev => [...prev, newItem]);
+    setSelected(new Set());
+    setQuantity(1);
+    setNotice(`Added ${activeOffer.name} to your basket.`);
+    setTimeout(() => setNotice(null), 3000);
+  }
+
+  function removeFromBasket(id: string) {
+    setBasket(prev => prev.filter(item => item.id !== id));
+  }
+
+  function updateQuantityInBasket(id: string, newQuantity: number) {
+    setBasket(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, newQuantity) } : item));
+  }
+
+  const basketTotal = basket.reduce((sum, item) => {
+    const offer = content?.offers?.find(o => o.id === item.offerId);
+    if (!offer) return sum;
+    return sum + (offer.productType === 'digital' ? offer.unitAmount * item.photoIds.length : offer.unitAmount * item.quantity);
+  }, 0);
+
   function startCheckout(e: React.FormEvent) {
     e.preventDefault();
-    if (!slug || !token || selected.size === 0 || !activeOffer) return;
-    
-    let limit: number | null = null;
-    if (activeOffer.productType === 'print') limit = 1;
-    else if (activeOffer.productType === 'pack') limit = activeOffer.photoCount * quantity;
+    if (!slug || !token || basket.length === 0) return;
 
-    if (limit !== null && selected.size !== limit) {
-      alert(`Please select exactly ${limit} photo${limit === 1 ? '' : 's'} for this offer.`);
-      return;
-    }
-
-    if (activeOffer.deliveryMethods.includes("shipping" as any) && deliveryMethod === "shipping" && !deliveryAddress.trim()) {
+    if (deliveryMethod === "shipping" && !deliveryAddress.trim()) {
       return;
     }
     
+    const items: DeliveryBasketItem[] = basket.map(item => ({
+      offerId: item.offerId,
+      photoIds: item.photoIds,
+      quantity: item.quantity
+    }));
+
     createOrder.mutate({ 
       slug, 
       data: { 
         token, 
-        offerId: activeOffer.id,
-        photoIds: Array.from(selected),
-        quantity: activeOffer.productType === 'digital' ? 1 : quantity,
+        items,
         customerName: customerName.trim(),
         customerEmail: customerEmail.trim() || undefined,
         paymentMethod,
@@ -186,8 +280,8 @@ export default function Delivery() {
           return;
         }
         setOrderIdToCheck(res.orderId);
-        setShowCheckoutForm(false);
-        setSelected(new Set());
+        setViewingBasket(false);
+        setBasket([]);
         setNotice(`Order #${res.orderId} received. ${res.paymentInstructions || "The studio will confirm payment before processing the order."}`);
       }
     });
@@ -269,27 +363,201 @@ export default function Delivery() {
     );
   }
 
-  // Once authenticated and content is loaded
-  const offers = content.offers || [];
-  
-  const unitAmount = activeOffer?.unitAmount || 0;
-  const currency = activeOffer?.currency || "USD";
-  
-  let requiredPhotoCount: number | null = null;
-  let selectedTotal = 0;
-  if (activeOffer) {
-    if (activeOffer.productType === 'digital') {
-      selectedTotal = unitAmount * selected.size;
-    } else if (activeOffer.productType === 'print') {
-      requiredPhotoCount = 1;
-      selectedTotal = unitAmount * quantity;
-    } else if (activeOffer.productType === 'pack') {
-      requiredPhotoCount = activeOffer.photoCount * quantity;
-      selectedTotal = unitAmount * quantity;
-    }
+  if (viewingBasket) {
+    const availablePayments = commonPayment.filter(m => m !== "stripe" || content.stripeAvailable);
+    const checkoutUnavailable = commonDelivery.length === 0 || availablePayments.length === 0;
+    
+    return (
+      <div style={brandStyle} className="min-h-[100dvh] bg-slate-50 text-slate-900 pb-32">
+        <header className="border-b border-slate-200 bg-white sticky top-0 z-10 shadow-sm">
+          <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+            <h1 className="text-xl font-bold">Checkout</h1>
+            <button 
+              type="button"
+              onClick={() => setViewingBasket(false)} 
+              className="flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-900"
+            >
+              <X className="size-4" /> Back to Gallery
+            </button>
+          </div>
+        </header>
+
+        <main className="mx-auto max-w-5xl px-6 py-10">
+          {basket.length === 0 ? (
+            <div className="text-center py-20 rounded-2xl border border-slate-200 bg-white p-12">
+              <ShoppingBag className="mx-auto size-12 text-slate-300" />
+              <h2 className="mt-4 text-lg font-semibold text-slate-900">Your basket is empty</h2>
+              <button 
+                onClick={() => setViewingBasket(false)}
+                className="mt-6 rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                Return to Gallery
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-10 md:grid-cols-12">
+              <div className="md:col-span-7 space-y-6">
+                <h2 className="text-lg font-semibold text-slate-900">Your Basket</h2>
+                <div className="space-y-4">
+                  {basket.map((item) => {
+                    const offer = content.offers.find(o => o.id === item.offerId);
+                    if (!offer) return null;
+                    const lineTotal = offer.productType === 'digital' ? offer.unitAmount * item.photoIds.length : offer.unitAmount * item.quantity;
+                    
+                    return (
+                      <div key={item.id} className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="flex justify-between items-start gap-4">
+                          <div>
+                            <h3 className="font-semibold text-slate-900">{offer.name}</h3>
+                            <p className="text-sm text-slate-500 mt-1">
+                              {item.photoIds.length} photo{item.photoIds.length === 1 ? "" : "s"} selected
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-bold text-slate-900">{formatPrice(lineTotal, offer.currency)}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+                          {offer.productType === 'print' ? (
+                            <div className="flex items-center gap-3">
+                              <label className="text-sm font-medium text-slate-700">Qty:</label>
+                              <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
+                                <button type="button" onClick={() => updateQuantityInBasket(item.id, item.quantity - 1)} className="px-3 py-1 text-slate-500 hover:bg-slate-100">-</button>
+                                <span className="px-3 text-sm font-medium">{item.quantity}</span>
+                                <button type="button" onClick={() => updateQuantityInBasket(item.id, item.quantity + 1)} className="px-3 py-1 text-slate-500 hover:bg-slate-100">+</button>
+                              </div>
+                            </div>
+                          ) : offer.productType === 'pack' ? (
+                            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Qty: {item.quantity} (Pack)</span>
+                          ) : (
+                            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Digital Delivery</span>
+                          )}
+                          <button type="button" onClick={() => removeFromBasket(item.id)} className="text-sm font-medium text-red-600 hover:text-red-700 transition-colors">
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="md:col-span-5">
+                <form onSubmit={startCheckout} className="sticky top-24 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h2 className="text-lg font-semibold text-slate-900 mb-6">Delivery & Payment</h2>
+                  
+                  <div className="space-y-5">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-slate-700">Your Name *</label>
+                      <input
+                        required
+                        type="text"
+                        value={customerName}
+                        onChange={e => setCustomerName(e.target.value)}
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                        placeholder="Jane Doe"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-slate-700">
+                          Email Address {paymentMethod === "stripe" ? "*" : ""}
+                        </label>
+                      <input
+                        type="email"
+                          required={paymentMethod === "stripe"}
+                        value={customerEmail}
+                        onChange={e => setCustomerEmail(e.target.value)}
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                        placeholder="you@example.com"
+                      />
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-slate-700">Delivery Method *</label>
+                      <select
+                        required
+                        value={deliveryMethod}
+                        onChange={e => setDeliveryMethod(e.target.value as any)}
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm capitalize focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      >
+                        {commonDelivery.map(m => (
+                          <option key={m} value={m} className="capitalize">{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {checkoutUnavailable && (
+                      <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        These products do not currently share an available payment and delivery method. Remove one product or try again when card payments are available.
+                      </div>
+                    )}
+
+                    {deliveryMethod === 'shipping' && (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-slate-700">Shipping Address *</label>
+                        <textarea
+                          required
+                          rows={2}
+                          value={deliveryAddress}
+                          onChange={e => setDeliveryAddress(e.target.value)}
+                          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                          placeholder="123 Main St, City, State, ZIP"
+                        />
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-slate-700">Payment Method *</label>
+                      <select
+                        required
+                        value={paymentMethod}
+                        onChange={e => setPaymentMethod(e.target.value as any)}
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      >
+                        {availablePayments.map(method => (
+                          <option key={method} value={method}>
+                            {method === "stripe"
+                              ? "Card with Stripe"
+                              : method === "establishment" ? "Pay at establishment" : "Bank transfer"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 border-t border-slate-100 pt-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <span className="text-base font-semibold text-slate-900">Total</span>
+                      <span className="text-xl font-bold text-slate-900">{formatPrice(basketTotal, basketCurrency || 'USD')}</span>
+                    </div>
+                    
+                    {createOrder.isError && (
+                      <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+                        There was an error placing your order. Please try again.
+                      </div>
+                    )}
+
+                    <button 
+                      type="submit"
+                      disabled={createOrder.isPending || checkoutUnavailable || (paymentMethod === "stripe" && !customerEmail.trim()) || (deliveryMethod === 'shipping' && !deliveryAddress.trim())} 
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{ backgroundColor: "var(--delivery-primary)" }}
+                    >
+                      {createOrder.isPending ? <Loader2 className="size-4 animate-spin" /> : <LockKeyhole className="size-4" />}
+                      Place Order
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    );
   }
 
-  const isValidSelection = requiredPhotoCount === null ? selected.size > 0 : selected.size === requiredPhotoCount;
+  const offers = content.offers || [];
 
   return (
     <div style={brandStyle} className="min-h-[100dvh] bg-slate-50 text-slate-900">
@@ -300,7 +568,7 @@ export default function Delivery() {
             {(gallery as any).studio?.tagline && <p className="text-sm text-slate-500">{(gallery as any).studio.tagline}</p>}
           </div>
           <button 
-            onClick={() => { setToken(null); setCode(""); }} 
+            onClick={() => { setToken(null); setCode(""); setBasket([]); setSelected(new Set()); }} 
             className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-900"
           >
             Use another code
@@ -308,7 +576,7 @@ export default function Delivery() {
         </div>
       </header>
       
-      <main className="mx-auto max-w-6xl px-6 py-10 pb-32">
+      <main className="mx-auto max-w-6xl px-6 py-10 pb-40">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium text-slate-500">Private delivery</p>
@@ -322,9 +590,9 @@ export default function Delivery() {
         </div>
 
         {offers.length > 0 && (
-          <div className="mt-6">
-            <label className="text-sm font-medium text-slate-700">Choose an offer</label>
-            <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <label className="text-base font-semibold text-slate-900">Choose a product</label>
+            <div className="mt-4 flex flex-wrap gap-2">
               {offers.map(offer => (
                 <button
                   key={offer.id}
@@ -333,17 +601,10 @@ export default function Delivery() {
                     setSelectedOfferId(offer.id);
                     setSelected(new Set());
                     setQuantity(1);
-                    if (!offer.deliveryMethods.includes(deliveryMethod)) {
-                      setDeliveryMethod(offer.deliveryMethods.includes("digital" as any) ? "digital" : offer.deliveryMethods[0] as any);
-                    }
-                    const availablePayments = offer.paymentMethods.filter(method => method !== "stripe" || content.stripeAvailable);
-                    if (!availablePayments.includes(paymentMethod)) {
-                      setPaymentMethod((availablePayments[0] || offer.paymentMethods[0]) as DeliveryOrderInputPaymentMethod);
-                    }
                   }}
-                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                  className={`rounded-lg border px-5 py-2.5 text-sm font-medium transition-all ${
                     selectedOfferId === offer.id
-                      ? "border-teal-600 bg-teal-50 text-teal-800"
+                      ? "border-teal-600 bg-teal-50 text-teal-800 shadow-sm"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   }`}
                 >
@@ -352,21 +613,42 @@ export default function Delivery() {
               ))}
             </div>
             {activeOffer && (
-              <p className="mt-2 text-sm text-slate-500">
-                {activeOffer.description}
-                {activeOffer.printSize ? ` · ${activeOffer.printSize}` : ""}
-                {activeOffer.productType === 'digital' 
-                  ? " · 1 unit per selected photo"
-                  : activeOffer.productType === 'print'
-                    ? " · Select 1 photo"
-                    : ` · Select ${activeOffer.photoCount} photo${activeOffer.photoCount === 1 ? "" : "s"} per pack`}
-              </p>
+              <div className="mt-5 space-y-4 border-t border-slate-100 pt-5">
+                <p className="text-sm text-slate-600">
+                  <span className="font-medium text-slate-900">{formatPrice(activeOffer.unitAmount, activeOffer.currency)}</span>
+                  <span className="mx-2 text-slate-300">|</span>
+                  {activeOffer.description}
+                  {activeOffer.printSize ? ` · ${activeOffer.printSize}` : ""}
+                  {activeOffer.productType === 'digital' 
+                    ? " · 1 unit per selected photo"
+                    : activeOffer.productType === 'print'
+                      ? " · Select 1 photo"
+                      : ` · Select ${activeOffer.photoCount} photo${activeOffer.photoCount === 1 ? "" : "s"} per pack`}
+                </p>
+
+                {activeOffer.productType !== 'digital' && (
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm font-medium text-slate-700">Quantity:</label>
+                    <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
+                      <button type="button" onClick={() => setQuantity(Math.max(1, quantity - 1))} className="px-3 py-1.5 text-slate-500 hover:bg-slate-100">-</button>
+                      <span className="px-3 text-sm font-medium">{quantity}</span>
+                      <button type="button" onClick={() => setQuantity(quantity + 1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-100">+</button>
+                    </div>
+                  </div>
+                )}
+
+                {!canAddOffer(activeOffer) && (
+                  <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 border border-amber-200">
+                    This product cannot be purchased together with items currently in your basket because they require different payment/delivery methods or use different currencies. Please complete your current order first, or clear your basket.
+                  </p>
+                )}
+              </div>
             )}
           </div>
         )}
         
         {notice && (
-          <div className="mt-6 flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900">
+          <div className="mt-6 flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900 shadow-sm animate-in fade-in zoom-in duration-300">
             <Check className="mt-0.5 size-4 shrink-0 text-teal-700" />
             {notice}
           </div>
@@ -375,12 +657,6 @@ export default function Delivery() {
         {content.orderingAvailable === false && (
           <div role="status" className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             Private photo access is available, but this studio has not configured an active offer yet.
-          </div>
-        )}
-        
-        {createOrder.isError && (
-          <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            The order could not be placed with this payment method. Choose another method or try again.
           </div>
         )}
         
@@ -447,11 +723,6 @@ export default function Delivery() {
                     <span className="truncate text-sm font-medium text-slate-700" title={photo.fileName}>
                       {photo.fileName}
                     </span>
-                    {!isPaid && unitAmount > 0 && (
-                      <span className="shrink-0 text-xs font-bold text-teal-700">
-                        {formatPrice(unitAmount, currency)}
-                      </span>
-                    )}
                   </div>
                 </button>
               );
@@ -496,143 +767,64 @@ export default function Delivery() {
         )}
       </main>
       
-      {content.photos.length > 0 && selected.size > 0 && activeOffer && (
-        <div className="fixed inset-x-0 bottom-0 animate-in slide-in-from-bottom-4 border-t border-slate-200 bg-white/95 px-6 py-4 shadow-lg backdrop-blur-sm">
-          {!showCheckoutForm ? (
-            <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-semibold text-slate-900">
-                  {requiredPhotoCount === null 
-                    ? `${selected.size} photo${selected.size === 1 ? "" : "s"} selected`
-                    : `${selected.size} of ${requiredPhotoCount} photo${requiredPhotoCount === 1 ? "" : "s"} selected`}
-                </p>
-                {unitAmount > 0 && (
-                  <p className="mt-0.5 text-sm font-medium text-slate-500">
-                    Total: {formatPrice(selectedTotal, currency)}
+      {(selected.size > 0 || basket.length > 0) && (
+        <div className="fixed inset-x-0 bottom-0 animate-in slide-in-from-bottom-4 border-t border-slate-200 bg-white/95 px-6 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] backdrop-blur-sm z-50">
+          <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              {selected.size > 0 ? (
+                <>
+                  <p className="font-semibold text-slate-900">
+                    {requiredPhotoCount === null 
+                      ? `${selected.size} photo${selected.size === 1 ? "" : "s"} selected`
+                      : `${selected.size} of ${requiredPhotoCount} photo${requiredPhotoCount === 1 ? "" : "s"} selected`}
                   </p>
-                )}
-              </div>
-              <button 
-                onClick={() => setShowCheckoutForm(true)} 
-                disabled={!isValidSelection} 
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-teal-700 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ backgroundColor: "var(--delivery-primary)" }}
-              >
-                Continue to Checkout
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={startCheckout} className="mx-auto max-w-6xl space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h3 className="font-semibold text-slate-900">Checkout Details</h3>
-                <button type="button" onClick={() => setShowCheckoutForm(false)} className="text-sm text-slate-500 hover:text-slate-900">Cancel</button>
-              </div>
-              
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-500">Your Name *</label>
-                  <input
-                    required
-                    type="text"
-                    value={customerName}
-                    onChange={e => setCustomerName(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
-                    placeholder="Jane Doe"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-500">Email</label>
-                  <input
-                    type="email"
-                    value={customerEmail}
-                    onChange={e => setCustomerEmail(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
-                    placeholder="you@example.com"
-                  />
-                </div>
-                
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-500">Delivery Method *</label>
-                  <select
-                    required
-                    value={deliveryMethod}
-                    onChange={e => setDeliveryMethod(e.target.value as any)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
-                  >
-                    {activeOffer.deliveryMethods.map(m => (
-                      <option key={m} value={m} className="capitalize">{m}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-500">Payment Method *</label>
-                  <select
-                    required
-                    value={paymentMethod}
-                    onChange={e => setPaymentMethod(e.target.value as DeliveryOrderInputPaymentMethod)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
-                  >
-                    {activeOffer.paymentMethods.map(method => (
-                      <option key={method} value={method} disabled={method === "stripe" && !content.stripeAvailable}>
-                        {method === "stripe"
-                          ? content.stripeAvailable ? "Card with Stripe" : "Card with Stripe (unavailable)"
-                          : method === "establishment" ? "Pay at establishment" : "Bank transfer"}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                
-                {activeOffer.productType !== 'digital' && (
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-500">Quantity *</label>
-                    <input
-                      required
-                      type="number"
-                      min={1}
-                      value={quantity}
-                      onChange={e => setQuantity(parseInt(e.target.value, 10) || 1)}
-                      className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
-                    />
-                  </div>
-                )}
-                
-                {deliveryMethod === 'shipping' && (
-                  <div className="space-y-1 sm:col-span-2 lg:col-span-4">
-                    <label className="text-xs font-medium text-slate-500">Shipping Address *</label>
-                    <textarea
-                      required
-                      rows={2}
-                      value={deliveryAddress}
-                      onChange={e => setDeliveryAddress(e.target.value)}
-                      className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
-                      placeholder="123 Main St, City, State, ZIP"
-                    />
-                  </div>
-                )}
-              </div>
-              
-              <div className="flex items-center justify-between pt-2">
-                <div>
-                  {unitAmount > 0 && (
-                    <p className="font-semibold text-slate-900">
-                      Total: {formatPrice(selectedTotal, currency)}
+                  {activeOffer && activeOffer.unitAmount > 0 && (
+                    <p className="mt-0.5 text-sm font-medium text-slate-500">
+                      Current selection: {formatPrice(selectedTotal, activeOffer.currency)}
                     </p>
                   )}
-                </div>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold text-slate-900">
+                    {basket.length} item{basket.length === 1 ? "" : "s"} in basket
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium text-slate-500">
+                    Basket Total: {formatPrice(basketTotal, basketCurrency || 'USD')}
+                  </p>
+                </>
+              )}
+            </div>
+            
+            <div className="flex flex-col sm:flex-row gap-3">
+              {selected.size > 0 && (
                 <button 
-                  type="submit"
-                  disabled={createOrder.isPending || !isValidSelection || (deliveryMethod === 'shipping' && !deliveryAddress.trim())} 
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-teal-700 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={addToBasket} 
+                  disabled={!isValidSelection || (activeOffer && !canAddOffer(activeOffer))} 
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-teal-50 px-6 text-sm font-semibold text-teal-800 shadow-sm transition-colors hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ color: "var(--delivery-primary)" }}
+                >
+                  Add to Basket
+                </button>
+              )}
+              {basket.length > 0 && (
+                <button 
+                  onClick={() => {
+                    if (selected.size > 0 && isValidSelection && activeOffer && canAddOffer(activeOffer)) {
+                      addToBasket();
+                    }
+                    setViewingBasket(true);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }} 
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-teal-700 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-800"
                   style={{ backgroundColor: "var(--delivery-primary)" }}
                 >
-                  {createOrder.isPending ? <Loader2 className="size-4 animate-spin" /> : <ShoppingBag className="size-4" />}
-                   {paymentMethod === "stripe" ? "Continue to card payment" : "Place Order"}
+                  <ShoppingBag className="size-4" />
+                  Checkout ({basket.length + (selected.size > 0 && isValidSelection && activeOffer && canAddOffer(activeOffer) ? 1 : 0)})
                 </button>
-              </div>
-            </form>
-          )}
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

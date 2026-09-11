@@ -7,6 +7,7 @@ import {
   db,
   deliveryAccessesTable,
   deliveryGalleriesTable,
+  deliveryPriceSheetsTable,
   deliveryOrderItemsTable,
   deliveryOrdersTable,
   classesTable,
@@ -473,16 +474,32 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Delivery access has been revoked" });
     return;
   }
-  const rawPhotoIds: unknown[] = Array.isArray(req.body?.photoIds) ? req.body.photoIds : [];
-  const photoIds: number[] = [...new Set(
-    rawPhotoIds
-      .map((id) => Number(id))
-      .filter((id): id is number => Number.isInteger(id) && id > 0),
-  )];
-  if (photoIds.length < 1 || photoIds.length > 100) {
-    res.status(400).json({ error: "Select between 1 and 100 photos" });
+  const submittedItems: unknown[] = Array.isArray(req.body?.items) && req.body.items.length > 0
+    ? req.body.items
+    : [{
+      offerId: req.body?.offerId ?? "digital-single",
+      photoIds: req.body?.photoIds,
+      quantity: req.body?.quantity ?? 1,
+    }];
+  if (submittedItems.length < 1 || submittedItems.length > 20) {
+    res.status(400).json({ error: "A basket must contain between 1 and 20 products" });
     return;
   }
+  const basket = submittedItems.map((value) => {
+    const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const rawPhotoIds = Array.isArray(item.photoIds) ? item.photoIds : [];
+    return {
+      offerId: typeof item.offerId === "string" ? item.offerId : "",
+      photoIds: [...new Set(rawPhotoIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))],
+      quantity: Number(item.quantity ?? 1),
+    };
+  });
+  if (basket.some((item) => !item.offerId || item.photoIds.length < 1 || item.photoIds.length > 100
+    || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 100)) {
+    res.status(400).json({ error: "Every basket product needs a valid offer, photo selection, and quantity" });
+    return;
+  }
+  const photoIds = [...new Set(basket.flatMap((item) => item.photoIds))];
 
   const photos = await db
     .select()
@@ -500,27 +517,38 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
 
   try {
     const savedOffers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
-    const offers: DeliveryOffer[] = savedOffers;
-    const offer = offers.find((candidate) => candidate.id === (req.body?.offerId ?? "digital-single"));
-    if (!offer) { res.status(400).json({ error: "Selected delivery offer is not available" }); return; }
-    if (offer.unitAmount === null || !offer.currency) {
-      res.status(400).json({ error: "The selected offer does not have a valid price" }); return;
+    const lines = basket.map((item) => ({
+      item,
+      offer: savedOffers.find((candidate) => candidate.id === item.offerId),
+      photos: item.photoIds.map((id) => photos.find((photo) => photo.id === id)).filter(Boolean),
+    }));
+    if (lines.some((line) => !line.offer || line.photos.length !== line.item.photoIds.length
+      || line.offer.unitAmount === null || !line.offer.currency)) {
+      res.status(400).json({ error: "One or more basket products are not available" }); return;
     }
-    const quantityProvided = req.body?.quantity !== undefined;
-    const quantity = Number(req.body?.quantity ?? 1);
-    const deliveryMethod = String(req.body?.deliveryMethod ?? offer.deliveryMethods[0]);
+    const validLines = lines as Array<{
+      item: { offerId: string; photoIds: number[]; quantity: number };
+      offer: DeliveryOffer & { unitAmount: number; currency: string };
+      photos: typeof photos;
+    }>;
+    const currencies = new Set(validLines.map((line) => line.offer.currency));
+    if (currencies.size !== 1) {
+      res.status(400).json({ error: "All basket products must use the same currency" }); return;
+    }
+    const deliveryMethod = String(req.body?.deliveryMethod ?? validLines[0].offer.deliveryMethods[0]);
     const paymentMethod = String(req.body?.paymentMethod ?? "");
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100
-      || !offer.deliveryMethods.includes(deliveryMethod as DeliveryOffer["deliveryMethods"][number])) {
-      res.status(400).json({ error: "Invalid quantity or delivery method for this offer" }); return;
+    if (validLines.some(({ offer }) => !offer.deliveryMethods.includes(deliveryMethod as DeliveryOffer["deliveryMethods"][number]))) {
+      res.status(400).json({ error: "The selected delivery method is not available for every basket product" }); return;
     }
-    if (!offer.paymentMethods.includes(paymentMethod as DeliveryOffer["paymentMethods"][number])) {
-      res.status(400).json({ error: "Invalid payment method for this offer" }); return;
+    if (validLines.some(({ offer }) => !offer.paymentMethods.includes(paymentMethod as DeliveryOffer["paymentMethods"][number]))) {
+      res.status(400).json({ error: "The selected payment method is not available for every basket product" }); return;
     }
     try {
-      validateDeliverySelection(offer.productType, offer.photoCount, photos.length, quantity, quantityProvided);
+      for (const { offer, photos: linePhotos, item } of validLines) {
+        validateDeliverySelection(offer.productType, offer.photoCount, linePhotos.length, item.quantity, true);
+      }
     } catch {
-      res.status(400).json({ error: "Selected photo count or quantity does not match this offer" }); return;
+      res.status(400).json({ error: "A basket product has the wrong photo count or quantity" }); return;
     }
     if (deliveryMethod === "shipping" && (typeof req.body?.deliveryAddress !== "string" || !req.body.deliveryAddress.trim())) {
       res.status(400).json({ error: "A shipping address is required" }); return;
@@ -533,36 +561,42 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
       res.status(400).json({ error: "Enter a valid customer email" }); return;
     }
-    const orderQuantity = deliveryOrderQuantity(offer.productType, offer.photoCount, photos.length, quantity);
-    const [order] = await db.insert(deliveryOrdersTable).values({
-      galleryId: row.gallery.id,
-      accessId: access.access.id,
-      status: "pending",
-      paymentMethod: paymentMethod as "stripe" | "establishment" | "bank_transfer",
-      stripeCheckoutSessionId: null,
-      customerName,
-      customerEmail: customerEmail || null,
-      deliveryMethod: deliveryMethod as "digital" | "school" | "collection" | "shipping",
-      deliveryAddress: deliveryMethod === "shipping" ? req.body.deliveryAddress.trim() : null,
-      fulfillmentStatus: "not_required",
-      amountTotal: deliveryAmount(offer.unitAmount, orderQuantity),
-      currency: offer.currency,
-    }).returning();
-    const itemRows = offer.productType === "print"
-      ? [{ photoId: photos[0].id, quantity }]
-      : photos.map((photo) => ({ photoId: photo.id, quantity: 1 }));
-    await db.insert(deliveryOrderItemsTable).values(itemRows.map(({ photoId, quantity: itemQuantity }) => ({
-      orderId: order.id,
-      photoId,
-      offerId: offer.id,
-      productName: offer.name,
-      productType: offer.productType,
-      includesDigitalDownloads: offer.includesDigitalDownloads,
-      printSize: offer.printSize ?? null,
-      quantity: itemQuantity,
-      unitAmount: offer.unitAmount!,
-      currency: offer.currency!,
-    })));
+    const pricedLines = validLines.map((line) => {
+      const orderQuantity = deliveryOrderQuantity(
+        line.offer.productType, line.offer.photoCount, line.photos.length, line.item.quantity,
+      );
+      return { ...line, orderQuantity, lineTotal: deliveryAmount(line.offer.unitAmount, orderQuantity) };
+    });
+    const amountTotal = pricedLines.reduce((total, line) => total + line.lineTotal, 0);
+    const currency = pricedLines[0].offer.currency;
+    const order = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(deliveryOrdersTable).values({
+        galleryId: row.gallery.id,
+        accessId: access.access.id,
+        status: "pending",
+        paymentMethod: paymentMethod as "stripe" | "establishment" | "bank_transfer",
+        stripeCheckoutSessionId: null,
+        customerName,
+        customerEmail: customerEmail || null,
+        deliveryMethod: deliveryMethod as "digital" | "school" | "collection" | "shipping",
+        deliveryAddress: deliveryMethod === "shipping" ? req.body.deliveryAddress.trim() : null,
+        fulfillmentStatus: "not_required",
+        amountTotal,
+        currency,
+      }).returning();
+      const orderItems = pricedLines.flatMap(({ offer, photos: linePhotos, item }) => {
+        const rows = offer.productType === "print"
+          ? [{ photoId: linePhotos[0].id, quantity: item.quantity }]
+          : linePhotos.map((photo) => ({ photoId: photo.id, quantity: 1 }));
+        return rows.map(({ photoId, quantity }) => ({
+          orderId: created.id, photoId, offerId: offer.id, productName: offer.name,
+          productType: offer.productType, includesDigitalDownloads: offer.includesDigitalDownloads,
+          printSize: offer.printSize ?? null, quantity, unitAmount: offer.unitAmount, currency: offer.currency,
+        }));
+      });
+      await tx.insert(deliveryOrderItemsTable).values(orderItems);
+      return created;
+    });
 
     if (paymentMethod !== "stripe") {
       res.json({
@@ -582,7 +616,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     try {
       session = await stripe.checkout.sessions.create({
         mode: "payment",
-        line_items: [{
+        line_items: pricedLines.map(({ offer, orderQuantity }) => ({
           price_data: {
             currency: offer.currency,
             unit_amount: offer.unitAmount,
@@ -592,7 +626,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
             },
           },
           quantity: orderQuantity,
-        }],
+        })),
         customer_creation: "always",
         ...(customerEmail ? { customer_email: customerEmail } : {}),
         ...(deliveryMethod === "shipping" ? {
@@ -880,6 +914,79 @@ router.get("/projects/:projectId/delivery/access-cards", requireAuth, async (req
   })));
 });
 
+function priceSheetResponse(sheet: typeof deliveryPriceSheetsTable.$inferSelect) {
+  return {
+    id: sheet.id,
+    studioId: sheet.studioId,
+    name: sheet.name,
+    offers: parseOffers(sheet.offersJson),
+    createdAt: sheet.createdAt.toISOString(),
+    updatedAt: sheet.updatedAt.toISOString(),
+  };
+}
+
+async function manageableProject(projectId: number, userId: string) {
+  if (!Number.isInteger(projectId) || !(await canAccessProject(userId, projectId, "manage"))) return null;
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+  return project ?? null;
+}
+
+router.get("/projects/:projectId/delivery/price-sheets", requireAuth, async (req, res): Promise<void> => {
+  const project = await manageableProject(Number(req.params.projectId), getUserId(req));
+  if (!project?.studioId) { res.status(404).json({ error: "Project not found" }); return; }
+  const sheets = await db.select().from(deliveryPriceSheetsTable)
+    .where(eq(deliveryPriceSheetsTable.studioId, project.studioId))
+    .orderBy(deliveryPriceSheetsTable.name);
+  res.json(sheets.map(priceSheetResponse));
+});
+
+router.post("/projects/:projectId/delivery/price-sheets", requireAuth, async (req, res): Promise<void> => {
+  const project = await manageableProject(Number(req.params.projectId), getUserId(req));
+  if (!project?.studioId) { res.status(404).json({ error: "Project not found" }); return; }
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name || name.length > 120) { res.status(400).json({ error: "Enter a price sheet name" }); return; }
+  let offers: DeliveryOffer[];
+  try {
+    offers = parseOffers(JSON.stringify({ offers: req.body?.offers }));
+    if (!offers.length || offers.some((offer) => offer.unitAmount === null || !offer.currency)) throw new Error();
+  } catch {
+    res.status(400).json({ error: "Add at least one complete product to the price sheet" }); return;
+  }
+  try {
+    const [sheet] = await db.insert(deliveryPriceSheetsTable).values({
+      studioId: project.studioId, name, offersJson: JSON.stringify({ offers }),
+    }).returning();
+    res.status(201).json(priceSheetResponse(sheet));
+  } catch {
+    res.status(409).json({ error: "A price sheet with this name already exists" });
+  }
+});
+
+router.patch("/projects/:projectId/delivery/price-sheets/:priceSheetId", requireAuth, async (req, res): Promise<void> => {
+  const project = await manageableProject(Number(req.params.projectId), getUserId(req));
+  const priceSheetId = Number(req.params.priceSheetId);
+  if (!project?.studioId || !Number.isInteger(priceSheetId)) { res.status(404).json({ error: "Price sheet not found" }); return; }
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  let offers: DeliveryOffer[];
+  try {
+    offers = parseOffers(JSON.stringify({ offers: req.body?.offers }));
+    if (!name || name.length > 120 || !offers.length || offers.some((offer) => offer.unitAmount === null || !offer.currency)) throw new Error();
+  } catch {
+    res.status(400).json({ error: "Enter a name and at least one complete product" }); return;
+  }
+  const [sheet] = await db.update(deliveryPriceSheetsTable).set({
+    name, offersJson: JSON.stringify({ offers }), updatedAt: new Date(),
+  }).where(and(
+    eq(deliveryPriceSheetsTable.id, priceSheetId),
+    eq(deliveryPriceSheetsTable.studioId, project.studioId),
+  )).returning();
+  if (!sheet) { res.status(404).json({ error: "Price sheet not found" }); return; }
+  await db.update(deliveryGalleriesTable).set({
+    priceSheetJson: sheet.offersJson, updatedAt: new Date(),
+  }).where(eq(deliveryGalleriesTable.priceSheetId, sheet.id));
+  res.json(priceSheetResponse(sheet));
+});
+
 router.patch("/projects/:projectId/delivery", requireAuth, async (req, res): Promise<void> => {
   const projectId = Number(req.params.projectId);
   if (!Number.isInteger(projectId) || !(await canAccessProject(getUserId(req), projectId, "manage"))) {
@@ -896,8 +1003,27 @@ router.patch("/projects/:projectId/delivery", requireAuth, async (req, res): Pro
       priceSheetJson = JSON.stringify({ offers });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Invalid offers" }); return; }
   }
-  const [gallery] = await db.select().from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
-  if (!gallery) { res.status(404).json({ error: "Publish the delivery gallery first" }); return; }
+  let [gallery] = await db.select().from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
+  if (!gallery) {
+    const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+    [gallery] = await db.insert(deliveryGalleriesTable).values({
+      projectId,
+      studioId: project.studioId,
+      slug: `vc-${randomBytes(8).toString("hex")}`,
+      status: "draft",
+    }).returning();
+  }
+  let assignedPriceSheet: typeof deliveryPriceSheetsTable.$inferSelect | null = null;
+  if (body.priceSheetId !== undefined && body.priceSheetId !== null) {
+    const priceSheetId = Number(body.priceSheetId);
+    const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+    const [sheet] = await db.select().from(deliveryPriceSheetsTable).where(and(
+      eq(deliveryPriceSheetsTable.id, priceSheetId),
+      eq(deliveryPriceSheetsTable.studioId, project.studioId!),
+    )).limit(1);
+    if (!sheet) { res.status(400).json({ error: "Selected price sheet is not available to this studio" }); return; }
+    assignedPriceSheet = sheet;
+  }
   const [updated] = await db.update(deliveryGalleriesTable).set({
     watermarkEnabled: typeof body.watermarkEnabled === "boolean" ? body.watermarkEnabled : gallery.watermarkEnabled,
     watermarkText: body.watermarkText === null || typeof body.watermarkText === "string" ? body.watermarkText : gallery.watermarkText,
@@ -908,7 +1034,13 @@ router.patch("/projects/:projectId/delivery", requireAuth, async (req, res): Pro
     bankTransferInstructions: body.bankTransferInstructions === null || typeof body.bankTransferInstructions === "string"
       ? body.bankTransferInstructions
       : gallery.bankTransferInstructions,
-    ...(priceSheetJson ? { priceSheetJson } : {}),
+    ...(assignedPriceSheet
+      ? { priceSheetId: assignedPriceSheet.id, priceSheetJson: assignedPriceSheet.offersJson }
+      : body.priceSheetId === null
+        ? { priceSheetId: null, ...(priceSheetJson ? { priceSheetJson } : {}) }
+        : priceSheetJson
+          ? { priceSheetJson }
+          : {}),
     updatedAt: new Date(),
   }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
   res.json({ gallery: updated });

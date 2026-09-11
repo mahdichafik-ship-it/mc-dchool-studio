@@ -42,6 +42,8 @@ import type {
   DeliveryOrderResponse,
   DeliveryOrdersResponse,
   DeliveryPhotosResponse,
+  DeliveryPriceSheet,
+  DeliveryPriceSheetInput,
   DeliverySettingsInput,
   DeliverySettingsResponse,
   FulfillmentInput,
@@ -3224,6 +3226,211 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getUpdateDeliverySettingsMutationOptions(options));
+    }
+
+export const getListDeliveryPriceSheetsUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/price-sheets`
+}
+
+export const listDeliveryPriceSheets = async (projectId: number, options?: RequestInit): Promise<DeliveryPriceSheet[]> => {
+
+  return customFetch<DeliveryPriceSheet[]>(getListDeliveryPriceSheetsUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDeliveryPriceSheetsQueryKey = (projectId: number,) => {
+    return [
+    `/api/projects/${projectId}/delivery/price-sheets`
+    ] as const;
+    }
+
+
+export const getListDeliveryPriceSheetsQueryOptions = <TData = Awaited<ReturnType<typeof listDeliveryPriceSheets>>, TError = ErrorType<unknown>>(projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeliveryPriceSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDeliveryPriceSheetsQueryKey(projectId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDeliveryPriceSheets>>> = ({ signal }) => listDeliveryPriceSheets(projectId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: projectId !== null && projectId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDeliveryPriceSheets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDeliveryPriceSheetsQueryResult = NonNullable<Awaited<ReturnType<typeof listDeliveryPriceSheets>>>
+export type ListDeliveryPriceSheetsQueryError = ErrorType<unknown>
+
+
+
+export function useListDeliveryPriceSheets<TData = Awaited<ReturnType<typeof listDeliveryPriceSheets>>, TError = ErrorType<unknown>>(
+ projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeliveryPriceSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDeliveryPriceSheetsQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateDeliveryPriceSheetUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/price-sheets`
+}
+
+export const createDeliveryPriceSheet = async (projectId: number,
+    deliveryPriceSheetInput: DeliveryPriceSheetInput, options?: RequestInit): Promise<DeliveryPriceSheet> => {
+
+  return customFetch<DeliveryPriceSheet>(getCreateDeliveryPriceSheetUrl(projectId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(deliveryPriceSheetInput)
+  }
+);}
+
+
+
+
+
+export const getCreateDeliveryPriceSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDeliveryPriceSheet>>, TError,{projectId: number;data: BodyType<DeliveryPriceSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createDeliveryPriceSheet>>, TError,{projectId: number;data: BodyType<DeliveryPriceSheetInput>}, TContext> => {
+
+const mutationKey = ['createDeliveryPriceSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDeliveryPriceSheet>>, {projectId: number;data: BodyType<DeliveryPriceSheetInput>}> = (props) => {
+          const {projectId,data} = props ?? {};
+
+          return  createDeliveryPriceSheet(projectId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDeliveryPriceSheetMutationResult = NonNullable<Awaited<ReturnType<typeof createDeliveryPriceSheet>>>
+    export type CreateDeliveryPriceSheetMutationBody = BodyType<DeliveryPriceSheetInput>
+    export type CreateDeliveryPriceSheetMutationError = ErrorType<unknown>
+
+    export const useCreateDeliveryPriceSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDeliveryPriceSheet>>, TError,{projectId: number;data: BodyType<DeliveryPriceSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createDeliveryPriceSheet>>,
+        TError,
+        {projectId: number;data: BodyType<DeliveryPriceSheetInput>},
+        TContext
+      > => {
+      return useMutation(getCreateDeliveryPriceSheetMutationOptions(options));
+    }
+
+export const getUpdateDeliveryPriceSheetUrl = (projectId: number,
+    priceSheetId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/price-sheets/${priceSheetId}`
+}
+
+export const updateDeliveryPriceSheet = async (projectId: number,
+    priceSheetId: number,
+    deliveryPriceSheetInput: DeliveryPriceSheetInput, options?: RequestInit): Promise<DeliveryPriceSheet> => {
+
+  return customFetch<DeliveryPriceSheet>(getUpdateDeliveryPriceSheetUrl(projectId,priceSheetId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(deliveryPriceSheetInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateDeliveryPriceSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDeliveryPriceSheet>>, TError,{projectId: number;priceSheetId: number;data: BodyType<DeliveryPriceSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateDeliveryPriceSheet>>, TError,{projectId: number;priceSheetId: number;data: BodyType<DeliveryPriceSheetInput>}, TContext> => {
+
+const mutationKey = ['updateDeliveryPriceSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateDeliveryPriceSheet>>, {projectId: number;priceSheetId: number;data: BodyType<DeliveryPriceSheetInput>}> = (props) => {
+          const {projectId,priceSheetId,data} = props ?? {};
+
+          return  updateDeliveryPriceSheet(projectId,priceSheetId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateDeliveryPriceSheetMutationResult = NonNullable<Awaited<ReturnType<typeof updateDeliveryPriceSheet>>>
+    export type UpdateDeliveryPriceSheetMutationBody = BodyType<DeliveryPriceSheetInput>
+    export type UpdateDeliveryPriceSheetMutationError = ErrorType<unknown>
+
+    export const useUpdateDeliveryPriceSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDeliveryPriceSheet>>, TError,{projectId: number;priceSheetId: number;data: BodyType<DeliveryPriceSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateDeliveryPriceSheet>>,
+        TError,
+        {projectId: number;priceSheetId: number;data: BodyType<DeliveryPriceSheetInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateDeliveryPriceSheetMutationOptions(options));
     }
 
 export const getPublishDeliveryUrl = (projectId: number,) => {

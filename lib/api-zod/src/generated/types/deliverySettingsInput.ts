@@ -17,5 +17,7 @@ export interface DeliverySettingsInput {
   establishmentPaymentInstructions?: string | null;
   /** @nullable */
   bankTransferInstructions?: string | null;
+  /** @nullable */
+  priceSheetId?: number | null;
   offers?: DeliveryOffer[];
 }

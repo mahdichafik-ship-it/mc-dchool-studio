@@ -3,6 +3,17 @@ import { projectsTable } from "./projects";
 import { studiosTable } from "./studios";
 import { studentsTable } from "./students";
 
+export const deliveryPriceSheetsTable = pgTable("delivery_price_sheets", {
+  id: serial("id").primaryKey(),
+  studioId: integer("studio_id").notNull().references(() => studiosTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  offersJson: text("offers_json").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("delivery_price_sheets_studio_name_unique").on(table.studioId, table.name),
+]);
+
 export const deliveryGalleriesTable = pgTable("delivery_galleries", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id")
@@ -10,6 +21,8 @@ export const deliveryGalleriesTable = pgTable("delivery_galleries", {
     .references(() => projectsTable.id, { onDelete: "cascade" }),
   studioId: integer("studio_id")
     .references(() => studiosTable.id, { onDelete: "set null" }),
+  priceSheetId: integer("price_sheet_id")
+    .references(() => deliveryPriceSheetsTable.id, { onDelete: "set null" }),
   slug: text("slug").notNull().unique(),
   status: text("status", { enum: ["draft", "published", "revoked"] })
     .notNull()
@@ -50,3 +63,4 @@ export const deliveryAccessesTable = pgTable("delivery_accesses", {
 
 export type DeliveryGallery = typeof deliveryGalleriesTable.$inferSelect;
 export type DeliveryAccess = typeof deliveryAccessesTable.$inferSelect;
+export type DeliveryPriceSheet = typeof deliveryPriceSheetsTable.$inferSelect;

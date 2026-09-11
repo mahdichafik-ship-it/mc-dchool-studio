@@ -10,5 +10,7 @@ export type DeliveryPhotosResponseGallery = {
   slug?: string;
   status?: string;
   /** @nullable */
+  priceSheetId?: number | null;
+  /** @nullable */
   expiresAt?: string | null;
 };

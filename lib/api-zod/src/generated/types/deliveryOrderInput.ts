@@ -5,14 +5,20 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeliveryBasketItem } from './deliveryBasketItem';
 import type { DeliveryOrderInputDeliveryMethod } from './deliveryOrderInputDeliveryMethod';
 import type { DeliveryOrderInputPaymentMethod } from './deliveryOrderInputPaymentMethod';
 
 export interface DeliveryOrderInput {
   token?: string;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  items?: DeliveryBasketItem[];
   offerId?: string;
   /** @minItems 1 */
-  photoIds: number[];
+  photoIds?: number[];
   /** @minimum 1 */
   quantity?: number;
   customerName?: string;

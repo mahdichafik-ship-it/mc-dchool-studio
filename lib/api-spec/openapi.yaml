@@ -884,6 +884,31 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/DeliverySettingsInput" } } }
       responses: { "200": { description: Updated settings, content: { application/json: { schema: { $ref: "#/components/schemas/DeliverySettingsResponse" } } } } }
+  /projects/{projectId}/delivery/price-sheets:
+    get:
+      operationId: listDeliveryPriceSheets
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Studio price sheets, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } } }
+    post:
+      operationId: createDeliveryPriceSheet
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "201": { description: Price sheet created, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
+  /projects/{projectId}/delivery/price-sheets/{priceSheetId}:
+    patch:
+      operationId: updateDeliveryPriceSheet
+      tags: [delivery]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: priceSheetId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "200": { description: Price sheet updated, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
   /projects/{projectId}/delivery/publish:
     post:
       operationId: publishDelivery
@@ -1477,9 +1502,10 @@ components:
       properties: { code: { type: string, minLength: 8, maxLength: 8 } }
     DeliveryOrderInput:
       type: object
-      required: [photoIds, paymentMethod]
+      required: [paymentMethod]
       properties:
         token: { type: string }
+        items: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/DeliveryBasketItem" } }
         offerId: { type: string }
         photoIds: { type: array, minItems: 1, items: { type: integer } }
         quantity: { type: integer, minimum: 1 }
@@ -1488,6 +1514,13 @@ components:
         paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
         deliveryMethod: { type: string, enum: [digital, school, collection, shipping] }
         deliveryAddress: { type: string }
+    DeliveryBasketItem:
+      type: object
+      required: [offerId, photoIds, quantity]
+      properties:
+        offerId: { type: string }
+        photoIds: { type: array, minItems: 1, maxItems: 100, items: { type: integer } }
+        quantity: { type: integer, minimum: 1, maximum: 100 }
     DeliveryOffer:
       type: object
       required: [id, name, productType, unitAmount, currency, paymentMethods, photoCount, deliveryMethods, active]
@@ -1518,7 +1551,24 @@ components:
         expiresAt: { type: ["string", "null"], format: date-time }
         establishmentPaymentInstructions: { type: ["string", "null"] }
         bankTransferInstructions: { type: ["string", "null"] }
+        priceSheetId: { type: ["integer", "null"] }
         offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+    DeliveryPriceSheetInput:
+      type: object
+      required: [name, offers]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        offers: { type: array, minItems: 1, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+    DeliveryPriceSheet:
+      type: object
+      required: [id, studioId, name, offers, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        studioId: { type: integer }
+        name: { type: string }
+        offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     FulfillmentInput:
       type: object
       required: [fulfillmentStatus]
@@ -1580,6 +1630,7 @@ components:
           properties:
             slug: { type: string }
             status: { type: string }
+            priceSheetId: { type: ["integer", "null"] }
             expiresAt: { type: ["string", "null"] }
         student: { type: object, additionalProperties: true }
         price: { type: object, additionalProperties: true }

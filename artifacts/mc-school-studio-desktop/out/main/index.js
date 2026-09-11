@@ -1724,6 +1724,54 @@ async function finishProjectCaptureBatch(projectId, batchKey, status, failedFile
   assertCaptureBatchComplete(payload);
 }
 function registerUploadHandlers() {
+  electron.ipcMain.handle("upload:deleteUnmatched", async (_e, { projectId, key }) => {
+    if (!/^capture:\d+$/.test(key)) throw new Error("Only unmatched capture files can be deleted here.");
+    const fileId = Number(key.slice("capture:".length));
+    const db = getDb();
+    const file = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+    const capture = file && db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, file.captureId)).get();
+    if (!file || !capture || capture.projectId !== projectId || capture.studentId !== null || file.uploadStatus === "done" || file.uploadStatus === "uploading") {
+      throw new Error("This file is no longer an unmatched, waiting capture.");
+    }
+    const confirmation = await electron.dialog.showMessageBox({
+      type: "warning",
+      title: "Delete unmatched file?",
+      message: `Delete ${file.originalFilename} from Volume Capture?`,
+      detail: "This removes this file from the project and blocked queue. Original camera files and existing disk copies are kept. This source will not be automatically imported again.",
+      buttons: ["Cancel", "Delete from project"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    if (confirmation.response !== 1) return { deleted: false };
+    db.transaction(() => {
+      const current = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, capture.id)).get();
+      const currentFile = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).get();
+      if (!current || current.studentId !== null || !currentFile || currentFile.uploadStatus === "done" || currentFile.uploadStatus === "uploading") {
+        throw new Error("The capture changed while confirming. Nothing was deleted.");
+      }
+      for (const path2 of [file.sourcePath, file.storedPath]) {
+        if (path2) setSetting(`discarded_capture_source:${path2}`, "1");
+      }
+      db.delete(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, fileId)).run();
+      if (file.fileRole === "JPEG" && current.legacyPhotoId !== null) {
+        db.update(capturesTable).set({ legacyPhotoId: null }).where(drizzleOrm.eq(capturesTable.id, current.id)).run();
+        db.delete(photosTable).where(drizzleOrm.eq(photosTable.id, current.legacyPhotoId)).run();
+      }
+      const remaining = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, current.id)).all();
+      if (!remaining.length) db.delete(capturesTable).where(drizzleOrm.eq(capturesTable.id, current.id)).run();
+      else db.update(capturesTable).set({
+        pairingStatus: remaining.some((row) => row.fileRole === "JPEG") ? "jpeg_only" : "raw_only"
+      }).where(drizzleOrm.eq(capturesTable.id, current.id)).run();
+    });
+    emitLiveUploadState(projectId);
+    electron.BrowserWindow.getAllWindows()[0]?.webContents.send("capture:updated", {
+      projectId,
+      captureId: capture.id,
+      studentId: null
+    });
+    return { deleted: true };
+  });
   electron.ipcMain.handle("upload:getLiveState", (_e, { projectId }) => {
     if (isLiveUploadEnabled(projectId)) ensureLiveUploadTimer(projectId);
     return getLiveUploadState(projectId);
@@ -2479,7 +2527,7 @@ function insertImageFile(db, captureId, input) {
   }).run();
 }
 function hasProcessedCaptureSource(db, sourcePath) {
-  return Boolean(findDuplicateFile(db, sourcePath));
+  return Boolean(findDuplicateFile(db, sourcePath) || db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, `discarded_capture_source:${sourcePath}`)).get());
 }
 function hasProcessedQrMarkerSource(db, sourcePath) {
   return Boolean(

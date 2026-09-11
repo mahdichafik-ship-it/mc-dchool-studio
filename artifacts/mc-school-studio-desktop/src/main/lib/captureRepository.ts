@@ -10,6 +10,7 @@ import {
   photosTable,
   qrMarkersTable,
   studentsTable,
+  settingsTable,
 } from '../db/schema.ts'
 import { getCaptureFileFormat, getCaptureFileRole, normalizeBaseFilename } from './capturePairing.ts'
 
@@ -158,7 +159,9 @@ function insertImageFile(db: DesktopDb, captureId: number, input: CaptureFileInp
  * survives watcher restarts, unlike the per-session seenPaths set.
  */
 export function hasProcessedCaptureSource(db: DesktopDb, sourcePath: string): boolean {
-  return Boolean(findDuplicateFile(db, sourcePath))
+  return Boolean(findDuplicateFile(db, sourcePath)
+    || db.select().from(settingsTable)
+      .where(eq(settingsTable.key, `discarded_capture_source:${sourcePath}`)).get())
 }
 
 export interface QrMarkerInput {

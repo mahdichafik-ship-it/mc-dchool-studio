@@ -149,6 +149,7 @@ interface ElectronAPI {
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
   invoke(channel: 'upload:getLiveState', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
   invoke(channel: 'upload:getQueue', args: { projectId: number }): Promise<import('../shared/types').LiveUploadQueueItem[]>
+  invoke(channel: 'upload:deleteUnmatched', args: { projectId: number; key: string }): Promise<{ deleted: boolean }>
   invoke(channel: 'upload:setLiveEnabled', args: { projectId: number; enabled: boolean }): Promise<import('../shared/types').LiveUploadState>
   invoke(channel: 'upload:runNow', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
   invoke(channel: 'upload:retryProjectFailed', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>

@@ -111,6 +111,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [uploadQueue, setUploadQueue] = useState<LiveUploadQueueItem[]>([])
+  const [deletingQueueItem, setDeletingQueueItem] = useState<string | null>(null)
   const [finishDialogOpen, setFinishDialogOpen] = useState(false)
   const [uploadActionRunning, setUploadActionRunning] = useState(false)
   const [reviewSummary, setReviewSummary] = useState<{
@@ -139,6 +140,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     liveUpload?.pending,
     liveUpload?.uploading,
     liveUpload?.error,
+    liveUpload?.blocked,
     liveUpload?.lastUploadedAt,
     liveUpload?.lastError,
   ])
@@ -773,6 +775,28 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                           <p className="mt-1 break-words text-red-600">{item.lastError}</p>
                         )}
                       </div>
+                    )}
+                    {item.status === 'blocked' && (
+                      <Button
+                        variant="outline"
+                        className="mt-2 text-red-700"
+                        disabled={deletingQueueItem !== null}
+                        onClick={async () => {
+                          setDeletingQueueItem(item.key)
+                          try {
+                            await window.api.invoke('upload:deleteUnmatched', { projectId, key: item.key })
+                            setUploadQueue(await window.api.invoke('upload:getQueue', { projectId }))
+                            await reloadLiveUpload()
+                          } catch (error) {
+                            addToast({ type: 'error', title: 'Could not delete file', description: String(error) })
+                          } finally {
+                            setDeletingQueueItem(null)
+                          }
+                        }}
+                      >
+                        <Trash2 className="mr-1 size-3" />
+                        {deletingQueueItem === item.key ? 'Confirming…' : 'Delete from project'}
+                      </Button>
                     )}
                   </div>
                 )

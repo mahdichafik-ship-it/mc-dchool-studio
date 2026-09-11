@@ -6,7 +6,7 @@
  * automatically queued and uploaded to the configured API endpoint.
  */
 
-import { BrowserWindow, ipcMain, safeStorage } from 'electron'
+import { BrowserWindow, ipcMain, safeStorage, dialog } from 'electron'
 import { readFileSync } from 'fs'
 import { basename } from 'node:path'
 import { getDb } from '../db'
@@ -1454,6 +1454,54 @@ export async function finishProjectCaptureBatch(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerUploadHandlers() {
+  ipcMain.handle('upload:deleteUnmatched', async (_e, { projectId, key }: { projectId: number; key: string }) => {
+    if (!/^capture:\d+$/.test(key)) throw new Error('Only unmatched capture files can be deleted here.')
+    const fileId = Number(key.slice('capture:'.length))
+    const db = getDb()
+    const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, fileId)).get()
+    const capture = file && db.select().from(capturesTable).where(eq(capturesTable.id, file.captureId)).get()
+    if (!file || !capture || capture.projectId !== projectId || capture.studentId !== null
+      || file.uploadStatus === 'done' || file.uploadStatus === 'uploading') {
+      throw new Error('This file is no longer an unmatched, waiting capture.')
+    }
+    const confirmation = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Delete unmatched file?',
+      message: `Delete ${file.originalFilename} from Volume Capture?`,
+      detail: 'This removes this file from the project and blocked queue. Original camera files and existing disk copies are kept. This source will not be automatically imported again.',
+      buttons: ['Cancel', 'Delete from project'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    if (confirmation.response !== 1) return { deleted: false }
+    db.transaction(() => {
+      const current = db.select().from(capturesTable).where(eq(capturesTable.id, capture.id)).get()
+      const currentFile = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, fileId)).get()
+      if (!current || current.studentId !== null || !currentFile
+        || currentFile.uploadStatus === 'done' || currentFile.uploadStatus === 'uploading') {
+        throw new Error('The capture changed while confirming. Nothing was deleted.')
+      }
+      for (const path of [file.sourcePath, file.storedPath]) {
+        if (path) setSetting(`discarded_capture_source:${path}`, '1')
+      }
+      db.delete(imageFilesTable).where(eq(imageFilesTable.id, fileId)).run()
+      if (file.fileRole === 'JPEG' && current.legacyPhotoId !== null) {
+        db.update(capturesTable).set({ legacyPhotoId: null }).where(eq(capturesTable.id, current.id)).run()
+        db.delete(photosTable).where(eq(photosTable.id, current.legacyPhotoId)).run()
+      }
+      const remaining = db.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, current.id)).all()
+      if (!remaining.length) db.delete(capturesTable).where(eq(capturesTable.id, current.id)).run()
+      else db.update(capturesTable).set({
+        pairingStatus: remaining.some((row) => row.fileRole === 'JPEG') ? 'jpeg_only' : 'raw_only',
+      }).where(eq(capturesTable.id, current.id)).run()
+    })
+    emitLiveUploadState(projectId)
+    BrowserWindow.getAllWindows()[0]?.webContents.send('capture:updated', {
+      projectId, captureId: capture.id, studentId: null,
+    })
+    return { deleted: true }
+  })
   ipcMain.handle('upload:getLiveState', (_e, { projectId }: { projectId: number }) => {
     if (isLiveUploadEnabled(projectId)) ensureLiveUploadTimer(projectId)
     return getLiveUploadState(projectId)

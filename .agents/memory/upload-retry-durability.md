@@ -27,6 +27,12 @@ Files without a destination identity are blocked local captures, not queued uplo
 
 **How to apply:** Exclude unmatched files from uploadable pending counts, preserve them locally, and show them separately with the reason they cannot upload.
 
+Removing an unmatched file from a project must preserve its original bytes and remember the discarded source across watcher restarts.
+
+**Why:** Deleting only the database row otherwise allows the watched original to be imported again, making the blocked item reappear.
+
+**How to apply:** Confirm project removal, recheck that the file is still unmatched, and record its source exclusion atomically with removal. Disk cleanup is a separate action.
+
 Never transfer or replace a capture batch across desktop connections without server-side accounting for durable files whose success response may have been lost.
 
 **Why:** Retrying an already-committed file can return an idempotent success while leaving that file credited to the original batch. A replacement batch would then remain permanently below its expected count.

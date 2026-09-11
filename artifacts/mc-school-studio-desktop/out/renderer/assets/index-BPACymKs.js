@@ -16982,6 +16982,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [syncProgress, setSyncProgress] = reactExports.useState(null);
   const [uploadDialogOpen, setUploadDialogOpen] = reactExports.useState(false);
   const [uploadQueue, setUploadQueue] = reactExports.useState([]);
+  const [deletingQueueItem, setDeletingQueueItem] = reactExports.useState(null);
   const [finishDialogOpen, setFinishDialogOpen] = reactExports.useState(false);
   const [uploadActionRunning, setUploadActionRunning] = reactExports.useState(false);
   const [reviewSummary, setReviewSummary] = reactExports.useState({ unratedPortraits: 0, unratedGroups: 0 });
@@ -17002,6 +17003,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
     liveUpload?.pending,
     liveUpload?.uploading,
     liveUpload?.error,
+    liveUpload?.blocked,
     liveUpload?.lastUploadedAt,
     liveUpload?.lastError
   ]);
@@ -17558,7 +17560,31 @@ function ProjectView({ projectId, onBack, offline = false }) {
                   ] }),
                   item.blockedReason && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 break-words text-slate-600", children: item.blockedReason }),
                   item.lastError && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 break-words text-red-600", children: item.lastError })
-                ] })
+                ] }),
+                item.status === "blocked" && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  Button,
+                  {
+                    variant: "outline",
+                    className: "mt-2 text-red-700",
+                    disabled: deletingQueueItem !== null,
+                    onClick: async () => {
+                      setDeletingQueueItem(item.key);
+                      try {
+                        await window.api.invoke("upload:deleteUnmatched", { projectId, key: item.key });
+                        setUploadQueue(await window.api.invoke("upload:getQueue", { projectId }));
+                        await reloadLiveUpload();
+                      } catch (error) {
+                        addToast({ type: "error", title: "Could not delete file", description: String(error) });
+                      } finally {
+                        setDeletingQueueItem(null);
+                      }
+                    },
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "mr-1 size-3" }),
+                      deletingQueueItem === item.key ? "Confirming…" : "Delete from project"
+                    ]
+                  }
+                )
               ] }, item.key);
             }) })
           ] }),

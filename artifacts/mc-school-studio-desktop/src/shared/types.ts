@@ -237,6 +237,34 @@ export interface ActiveCaptureTargetEvent {
   source: 'manual' | 'qr' | 'none'
 }
 
+export type DroppedCaptureFileStatus = 'imported' | 'duplicate' | 'unsupported' | 'error'
+
+export interface DroppedCaptureFileResult {
+  filePath: string
+  fileName: string
+  status: DroppedCaptureFileStatus
+  reason?: string
+}
+
+export interface DroppedCaptureBatchResult {
+  projectId: number
+  studentId: number
+  total: number
+  imported: number
+  duplicates: number
+  skipped: number
+  errors: number
+  files: DroppedCaptureFileResult[]
+}
+
+export interface DroppedCaptureProgressEvent {
+  projectId: number
+  studentId: number
+  completed: number
+  total: number
+  result: DroppedCaptureFileResult
+}
+
 export type CaptureExportMode =
   | 'all'
   | 'paired'

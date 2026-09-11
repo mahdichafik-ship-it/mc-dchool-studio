@@ -337,6 +337,35 @@ test('uses the selected student instead of a conflicting Smart Shooter filename'
   }
 })
 
+test('keeps the explicit drop target when the active selection changes during processing', async () => {
+  const fixture = createFixture('DSC_8293.jpg')
+  const { store, photos } = createStore()
+  let activeSelection = 3
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => null,
+      targetStudentId: activeSelection,
+      onPreviewReady: async () => {
+        // Simulate the photographer selecting another roster row while the
+        // original drop is still being prepared.
+        activeSelection = 1
+        return null
+      },
+    })
+
+    assert.equal(result.kind, 'matched')
+    if (result.kind !== 'matched') return
+    assert.equal(result.student.id, 3)
+    assert.equal(photos[0]?.studentId, 3)
+    assert.equal(activeSelection, 1)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
 test('rejects a selected student from another project', async () => {
   const fixture = createFixture('DSC_8292.jpg')
   const { store, photos } = createStore()

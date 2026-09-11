@@ -2,6 +2,7 @@
 const electron = require("electron");
 const api = {
   invoke: (channel, args) => electron.ipcRenderer.invoke(channel, args),
+  getPathForFile: (file) => electron.webUtils.getPathForFile(file),
   on: (channel, listener) => {
     const wrappedListener = (_event, ...args) => listener(...args);
     electron.ipcRenderer.on(channel, wrappedListener);

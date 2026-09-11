@@ -46,6 +46,11 @@ import type {
   StudentGroup,
   GroupCaptureReview,
 } from '@/hooks/useApi'
+import type {
+  DroppedCaptureBatchResult,
+  DroppedCaptureFileResult,
+  DroppedCaptureProgressEvent,
+} from '@shared/types'
 
 interface Props {
   projectId: number
@@ -62,6 +67,13 @@ const captureFilterOptions: Array<{ value: CaptureFilter; label: string }> = [
   { value: 'raw_only', label: 'RAW only' },
   { value: 'unpaired', label: 'Needs review' },
 ]
+
+interface DropProgressState {
+  studentId: number
+  completed: number
+  total: number
+  results: DroppedCaptureFileResult[]
+}
 
 export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
@@ -118,6 +130,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     unratedPortraits: number
     unratedGroups: number
   }>({ unratedPortraits: 0, unratedGroups: 0 })
+  const [dropProgress, setDropProgress] = useState<DropProgressState | null>(null)
+  const [draggedStudentId, setDraggedStudentId] = useState<number | null>(null)
   const autoStartAttemptedRef = useRef<number | null>(null)
   const pendingUploadCount = liveUpload
     ? liveUpload.pending + liveUpload.uploading
@@ -148,6 +162,18 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   useEffect(() => {
     return window.api.on('project:syncProgress', (event) => {
       if (event.projectId === projectId) setSyncProgress(event)
+    })
+  }, [projectId])
+
+  useEffect(() => {
+    return window.api.on('watcher:dropProgress', (event: DroppedCaptureProgressEvent) => {
+      if (event.projectId !== projectId) return
+      setDropProgress((current) => ({
+        studentId: event.studentId,
+        completed: event.completed,
+        total: event.total,
+        results: [...(current?.studentId === event.studentId ? current.results : []), event.result],
+      }))
     })
   }, [projectId])
 
@@ -340,6 +366,96 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
+  async function handleDropForStudent(
+    studentId: number,
+    event: React.DragEvent<HTMLElement>,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    setDraggedStudentId(null)
+    if (project?.finishedAt) {
+      addToast({
+        type: 'error',
+        title: 'Project is finished',
+        description: 'Finished projects cannot import more captures.',
+      })
+      return
+    }
+
+    const droppedFiles = Array.from(event.dataTransfer.files)
+    if (droppedFiles.length === 0) {
+      addToast({
+        type: 'error',
+        title: 'No files dropped',
+        description: 'Drop JPEG or RAW files from Finder onto a student.',
+      })
+      return
+    }
+
+    const filePaths: string[] = []
+    let pathErrors = 0
+    for (const file of droppedFiles) {
+      try {
+        const filePath = window.api.getPathForFile(file)
+        if (filePath) filePaths.push(filePath)
+        else pathErrors++
+      } catch {
+        pathErrors++
+      }
+    }
+    if (filePaths.length === 0) {
+      addToast({
+        type: 'error',
+        title: 'Could not read dropped files',
+        description: `${pathErrors} file${pathErrors === 1 ? '' : 's'} could not be opened by the desktop app.`,
+      })
+      return
+    }
+
+    setDropProgress({ studentId, completed: 0, total: filePaths.length, results: [] })
+    try {
+      const result = await window.api.invoke('watcher:ingestDroppedFiles', {
+        projectId,
+        studentId,
+        filePaths,
+      }) as DroppedCaptureBatchResult
+      await reloadStudents()
+      if (result.imported > 0) {
+        addToast({
+          type: result.errors > 0 ? 'error' : 'success',
+          title: result.errors > 0 ? 'Drop completed with errors' : 'Photos imported',
+          description: [
+            `${result.imported} imported`,
+            result.duplicates > 0 ? `${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} skipped` : null,
+            result.skipped > 0 ? `${result.skipped} unsupported skipped` : null,
+            result.errors > 0 ? `${result.errors} error${result.errors === 1 ? '' : 's'}` : null,
+            pathErrors > 0 ? `${pathErrors} file path error${pathErrors === 1 ? '' : 's'}` : null,
+          ].filter(Boolean).join(' · '),
+        })
+      } else {
+        const hasErrors = result.errors > 0 || pathErrors > 0
+        addToast({
+          type: hasErrors ? 'error' : 'info',
+          title: hasErrors ? 'No photos imported' : 'No new photos imported',
+          description: [
+            result.duplicates > 0 ? `${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'}` : null,
+            result.skipped > 0 ? `${result.skipped} unsupported` : null,
+            result.errors > 0 ? `${result.errors} error${result.errors === 1 ? '' : 's'}` : null,
+            pathErrors > 0 ? `${pathErrors} file path error${pathErrors === 1 ? '' : 's'}` : null,
+          ].filter(Boolean).join(' · ') || 'The dropped files could not be imported.',
+        })
+      }
+      window.setTimeout(() => setDropProgress(null), 1200)
+    } catch (error) {
+      setDropProgress(null)
+      addToast({
+        type: 'error',
+        title: 'Photo drop failed',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   async function handleRetryFailed() {
     if (errorPhotoIds.length === 0 || retrying) return
     setRetrying(true)
@@ -509,7 +625,29 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   })
 
   return (
-    <div className="flex flex-col h-full font-sans bg-slate-50">
+    <div
+      className="flex flex-col h-full font-sans bg-slate-50"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => event.preventDefault()}
+    >
+      {dropProgress && (
+        <div className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2 rounded-xl border border-teal-200 bg-white px-5 py-3 shadow-xl">
+          <div className="flex items-center gap-3 text-sm font-bold text-slate-800">
+            <Loader className="size-4 animate-spin text-teal-600" />
+            Importing photos {Math.min(dropProgress.completed, dropProgress.total)}/{dropProgress.total}
+          </div>
+          <div className="mt-2 h-1.5 w-64 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-teal-500 transition-all"
+              style={{
+                width: `${dropProgress.total > 0
+                  ? Math.min(100, (dropProgress.completed / dropProgress.total) * 100)
+                  : 0}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
       {/* Header bar */}
       <header className="bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
         <div className="flex items-center gap-5 min-w-0">
@@ -1068,6 +1206,13 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                   isSelected={selectedStudent?.id === s.id}
                   isActive={activeStudentId === s.id}
                   onClick={() => void handleSelectCaptureStudent(s)}
+                   isDropActive={draggedStudentId === s.id}
+                   onDragEnter={(event) => {
+                     event.preventDefault()
+                     setDraggedStudentId(s.id)
+                   }}
+                   onDragLeave={() => setDraggedStudentId((current) => current === s.id ? null : current)}
+                   onDrop={(event) => void handleDropForStudent(s.id, event)}
                   uploadSummary={uploadStatusMap.get(s.id)}
                 />
               ))}
@@ -1101,6 +1246,13 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               onClearCaptureTarget={() => void handleClearCaptureStudent()}
               offline={offline}
               employeeLabel={employeeLabel}
+               isDropActive={draggedStudentId === selectedStudent.id}
+               onDragEnter={(event) => {
+                 event.preventDefault()
+                 setDraggedStudentId(selectedStudent.id)
+               }}
+               onDragLeave={() => setDraggedStudentId((current) => current === selectedStudent.id ? null : current)}
+               onDrop={(event) => void handleDropForStudent(selectedStudent.id, event)}
             />
           ) : unmatchedPhotos.length > 0 ? (
             <UnmatchedPhotosPanel
@@ -1390,23 +1542,44 @@ function StudentRow({
   isSelected,
   isActive,
   onClick,
+  isDropActive,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
   uploadSummary,
 }: {
   student: Student
   isSelected: boolean
   isActive: boolean
   onClick: () => void
+  isDropActive: boolean
+  onDragEnter: (event: React.DragEvent<HTMLButtonElement>) => void
+  onDragLeave: () => void
+  onDrop: (event: React.DragEvent<HTMLButtonElement>) => void
   uploadSummary?: StudentUploadSummary
 }) {
   return (
     <button
       onClick={onClick}
+      onDragEnter={onDragEnter}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={cn(
         "text-left w-full p-3 border-b transition-colors flex items-center gap-3",
-        isActive ? "bg-teal-50/50 border-l-4 border-l-teal-500" : isSelected ? "bg-slate-50 border-l-4 border-l-transparent" : "hover:bg-slate-50 border-l-4 border-l-transparent border-b-slate-100"
+        isDropActive
+          ? "bg-teal-100 border-l-4 border-l-teal-600 ring-2 ring-inset ring-teal-300"
+          : isActive
+            ? "bg-teal-50/50 border-l-4 border-l-teal-500"
+            : isSelected
+              ? "bg-slate-50 border-l-4 border-l-transparent"
+              : "hover:bg-slate-50 border-l-4 border-l-transparent border-b-slate-100"
       )}
       aria-pressed={isActive}
-      title={isActive ? 'Active capture student' : 'Select as active capture student'}
+      title={isDropActive ? 'Drop photos to import for this student' : isActive ? 'Active capture student' : 'Select as active capture student'}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
@@ -1450,6 +1623,10 @@ function StudentDetail({
   onClearCaptureTarget,
   offline,
   employeeLabel,
+  isDropActive,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
 }: {
   student: Student
   projectId: number
@@ -1460,6 +1637,10 @@ function StudentDetail({
   onClearCaptureTarget: () => void
   offline: boolean
   employeeLabel: string
+  isDropActive: boolean
+  onDragEnter: (event: React.DragEvent<HTMLDivElement>) => void
+  onDragLeave: () => void
+  onDrop: (event: React.DragEvent<HTMLDivElement>) => void
 }) {
   const {
     data: review,
@@ -1562,7 +1743,19 @@ function StudentDetail({
   }
 
   return (
-    <div className="flex flex-col h-full relative bg-slate-50">
+    <div
+      className={cn(
+        "flex flex-col h-full relative bg-slate-50 transition-colors",
+        isDropActive && "ring-4 ring-inset ring-teal-400 bg-teal-50/30",
+      )}
+      onDragEnter={onDragEnter}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
        {/* Person info header */}
       <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
         {isActiveCaptureTarget && (

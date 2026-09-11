@@ -27,6 +27,8 @@ import type {
   CreateStudentResult,
   StudentGroup,
   GroupCaptureReview,
+  DroppedCaptureBatchResult,
+  DroppedCaptureProgressEvent,
 } from '../shared/types'
 
 interface UploadConfig {
@@ -129,6 +131,12 @@ interface ElectronAPI {
   invoke(channel: 'watcher:setActiveStudent', args: { projectId: number; studentId: number | null }): Promise<number | null>
   invoke(channel: 'watcher:getActiveTarget', args: { projectId: number }): Promise<{ studentId: number | null; groupId: number | null; targetType: 'student' | 'group' | 'none' }>
   invoke(channel: 'watcher:setActiveGroup', args: { projectId: number; groupId: number | null }): Promise<number | null>
+  invoke(channel: 'watcher:ingestDroppedFiles', args: {
+    projectId: number
+    studentId: number
+    filePaths: string[]
+  }): Promise<DroppedCaptureBatchResult>
+  getPathForFile(file: File): string
   invoke(channel: 'dialog:openFile', args?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>
@@ -181,6 +189,7 @@ interface ElectronAPI {
   on(channel: 'capture:updated', listener: (event: CaptureUpdatedEvent) => void): () => void
   on(channel: 'groupCapture:updated', listener: (event: { projectId: number; groupId: number }) => void): () => void
   on(channel: 'watcher:activeStudentChanged', listener: (event: ActiveCaptureTargetEvent) => void): () => void
+  on(channel: 'watcher:dropProgress', listener: (event: DroppedCaptureProgressEvent) => void): () => void
   on(channel: 'capture:fileUploadStatusChanged', listener: (event: CaptureFileUploadStatusChangedEvent) => void): () => void
   on(channel: 'project:syncProgress', listener: (event: ProjectSyncProgressEvent) => void): () => void
 }

@@ -43768,9 +43768,27 @@ const FLUSH_DELAY_MS = 50;
 const watchers = /* @__PURE__ */ new Map();
 const pendingManualTargets = /* @__PURE__ */ new Map();
 const pendingGroupTargets = /* @__PURE__ */ new Map();
+const activeDropBatches = /* @__PURE__ */ new Set();
+let dropBatchTail = Promise.resolve();
 let desktopRetiring = false;
+function createWatchSession(watcher, sequenceState = createSequenceState(), awaitDurability = false) {
+  return {
+    watcher,
+    pendingFiles: [],
+    pendingEnqueues: /* @__PURE__ */ new Set(),
+    flushTimer: null,
+    processing: Promise.resolve(),
+    persistence: Promise.resolve(),
+    pendingPersistences: /* @__PURE__ */ new Set(),
+    previewScheduler: new NewestLivePreviewScheduler(),
+    seenPaths: /* @__PURE__ */ new Set(),
+    sequenceState,
+    awaitDurability
+  };
+}
 async function stopAllWatchersForRetirement() {
   desktopRetiring = true;
+  await drainDroppedCaptureBatches();
   const sessions = [...watchers.values()];
   watchers.clear();
   for (const session of sessions) {
@@ -43779,7 +43797,9 @@ async function stopAllWatchersForRetirement() {
     session.pendingFiles = [];
     await Promise.allSettled([...session.pendingEnqueues]);
   }
-  await Promise.allSettled(sessions.map((session) => session.watcher.close()));
+  await Promise.allSettled(
+    sessions.map((session) => session.watcher).filter((watcher) => watcher !== null).map((watcher) => watcher.close())
+  );
   await Promise.allSettled(sessions.map((session) => session.processing));
   await Promise.allSettled(sessions.map((session) => session.persistence));
   await Promise.allSettled(sessions.flatMap((session) => [...session.pendingPersistences]));
@@ -43792,9 +43812,26 @@ async function stopAllWatchersForShutdown() {
   if (failures.length > 0) {
     throw new AggregateError(failures, "One or more Watch Folder sessions failed to drain");
   }
+  await drainDroppedCaptureBatches();
 }
 function enableWatchersAfterSignIn() {
   desktopRetiring = false;
+}
+function queueDroppedCaptureBatch(projectId, studentId, filePaths) {
+  const batch = dropBatchTail.then(() => ingestDroppedFiles(projectId, studentId, filePaths));
+  dropBatchTail = batch.then(
+    () => void 0,
+    () => void 0
+  );
+  activeDropBatches.add(batch);
+  void batch.finally(() => activeDropBatches.delete(batch)).catch(() => {
+  });
+  return batch;
+}
+async function drainDroppedCaptureBatches() {
+  while (activeDropBatches.size > 0) {
+    await Promise.allSettled([...activeDropBatches]);
+  }
 }
 function getMainWindow() {
   const wins = electron.BrowserWindow.getAllWindows();
@@ -43962,14 +43999,16 @@ function enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, re
       { skipPreviewGeneration: true }
     );
     notifyLiveUploadJobQueued(projectId);
-  }).catch((error) => {
+  });
+  const handledTask = task.catch((error) => {
     session.seenPaths.delete(capture.filePath);
     console.error(`[Watcher] Could not persist ${capture.filePath}; it will be retried`, error);
   });
-  session.persistence = task;
-  session.pendingPersistences.add(task);
-  void task.finally(() => session.pendingPersistences.delete(task)).catch(() => {
+  session.persistence = handledTask;
+  session.pendingPersistences.add(handledTask);
+  void handledTask.finally(() => session.pendingPersistences.delete(handledTask)).catch(() => {
   });
+  return task;
 }
 function registerWatcherHandlers() {
   const db = getDb();
@@ -44005,24 +44044,18 @@ function registerWatcherHandlers() {
       // safe across restarts and prevent duplicate imports.
       ignoreInitial: false
     });
-    const session = {
+    const session = createWatchSession(
       watcher,
-      pendingFiles: [],
-      pendingEnqueues: /* @__PURE__ */ new Set(),
-      flushTimer: null,
-      processing: Promise.resolve(),
-      persistence: Promise.resolve(),
-      pendingPersistences: /* @__PURE__ */ new Set(),
-      previewScheduler: new NewestLivePreviewScheduler(),
-      seenPaths: /* @__PURE__ */ new Set(),
-      sequenceState: createSequenceState(pendingManualTargets.get(projectId) ?? null)
-    };
+      createSequenceState(pendingManualTargets.get(projectId) ?? null)
+    );
     watchers.set(projectId, session);
     watcher.on("add", (filePath) => {
       const diagnosticId = startImagePipelineTrace(filePath);
       const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId);
       session.pendingEnqueues.add(enqueueTask);
-      void enqueueTask.finally(() => session.pendingEnqueues.delete(enqueueTask));
+      void enqueueTask.catch((error) => {
+        console.error(`[Watcher] Could not enqueue ${filePath}`, error);
+      }).finally(() => session.pendingEnqueues.delete(enqueueTask));
     });
     watcher.on("error", (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error);
@@ -44113,6 +44146,15 @@ function registerWatcherHandlers() {
       return groupId;
     }
   );
+  electron.ipcMain.handle(
+    "watcher:ingestDroppedFiles",
+    async (_e, input) => {
+      if (!Number.isInteger(input?.projectId) || !Number.isInteger(input?.studentId)) {
+        throw new Error("A valid project and student are required for dropped photos");
+      }
+      return queueDroppedCaptureBatch(input.projectId, input.studentId, input.filePaths);
+    }
+  );
 }
 async function stopProjectWatcher(projectId, options = {}) {
   const { drain = true, clearTarget = true } = options;
@@ -44128,7 +44170,7 @@ async function stopProjectWatcher(projectId, options = {}) {
   watchers.delete(projectId);
   if (session.flushTimer) clearTimeout(session.flushTimer);
   session.flushTimer = null;
-  await session.watcher.close();
+  if (session.watcher) await session.watcher.close();
   await Promise.allSettled([...session.pendingEnqueues]);
   const pending = sortCaptureFiles(session.pendingFiles.splice(0));
   if (drain && pending.length > 0) {
@@ -44153,28 +44195,32 @@ async function stopProjectWatcher(projectId, options = {}) {
     emitActiveStudentChanged(projectId, null, "none");
   }
 }
-async function enqueueCapture(projectId, filePath, diagnosticId) {
+async function enqueueCapture(projectId, filePath, diagnosticId, options = {}) {
   if (desktopRetiring) {
     finishImagePipelineTrace(diagnosticId);
-    return;
+    throw new Error("Cloud sync is disabled because this desktop was retired");
   }
-  const session = watchers.get(projectId);
+  const session = options.session ?? watchers.get(projectId);
   if (!session || session.seenPaths.has(filePath)) {
     finishImagePipelineTrace(diagnosticId);
-    return;
+    return "duplicate";
   }
   if (!getCaptureFileRole(filePath)) {
     finishImagePipelineTrace(diagnosticId);
-    return;
+    return "unsupported";
   }
   try {
     const fileStat = await waitForStableFile(filePath, promises.stat);
     markImagePipeline(diagnosticId, "file became stable", `bytes=${fileStat.size}`);
-    if (desktopRetiring || watchers.get(projectId) !== session) {
+    if (desktopRetiring || options.session === void 0 && watchers.get(projectId) !== session) {
       finishImagePipelineTrace(diagnosticId);
-      return;
+      throw new Error("Capture session stopped before the file became available");
     }
-    if (!registerCapturePath(session.seenPaths, filePath)) return;
+    if (!registerCapturePath(session.seenPaths, filePath)) return "duplicate";
+    const db = getDb();
+    if (hasProcessedCaptureSource(db, filePath) || hasProcessedQrMarkerSource(db, filePath)) {
+      return "duplicate";
+    }
     session.pendingFiles.push({
       filePath,
       fileName: path.basename(filePath),
@@ -44184,13 +44230,29 @@ async function enqueueCapture(projectId, filePath, diagnosticId) {
       // delayed by image copies or a burst of filesystem events, and a
       // photographer may select another student or scan another QR during
       // that delay.
-      selectedStudentId: session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId,
-      selectedGroupId: pendingGroupTargets.get(projectId) ?? null
+      selectedStudentId: options.selectedStudentId !== void 0 ? options.selectedStudentId : session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId,
+      selectedGroupId: options.selectedGroupId !== void 0 ? options.selectedGroupId : pendingGroupTargets.get(projectId) ?? null
     });
+    if (options.processImmediately) {
+      const [capture] = session.pendingFiles.splice(0);
+      if (!capture) throw new Error("Capture could not be queued");
+      const processing = session.processing.then(() => handleNewPhoto(projectId, capture, session));
+      session.processing = processing.catch((error) => {
+        session.seenPaths.delete(capture.filePath);
+        console.error(`[Watcher] Could not process ${capture.filePath}`, error);
+      });
+      try {
+        return await processing;
+      } finally {
+        finishImagePipelineTrace(capture.diagnosticId);
+      }
+    }
     scheduleFlush(projectId);
+    return "imported";
   } catch (error) {
     console.error(`[Watcher] Could not inspect ${filePath}`, error);
     finishImagePipelineTrace(diagnosticId);
+    throw error;
   }
 }
 function scheduleFlush(projectId) {
@@ -44220,13 +44282,118 @@ function scheduleFlush(projectId) {
     });
   }, FLUSH_DELAY_MS);
 }
+function sendDroppedProgress(projectId, studentId, completed, total, result) {
+  getMainWindow()?.webContents.send("watcher:dropProgress", {
+    projectId,
+    studentId,
+    completed,
+    total,
+    result
+  });
+}
+async function ingestDroppedFiles(projectId, studentId, filePaths) {
+  if (desktopRetiring || getSetting("desktop_retired") === "1") {
+    throw new Error("Cloud sync is disabled because this desktop was retired");
+  }
+  const db = getDb();
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project) throw new Error(`Project ${projectId} not found`);
+  if (project.finishedAt) {
+    throw new Error("This project is finished. Reopen it as a new local project before importing photos.");
+  }
+  const student = findProjectStudent(db, projectId, studentId);
+  if (!student) throw new Error("Student does not belong to this project");
+  if (!Array.isArray(filePaths)) throw new Error("Dropped files were not provided");
+  const session = createWatchSession(null, createSequenceState(), true);
+  const results = [];
+  let imported = 0;
+  let duplicates = 0;
+  let skipped = 0;
+  let errors = 0;
+  for (const rawPath of filePaths) {
+    const filePath = typeof rawPath === "string" ? rawPath : "";
+    const fileName = filePath ? path.basename(filePath) : "Unknown file";
+    let diagnosticId;
+    let result;
+    if (!filePath) {
+      result = { filePath, fileName, status: "error", reason: "The dropped file path was empty." };
+    } else if (!getCaptureFileRole(fileName)) {
+      result = {
+        filePath,
+        fileName,
+        status: "unsupported",
+        reason: "Only JPEG (.jpg/.jpeg) and supported RAW files can be imported."
+      };
+    } else {
+      try {
+        diagnosticId = startImagePipelineTrace(filePath);
+        const fileStat = await promises.stat(filePath);
+        if (!fileStat.isFile()) {
+          throw new Error("The dropped item is not a regular file.");
+        }
+        const status = await enqueueCapture(projectId, filePath, diagnosticId, {
+          session,
+          selectedStudentId: studentId,
+          selectedGroupId: null,
+          processImmediately: true
+        });
+        if (status === "duplicate") {
+          result = {
+            filePath,
+            fileName,
+            status: "duplicate",
+            reason: "This source file was already imported or discarded."
+          };
+        } else if (status === "unmatched") {
+          result = {
+            filePath,
+            fileName,
+            status: "error",
+            reason: "The capture could not be assigned to the selected student."
+          };
+        } else {
+          result = { filePath, fileName, status: "imported" };
+        }
+      } catch (error) {
+        result = {
+          filePath,
+          fileName,
+          status: "error",
+          reason: error instanceof Error ? error.message : String(error)
+        };
+      } finally {
+        finishImagePipelineTrace(diagnosticId);
+      }
+    }
+    results.push(result);
+    if (result.status === "imported") imported++;
+    else if (result.status === "duplicate") duplicates++;
+    else if (result.status === "unsupported") skipped++;
+    else errors++;
+    sendDroppedProgress(projectId, studentId, results.length, filePaths.length, result);
+  }
+  await session.processing;
+  await session.persistence;
+  await Promise.allSettled([...session.pendingPersistences]);
+  await session.previewScheduler.waitForIdle();
+  return {
+    projectId,
+    studentId,
+    total: filePaths.length,
+    imported,
+    duplicates,
+    skipped,
+    errors,
+    files: results
+  };
+}
 async function handleNewPhoto(projectId, capture, session) {
-  if (desktopRetiring) return;
+  if (desktopRetiring) throw new Error("Cloud sync is disabled because this desktop was retired");
   const db = getDb();
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   if (!project) throw new Error(`Project ${projectId} not found`);
   const role = getCaptureFileRole(capture.fileName);
-  if (!role || hasProcessedCaptureSource(db, capture.filePath) || hasProcessedQrMarkerSource(db, capture.filePath)) return;
+  if (!role || hasProcessedCaptureSource(db, capture.filePath) || hasProcessedQrMarkerSource(db, capture.filePath)) return "duplicate";
   if (capture.selectedGroupId !== null && capture.selectedGroupId !== void 0) {
     const group = db.select().from(groupsTable).where(drizzleOrm.and(
       drizzleOrm.eq(groupsTable.id, capture.selectedGroupId),
@@ -44263,11 +44430,10 @@ async function handleNewPhoto(projectId, capture, session) {
       projectId,
       groupId: group.id
     });
-    return;
+    return "imported";
   }
   if (role === "RAW") {
-    await handleNewRaw(projectId, capture, session, db);
-    return;
+    return handleNewRaw(projectId, capture, session, db);
   }
   const win = getMainWindow();
   const manualStudentId = capture.selectedStudentId !== void 0 ? capture.selectedStudentId : session.sequenceState.manualStudentId;
@@ -44298,12 +44464,13 @@ async function handleNewPhoto(projectId, capture, session) {
     if (result2.kind === "unmatched") {
       sendUnmatchedResult(win, projectId, result2);
       console.log(`[Watcher] Unmatched ${capture.fileName}: ${result2.reason}`);
-      return;
+      return "unmatched";
     }
     if (result2.kind === "matched-pending") {
-      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result2);
+      const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result2);
+      if (session.awaitDurability) await persistence;
     }
-    return;
+    return "imported";
   }
   if (manualStudentId !== null) {
     const result2 = await processWatchedPhoto(projectId, capture.filePath, {
@@ -44327,12 +44494,13 @@ async function handleNewPhoto(projectId, capture, session) {
     if (result2.kind === "unmatched") {
       sendUnmatchedResult(win, projectId, result2);
       console.log(`[Watcher] Unmatched ${capture.fileName}: ${result2.reason}`);
-      return;
+      return "unmatched";
     }
     if (result2.kind === "matched-pending") {
-      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result2);
+      const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result2);
+      if (session.awaitDurability) await persistence;
     }
-    return;
+    return "imported";
   }
   const qrResult = await readQrFromImage(capture.filePath);
   if (qrResult) {
@@ -44346,7 +44514,7 @@ async function handleNewPhoto(projectId, capture, session) {
     if (decision2.kind === "review") {
       recordUnmatched(db, win, projectId, capture, decision2.reason);
       emitActiveStudentChanged(projectId, null, "none");
-      return;
+      return "unmatched";
     }
     if (!student2) {
       recordUnmatched(
@@ -44356,7 +44524,7 @@ async function handleNewPhoto(projectId, capture, session) {
         capture,
         `QR marker "${qrResult.studentId}" does not match a student in this project`
       );
-      return;
+      return "unmatched";
     }
     const marker = await persistQrMarker(db, projectId, student2, capture);
     win?.webContents.send("photo:marker", {
@@ -44371,7 +44539,7 @@ async function handleNewPhoto(projectId, capture, session) {
       "qr"
     );
     console.log(`[Watcher] QR marker ${capture.fileName} → ${student2.firstName} ${student2.lastName}`);
-    return;
+    return "imported";
   }
   if (session.sequenceState.activeStudentId === null) {
     if (looksLikeSmartShooterName(capture.fileName)) {
@@ -44395,18 +44563,19 @@ async function handleNewPhoto(projectId, capture, session) {
       if (result2.kind === "unmatched") {
         sendUnmatchedResult(win, projectId, result2);
         console.log(`[Watcher] Unmatched ${capture.fileName}: ${result2.reason}`);
-        return;
+        return "unmatched";
       }
       if (result2.kind === "matched-pending") {
-        enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result2);
+        const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result2);
+        if (session.awaitDurability) await persistence;
       }
-      return;
+      return "imported";
     }
   }
   const decision = advanceSequence(session.sequenceState, { kind: "portrait" });
   if (decision.kind === "review") {
     recordUnmatched(db, win, projectId, capture, decision.reason);
-    return;
+    return "unmatched";
   }
   const student = db.select().from(studentsTable).where(
     drizzleOrm.and(
@@ -44417,7 +44586,7 @@ async function handleNewPhoto(projectId, capture, session) {
   if (!student) {
     session.sequenceState.activeStudentId = null;
     recordUnmatched(db, win, projectId, capture, "The active student is no longer in this project roster");
-    return;
+    return "unmatched";
   }
   const result = await processWatchedPhoto(projectId, capture.filePath, {
     store: createWatchedPhotoStore(db, capture.filePath),
@@ -44439,11 +44608,13 @@ async function handleNewPhoto(projectId, capture, session) {
   });
   if (result.kind === "unmatched") {
     sendUnmatchedResult(win, projectId, result);
-    return;
+    return "unmatched";
   }
   if (result.kind === "matched-pending") {
-    enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result);
+    const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result);
+    if (session.awaitDurability) await persistence;
   }
+  return "imported";
 }
 async function copyToProjectFolder(sourcePath, fileName, destinationDir) {
   await promises.mkdir(destinationDir, { recursive: true });
@@ -44498,7 +44669,7 @@ async function persistQrMarker(db, projectId, student, capture) {
 }
 async function handleNewRaw(projectId, capture, session, db) {
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-  if (!project) return;
+  if (!project) throw new Error(`Project ${projectId} not found`);
   const knownStudents = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
   const filenameReference = extractStudentReference(
     capture.fileName,
@@ -44598,14 +44769,17 @@ async function handleNewRaw(projectId, capture, session, db) {
     console.log(
       `[Watcher] RAW ${result.kind === "paired" ? "paired" : "stored"} ${capture.fileName} for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ""}`
     );
-  }).catch((error) => {
+  });
+  const handledTask = task.catch((error) => {
     session.seenPaths.delete(capture.filePath);
     console.error(`[Watcher] Could not persist RAW ${capture.filePath}; it will be retried`, error);
   });
-  session.persistence = task;
-  session.pendingPersistences.add(task);
-  void task.finally(() => session.pendingPersistences.delete(task)).catch(() => {
+  session.persistence = handledTask;
+  session.pendingPersistences.add(handledTask);
+  void handledTask.finally(() => session.pendingPersistences.delete(handledTask)).catch(() => {
   });
+  if (session.awaitDurability) await task;
+  return "imported";
 }
 async function finishMatchedPhoto(db, win, photo, student, diagnosticId, previewThumbnailData, options = {}) {
   console.log(`[Watcher] Matched ${photo.fileName} → ${student.firstName} ${student.lastName}`);

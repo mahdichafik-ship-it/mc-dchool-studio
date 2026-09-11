@@ -33,6 +33,12 @@ Removing an unmatched file from a project must preserve its original bytes and r
 
 **How to apply:** Confirm project removal, recheck that the file is still unmatched, and record its source exclusion atomically with removal. Disk cleanup is a separate action.
 
+Register active-run promises before executing any queue work, including an empty-queue check.
+
+**Why:** An async function can return and execute its finally block synchronously before its first await. Registering its promise afterward resurrects a completed run as an active lock, blocking every later capture until restart.
+
+**How to apply:** Defer execution to a microtask after registration and clear the lock on settlement. Test repeated empty-to-nonempty transitions, not only uploads present at startup.
+
 Never transfer or replace a capture batch across desktop connections without server-side accounting for durable files whose success response may have been lost.
 
 **Why:** Retrying an already-committed file can return an idempotent success while leaving that file credited to the original batch. A replacement batch would then remain permanently below its expected count.

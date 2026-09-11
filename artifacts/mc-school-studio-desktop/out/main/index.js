@@ -656,6 +656,16 @@ function getEligibleUploadJobs(jobs, getKey, retryAfterByKey, now2) {
     return leftDeferred ? 1 : -1;
   });
 }
+function startActiveUploadRun(runs, projectId, work, onSettled) {
+  const existing = runs.get(projectId);
+  if (existing) return existing;
+  const task = Promise.resolve().then(work).finally(() => {
+    if (runs.get(projectId) === task) runs.delete(projectId);
+    onSettled();
+  });
+  runs.set(projectId, task);
+  return task;
+}
 function getSetting(key) {
   const db = getDb();
   const row = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
@@ -1553,7 +1563,7 @@ async function runLiveUpload(projectId, includeErrors = false) {
   const project = getDb().select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   if (!project || project.finishedAt) return;
   if (!includeErrors && (failedLiveRunRetryAfter.get(projectId) ?? 0) > Date.now()) return;
-  const task = (async () => {
+  const task = startActiveUploadRun(activeLiveUploadRuns, projectId, async () => {
     try {
       const jobs = getProjectLiveUploadJobs(projectId, includeErrors);
       if (jobs.length === 0) return;
@@ -1601,12 +1611,8 @@ async function runLiveUpload(projectId, includeErrors = false) {
         ...liveUploadActivity.get(projectId),
         lastError: String(error)
       });
-    } finally {
-      activeLiveUploadRuns.delete(projectId);
-      emitLiveUploadState(projectId);
     }
-  })();
-  activeLiveUploadRuns.set(projectId, task);
+  }, () => emitLiveUploadState(projectId));
   emitLiveUploadState(projectId);
   return task;
 }

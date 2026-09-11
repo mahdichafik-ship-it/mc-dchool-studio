@@ -28,6 +28,7 @@ import { eq, and, or, isNull } from 'drizzle-orm'
 import type { LiveUploadQueueItem, LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
+import { startActiveUploadRun } from '../lib/activeUploadRun'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
@@ -1249,7 +1250,7 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
   if (!project || project.finishedAt) return
   if (!includeErrors && (failedLiveRunRetryAfter.get(projectId) ?? 0) > Date.now()) return
 
-  const task = (async () => {
+  const task = startActiveUploadRun(activeLiveUploadRuns, projectId, async () => {
     try {
       const jobs = getProjectLiveUploadJobs(projectId, includeErrors)
       if (jobs.length === 0) return
@@ -1300,12 +1301,8 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
         ...liveUploadActivity.get(projectId),
         lastError: String(error),
       })
-    } finally {
-      activeLiveUploadRuns.delete(projectId)
-      emitLiveUploadState(projectId)
     }
-  })()
-  activeLiveUploadRuns.set(projectId, task)
+  }, () => emitLiveUploadState(projectId))
   emitLiveUploadState(projectId)
   return task
 }

@@ -16133,6 +16133,17 @@ function useGroupCaptures(projectId, groupId) {
   reactExports.useEffect(() => {
     void load();
   }, [load]);
+  reactExports.useEffect(() => {
+    if (!projectId || !groupId) return;
+    const unsubscribe = api.on("groupCapture:updated", (event) => {
+      if (event.projectId === projectId && event.groupId === groupId) void load();
+    });
+    const intervalId = window.setInterval(() => void load(), 3e3);
+    return () => {
+      unsubscribe();
+      window.clearInterval(intervalId);
+    };
+  }, [projectId, groupId, load]);
   return { data, reload: load };
 }
 function useUnmatchedPhotos(projectId) {
@@ -16972,6 +16983,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [uploadDialogOpen, setUploadDialogOpen] = reactExports.useState(false);
   const [finishDialogOpen, setFinishDialogOpen] = reactExports.useState(false);
   const [uploadActionRunning, setUploadActionRunning] = reactExports.useState(false);
+  const [reviewSummary, setReviewSummary] = reactExports.useState({ unratedPortraits: 0, unratedGroups: 0 });
   const autoStartAttemptedRef = reactExports.useRef(null);
   const pendingUploadCount = liveUpload ? liveUpload.pending + liveUpload.uploading : [...uploadStatusMap.values()].reduce(
     (count, summary) => count + summary.pending + summary.uploading,
@@ -17245,6 +17257,27 @@ function ProjectView({ projectId, onBack, offline = false }) {
       await reloadLiveUpload();
     }
   }
+  async function loadReviewSummary() {
+    const summary = await window.api.invoke("captures:reviewSummary", { projectId });
+    setReviewSummary(summary);
+    return summary;
+  }
+  async function openUploadDialog() {
+    try {
+      await loadReviewSummary();
+      setUploadDialogOpen(true);
+    } catch (error) {
+      addToast({ type: "error", title: "Could not check photo ratings", description: String(error) });
+    }
+  }
+  async function openFinishDialog() {
+    try {
+      await loadReviewSummary();
+      setFinishDialogOpen(true);
+    } catch (error) {
+      addToast({ type: "error", title: "Could not check photo ratings", description: String(error) });
+    }
+  }
   async function handleToggleLiveUpload() {
     if (!liveUpload || project?.finishedAt) return;
     setUploadActionRunning(true);
@@ -17267,6 +17300,11 @@ function ProjectView({ projectId, onBack, offline = false }) {
       if (retryFailed) await retryProjectFailed();
       else await runUploadNow();
       await reloadUploadStatus();
+      addToast({
+        type: "success",
+        title: retryFailed ? "Retry started" : "Upload started",
+        description: "Upload continues in the background. Keep this window open to monitor progress."
+      });
     } catch (error) {
       addToast({ type: "error", title: "Upload could not continue", description: String(error) });
     } finally {
@@ -17368,7 +17406,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
-                onClick: () => setUploadDialogOpen(true),
+                onClick: () => void openUploadDialog(),
                 className: "h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold",
                 title: "Open upload activity",
                 children: liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : "Status"
@@ -17407,7 +17445,21 @@ function ProjectView({ projectId, onBack, offline = false }) {
             Button,
             {
               size: "sm",
-              onClick: () => setFinishDialogOpen(true),
+              variant: "outline",
+              onClick: () => void openUploadDialog(),
+              disabled: uploadActionRunning || Boolean(project?.finishedAt) || captureSummary.total === 0 && groupCaptureCount === 0,
+              className: "h-8 px-3 border-blue-500/50 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 hover:text-white text-[10px] font-bold uppercase tracking-wider",
+              children: [
+                liveUpload?.running || uploadActionRunning ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 mr-1.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3.5 mr-1.5" }),
+                liveUpload?.uploading ? `Uploading ${liveUpload.uploading}` : pendingUploadCount > 0 ? `Upload ${pendingUploadCount}` : "Upload"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            Button,
+            {
+              size: "sm",
+              onClick: () => void openFinishDialog(),
               disabled: finishing || Boolean(project?.finishedAt) || captureSummary.total === 0 && groupCaptureCount === 0,
               className: cn(
                 "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
@@ -17440,6 +17492,17 @@ function ProjectView({ projectId, onBack, offline = false }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xl font-extrabold", children: String(value) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase tracking-wider", children: String(label) })
           ] }, String(label))) }),
+          (reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-amber-300 bg-amber-50 p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-5 shrink-0 text-amber-600" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-bold text-amber-900", children: "Review photos before uploading" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 text-sm text-amber-800", children: [
+                reviewSummary.unratedPortraits > 0 ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? "" : "s"} need a rating or “Do not share”.` : "",
+                reviewSummary.unratedPortraits > 0 && reviewSummary.unratedGroups > 0 ? " " : "",
+                reviewSummary.unratedGroups > 0 ? `${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? "" : "s"} need a rating.` : ""
+              ] })
+            ] })
+          ] }) }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-bold text-slate-700", children: "Cloud connection" }),
@@ -17473,7 +17536,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
               Button,
               {
-                disabled: uploadActionRunning || !liveUpload?.cloudReady || (liveUpload?.pending ?? 0) === 0,
+                disabled: uploadActionRunning || !liveUpload?.cloudReady || (liveUpload?.pending ?? 0) === 0 || reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0,
                 onClick: () => void handleUploadNow(),
                 className: "bg-blue-600 hover:bg-blue-700 text-white",
                 children: [
@@ -17515,13 +17578,27 @@ function ProjectView({ projectId, onBack, offline = false }) {
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-bold uppercase text-red-700", children: "Need retry" })
             ] })
           ] }),
+          (reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-red-300 bg-red-50 p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-5 shrink-0 text-red-600" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-bold text-red-900", children: "Photo review is not complete" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 text-sm text-red-800", children: [
+                "Review ",
+                reviewSummary.unratedPortraits,
+                " portrait",
+                reviewSummary.unratedPortraits === 1 ? "" : "s",
+                reviewSummary.unratedGroups > 0 ? ` and ${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? "" : "s"}` : "",
+                ". Rate photos to share, or choose “Do not share” for portraits that must stay private."
+              ] })
+            ] })
+          ] }) }),
           !liveUpload?.cloudReady && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-600", children: "Connect to Volume Capture before finishing. Your local captures remain safe." }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3 justify-end", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { variant: "outline", disabled: finishing, onClick: () => setFinishDialogOpen(false), children: "Keep Shooting" }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
               Button,
               {
-                disabled: finishing || !liveUpload?.cloudReady,
+                disabled: finishing || !liveUpload?.cloudReady || reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0,
                 onClick: () => void handleUploadAndFinish(),
                 className: "bg-blue-600 hover:bg-blue-700 text-white",
                 children: [
@@ -18138,7 +18215,7 @@ function StudentDetail({
           ] }) : filteredCaptures.length === 0 && qrMarkers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "h-64 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-3xl shadow-sm text-center", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-10 text-slate-300 mb-3" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-extrabold text-slate-500 uppercase tracking-wider", children: "No captures match filter" })
-          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6", children: [
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6", children: [
             qrMarkers.map((marker) => /* @__PURE__ */ jsxRuntimeExports.jsx(
               QrMarkerTile,
               {
@@ -18760,25 +18837,41 @@ function CaptureReviewControls({
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: cn(
           "text-[10px] font-semibold",
           capture.rating > 0 ? "text-teal-700" : "text-slate-400"
-        ), children: capture.rating > 0 ? `Shared · ${capture.rating} star${capture.rating === 1 ? "" : "s"}` : "Not shared · choose 1–5 stars" })
+        ), children: capture.rating > 0 ? `Shared · ${capture.rating} star${capture.rating === 1 ? "" : "s"}` : capture.rejected ? "Not shared · reviewed" : "Not reviewed · choose 1–5 stars" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "button",
-        {
-          type: "button",
-          onClick: () => onUpdateReview(capture.id, {
-            rating: capture.rating > 0 ? 0 : 5,
-            favorite: capture.rating <= 0,
-            selected: capture.rating <= 0,
-            rejected: false
-          }),
-          className: cn(
-            "rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition-colors",
-            capture.rating > 0 ? "bg-teal-100 text-teal-800 hover:bg-teal-200" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-          ),
-          children: capture.rating > 0 ? "Remove" : "Share"
-        }
-      )
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5", children: [
+        capture.rating <= 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => onUpdateReview(capture.id, {
+              rating: 0,
+              favorite: false,
+              selected: false,
+              rejected: !capture.rejected
+            }),
+            className: "rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-200",
+            children: capture.rejected ? "Review again" : "Do not share"
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => onUpdateReview(capture.id, {
+              rating: capture.rating > 0 ? 0 : 5,
+              favorite: capture.rating <= 0,
+              selected: capture.rating <= 0,
+              rejected: capture.rating > 0
+            }),
+            className: cn(
+              "rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition-colors",
+              capture.rating > 0 ? "bg-teal-100 text-teal-800 hover:bg-teal-200" : "bg-blue-600 text-white hover:bg-blue-700"
+            ),
+            children: capture.rating > 0 ? "Remove" : "Share"
+          }
+        )
+      ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2", children: [
       [1, 2, 3, 4, 5].map((rating) => /* @__PURE__ */ jsxRuntimeExports.jsx(

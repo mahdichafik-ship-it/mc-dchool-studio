@@ -2577,6 +2577,20 @@ function registerPhotoHandlers() {
     })));
   });
   electron.ipcMain.handle("groupCaptures:summary", async (_e, { projectId }) => db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all().length);
+  electron.ipcMain.handle("captures:reviewSummary", async (_e, { projectId }) => {
+    const portraitCaptures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().filter((capture) => capture.studentId !== null);
+    const portraitJpegCaptureIds = new Set(
+      db.select({ captureId: imageFilesTable.captureId }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.fileRole, "JPEG")).all().map((file) => file.captureId)
+    );
+    const groupCaptures = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all();
+    const groupJpegCaptureIds = new Set(
+      db.select({ captureId: groupCaptureFilesTable.captureId }).from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.fileRole, "JPEG")).all().map((file) => file.captureId)
+    );
+    return {
+      unratedPortraits: portraitCaptures.filter((capture) => portraitJpegCaptureIds.has(capture.id) && capture.rating <= 0 && !capture.rejected).length,
+      unratedGroups: groupCaptures.filter((capture) => groupJpegCaptureIds.has(capture.id) && capture.rating <= 0).length
+    };
+  });
   electron.ipcMain.handle("groupCaptures:updateReview", async (_e, { captureId, rating }) => {
     const capture = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).get();
     if (!capture) return null;
@@ -44080,6 +44094,10 @@ async function handleNewPhoto(projectId, capture, session) {
       storedPath,
       fileName: capture.fileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString()
+    });
+    getMainWindow()?.webContents.send("groupCapture:updated", {
+      projectId,
+      groupId: group.id
     });
     return;
   }

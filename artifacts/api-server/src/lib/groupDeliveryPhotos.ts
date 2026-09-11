@@ -7,7 +7,7 @@ import {
   studentPhotosTable,
   studentsTable,
 } from "@workspace/db";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 
 type GroupCapture = typeof groupCapturesTable.$inferSelect;
 type GroupCaptureFile = typeof groupCaptureFilesTable.$inferSelect;
@@ -17,28 +17,8 @@ async function photographedStudentIdsForGroup(capture: GroupCapture): Promise<nu
     .where(eq(groupsTable.id, capture.groupId)).limit(1);
   if (!group) return [];
 
-  if (group.isDefaultClassGroup && group.classId !== null) {
-    const rows = await db.selectDistinct({ studentId: studentsTable.id })
-      .from(studentsTable)
-      .innerJoin(studentPhotosTable, and(
-        eq(studentPhotosTable.studentId, studentsTable.id),
-        isNull(studentPhotosTable.sourceGroupCaptureFileId),
-        isNotNull(studentPhotosTable.durableObjectPath),
-      ))
-      .where(and(
-        eq(studentsTable.projectId, capture.projectId),
-        eq(studentsTable.classId, group.classId),
-      ));
-    return rows.map((row) => row.studentId);
-  }
-
   const rows = await db.selectDistinct({ studentId: groupMembersTable.studentId })
     .from(groupMembersTable)
-    .innerJoin(studentPhotosTable, and(
-      eq(studentPhotosTable.studentId, groupMembersTable.studentId),
-      isNull(studentPhotosTable.sourceGroupCaptureFileId),
-      isNotNull(studentPhotosTable.durableObjectPath),
-    ))
     .where(eq(groupMembersTable.groupId, capture.groupId));
   return rows.map((row) => row.studentId);
 }
@@ -93,19 +73,13 @@ export async function projectAvailableGroupJpegsToStudent(
     .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId))).limit(1);
   if (!student) return 0;
 
-  const defaultGroups = await db.select({ id: groupsTable.id }).from(groupsTable)
-    .where(and(
-      eq(groupsTable.projectId, projectId),
-      eq(groupsTable.classId, student.classId),
-      eq(groupsTable.isDefaultClassGroup, true),
-    ));
   const memberGroups = await db.select({ id: groupMembersTable.groupId }).from(groupMembersTable)
     .innerJoin(groupsTable, and(
       eq(groupsTable.id, groupMembersTable.groupId),
       eq(groupsTable.projectId, projectId),
     ))
     .where(eq(groupMembersTable.studentId, studentId));
-  const groupIds = [...new Set([...defaultGroups, ...memberGroups].map((row) => row.id))];
+  const groupIds = [...new Set(memberGroups.map((row) => row.id))];
   if (groupIds.length === 0) return 0;
 
   const rows = await db.select({

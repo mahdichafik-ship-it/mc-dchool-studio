@@ -105,6 +105,10 @@ interface ElectronAPI {
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
   invoke(channel: 'captures:list', args: { studentId: number }): Promise<StudentCaptureReview>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>
+  invoke(channel: 'captures:reviewSummary', args: { projectId: number }): Promise<{
+    unratedPortraits: number
+    unratedGroups: number
+  }>
   invoke(channel: 'captures:updateReview', args: {
     captureId: number
     favorite?: boolean
@@ -173,6 +177,7 @@ interface ElectronAPI {
   on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
   on(channel: 'auth:sessionInvalidated', listener: (session: AuthSession) => void): () => void
   on(channel: 'capture:updated', listener: (event: CaptureUpdatedEvent) => void): () => void
+  on(channel: 'groupCapture:updated', listener: (event: { projectId: number; groupId: number }) => void): () => void
   on(channel: 'watcher:activeStudentChanged', listener: (event: ActiveCaptureTargetEvent) => void): () => void
   on(channel: 'capture:fileUploadStatusChanged', listener: (event: CaptureFileUploadStatusChangedEvent) => void): () => void
   on(channel: 'project:syncProgress', listener: (event: ProjectSyncProgressEvent) => void): () => void

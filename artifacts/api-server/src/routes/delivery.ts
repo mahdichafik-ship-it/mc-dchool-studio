@@ -10,6 +10,8 @@ import {
   deliveryOrderItemsTable,
   deliveryOrdersTable,
   classesTable,
+  captureFilesTable,
+  capturesTable,
   projectsTable,
   studentPhotosTable,
   studentsTable,
@@ -92,6 +94,52 @@ function verifyToken(token: string, galleryId: number): { accessId: number } | n
   } catch {
     return null;
   }
+}
+
+async function materializeCaptureJpegsForDelivery(projectId: number): Promise<number> {
+  const jpegCaptures = await db
+    .select({
+      capture: capturesTable,
+      file: captureFilesTable,
+    })
+    .from(capturesTable)
+    .innerJoin(captureFilesTable, and(
+      eq(captureFilesTable.captureId, capturesTable.id),
+      eq(captureFilesTable.fileRole, "JPEG"),
+      isNotNull(captureFilesTable.durableObjectPath),
+    ))
+    .where(eq(capturesTable.projectId, projectId));
+
+  if (jpegCaptures.length === 0) return 0;
+
+  const existing = await db
+    .select({
+      studentId: studentPhotosTable.studentId,
+      fileName: studentPhotosTable.fileName,
+    })
+    .from(studentPhotosTable)
+    .where(eq(studentPhotosTable.projectId, projectId));
+  const existingKeys = new Set(existing.map((photo) => `${photo.studentId}:${photo.fileName}`));
+  const missing = jpegCaptures.filter(({ capture, file }) =>
+    !existingKeys.has(`${capture.studentId}:${file.originalFilename}`),
+  );
+  if (missing.length === 0) return 0;
+
+  await db.insert(studentPhotosTable).values(missing.map(({ capture, file }) => ({
+    projectId: capture.projectId,
+    studentId: capture.studentId,
+    fileName: file.originalFilename,
+    fileUrl: file.fileUrl,
+    durableObjectPath: file.durableObjectPath,
+    mimeType: file.mimeType,
+    capturedAt: capture.capturedAt,
+    captureBatchId: file.captureBatchId,
+    desktopConnectionId: file.desktopConnectionId,
+    clientUploadId: file.clientUploadId,
+    rating: capture.rating,
+    colorLabel: capture.colorLabel,
+  }))).onConflictDoNothing();
+  return missing.length;
 }
 
 function publicGallery(gallery: typeof deliveryGalleriesTable.$inferSelect, studio: typeof studiosTable.$inferSelect | null) {
@@ -380,7 +428,6 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
     .where(and(
       eq(studentPhotosTable.projectId, row.gallery.projectId),
       eq(studentPhotosTable.studentId, access.student.id),
-      eq(studentPhotosTable.shareWithParents, true),
       isNotNull(studentPhotosTable.durableObjectPath),
     ))
     .orderBy(studentPhotosTable.createdAt);
@@ -445,7 +492,6 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       eq(studentPhotosTable.studentId, access.student.id),
       inArray(studentPhotosTable.id, photoIds),
       isNotNull(studentPhotosTable.durableObjectPath),
-      eq(studentPhotosTable.shareWithParents, true),
     ));
   if (photos.length !== photoIds.length) {
     res.status(400).json({ error: "One or more selected photos are not available for ordering" });
@@ -650,7 +696,6 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
       eq(deliveryAccessesTable.id, verified.accessId),
       eq(deliveryAccessesTable.galleryId, row.gallery.id),
       isNull(deliveryAccessesTable.revokedAt),
-      eq(studentPhotosTable.shareWithParents, true),
     ))
     .limit(1);
   if (!photo) {
@@ -731,6 +776,7 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     res.status(404).json({ error: "Project not found" });
     return;
   }
+  await materializeCaptureJpegsForDelivery(projectId);
   const [undeliverablePhoto] = await db
     .select({ id: studentPhotosTable.id })
     .from(studentPhotosTable)

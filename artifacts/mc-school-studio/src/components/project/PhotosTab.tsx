@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Image as ImageIcon, Download, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Loader2 } from 'lucide-react';
-import { useListStudents, useUpdatePhotoSharing } from '@workspace/api-client-react';
+import { Camera, Image as ImageIcon, Download, RefreshCw, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { useListStudents } from '@workspace/api-client-react';
 
 interface CloudPhoto {
   id: number;
@@ -178,80 +178,22 @@ export function PhotosTab({ projectId, isCorporate }: { projectId: number, isCor
   );
 }
 
-function PhotoCard({ photo, isCorporate }: { photo: CloudPhoto, isCorporate?: boolean }) {
+function PhotoCard({ photo }: { photo: CloudPhoto, isCorporate?: boolean }) {
   // Use the authenticated proxy endpoint — browser sends session cookie automatically
   const fileUrl = photoFileUrl(photo.projectId, photo.studentId, photo.id);
-  const [isShared, setIsShared] = useState(photo.shareWithParents);
-  const updateSharing = useUpdatePhotoSharing();
-
-  useEffect(() => {
-    setIsShared(photo.shareWithParents);
-  }, [photo.shareWithParents]);
-
-  const handleToggleShare = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (updateSharing.isPending) return;
-    
-    const nextValue = !isShared;
-    // Optimistic update
-    setIsShared(nextValue);
-
-    updateSharing.mutate(
-      {
-        projectId: photo.projectId,
-        studentId: photo.studentId,
-        photoId: photo.id,
-        data: { shareWithParents: nextValue },
-      },
-      {
-        onError: () => {
-          // Revert on error
-          setIsShared(!nextValue);
-        },
-      }
-    );
-  };
-
-  const updating = updateSharing.isPending;
 
   return (
     <div className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
       <img
         src={fileUrl}
         alt={photo.fileName}
-        className={`h-full w-full object-cover transition-opacity duration-300 ${!isShared ? 'opacity-40 grayscale' : 'opacity-100'}`}
+        className="h-full w-full object-cover"
         onError={(e) => {
           (e.target as HTMLImageElement).style.display = 'none';
         }}
       />
 
-      {/* Top action bar - Share Toggle */}
-      <div className="absolute left-0 right-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
-        <button
-          type="button"
-          onClick={handleToggleShare}
-          disabled={updating}
-          title={isShared ? `Hide from ${isCorporate ? 'employee' : 'parent'} gallery` : `Show in ${isCorporate ? 'employee' : 'parent'} gallery`}
-          data-testid={`button-toggle-share-${photo.id}`}
-          className={`flex items-center gap-1.5 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/70 ${updating ? 'opacity-50' : ''}`}
-        >
-          {updating ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : isShared ? (
-            <>
-              <Eye className="size-3.5" />
-              <span>Visible</span>
-            </>
-          ) : (
-            <>
-              <EyeOff className="size-3.5" />
-              <span>Hidden</span>
-            </>
-          )}
-        </button>
-
+      <div className="absolute left-0 right-0 top-0 flex items-start justify-end bg-gradient-to-b from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
         <a
           href={fileUrl}
           download={photo.fileName}
@@ -265,14 +207,6 @@ function PhotoCard({ photo, isCorporate }: { photo: CloudPhoto, isCorporate?: bo
           <Download className="size-3.5" />
         </a>
       </div>
-
-      {!isShared && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-md">
-            Hidden from delivery
-          </div>
-        </div>
-      )}
 
       {/* Filename */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">

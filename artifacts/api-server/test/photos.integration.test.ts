@@ -294,6 +294,15 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(jpegUploaded.pairingStatus, "jpeg_only");
   assert.equal(jpegUploaded.file.fileRole, "JPEG");
   captureFilePaths.push(path.resolve(process.cwd(), jpegUploaded.file.fileUrl.replace(/^\//, "")));
+  const [projectedDeliveryPhoto] = await db
+    .select()
+    .from(studentPhotosTable)
+    .where(and(
+      eq(studentPhotosTable.projectId, projectId),
+      eq(studentPhotosTable.studentId, studentId),
+      eq(studentPhotosTable.fileName, "portrait-original.jpg"),
+    ));
+  assert(projectedDeliveryPhoto, "every durable uploaded JPEG should be available to a published gallery");
 
   const retryForm = new (globalThis as any).FormData();
   retryForm.append(
@@ -419,6 +428,7 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(rawFileResponse.status, 200);
   assert.equal(rawFileResponse.headers.get("content-type"), "application/octet-stream");
   assert.deepEqual(Buffer.from(await rawFileResponse.arrayBuffer()), rawBytes);
+  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, projectedDeliveryPhoto.id));
 });
 
 test("preserves a photo through upload, delivery, and deletion", async () => {

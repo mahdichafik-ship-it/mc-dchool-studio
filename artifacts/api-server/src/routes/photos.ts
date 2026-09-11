@@ -1069,12 +1069,9 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       throw error;
     }
 
-    // Delivery projection is materialized once the photographer approves the
-    // capture. This keeps unreviewed captures out of the parent gallery while
-    // still making the current capture pipeline durable on review.
-    if (result.capture.colorLabel === "green") {
-      await projectCaptureJpegToDeliveryPhoto(result.capture, result.file);
-    }
+    // Every durable JPEG is materialized for delivery. Publishing the gallery,
+    // rather than a second per-photo flag, is the parent-sharing checkpoint.
+    await projectCaptureJpegToDeliveryPhoto(result.capture, result.file);
     if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,
@@ -1136,10 +1133,8 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
   if (jpeg) {
     await projectCaptureJpegToDeliveryPhoto(capture, jpeg.file);
   }
-  // The delivery table is the durable publication snapshot. Keep it in sync
-  // with the desktop review decision and the projected JPEG identity.
+  // Keep review metadata synchronized with the projected delivery JPEG.
   await db.update(studentPhotosTable).set({
-    shareWithParents: colorLabel === "green",
     rating,
     colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
   }).where(and(

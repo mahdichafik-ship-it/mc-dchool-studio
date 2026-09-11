@@ -40,3 +40,4 @@
 - [Delivery access and payment availability](delivery-access-and-payment-availability.md) — one payment provider’s outage must not block galleries, orders, or other payment methods.
 - [Publish-time schema changes](publish-time-schema-changes.md) — production schema changes are applied by Replit Publish’s development-to-production diff, not custom app migrations or startup DDL.
 - [Updater metadata propagation](updater-metadata-propagation.md) — a just-published Mac release can briefly serve the previous latest-mac.yml; rerun an otherwise healthy update smoke.
+- [Desktop capture-key scope](desktop-capture-key-scope.md) — desktop-local capture keys are connection-scoped because independent photographer databases can reuse local IDs.

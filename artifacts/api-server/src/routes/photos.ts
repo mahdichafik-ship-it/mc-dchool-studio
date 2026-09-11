@@ -1005,6 +1005,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       .replace(/\\/g, "/");
     const fileUrl = `/uploads/${relPath}`;
     const connection = getDesktopConnection(req);
+    const scopedCaptureKey = `desktop:${connection.connectionId}:${captureKey}`;
     const captureBatch = await resolveCaptureBatch(projectId, captureBatchKey, connection.connectionId);
     if (captureBatchKey && !captureBatch) {
       discardUploadedFile(req);
@@ -1040,17 +1041,45 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         .from(capturesTable)
         .where(and(
           eq(capturesTable.projectId, projectId),
-          eq(capturesTable.captureKey, captureKey),
+          eq(capturesTable.captureKey, scopedCaptureKey),
         ))
         .limit(1);
+
+      // Older desktop releases stored project-wide keys such as
+      // "legacy-photo:53". Local IDs can repeat on another photographer's Mac,
+      // so only adopt an unscoped legacy capture when this same desktop
+      // connection already owns one of its files.
+      if (!capture) {
+        const [legacyCapture] = await tx
+          .select()
+          .from(capturesTable)
+          .where(and(
+            eq(capturesTable.projectId, projectId),
+            eq(capturesTable.captureKey, captureKey),
+            eq(capturesTable.studentId, studentId),
+          ))
+          .limit(1);
+        if (legacyCapture) {
+          const [ownedLegacyFile] = await tx
+            .select({ id: captureFilesTable.id })
+            .from(captureFilesTable)
+            .where(and(
+              eq(captureFilesTable.captureId, legacyCapture.id),
+              eq(captureFilesTable.desktopConnectionId, connection.connectionId),
+            ))
+            .limit(1);
+          if (ownedLegacyFile) capture = legacyCapture;
+        }
+      }
+
       if (capture && capture.studentId !== studentId) {
-        throw new Error("Capture key was already assigned to a different student");
+        throw new Error("Scoped capture key was already assigned to a different student");
       }
       if (!capture) {
         [capture] = await tx
           .insert(capturesTable)
           .values({
-            captureKey,
+            captureKey: scopedCaptureKey,
             projectId,
             studentId,
             baseFilename: body.baseFilename?.trim() || path.basename(uploadedFile.originalname, path.extname(uploadedFile.originalname)),

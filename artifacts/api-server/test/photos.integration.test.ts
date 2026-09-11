@@ -451,6 +451,69 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, projectedDeliveryPhoto.id));
 });
 
+test("keeps identical local capture keys isolated between photographer desktops", async () => {
+  const [otherStudent] = await db
+    .insert(studentsTable)
+    .values({
+      projectId,
+      classId,
+      firstName: "Other",
+      lastName: "Student",
+      generatedStudentId: `OTHER${process.pid}${Date.now()}`,
+    })
+    .returning({ id: studentsTable.id });
+  const sharedLocalKey = `legacy-photo:${Date.now()}`;
+
+  const upload = async (
+    targetStudentId: number,
+    token: string,
+    uploadId: string,
+    filename: string,
+  ) => {
+    const form = new (globalThis as any).FormData();
+    form.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), filename);
+    form.append("captureKey", sharedLocalKey);
+    form.append("fileRole", "JPEG");
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${targetStudentId}/captures`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-MC-Upload-Id": uploadId,
+        },
+        body: form,
+      },
+    );
+    assert.equal(response.status, 201);
+    return response.json() as Promise<{ captureId: number; file: { fileUrl: string } }>;
+  };
+
+  const first = await upload(
+    studentId,
+    desktopCredentials.token,
+    `shared-key-first-${Date.now()}`,
+    "first-photographer.jpg",
+  );
+  const second = await upload(
+    otherStudent.id,
+    otherDesktopCredentials.token,
+    `shared-key-second-${Date.now()}`,
+    "second-photographer.jpg",
+  );
+
+  assert.notEqual(first.captureId, second.captureId);
+  captureFilePaths.push(
+    path.resolve(process.cwd(), first.file.fileUrl.replace(/^\//, "")),
+    path.resolve(process.cwd(), second.file.fileUrl.replace(/^\//, "")),
+  );
+  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.fileName, "first-photographer.jpg"));
+  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.fileName, "second-photographer.jpg"));
+  await db.delete(capturesTable).where(eq(capturesTable.id, first.captureId));
+  await db.delete(capturesTable).where(eq(capturesTable.id, second.captureId));
+  await db.delete(studentsTable).where(eq(studentsTable.id, otherStudent.id));
+});
+
 test("preserves a photo through upload, delivery, and deletion", async () => {
   const form = new (globalThis as any).FormData();
   form.append(

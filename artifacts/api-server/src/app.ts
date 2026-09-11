@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
@@ -53,6 +53,20 @@ app.use(
 );
 
 app.use("/api", router);
+
+const handleUnhandledRequestError: ErrorRequestHandler = (error, req, res, _next) => {
+  logger.error({
+    err: error,
+    method: req.method,
+    path: req.originalUrl,
+  }, "Unhandled request error");
+  res.status(500).json({
+    error: "The server could not complete this request. Please retry.",
+    code: "INTERNAL_SERVER_ERROR",
+  });
+};
+
+app.use(handleUnhandledRequestError);
 
 // Ensure uploads directory exists (files written here by the multer storage engine;
 // served exclusively via the authenticated /api/.../photos/:id/file proxy endpoint)

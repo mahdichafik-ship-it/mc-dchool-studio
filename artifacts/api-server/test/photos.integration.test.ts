@@ -420,6 +420,19 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(visibleBatch?.status, "complete");
   assert.equal(visibleBatch?.uploadedFileCount, 2);
 
+  const completedBatchStart = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${desktopCredentials.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ batchKey, expectedFileCount: 2 }),
+  });
+  assert.equal(completedBatchStart.status, 200);
+  const stillCompletedBatch = await completedBatchStart.json() as { status: string; completedAt: string | null };
+  assert.equal(stillCompletedBatch.status, "complete");
+  assert(stillCompletedBatch.completedAt);
+
   const conflictingBatchStart = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
     method: "POST",
     headers: {

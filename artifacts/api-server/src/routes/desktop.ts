@@ -236,6 +236,14 @@ router.post("/projects/:projectId/capture-batches", requireDesktopConnection, as
     res.status(409).json({ error: "Capture batch belongs to another desktop connection" });
     return;
   }
+  if (
+    existing
+    && existing.status === "complete"
+    && expectedFileCount <= existing.expectedFileCount
+  ) {
+    res.status(200).json(existing);
+    return;
+  }
   const [batch] = existing
     ? await db
       .update(captureBatchesTable)

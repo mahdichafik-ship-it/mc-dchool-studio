@@ -1180,7 +1180,7 @@ async function syncGroupCaptureReview(captureId) {
   if (!group?.cloudId || !project?.cloudId || !apiUrl || !connectionToken) return;
   try {
     const response = await fetch(
-      `${apiUrl.replace(/\/+$/, "")}/api/projects/${project.cloudId}/groups/${group.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      `${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/groups/${group.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
       {
         method: "PATCH",
         headers: { Authorization: `Bearer ${connectionToken}`, "Content-Type": "application/json" },
@@ -1279,7 +1279,7 @@ function uploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
   });
   return task;
 }
-function getProjectSyncJobs(projectId) {
+function getProjectSyncJobs(projectId, includeDone = false) {
   const db = getDb();
   const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
   const jobs = [];
@@ -1287,7 +1287,7 @@ function getProjectSyncJobs(projectId) {
   const groupCaptures = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.projectId, projectId)).all();
   for (const capture of groupCaptures) {
     for (const file of db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, capture.id)).all()) {
-      if (file.uploadStatus !== "done" || file.fileRole === "JPEG" && !file.galleryReady) {
+      if (includeDone || file.uploadStatus !== "done" || file.fileRole === "JPEG" && !file.galleryReady) {
         jobs.push({ kind: "group-capture-file", captureId: capture.id, fileId: file.id });
       }
     }
@@ -1297,14 +1297,14 @@ function getProjectSyncJobs(projectId) {
     if (capture.studentId === null) continue;
     const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
     for (const file of files) {
-      if (file.uploadStatus !== "done") {
+      if (includeDone || file.uploadStatus !== "done") {
         jobs.push({ kind: "capture-file", captureId: capture.id, fileId: file.id });
       }
     }
   }
   const legacyPhotos = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.projectId, projectId)).all();
   for (const photo of legacyPhotos) {
-    if (!photo.isMatched || photo.studentId === null || mirroredPhotoIds.has(photo.id) || photo.uploadStatus === "done") continue;
+    if (!photo.isMatched || photo.studentId === null || mirroredPhotoIds.has(photo.id) || !includeDone && photo.uploadStatus === "done") continue;
     jobs.push({
       kind: "legacy-photo",
       projectId,
@@ -1320,9 +1320,36 @@ function getProjectSyncJobs(projectId) {
 const LIVE_UPLOAD_SETTING_PREFIX = "live_upload:";
 const CAPTURE_BATCH_FILE_KEYS_PREFIX = "capture_batch_files:";
 const LIVE_UPLOAD_INTERVAL_MS = 2500;
+const FAILED_UPLOAD_RETRY_BASE_MS = 3e4;
+const FAILED_UPLOAD_RETRY_MAX_MS = 5 * 6e4;
 const liveUploadTimers = /* @__PURE__ */ new Map();
 const activeLiveUploadRuns = /* @__PURE__ */ new Map();
 const liveUploadActivity = /* @__PURE__ */ new Map();
+const failedUploadRetryAfter = /* @__PURE__ */ new Map();
+const failedLiveRunRetryAfter = /* @__PURE__ */ new Map();
+const failedUploadAttempts = /* @__PURE__ */ new Map();
+const failedLiveRunAttempts = /* @__PURE__ */ new Map();
+function retryDelay(attempt) {
+  const exponential = Math.min(
+    FAILED_UPLOAD_RETRY_MAX_MS,
+    FAILED_UPLOAD_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1)
+  );
+  return Math.min(
+    FAILED_UPLOAD_RETRY_MAX_MS,
+    Math.round(exponential * (0.8 + Math.random() * 0.4))
+  );
+}
+function deferFailedJob(job) {
+  const key = projectSyncJobKey(job);
+  const attempt = (failedUploadAttempts.get(key) ?? 0) + 1;
+  failedUploadAttempts.set(key, attempt);
+  failedUploadRetryAfter.set(key, Date.now() + retryDelay(attempt));
+}
+function deferFailedRun(projectId) {
+  const attempt = (failedLiveRunAttempts.get(projectId) ?? 0) + 1;
+  failedLiveRunAttempts.set(projectId, attempt);
+  failedLiveRunRetryAfter.set(projectId, Date.now() + retryDelay(attempt));
+}
 function liveUploadSettingKey(projectId) {
   return `${LIVE_UPLOAD_SETTING_PREFIX}${projectId}`;
 }
@@ -1340,7 +1367,8 @@ function registerProjectBatchJobs(projectId, jobs) {
   } catch {
     existing = [];
   }
-  const keys = new Set(existing);
+  const validKeys = new Set(getProjectSyncJobs(projectId, true).map(projectSyncJobKey));
+  const keys = new Set(existing.filter((key) => validKeys.has(key)));
   for (const job of jobs) keys.add(projectSyncJobKey(job));
   setSetting(settingKey, JSON.stringify([...keys]));
   return keys.size;
@@ -1397,7 +1425,8 @@ function getProjectLiveUploadJobs(projectId, includeErrors) {
   const db = getDb();
   return getProjectSyncJobs(projectId).filter((job) => {
     const status = job.kind === "capture-file" ? db.select({ value: imageFilesTable.uploadStatus }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.id, job.fileId)).get()?.value : job.kind === "group-capture-file" ? db.select({ value: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.id, job.fileId)).get()?.value : db.select({ value: photosTable.uploadStatus }).from(photosTable).where(drizzleOrm.eq(photosTable.id, job.photoId)).get()?.value;
-    return status !== "error" || includeErrors;
+    if (status !== "error" || includeErrors) return true;
+    return (failedUploadRetryAfter.get(projectSyncJobKey(job)) ?? 0) <= Date.now();
   });
 }
 async function uploadProjectJob(job, captureBatchKey) {
@@ -1426,21 +1455,40 @@ async function runLiveUpload(projectId, includeErrors = false) {
   }
   const project = getDb().select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   if (!project || project.finishedAt) return;
+  if (!includeErrors && (failedLiveRunRetryAfter.get(projectId) ?? 0) > Date.now()) return;
   const task = (async () => {
     try {
       const jobs = getProjectLiveUploadJobs(projectId, includeErrors);
       if (jobs.length === 0) return;
-      await syncGroupCloudIdentities(projectId);
       const captureBatchKey = await beginProjectCaptureBatch(
         projectId,
         registerProjectBatchJobs(projectId, jobs)
       );
+      failedLiveRunRetryAfter.delete(projectId);
+      failedLiveRunAttempts.delete(projectId);
+      let groupIdentitiesReady = false;
+      let groupIdentityError;
       for (const job of jobs) {
         if (!isCloudSessionVerified()) break;
         try {
+          if (job.kind === "group-capture-file") {
+            if (groupIdentityError) throw groupIdentityError;
+            if (!groupIdentitiesReady) {
+              try {
+                await syncGroupCloudIdentities(projectId);
+                groupIdentitiesReady = true;
+              } catch (error) {
+                groupIdentityError = error;
+                throw error;
+              }
+            }
+          }
           await uploadProjectJob(job, captureBatchKey);
+          failedUploadRetryAfter.delete(projectSyncJobKey(job));
+          failedUploadAttempts.delete(projectSyncJobKey(job));
           liveUploadActivity.set(projectId, { lastUploadedAt: (/* @__PURE__ */ new Date()).toISOString() });
         } catch (error) {
+          deferFailedJob(job);
           liveUploadActivity.set(projectId, {
             ...liveUploadActivity.get(projectId),
             lastError: String(error)
@@ -1450,6 +1498,7 @@ async function runLiveUpload(projectId, includeErrors = false) {
         emitLiveUploadState(projectId);
       }
     } catch (error) {
+      deferFailedRun(projectId);
       liveUploadActivity.set(projectId, {
         ...liveUploadActivity.get(projectId),
         lastError: String(error)

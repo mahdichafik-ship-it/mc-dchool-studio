@@ -532,7 +532,8 @@ async function performUploadPhoto(
       const payload = await response.json() as { fileUrl?: unknown }
       if (typeof payload.fileUrl === 'string') fileUrl = payload.fileUrl
     } catch {
-      // A successful upload is still complete if the server response is not JSON.
+      // The server only returns success after its configured durable backup
+      // destination accepts the file.
       console.warn('[Upload] Upload succeeded but did not return a readable fileUrl')
     }
 
@@ -757,7 +758,7 @@ export async function syncGroupCaptureReview(captureId: number): Promise<void> {
   if (!group?.cloudId || !project?.cloudId || !apiUrl || !connectionToken) return
   try {
     const response = await fetch(
-      `${apiUrl.replace(/\/+$/, '')}/api/projects/${project.cloudId}/groups/${group.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/groups/${group.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
       {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${connectionToken}`, 'Content-Type': 'application/json' },
@@ -907,7 +908,7 @@ type ProjectSyncJob =
   }
   | { kind: 'group-capture-file'; captureId: number; fileId: number }
 
-function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
+function getProjectSyncJobs(projectId: number, includeDone = false): ProjectSyncJob[] {
   const db = getDb()
   const captures = db
     .select()
@@ -919,7 +920,7 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
   const groupCaptures = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.projectId, projectId)).all()
   for (const capture of groupCaptures) {
     for (const file of db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.captureId, capture.id)).all()) {
-      if (file.uploadStatus !== 'done' || (file.fileRole === 'JPEG' && !file.galleryReady)) {
+      if (includeDone || file.uploadStatus !== 'done' || (file.fileRole === 'JPEG' && !file.galleryReady)) {
         jobs.push({ kind: 'group-capture-file', captureId: capture.id, fileId: file.id })
       }
     }
@@ -934,7 +935,7 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
       .where(eq(imageFilesTable.captureId, capture.id))
       .all()
     for (const file of files) {
-      if (file.uploadStatus !== 'done') {
+      if (includeDone || file.uploadStatus !== 'done') {
         jobs.push({ kind: 'capture-file', captureId: capture.id, fileId: file.id })
       }
     }
@@ -950,7 +951,7 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
       !photo.isMatched
       || photo.studentId === null
       || mirroredPhotoIds.has(photo.id)
-      || photo.uploadStatus === 'done'
+      || (!includeDone && photo.uploadStatus === 'done')
     ) continue
     jobs.push({
       kind: 'legacy-photo',
@@ -969,9 +970,39 @@ function getProjectSyncJobs(projectId: number): ProjectSyncJob[] {
 const LIVE_UPLOAD_SETTING_PREFIX = 'live_upload:'
 const CAPTURE_BATCH_FILE_KEYS_PREFIX = 'capture_batch_files:'
 const LIVE_UPLOAD_INTERVAL_MS = 2_500
+const FAILED_UPLOAD_RETRY_BASE_MS = 30_000
+const FAILED_UPLOAD_RETRY_MAX_MS = 5 * 60_000
 const liveUploadTimers = new Map<number, NodeJS.Timeout>()
 const activeLiveUploadRuns = new Map<number, Promise<void>>()
 const liveUploadActivity = new Map<number, { lastUploadedAt?: string; lastError?: string }>()
+const failedUploadRetryAfter = new Map<string, number>()
+const failedLiveRunRetryAfter = new Map<number, number>()
+const failedUploadAttempts = new Map<string, number>()
+const failedLiveRunAttempts = new Map<number, number>()
+
+function retryDelay(attempt: number): number {
+  const exponential = Math.min(
+    FAILED_UPLOAD_RETRY_MAX_MS,
+    FAILED_UPLOAD_RETRY_BASE_MS * (2 ** Math.max(0, attempt - 1)),
+  )
+  return Math.min(
+    FAILED_UPLOAD_RETRY_MAX_MS,
+    Math.round(exponential * (0.8 + Math.random() * 0.4)),
+  )
+}
+
+function deferFailedJob(job: ProjectSyncJob): void {
+  const key = projectSyncJobKey(job)
+  const attempt = (failedUploadAttempts.get(key) ?? 0) + 1
+  failedUploadAttempts.set(key, attempt)
+  failedUploadRetryAfter.set(key, Date.now() + retryDelay(attempt))
+}
+
+function deferFailedRun(projectId: number): void {
+  const attempt = (failedLiveRunAttempts.get(projectId) ?? 0) + 1
+  failedLiveRunAttempts.set(projectId, attempt)
+  failedLiveRunRetryAfter.set(projectId, Date.now() + retryDelay(attempt))
+}
 
 function liveUploadSettingKey(projectId: number): string {
   return `${LIVE_UPLOAD_SETTING_PREFIX}${projectId}`
@@ -992,7 +1023,8 @@ function registerProjectBatchJobs(projectId: number, jobs: ProjectSyncJob[]): nu
   } catch {
     existing = []
   }
-  const keys = new Set(existing)
+  const validKeys = new Set(getProjectSyncJobs(projectId, true).map(projectSyncJobKey))
+  const keys = new Set(existing.filter((key) => validKeys.has(key)))
   for (const job of jobs) keys.add(projectSyncJobKey(job))
   setSetting(settingKey, JSON.stringify([...keys]))
   return keys.size
@@ -1070,7 +1102,8 @@ function getProjectLiveUploadJobs(projectId: number, includeErrors: boolean): Pr
           .where(eq(groupCaptureFilesTable.id, job.fileId)).get()?.value
         : db.select({ value: photosTable.uploadStatus }).from(photosTable)
           .where(eq(photosTable.id, job.photoId)).get()?.value
-    return status !== 'error' || includeErrors
+    if (status !== 'error' || includeErrors) return true
+    return (failedUploadRetryAfter.get(projectSyncJobKey(job)) ?? 0) <= Date.now()
   })
 }
 
@@ -1101,12 +1134,12 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
   }
   const project = getDb().select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
   if (!project || project.finishedAt) return
+  if (!includeErrors && (failedLiveRunRetryAfter.get(projectId) ?? 0) > Date.now()) return
 
   const task = (async () => {
     try {
       const jobs = getProjectLiveUploadJobs(projectId, includeErrors)
       if (jobs.length === 0) return
-      await syncGroupCloudIdentities(projectId)
       // The server keeps the greatest expected count for this retry-stable key.
       // As a shoot grows, every live upload therefore belongs to the same batch
       // that Finish My Shoot will eventually close.
@@ -1114,12 +1147,31 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
         projectId,
         registerProjectBatchJobs(projectId, jobs),
       )
+      failedLiveRunRetryAfter.delete(projectId)
+      failedLiveRunAttempts.delete(projectId)
+      let groupIdentitiesReady = false
+      let groupIdentityError: unknown
       for (const job of jobs) {
         if (!isCloudSessionVerified()) break
         try {
+          if (job.kind === 'group-capture-file') {
+            if (groupIdentityError) throw groupIdentityError
+            if (!groupIdentitiesReady) {
+              try {
+                await syncGroupCloudIdentities(projectId)
+                groupIdentitiesReady = true
+              } catch (error) {
+                groupIdentityError = error
+                throw error
+              }
+            }
+          }
           await uploadProjectJob(job, captureBatchKey)
+          failedUploadRetryAfter.delete(projectSyncJobKey(job))
+          failedUploadAttempts.delete(projectSyncJobKey(job))
           liveUploadActivity.set(projectId, { lastUploadedAt: new Date().toISOString() })
         } catch (error) {
+          deferFailedJob(job)
           liveUploadActivity.set(projectId, {
             ...liveUploadActivity.get(projectId),
             lastError: String(error),
@@ -1129,6 +1181,7 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
         emitLiveUploadState(projectId)
       }
     } catch (error) {
+      deferFailedRun(projectId)
       liveUploadActivity.set(projectId, {
         ...liveUploadActivity.get(projectId),
         lastError: String(error),

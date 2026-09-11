@@ -1962,7 +1962,7 @@ function PhotoTile({
   retrying: boolean
 }) {
   return (
-    <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
+    <div className="group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md">
       {photo.thumbnailData || photo.previewUrl ? (
         <GalleryThumbnail
           source={photo.previewUrl}
@@ -2110,7 +2110,7 @@ function CaptureTile({
 
   if (photo) {
     return (
-      <div className="group relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition-shadow h-full w-full bg-white">
+      <div className="group relative flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
         <PhotoTile
           photo={photo}
           uploadStatus={uploadStatus}

@@ -18304,6 +18304,36 @@ function GroupDetail({
   onClearCaptureTarget,
   onRefreshCaptures
 }) {
+  function captureUploadState(capture) {
+    if (capture.files.some((file) => file.uploadStatus === "error")) {
+      return { label: "Upload failed", className: "bg-red-50 text-red-700 border-red-200" };
+    }
+    if (capture.files.some((file) => file.uploadStatus === "uploading")) {
+      return { label: "Uploading", className: "bg-blue-50 text-blue-700 border-blue-200" };
+    }
+    if (capture.files.some((file) => file.uploadStatus !== "done")) {
+      return { label: "Queued", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    }
+    if (capture.files.some((file) => file.fileRole === "JPEG" && !file.galleryReady)) {
+      return { label: "Preparing gallery", className: "bg-violet-50 text-violet-700 border-violet-200" };
+    }
+    return { label: "Uploaded", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  }
+  function fileUploadState(file) {
+    if (file.uploadStatus === "done" && file.fileRole === "JPEG" && !file.galleryReady) {
+      return { label: "Preparing gallery", className: "text-violet-700", icon: /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) };
+    }
+    if (file.uploadStatus === "done") {
+      return { label: "Uploaded", className: "text-emerald-700", icon: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3" }) };
+    }
+    if (file.uploadStatus === "uploading") {
+      return { label: "Uploading", className: "text-blue-700", icon: /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3 animate-spin" }) };
+    }
+    if (file.uploadStatus === "error") {
+      return { label: "Failed", className: "text-red-700", icon: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-3" }) };
+    }
+    return { label: "Queued", className: "text-amber-700", icon: /* @__PURE__ */ jsxRuntimeExports.jsx(CloudUpload, { className: "size-3" }) };
+  }
   async function updateGroupRating(captureId, rating) {
     try {
       await window.api.invoke("groupCaptures:updateReview", { captureId, rating });
@@ -18376,51 +18406,67 @@ function GroupDetail({
             /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "size-4 mr-2" }),
             " Check for Captures"
           ] })
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 2xl:grid-cols-2 gap-6", children: groupCaptures.map((capture) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-1 h-full bg-teal-500" }),
-          capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              type: "button",
-              className: "aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100",
-              onClick: () => void window.api.invoke("photos:openInSystem", {
-                filePath: capture.files.find((file) => file.fileRole === "JPEG").storedPath
-              }),
-              title: "Open full-size image to inspect focus and zoom",
-              children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "img",
-                {
-                  src: capture.files.find((file) => file.fileRole === "JPEG").previewUrl,
-                  alt: capture.baseFilename,
-                  className: "h-full w-full object-contain bg-slate-950"
-                }
-              )
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2 mb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-extrabold text-base text-slate-900 truncate", children: capture.baseFilename }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", children: capture.pairingStatus })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2 mt-1 flex-wrap", children: capture.files.map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => void window.api.invoke("photos:openInSystem", { filePath: file.storedPath }), className: "hover:text-teal-700 hover:bg-teal-50 transition-colors flex items-center justify-center gap-1.5 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 flex-1", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
-            " ",
-            file.fileRole
-          ] }, file.id)) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-extrabold uppercase tracking-wider text-amber-900", children: "Parent gallery" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-0.5", children: [1, 2, 3, 4, 5].map((rating) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 2xl:grid-cols-2 gap-6", children: groupCaptures.map((capture) => {
+          const overallUploadState = captureUploadState(capture);
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-1 h-full bg-teal-500" }),
+            capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
                 type: "button",
-                "aria-label": `Rate group photo ${rating} stars`,
-                onClick: () => void updateGroupRating(capture.id, capture.rating === rating ? 0 : rating),
-                className: "p-1 text-amber-500 hover:text-amber-600",
-                children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-5", fill: capture.rating >= rating ? "currentColor" : "none" })
-              },
-              rating
-            )) })
-          ] })
-        ] }, capture.id)) })
+                className: "aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100",
+                onClick: () => void window.api.invoke("photos:openInSystem", {
+                  filePath: capture.files.find((file) => file.fileRole === "JPEG").storedPath
+                }),
+                title: "Open full-size image to inspect focus and zoom",
+                children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "img",
+                  {
+                    src: capture.files.find((file) => file.fileRole === "JPEG").previewUrl,
+                    alt: capture.baseFilename,
+                    className: "h-full w-full object-contain bg-slate-950"
+                  }
+                )
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-2 mb-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-extrabold text-base text-slate-900 truncate", children: capture.baseFilename }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: cn("shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", overallUploadState.className), children: overallUploadState.label })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", children: capture.pairingStatus })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2 mt-1 flex-wrap", children: capture.files.map((file) => {
+              const uploadState = fileUploadState(file);
+              return /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => void window.api.invoke("photos:openInSystem", { filePath: file.storedPath }), className: "hover:bg-teal-50 transition-colors flex min-w-[140px] flex-1 items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-600", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1.5", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(ExternalLink, { className: "size-3" }),
+                  " ",
+                  file.fileRole
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: cn("flex items-center gap-1 normal-case tracking-normal", uploadState.className), children: [
+                  uploadState.icon,
+                  " ",
+                  uploadState.label
+                ] })
+              ] }, file.id);
+            }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-extrabold uppercase tracking-wider text-amber-900", children: "Parent gallery" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-0.5", children: [1, 2, 3, 4, 5].map((rating) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  "aria-label": `Rate group photo ${rating} stars`,
+                  onClick: () => void updateGroupRating(capture.id, capture.rating === rating ? 0 : rating),
+                  className: "p-1 text-amber-500 hover:text-amber-600",
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "size-5", fill: capture.rating >= rating ? "currentColor" : "none" })
+                },
+                rating
+              )) })
+            ] })
+          ] }, capture.id);
+        }) })
       ] })
     ] }) })
   ] });

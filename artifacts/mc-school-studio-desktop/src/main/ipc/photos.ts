@@ -66,6 +66,7 @@ function rowToGroupCaptureFile(row: typeof groupCaptureFilesTable.$inferSelect) 
     fileSize: row.fileSize,
     uploadStatus: row.uploadStatus,
     fileUrl: row.fileUrl,
+    galleryReady: row.galleryReady,
   }
 }
 

@@ -2542,7 +2542,8 @@ function rowToGroupCaptureFile(row) {
     storedPath: row.storedPath,
     fileSize: row.fileSize,
     uploadStatus: row.uploadStatus,
-    fileUrl: row.fileUrl
+    fileUrl: row.fileUrl,
+    galleryReady: row.galleryReady
   };
 }
 function getCaptureSummary(rows) {

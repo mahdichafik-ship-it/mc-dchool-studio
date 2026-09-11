@@ -70,6 +70,7 @@ export interface GroupCaptureFileReview {
   fileSize: number | null
   uploadStatus: UploadStatus
   fileUrl: string | null
+  galleryReady: boolean
   previewUrl?: string
 }
 

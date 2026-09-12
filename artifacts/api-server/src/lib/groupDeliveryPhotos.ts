@@ -42,6 +42,7 @@ export async function projectGroupJpegToPhotographedStudents(
     captureBatchId: file.captureBatchId,
     sourceGroupCaptureFileId: file.id,
     rating: capture.rating,
+    shareWithParents: capture.rating > 0,
   }))).onConflictDoNothing();
   return studentIds.length;
 }
@@ -108,6 +109,7 @@ export async function projectAvailableGroupJpegsToStudent(
       captureBatchId: file.captureBatchId,
       sourceGroupCaptureFileId: file.id,
       rating: capture.rating,
+      shareWithParents: capture.rating > 0,
     }).onConflictDoNothing();
   }
   return rows.length;

@@ -9,6 +9,17 @@
 export type DeliveryAccessCardsResponseItem = {
   firstName?: string;
   lastName?: string;
+  subjectLabel?: string;
+  groupLabel?: string;
+  /** Legacy subject identifier retained for compatibility */
+  studentId?: number;
+  /** Legacy subject identifier retained for compatibility */
+  subjectId?: number;
+  generatedStudentId?: string;
+  /** @nullable */
+  className?: string | null;
+  /** @nullable */
+  departmentName?: string | null;
   accessCode?: string;
   accessUrl?: string;
   qrDataUrl?: string;

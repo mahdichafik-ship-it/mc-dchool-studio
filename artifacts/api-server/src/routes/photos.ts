@@ -29,6 +29,10 @@ import {
   projectAvailableGroupJpegsToStudent,
   projectGroupJpegToPhotographedStudents,
 } from "../lib/groupDeliveryPhotos";
+import {
+  createR2CopyUpload,
+  sha256File,
+} from "../lib/r2UploadCopies";
 
 const router = Router({ mergeParams: true });
 
@@ -733,6 +737,18 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
     try { await backupGroupUploadedFile(projectId, groupId, result.backupFilePath, uploadedGroupFile.originalFilename, uploadedGroupFile.fileRole as "JPEG" | "RAW", uploadedGroupFile.fileFormat, `group-capture:${result.capture.id}:${uploadedGroupFile.fileRole}`); }
     catch (error) { if (error instanceof GoogleDriveBackupError) { res.status(503).json({ error: "Capture saved locally, but Google Drive backup failed. Retry the upload.", code: "GOOGLE_DRIVE_BACKUP_FAILED" }); return; } throw error; }
     await projectGroupJpegToPhotographedStudents(result.capture, uploadedGroupFile);
+    const r2Upload = await createR2CopyUpload({
+      source: {
+        kind: "group",
+        id: uploadedGroupFile.id,
+        projectId,
+        captureId: result.capture.id,
+      },
+      originalFilename: uploadedGroupFile.originalFilename,
+      mimeType: uploadedGroupFile.mimeType,
+      fileSize: req.file.size,
+      sha256: await sha256File(req.file.path),
+    });
     if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,
@@ -741,6 +757,7 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
       file: uploadedGroupFile,
       reused: result.reused,
       galleryReady: uploadedGroupFile.fileRole !== "JPEG" || Boolean(uploadedGroupFile.durableObjectPath),
+      r2Upload,
     });
   } catch (error) { discardUploadedFile(req); next(error); }
 });
@@ -781,7 +798,10 @@ router.patch("/projects/:projectId/groups/:groupId/captures/:captureKey/review",
     eq(groupCaptureFilesTable.fileRole, "JPEG"),
   )).limit(1);
   if (jpeg) {
-    await db.update(studentPhotosTable).set({ rating }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, jpeg.id));
+    await db.update(studentPhotosTable).set({
+      rating,
+      shareWithParents: rating > 0,
+    }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, jpeg.id));
     await projectGroupJpegToPhotographedStudents(capture, jpeg);
   }
   res.json({ capture });
@@ -929,8 +949,23 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
       throw error;
     }
     await projectAvailableGroupJpegsToStudent(projectId, studentId);
+    const r2Upload = await createR2CopyUpload({
+      source: {
+        kind: "student",
+        id: result.photo.id,
+        projectId,
+        studentId,
+      },
+      originalFilename: result.photo.fileName,
+      mimeType: result.photo.mimeType,
+      fileSize: req.file.size,
+      sha256: await sha256File(req.file.path),
+    });
     if (result.reused) discardUploadedFile(req);
-    res.status(result.reused ? 200 : 201).json(photoToResponse(result.photo));
+    res.status(result.reused ? 200 : 201).json({
+      ...photoToResponse(result.photo),
+      r2Upload,
+    });
   } catch (error) {
     discardUploadedFile(req);
     next(error);
@@ -1185,6 +1220,18 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     // Every durable JPEG is materialized for delivery. Publishing the gallery,
     // rather than a second per-photo flag, is the parent-sharing checkpoint.
     await projectCaptureJpegToDeliveryPhoto(result.capture, result.file);
+    const r2Upload = await createR2CopyUpload({
+      source: {
+        kind: "capture",
+        id: result.file.id,
+        projectId,
+        captureId: result.capture.id,
+      },
+      originalFilename: result.file.originalFilename,
+      mimeType: result.file.mimeType,
+      fileSize: uploadedFile.size,
+      sha256: await sha256File(uploadedFile.path),
+    });
     if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,
@@ -1192,6 +1239,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       pairingStatus: result.capture.pairingStatus,
       file: captureFileToResponse(result.file),
       reused: result.reused,
+      r2Upload,
     });
   } catch (error) {
     discardUploadedFile(req);

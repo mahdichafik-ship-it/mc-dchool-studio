@@ -7,7 +7,8 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { captureBatchesTable, captureFilesTable, db, desktopAuthSessionsTable, desktopConnectionsTable, studentPhotosTable, studioMembersTable } from "@workspace/db";
+import { captureBatchesTable, captureFilesTable, capturesTable, db, desktopAuthSessionsTable, desktopConnectionsTable, studentPhotosTable, studioMembersTable } from "@workspace/db";
+import { photoStorageCopiesTable } from "@workspace/db/schema";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
 import { and, count, eq, gt, inArray, sql } from "drizzle-orm";
 import {
@@ -24,10 +25,109 @@ import { getUserId, requireAuth } from "../lib/auth";
 import { isPlatformOwner } from "../lib/platformAccess";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
-import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable } from "@workspace/db";
+import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable, groupCapturesTable } from "@workspace/db";
+import { verifyR2Copy } from "../lib/r2UploadCopies";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
+
+async function storageCopyProjectId(
+  copy: typeof photoStorageCopiesTable.$inferSelect,
+): Promise<number | null> {
+  if (copy.studentPhotoId !== null) {
+    const [photo] = await db
+      .select({ projectId: studentPhotosTable.projectId })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, copy.studentPhotoId))
+      .limit(1);
+    return photo?.projectId ?? null;
+  }
+  if (copy.captureFileId !== null) {
+    const [capture] = await db
+      .select({ projectId: capturesTable.projectId })
+      .from(captureFilesTable)
+      .innerJoin(
+        capturesTable,
+        eq(captureFilesTable.captureId, capturesTable.id),
+      )
+      .where(eq(captureFilesTable.id, copy.captureFileId))
+      .limit(1);
+    return capture?.projectId ?? null;
+  }
+  if (copy.groupCaptureFileId !== null) {
+    const [capture] = await db
+      .select({ projectId: groupCapturesTable.projectId })
+      .from(groupCaptureFilesTable)
+      .innerJoin(
+        groupCapturesTable,
+        eq(groupCaptureFilesTable.captureId, groupCapturesTable.id),
+      )
+      .where(eq(groupCaptureFilesTable.id, copy.groupCaptureFileId))
+      .limit(1);
+    return capture?.projectId ?? null;
+  }
+  return null;
+}
+
+router.post(
+  "/storage-copies/:copyId/r2/verify",
+  requireDesktopConnection,
+  async (req, res): Promise<void> => {
+    const copyId = Number(req.params.copyId);
+    if (!Number.isSafeInteger(copyId) || copyId <= 0) {
+      res.status(400).json({ error: "Invalid storage copy identifier" });
+      return;
+    }
+    const [copy] = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.id, copyId))
+      .limit(1);
+    const connection = getDesktopConnection(req);
+    const projectId = copy ? await storageCopyProjectId(copy) : null;
+    if (
+      !copy ||
+      projectId === null ||
+      !(await canAccessDesktopProject(
+        {
+          id: connection.memberId,
+          studioId: connection.studioId,
+          role: connection.memberRole,
+          userId: connection.memberUserId,
+        },
+        projectId,
+      ))
+    ) {
+      res.status(404).json({ error: "Storage copy not found" });
+      return;
+    }
+    try {
+      const verified = await verifyR2Copy(copy);
+      res.json({
+        copy: {
+          id: verified.id,
+          destination: verified.destination,
+          state: verified.state,
+          objectKey: verified.objectKey,
+          fileSize: verified.fileSize,
+          sha256: verified.sha256,
+          etag: verified.etag,
+          verifiedAt: verified.verifiedAt,
+        },
+      });
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error
+          ? String(error.code)
+          : "R2_VERIFICATION_FAILED";
+      res.status(code === "R2_UPLOAD_NOT_VERIFIED" ? 409 : 503).json({
+        error:
+          error instanceof Error ? error.message : "R2 verification failed",
+        code,
+      });
+    }
+  },
+);
 
 function validCaptureBatchKey(value: unknown): value is string {
   return typeof value === "string" && /^[a-zA-Z0-9:_-]{8,200}$/.test(value);

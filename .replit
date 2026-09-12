@@ -26,6 +26,9 @@ PHOTO_UPLOAD_KEY = "Where do I get the value for PHOTO_UPLOAD_KEY? Which service
 
 [userenv.shared]
 PLATFORM_OWNER_USER_ID = "user_3Ge4DiJPRJjUvoMhPndYHElcq7L"
+R2_ACCOUNT_ID = "62121efc6269739f71f1bd7e8490c7d8"
+R2_BUCKET_NAME = "volume-capture-private"
+R2_REGION = "auto"
 
 [nix]
 channel = "stable-25_05"

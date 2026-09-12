@@ -758,12 +758,17 @@ export const GetDeliveryGalleryParams = zod.object({
 export const GetDeliveryGalleryResponse = zod.object({
   "slug": zod.string(),
   "status": zod.string(),
+  "projectType": zod.enum(['school', 'corporate']),
+  "subjectLabel": zod.string(),
+  "groupLabel": zod.string(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "studio": zod.record(zod.string(), zod.unknown()).optional(),
   "photos": zod.array(zod.object({
   "id": zod.number().optional(),
   "fileName": zod.string().optional(),
   "fileUrl": zod.string().optional(),
   "downloadUrl": zod.string().optional()
-}))
+})).optional()
 })
 
 
@@ -863,10 +868,14 @@ export const GetDeliveryPhotosResponse = zod.object({
   "gallery": zod.object({
   "slug": zod.string().optional(),
   "status": zod.string().optional(),
+  "projectType": zod.enum(['school', 'corporate']).optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
   "priceSheetId": zod.number().nullish(),
   "expiresAt": zod.string().nullish()
 }),
   "student": zod.record(zod.string(), zod.unknown()),
+  "subject": zod.record(zod.string(), zod.unknown()).optional(),
   "price": zod.record(zod.string(), zod.unknown()).optional(),
   "offers": zod.array(zod.object({
   "id": zod.string(),
@@ -1013,6 +1022,9 @@ export const GetDeliverySettingsResponse = zod.object({
   "slug": zod.string().optional(),
   "status": zod.string().optional()
 }),
+  "projectType": zod.enum(['school', 'corporate']).optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
   "accessCount": zod.number().optional()
 })
 
@@ -1064,6 +1076,9 @@ export const UpdateDeliverySettingsResponse = zod.object({
   "slug": zod.string().optional(),
   "status": zod.string().optional()
 }),
+  "projectType": zod.enum(['school', 'corporate']).optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
   "accessCount": zod.number().optional()
 })
 
@@ -1486,6 +1501,13 @@ export const ListDeliveryAccessCardsParams = zod.object({
 export const ListDeliveryAccessCardsResponseItem = zod.object({
   "firstName": zod.string().optional(),
   "lastName": zod.string().optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
+  "studentId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "subjectId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "generatedStudentId": zod.string().optional(),
+  "className": zod.string().nullish(),
+  "departmentName": zod.string().nullish(),
   "accessCode": zod.string().optional(),
   "accessUrl": zod.string().optional(),
   "qrDataUrl": zod.string().optional()

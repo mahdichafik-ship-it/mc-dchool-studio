@@ -6,8 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DeliverySettingsResponseGallery } from './deliverySettingsResponseGallery';
+import type { DeliverySettingsResponseProjectType } from './deliverySettingsResponseProjectType';
 
 export interface DeliverySettingsResponse {
   gallery: DeliverySettingsResponseGallery;
+  projectType?: DeliverySettingsResponseProjectType;
+  subjectLabel?: string;
+  groupLabel?: string;
   accessCount?: number;
 }

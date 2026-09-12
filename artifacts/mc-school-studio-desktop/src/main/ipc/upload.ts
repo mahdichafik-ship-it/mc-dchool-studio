@@ -8,6 +8,7 @@
 
 import { BrowserWindow, ipcMain, safeStorage, dialog } from 'electron'
 import { readFileSync } from 'fs'
+import { createHash } from 'node:crypto'
 import { basename } from 'node:path'
 import { getDb } from '../db'
 import {
@@ -29,6 +30,23 @@ import type { LiveUploadQueueItem, LiveUploadState, UploadStatus } from '../../s
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
 import { startActiveUploadRun } from '../lib/activeUploadRun'
+import {
+  assertR2VerifierResponse,
+  parseR2UploadSession,
+  parseUploadResponse,
+  parseUploadResponseJson,
+  RetryableUploadError,
+} from '../lib/uploadResponseValidation'
+import type { R2UploadSession } from '../lib/uploadResponseValidation'
+
+export {
+  assertR2VerifierResponse,
+  parseR2UploadSession,
+  parseUploadResponse,
+  parseUploadResponseJson,
+  RetryableUploadError,
+} from '../lib/uploadResponseValidation'
+export type { R2UploadSession } from '../lib/uploadResponseValidation'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
@@ -132,8 +150,6 @@ const activeUploads = new Set<Promise<void>>()
 const activePhotoUploads = new Map<number, Promise<void>>()
 const activeCaptureFileUploads = new Map<number, Promise<void>>()
 const cloudIdentityRepairs = new Map<string, Promise<void>>()
-
-class RetryableUploadError extends Error {}
 
 type DesktopProjectSummary = {
   id: number
@@ -475,6 +491,65 @@ function isConnectivityFailure(error: unknown): boolean {
     || error.name === 'TypeError'
 }
 
+export async function completeR2Upload(
+  session: R2UploadSession | null | undefined,
+  fileBuffer: Buffer,
+  apiUrl: string,
+  connectionToken: string,
+): Promise<void> {
+  // Servers predating private R2 delivery do not return this additive field.
+  if (!session) return
+  session = parseR2UploadSession(session)
+  if (session.alreadyVerified) return
+  const expectedSha256 = session.uploadHeaders['x-amz-meta-sha256']
+  const actualSha256 = createHash('sha256').update(fileBuffer).digest('hex')
+  if (expectedSha256?.toLowerCase() !== actualSha256) {
+    throw new Error('R2 upload session does not match the local file bytes.')
+  }
+
+  const uploadResponse = await fetch(session.uploadUrl, {
+    method: session.uploadMethod,
+    headers: session.uploadHeaders,
+    body: new Blob([fileBuffer], {
+      type: session.uploadHeaders['Content-Type'] || 'application/octet-stream',
+    }),
+    signal: AbortSignal.timeout(120_000),
+  })
+  if (!uploadResponse.ok) {
+    const body = await uploadResponse.text().catch(() => '')
+    throw new RetryableUploadError(
+      `R2 upload failed with HTTP ${uploadResponse.status}${body ? `: ${body}` : ''}`,
+    )
+  }
+
+  const verifyResponse = await fetch(
+    `${apiUrl.replace(/\/+$/, '')}/api/desktop/storage-copies/${session.copyId}/r2/verify`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connectionToken}` },
+      signal: AbortSignal.timeout(30_000),
+    },
+  )
+  if (!verifyResponse.ok) {
+    const body = await verifyResponse.text().catch(() => '')
+    if (verifyResponse.status === 401) invalidateDesktopCredentials(true)
+    if (verifyResponse.status === 409 || verifyResponse.status === 429 || verifyResponse.status >= 500) {
+      throw new RetryableUploadError(
+        `R2 verification failed with HTTP ${verifyResponse.status}${body ? `: ${body}` : ''}`,
+      )
+    }
+    throw new Error(`R2 verification failed with HTTP ${verifyResponse.status}${body ? `: ${body}` : ''}`)
+  }
+
+  let verifierPayload: unknown
+  try {
+    verifierPayload = await verifyResponse.json()
+  } catch {
+    throw new RetryableUploadError('R2 verification returned an invalid response; retrying safely.')
+  }
+  assertR2VerifierResponse(verifierPayload, session.copyId)
+}
+
 async function performUploadPhoto(
   projectId: number,
   studentId: number,
@@ -537,15 +612,16 @@ async function performUploadPhoto(
     }
 
     // Keep the server URL so the desktop app can link directly to the uploaded file.
-    let fileUrl: string | null = null
+    let fileUrl: string
+    let r2Upload: R2UploadSession | null | undefined
     try {
-      const payload = await response.json() as { fileUrl?: unknown }
-      if (typeof payload.fileUrl === 'string') fileUrl = payload.fileUrl
+      const payload = await parseUploadResponse(response, 'photo')
+      fileUrl = payload.fileUrl!
+      r2Upload = payload.r2Upload
     } catch {
-      // The server only returns success after its configured durable backup
-      // destination accepts the file.
-      console.warn('[Upload] Upload succeeded but did not return a readable fileUrl')
+      throw new RetryableUploadError('Upload succeeded but returned an invalid response; retrying safely.')
     }
+    await completeR2Upload(r2Upload, fileBuffer, apiUrl, connectionToken)
 
     // Mark as done
     db.update(photosTable)
@@ -684,12 +760,15 @@ async function performUploadCaptureFile(captureId: number, fileId: number, captu
     }
 
     let serverFileUrl: string | null = null
+    let r2Upload: R2UploadSession | null | undefined
     try {
-      const payload = await response.json() as { file?: { fileUrl?: unknown } }
-      if (typeof payload.file?.fileUrl === 'string') serverFileUrl = toServerFileUrl(payload.file.fileUrl)
+      const payload = await parseUploadResponse(response, 'capture')
+      serverFileUrl = toServerFileUrl(payload.file!.fileUrl as string)
+      r2Upload = payload.r2Upload
     } catch {
-      console.warn('[Upload] Capture file uploaded but did not return a readable fileUrl')
+      throw new RetryableUploadError('Capture upload returned an invalid response; retrying safely.')
     }
+    await completeR2Upload(r2Upload, fileBuffer, apiUrl, connectionToken)
     setCaptureFileStatus(captureId, fileId, 'done', serverFileUrl)
     console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`)
   } catch (error) {
@@ -739,13 +818,21 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
       if (response.status === 429 || response.status >= 500) throw new RetryableUploadError(`HTTP ${response.status}: ${text}`)
       throw new Error(`HTTP ${response.status}: ${text}`)
     }
-    const payload = await response.json().catch(() => ({})) as {
-      file?: { fileUrl?: unknown }
-      galleryReady?: unknown
+    let payload: ReturnType<typeof parseUploadResponseJson>
+    try {
+      payload = await parseUploadResponse(response, 'group')
+    } catch {
+      throw new RetryableUploadError('Group capture upload returned an invalid response; retrying safely.')
     }
+    await completeR2Upload(
+      payload.r2Upload,
+      readFileSync(file.storedPath),
+      apiUrl,
+      connectionToken,
+    )
     db.update(groupCaptureFilesTable).set({
       uploadStatus: 'done',
-      fileUrl: typeof payload.file?.fileUrl === 'string' ? toServerFileUrl(payload.file.fileUrl) : null,
+      fileUrl: toServerFileUrl(payload.file!.fileUrl as string),
       galleryReady: file.fileRole !== 'JPEG' || payload.galleryReady === true,
     }).where(eq(groupCaptureFilesTable.id, fileId)).run()
   } catch (error) {

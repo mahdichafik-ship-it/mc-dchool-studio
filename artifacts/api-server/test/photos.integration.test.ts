@@ -79,6 +79,15 @@ type PhotoResponse = {
   mimeType: string;
   capturedAt: string | null;
   createdAt: string;
+  r2Upload?: {
+    copyId: number;
+    objectKey: string;
+    uploadUrl: string;
+    uploadMethod: "PUT";
+    uploadHeaders: Record<string, string>;
+    expiresAt: string;
+    alreadyVerified: boolean;
+  } | null;
 };
 
 let server: Server;
@@ -543,6 +552,16 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   assert.equal(uploaded.fileName, "integration-portrait.jpg");
   assert.equal(uploaded.mimeType, "image/jpeg");
   assert.equal(uploaded.capturedAt, "2026-08-22T12:34:56.000Z");
+  assert.equal(uploaded.r2Upload?.uploadMethod, "PUT");
+  assert.equal(uploaded.r2Upload?.alreadyVerified, false);
+  assert.match(
+    uploaded.r2Upload?.objectKey ?? "",
+    /^staging\/storage-copy-\d+\/[0-9a-f-]+\//,
+  );
+  assert.doesNotMatch(
+    uploaded.r2Upload?.uploadUrl ?? "",
+    /R2_SECRET_ACCESS_KEY/,
+  );
 
   const [storedPhoto] = await db
     .select()
@@ -583,7 +602,8 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   assert.equal(listResponse.status, 200);
   const listedPhotos = (await listResponse.json()) as PhotoResponse[];
   assert.equal(listedPhotos.length, 1);
-  assert.deepEqual(listedPhotos[0], uploaded);
+  const { r2Upload: _r2Upload, ...uploadedPhoto } = uploaded;
+  assert.deepEqual(listedPhotos[0], uploadedPhoto);
   const listedFilePath = path.resolve(
     process.cwd(),
     listedPhotos[0].fileUrl.replace(/^\//, ""),
@@ -1219,4 +1239,5 @@ test("shows a class photo for every group member even without an individual port
     new Set([photographed.id, absent.id]),
   );
   assert(projected.every((photo) => photo.rating === 5));
+  assert(projected.every((photo) => photo.shareWithParents));
 });

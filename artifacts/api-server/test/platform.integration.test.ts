@@ -117,7 +117,12 @@ test("encrypts storage credentials with authenticated encryption", () => {
     accessToken: "access-token-value",
     refreshToken: "refresh-token-value",
   });
-  const tampered = encrypted.replace(/"ciphertext":"./, '"ciphertext":"A');
+  const payload = JSON.parse(encrypted) as { ciphertext: string };
+  const replacement = payload.ciphertext.startsWith("A") ? "B" : "A";
+  const tampered = encrypted.replace(
+    /"ciphertext":"./,
+    `"ciphertext":"${replacement}`,
+  );
   assert.throws(() => decryptStorageValue(tampered));
 });
 

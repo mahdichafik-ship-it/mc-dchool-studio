@@ -590,6 +590,31 @@ export default function Delivery() {
   }
 
   const offers = content.offers || [];
+  const deliveryContent = content as typeof content & {
+    gallery?: { projectType?: string; subjectLabel?: string; groupLabel?: string };
+    subject?: { displayName?: string; label?: string; departmentName?: string | null };
+  };
+  const subject: {
+    displayName?: string;
+    label?: string;
+    departmentName?: string | null;
+    companyName?: string | null;
+    firstName?: string;
+    lastName?: string;
+  } = (deliveryContent.subject as {
+    displayName?: string;
+    label?: string;
+    departmentName?: string | null;
+    companyName?: string | null;
+    firstName?: string;
+    lastName?: string;
+  } | undefined) ?? (content.student as { firstName?: string; lastName?: string });
+  const subjectLabel = subject.label
+    ?? deliveryContent.gallery?.subjectLabel
+    ?? "Student";
+  const subjectName = deliveryContent.subject?.displayName
+    ?? `${subject?.firstName ?? ""} ${subject?.lastName ?? ""}`.trim();
+  const isCorporate = deliveryContent.gallery?.projectType === "corporate";
 
   return (
     <div style={brandStyle} className="min-h-[100dvh] bg-slate-50 text-slate-900">
@@ -612,10 +637,18 @@ export default function Delivery() {
       <main className="mx-auto max-w-6xl px-6 py-10 pb-40">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-slate-500">{t("privateDelivery")}</p>
+            <p className="text-sm font-medium text-slate-500">{subjectLabel} {t("privateDelivery")}</p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight">
-              {(content.student as any)?.firstName} {(content.student as any)?.lastName}
+              {subjectName}
             </h1>
+            {isCorporate && subject?.companyName && (
+              <p className="mt-1 text-sm text-slate-500">{subject.companyName}</p>
+            )}
+            {isCorporate && subject.departmentName && (
+              <p className="mt-1 text-sm text-slate-500">
+                {deliveryContent.gallery?.groupLabel ?? "Department"}: {subject.departmentName}
+              </p>
+            )}
           </div>
           <p className="text-sm text-slate-500">
             {content.photos.length} {content.photos.length === 1 ? t("preview") : t("previews")}

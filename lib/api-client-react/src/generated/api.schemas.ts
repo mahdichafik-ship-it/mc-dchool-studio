@@ -557,6 +557,16 @@ export interface PaymentStatusInput {
   status: PaymentStatusInputStatus;
 }
 
+export type DeliveryGalleryProjectType = typeof DeliveryGalleryProjectType[keyof typeof DeliveryGalleryProjectType];
+
+
+export const DeliveryGalleryProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export type DeliveryGalleryStudio = { [key: string]: unknown };
+
 export type DeliveryGalleryPhotosItem = {
   id?: number;
   fileName?: string;
@@ -567,7 +577,13 @@ export type DeliveryGalleryPhotosItem = {
 export interface DeliveryGallery {
   slug: string;
   status: string;
-  photos: DeliveryGalleryPhotosItem[];
+  projectType: DeliveryGalleryProjectType;
+  subjectLabel: string;
+  groupLabel: string;
+  /** @nullable */
+  expiresAt?: string | null;
+  studio?: DeliveryGalleryStudio;
+  photos?: DeliveryGalleryPhotosItem[];
 }
 
 export interface DeliveryAccessResponse {
@@ -598,9 +614,20 @@ export interface DeliveryAccessMutationResponse {
   access: DeliveryAccessMutationResponseAccess;
 }
 
+export type DeliveryPhotosResponseGalleryProjectType = typeof DeliveryPhotosResponseGalleryProjectType[keyof typeof DeliveryPhotosResponseGalleryProjectType];
+
+
+export const DeliveryPhotosResponseGalleryProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export type DeliveryPhotosResponseGallery = {
   slug?: string;
   status?: string;
+  projectType?: DeliveryPhotosResponseGalleryProjectType;
+  subjectLabel?: string;
+  groupLabel?: string;
   /** @nullable */
   priceSheetId?: number | null;
   /** @nullable */
@@ -609,11 +636,14 @@ export type DeliveryPhotosResponseGallery = {
 
 export type DeliveryPhotosResponseStudent = { [key: string]: unknown };
 
+export type DeliveryPhotosResponseSubject = { [key: string]: unknown };
+
 export type DeliveryPhotosResponsePrice = { [key: string]: unknown };
 
 export interface DeliveryPhotosResponse {
   gallery: DeliveryPhotosResponseGallery;
   student: DeliveryPhotosResponseStudent;
+  subject?: DeliveryPhotosResponseSubject;
   price?: DeliveryPhotosResponsePrice;
   offers: DeliveryOffer[];
   /** Whether at least one complete Volume Capture offer is available. */
@@ -682,8 +712,19 @@ export type DeliverySettingsResponseGallery = {
   status?: string;
 };
 
+export type DeliverySettingsResponseProjectType = typeof DeliverySettingsResponseProjectType[keyof typeof DeliverySettingsResponseProjectType];
+
+
+export const DeliverySettingsResponseProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export interface DeliverySettingsResponse {
   gallery: DeliverySettingsResponseGallery;
+  projectType?: DeliverySettingsResponseProjectType;
+  subjectLabel?: string;
+  groupLabel?: string;
   accessCount?: number;
 }
 
@@ -702,6 +743,17 @@ export interface DeliveryMutationResponse {
 export type DeliveryAccessCardsResponseItem = {
   firstName?: string;
   lastName?: string;
+  subjectLabel?: string;
+  groupLabel?: string;
+  /** Legacy subject identifier retained for compatibility */
+  studentId?: number;
+  /** Legacy subject identifier retained for compatibility */
+  subjectId?: number;
+  generatedStudentId?: string;
+  /** @nullable */
+  className?: string | null;
+  /** @nullable */
+  departmentName?: string | null;
   accessCode?: string;
   accessUrl?: string;
   qrDataUrl?: string;

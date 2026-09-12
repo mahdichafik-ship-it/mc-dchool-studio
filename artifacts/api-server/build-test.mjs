@@ -13,6 +13,9 @@ await build({
     path.resolve(artifactDir, "test/googleDriveBackup.test.ts"),
     path.resolve(artifactDir, "test/managedStripeWebhook.test.ts"),
     path.resolve(artifactDir, "test/deliveryOffers.integration.test.ts"),
+    path.resolve(artifactDir, "test/deliveryR2.integration.test.ts"),
+    path.resolve(artifactDir, "test/r2Storage.test.ts"),
+    path.resolve(artifactDir, "test/r2UploadCopies.test.ts"),
   ],
   outdir: path.resolve(artifactDir, "test"),
   entryNames: "[name]",
@@ -28,6 +31,7 @@ await build({
     "express",
     "multer",
     "pdfkit",
+    "sharp",
   ],
   banner: {
     js: `import { createRequire as __createRequire } from "node:module";

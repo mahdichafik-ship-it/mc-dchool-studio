@@ -10,10 +10,12 @@ import type { DeliveryOffer } from './deliveryOffer';
 import type { DeliveryPhotosResponseGallery } from './deliveryPhotosResponseGallery';
 import type { DeliveryPhotosResponsePrice } from './deliveryPhotosResponsePrice';
 import type { DeliveryPhotosResponseStudent } from './deliveryPhotosResponseStudent';
+import type { DeliveryPhotosResponseSubject } from './deliveryPhotosResponseSubject';
 
 export interface DeliveryPhotosResponse {
   gallery: DeliveryPhotosResponseGallery;
   student: DeliveryPhotosResponseStudent;
+  subject?: DeliveryPhotosResponseSubject;
   price?: DeliveryPhotosResponsePrice;
   offers: DeliveryOffer[];
   /** Whether at least one complete Volume Capture offer is available. */

@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../src/lib/deliveryOfferRules";
+import { deliveryTerminology, normalizeDeliveryProjectType } from "../src/lib/deliveryTerminology";
 
 test("print offer accepts one photo and creates three order units", () => {
   validateDeliverySelection("print", 1, 1, 3);
@@ -27,4 +28,19 @@ test("digital pricing is derived without a payment provider", () => {
   const digitalQuantity = deliveryOrderQuantity("digital", 1, 3, 3);
   assert.equal(deliveryAmount(700, digitalQuantity), 2100);
   assert.notEqual(deliveryAmount(1200, digitalQuantity), 2100);
+});
+
+test("corporate delivery keeps legacy subject identifiers but presents employee terminology", () => {
+  assert.deepEqual(deliveryTerminology(normalizeDeliveryProjectType("corporate")), {
+    subjectLabel: "Employee",
+    groupLabel: "Department",
+  });
+  assert.equal(normalizeDeliveryProjectType("legacy-project-without-a-type"), "school");
+});
+
+test("school delivery terminology remains unchanged for legacy projects", () => {
+  assert.deepEqual(deliveryTerminology(normalizeDeliveryProjectType(undefined)), {
+    subjectLabel: "Student",
+    groupLabel: "Class",
+  });
 });

@@ -9,6 +9,7 @@ import {
 } from "@workspace/db";
 import {
   backupFileToGoogleDrive,
+  canonicalStoragePathName,
   canonicalProjectFolderName,
   stableCollisionFileName,
   GoogleDriveBackupError,
@@ -24,11 +25,6 @@ import {
 import { logger } from "./logger";
 
 const STORAGE_FETCH_TIMEOUT_MS = 90_000;
-
-function safePathPart(value: string, fallback: string): string {
-  const cleaned = value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ");
-  return (cleaned || fallback).slice(0, 120);
-}
 
 export function dropboxContentHash(bytes: Buffer): string {
   const blockHashes: Buffer[] = [];
@@ -107,10 +103,10 @@ export async function backupToDropbox(
 ): Promise<void> {
   const parts = [
     "Volume Capture Backups",
-    safePathPart(input.studioName, `Studio ${input.studioId}`),
+    canonicalStoragePathName(input.studioName, `Studio ${input.studioId}`),
     canonicalProjectFolderName(input.schoolName, input.projectId),
-    safePathPart(input.className, `Class ${input.classId}`),
-    safePathPart(input.studentFolderName, `Student ${input.studentId}`),
+    canonicalStoragePathName(input.className, `Class ${input.classId}`),
+    canonicalStoragePathName(input.studentFolderName, `Student ${input.studentId}`),
   ];
   let folderPath = "";
   for (const part of parts) {
@@ -146,7 +142,7 @@ export async function backupToDropbox(
     body: fileBytes,
     signal: AbortSignal.timeout(STORAGE_FETCH_TIMEOUT_MS),
   });
-  const originalName = safePathPart(input.fileName, `${input.backupKey}.${input.fileFormat}`);
+  const originalName = canonicalStoragePathName(input.fileName, `${input.backupKey}.${input.fileFormat}`);
   const originalDestination = `${folderPath}/${originalName}`;
   let response = await upload(originalDestination);
   if (response.ok) return;

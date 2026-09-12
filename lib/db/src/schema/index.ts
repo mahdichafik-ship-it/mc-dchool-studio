@@ -9,3 +9,4 @@ export * from "./platformAudit";
 export * from "./groups";
 export * from "./deliveries";
 export * from "./deliveryOrders";
+export * from "./photoStorageCopies";

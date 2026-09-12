@@ -981,6 +981,46 @@ function isConnectivityFailure(error) {
   if (!(error instanceof Error)) return false;
   return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
 }
+async function completeR2Upload(session, fileBuffer, apiUrl, connectionToken) {
+  if (!session || session.alreadyVerified) return;
+  const expectedSha256 = session.uploadHeaders["x-amz-meta-sha256"];
+  const actualSha256 = node_crypto.createHash("sha256").update(fileBuffer).digest("hex");
+  if (expectedSha256?.toLowerCase() !== actualSha256) {
+    throw new Error("R2 upload session does not match the local file bytes.");
+  }
+  const uploadResponse = await fetch(session.uploadUrl, {
+    method: session.uploadMethod,
+    headers: session.uploadHeaders,
+    body: new Blob([fileBuffer], {
+      type: session.uploadHeaders["Content-Type"] || "application/octet-stream"
+    }),
+    signal: AbortSignal.timeout(12e4)
+  });
+  if (!uploadResponse.ok) {
+    const body = await uploadResponse.text().catch(() => "");
+    throw new RetryableUploadError(
+      `R2 upload failed with HTTP ${uploadResponse.status}${body ? `: ${body}` : ""}`
+    );
+  }
+  const verifyResponse = await fetch(
+    `${apiUrl.replace(/\/+$/, "")}/api/desktop/storage-copies/${session.copyId}/r2/verify`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${connectionToken}` },
+      signal: AbortSignal.timeout(3e4)
+    }
+  );
+  if (!verifyResponse.ok) {
+    const body = await verifyResponse.text().catch(() => "");
+    if (verifyResponse.status === 401) invalidateDesktopCredentials(true);
+    if (verifyResponse.status === 409 || verifyResponse.status === 429 || verifyResponse.status >= 500) {
+      throw new RetryableUploadError(
+        `R2 verification failed with HTTP ${verifyResponse.status}${body ? `: ${body}` : ""}`
+      );
+    }
+    throw new Error(`R2 verification failed with HTTP ${verifyResponse.status}${body ? `: ${body}` : ""}`);
+  }
+}
 async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
   const db = getDb();
   const { apiUrl, connectionToken } = getUploadConfig$1();
@@ -1023,12 +1063,15 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
     let fileUrl = null;
+    let r2Upload;
     try {
       const payload = await response.json();
       if (typeof payload.fileUrl === "string") fileUrl = payload.fileUrl;
+      r2Upload = payload.r2Upload;
     } catch {
-      console.warn("[Upload] Upload succeeded but did not return a readable fileUrl");
+      throw new RetryableUploadError("Upload succeeded but returned an invalid response; retrying safely.");
     }
+    await completeR2Upload(r2Upload, fileBuffer, apiUrl, connectionToken);
     db.update(photosTable).set({ uploadStatus: "done", fileUrl }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
     notifyUploadStatus(photoId, studentId, "done");
     console.log(`[Upload] Photo ${photoId} uploaded successfully`);
@@ -1125,12 +1168,15 @@ async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
     let serverFileUrl = null;
+    let r2Upload;
     try {
       const payload = await response.json();
       if (typeof payload.file?.fileUrl === "string") serverFileUrl = toServerFileUrl(payload.file.fileUrl);
+      r2Upload = payload.r2Upload;
     } catch {
-      console.warn("[Upload] Capture file uploaded but did not return a readable fileUrl");
+      throw new RetryableUploadError("Capture upload returned an invalid response; retrying safely.");
     }
+    await completeR2Upload(r2Upload, fileBuffer, apiUrl, connectionToken);
     setCaptureFileStatus(captureId, fileId, "done", serverFileUrl);
     console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`);
   } catch (error) {
@@ -1179,7 +1225,18 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
       if (response.status === 429 || response.status >= 500) throw new RetryableUploadError(`HTTP ${response.status}: ${text}`);
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    const payload = await response.json().catch(() => ({}));
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new RetryableUploadError("Group capture upload returned an invalid response; retrying safely.");
+    }
+    await completeR2Upload(
+      payload.r2Upload,
+      require$$0.readFileSync(file.storedPath),
+      apiUrl,
+      connectionToken
+    );
     db.update(groupCaptureFilesTable).set({
       uploadStatus: "done",
       fileUrl: typeof payload.file?.fileUrl === "string" ? toServerFileUrl(payload.file.fileUrl) : null,

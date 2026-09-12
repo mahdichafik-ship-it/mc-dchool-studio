@@ -8,7 +8,6 @@ import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 
 const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
-const SIGNED_HEADERS = "host;x-amz-content-sha256;x-amz-date";
 
 export interface R2Config {
   accountId: string;
@@ -24,6 +23,13 @@ export interface R2ObjectMetadata {
   contentType: string | null;
   etag: string | null;
   sha256: string | null;
+}
+
+export interface R2PutUpload {
+  uploadUrl: string;
+  uploadMethod: "PUT";
+  uploadHeaders: Record<string, string>;
+  expiresAt: string;
 }
 
 export function getR2Config(
@@ -83,12 +89,95 @@ function signingKey(
   return hmac(serviceKey, "aws4_request");
 }
 
+function awsEncode(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+export function createR2PutUpload(
+  objectKey: string,
+  options: {
+    contentType: string;
+    sha256: string;
+    expiresInSeconds?: number;
+    now?: Date;
+  },
+  config = getR2Config(),
+): R2PutUpload {
+  if (!config) throw new Error("R2 is not configured");
+  if (!/^[a-f0-9]{64}$/i.test(options.sha256)) {
+    throw new Error("A valid SHA-256 digest is required for an R2 upload");
+  }
+  const expiresInSeconds = Math.max(
+    60,
+    Math.min(900, options.expiresInSeconds ?? 900),
+  );
+  const now = options.now ?? new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const shortDate = amzDate.slice(0, 8);
+  const scope = `${shortDate}/${config.region}/s3/aws4_request`;
+  const base = new URL(config.endpoint);
+  const canonicalPath = `/${encodePath(config.bucket)}/${encodePath(objectKey)}`;
+  const signedHeaderNames = "content-type;host;x-amz-meta-sha256";
+  const queryEntries = [
+    ["X-Amz-Algorithm", "AWS4-HMAC-SHA256"],
+    ["X-Amz-Credential", `${config.accessKeyId}/${scope}`],
+    ["X-Amz-Date", amzDate],
+    ["X-Amz-Expires", String(expiresInSeconds)],
+    ["X-Amz-SignedHeaders", signedHeaderNames],
+  ] as const;
+  const canonicalQuery = queryEntries
+    .map(([key, value]) => `${awsEncode(key)}=${awsEncode(value)}`)
+    .sort()
+    .join("&");
+  const canonicalHeaders =
+    `content-type:${options.contentType.trim()}\n` +
+    `host:${base.host}\n` +
+    `x-amz-meta-sha256:${options.sha256.toLowerCase()}\n`;
+  const canonicalRequest = [
+    "PUT",
+    canonicalPath,
+    canonicalQuery,
+    canonicalHeaders,
+    signedHeaderNames,
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    sha256(canonicalRequest),
+  ].join("\n");
+  const signature = createHmac(
+    "sha256",
+    signingKey(config.secretAccessKey, shortDate, config.region),
+  )
+    .update(stringToSign)
+    .digest("hex");
+
+  return {
+    uploadUrl:
+      new URL(canonicalPath, `${config.endpoint}/`).toString() +
+      `?${canonicalQuery}&X-Amz-Signature=${signature}`,
+    uploadMethod: "PUT",
+    uploadHeaders: {
+      "Content-Type": options.contentType.trim(),
+      "x-amz-meta-sha256": options.sha256.toLowerCase(),
+    },
+    expiresAt: new Date(
+      now.getTime() + expiresInSeconds * 1_000,
+    ).toISOString(),
+  };
+}
+
 function signedHeaders(
   config: R2Config,
   method: string,
   objectKey: string | null,
   payloadHash: string,
   now = new Date(),
+  additionalHeaders: Record<string, string> = {},
 ): { headers: Headers; url: string } {
   const base = new URL(config.endpoint);
   const path = objectKey
@@ -96,16 +185,28 @@ function signedHeaders(
     : `/${encodePath(config.bucket)}`;
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
   const shortDate = amzDate.slice(0, 8);
-  const canonicalHeaders =
-    `host:${base.host}\n` +
-    `x-amz-content-sha256:${payloadHash}\n` +
-    `x-amz-date:${amzDate}\n`;
+  const headerValues: Record<string, string> = {
+    host: base.host,
+    "x-amz-content-sha256": payloadHash,
+    "x-amz-date": amzDate,
+    ...Object.fromEntries(
+      Object.entries(additionalHeaders).map(([key, value]) => [
+        key.toLowerCase(),
+        value.trim(),
+      ]),
+    ),
+  };
+  const signedHeaderNames = Object.keys(headerValues).sort().join(";");
+  const canonicalHeaders = Object.entries(headerValues)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}:${value}\n`)
+    .join("");
   const canonicalRequest = [
     method,
     path,
     "",
     canonicalHeaders,
-    SIGNED_HEADERS,
+    signedHeaderNames,
     payloadHash,
   ].join("\n");
   const scope = `${shortDate}/${config.region}/s3/aws4_request`;
@@ -124,9 +225,10 @@ function signedHeaders(
   const headers = new Headers({
     authorization:
       `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${scope}, ` +
-      `SignedHeaders=${SIGNED_HEADERS}, Signature=${signature}`,
+      `SignedHeaders=${signedHeaderNames}, Signature=${signature}`,
     "x-amz-content-sha256": payloadHash,
     "x-amz-date": amzDate,
+    ...additionalHeaders,
   });
 
   return { headers, url: new URL(path, `${config.endpoint}/`).toString() };
@@ -227,5 +329,46 @@ export async function getR2Object(
   return expectR2Response(
     await fetch(request.url, { method: "GET", headers: request.headers }),
     "download",
+  );
+}
+
+export async function deleteR2Object(
+  objectKey: string,
+  config = getR2Config(),
+): Promise<void> {
+  if (!config) throw new Error("R2 is not configured");
+  const request = signedHeaders(config, "DELETE", objectKey, EMPTY_SHA256);
+  await expectR2Response(
+    await fetch(request.url, { method: "DELETE", headers: request.headers }),
+    "delete",
+  );
+}
+
+export async function copyR2Object(
+  sourceObjectKey: string,
+  destinationObjectKey: string,
+  options: { sha256: string },
+  config = getR2Config(),
+): Promise<void> {
+  if (!config) throw new Error("R2 is not configured");
+  const copySource = `/${encodePath(config.bucket)}/${encodePath(sourceObjectKey)}`;
+  const request = signedHeaders(
+    config,
+    "PUT",
+    destinationObjectKey,
+    EMPTY_SHA256,
+    new Date(),
+    {
+      "x-amz-copy-source": copySource,
+      "x-amz-meta-sha256": options.sha256.toLowerCase(),
+      "x-amz-metadata-directive": "REPLACE",
+    },
+  );
+  await expectR2Response(
+    await fetch(request.url, {
+      method: "PUT",
+      headers: request.headers,
+    }),
+    "copy",
   );
 }

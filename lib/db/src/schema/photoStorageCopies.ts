@@ -33,6 +33,7 @@ export const photoStorageCopiesTable = pgTable(
       enum: ["replit", "r2", "google_drive", "dropbox"],
     }).notNull(),
     objectKey: text("object_key").notNull(),
+    stagingObjectKey: text("staging_object_key"),
     providerObjectId: text("provider_object_id"),
     state: text("state", {
       enum: ["pending", "uploading", "ready", "failed"],

@@ -193,7 +193,19 @@ const server = createServer((request, response) => {
     request.on('end', () => {
       uploadCount++
       json(response, 201, {
-        file: { fileUrl: '/uploads/release-smoke.jpg' },
+        captureId: 71,
+        captureKey: 'release-smoke-capture',
+        pairingStatus: 'complete',
+        file: {
+          id: 72,
+          fileRole: 'JPEG',
+          fileFormat: 'JPG',
+          originalFilename: managedPhotoName,
+          mimeType: 'image/jpeg',
+          fileSize: 1,
+          fileUrl: '/uploads/release-smoke.jpg',
+        },
+        reused: false,
       })
     })
     return

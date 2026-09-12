@@ -18,15 +18,22 @@ import {
   studentsTable,
   studiosTable,
 } from "@workspace/db";
-import { and, eq, gt, inArray, isNull, isNotNull } from "drizzle-orm";
+import { photoStorageCopiesTable } from "@workspace/db/schema";
+import { and, eq, gt, inArray, isNull, isNotNull, or } from "drizzle-orm";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject, getStudioMember } from "../lib/studioAccess";
 import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
 import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { getR2Object } from "../lib/r2Storage";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
 import { materializeGroupJpegsForDelivery } from "../lib/groupDeliveryPhotos";
+import {
+  deliveryTerminology,
+  normalizeDeliveryProjectType,
+  type DeliveryProjectType,
+} from "../lib/deliveryTerminology";
 
 const router = Router();
 const DELIVERY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -140,15 +147,22 @@ async function materializeCaptureJpegsForDelivery(projectId: number): Promise<nu
     clientUploadId: file.clientUploadId,
     rating: capture.rating,
     colorLabel: capture.colorLabel,
+      shareWithParents: capture.rating > 0,
   }))).onConflictDoNothing();
   return missing.length;
 }
 
-function publicGallery(gallery: typeof deliveryGalleriesTable.$inferSelect, studio: typeof studiosTable.$inferSelect | null) {
+function publicGallery(
+  gallery: typeof deliveryGalleriesTable.$inferSelect,
+  studio: typeof studiosTable.$inferSelect | null,
+  projectType: DeliveryProjectType = "school",
+) {
   return {
     slug: gallery.slug,
     status: gallery.status,
     expiresAt: gallery.expiresAt?.toISOString() ?? null,
+    projectType,
+    ...deliveryTerminology(projectType),
     studio: {
       name: studio?.name ?? "Volume Capture",
       tagline: studio?.tagline ?? "Private photo delivery",
@@ -160,9 +174,10 @@ function publicGallery(gallery: typeof deliveryGalleriesTable.$inferSelect, stud
 
 async function getGalleryBySlug(slug: string) {
   const [row] = await db
-    .select({ gallery: deliveryGalleriesTable, studio: studiosTable })
+    .select({ gallery: deliveryGalleriesTable, studio: studiosTable, project: projectsTable })
     .from(deliveryGalleriesTable)
     .leftJoin(studiosTable, eq(deliveryGalleriesTable.studioId, studiosTable.id))
+    .innerJoin(projectsTable, eq(deliveryGalleriesTable.projectId, projectsTable.id))
     .where(eq(deliveryGalleriesTable.slug, slug))
     .limit(1);
   return row ?? null;
@@ -280,9 +295,10 @@ function manualPaymentInstructions(
 
 async function getAccessForToken(galleryId: number, accessId: number) {
   const [access] = await db
-    .select({ access: deliveryAccessesTable, student: studentsTable })
+    .select({ access: deliveryAccessesTable, student: studentsTable, className: classesTable.className })
     .from(deliveryAccessesTable)
     .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
+    .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
     .where(and(
       eq(deliveryAccessesTable.id, accessId),
       eq(deliveryAccessesTable.galleryId, galleryId),
@@ -331,6 +347,35 @@ async function photoHasBeenPaid(accessId: number, photoId: number): Promise<bool
   return Boolean(item);
 }
 
+/**
+ * R2 copies are deliberately selected only after the upload verifier has
+ * promoted them to the immutable verified namespace.  In particular, an
+ * uploading/staging copy must never become a delivery source.
+ *
+ * Group captures are materialized into student_photos for gallery access.  A
+ * materialized row can therefore use either its own copy or the copy of the
+ * source group file while the migration is in progress.
+ */
+async function getVerifiedR2Copy(photo: typeof studentPhotosTable.$inferSelect) {
+  const sourceCondition = photo.sourceGroupCaptureFileId === null
+    ? eq(photoStorageCopiesTable.studentPhotoId, photo.id)
+    : or(
+      eq(photoStorageCopiesTable.studentPhotoId, photo.id),
+      eq(photoStorageCopiesTable.groupCaptureFileId, photo.sourceGroupCaptureFileId),
+    );
+  const [copy] = await db
+    .select()
+    .from(photoStorageCopiesTable)
+    .where(and(
+      eq(photoStorageCopiesTable.destination, "r2"),
+      eq(photoStorageCopiesTable.state, "ready"),
+      sourceCondition,
+    ))
+    .orderBy(photoStorageCopiesTable.verifiedAt)
+    .limit(1);
+  return copy ?? null;
+}
+
 // Public metadata for the code-entry page. No student or photo information is returned.
 router.get("/delivery/:slug", async (req, res): Promise<void> => {
   const row = await getGalleryBySlug(String(req.params.slug));
@@ -338,7 +383,7 @@ router.get("/delivery/:slug", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Delivery gallery not found or no longer available" });
     return;
   }
-  res.json(publicGallery(row.gallery, row.studio));
+  res.json(publicGallery(row.gallery, row.studio, normalizeDeliveryProjectType(row.project.projectType)));
 });
 
 router.get("/delivery/:slug/catalog", async (req, res): Promise<void> => {
@@ -432,6 +477,7 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       eq(studentPhotosTable.studentId, access.student.id),
       isNotNull(studentPhotosTable.durableObjectPath),
       gt(studentPhotosTable.rating, 0),
+      eq(studentPhotosTable.shareWithParents, true),
     ))
     .orderBy(studentPhotosTable.createdAt);
 
@@ -441,10 +487,24 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
   const stripeAvailable = stripeOffered ? await stripeIsAvailable() : false;
 
   res.json({
-    gallery: publicGallery(row.gallery, row.studio),
+    gallery: publicGallery(row.gallery, row.studio, normalizeDeliveryProjectType(row.project.projectType)),
     student: {
       firstName: access.student.firstName,
       lastName: access.student.lastName,
+      label: deliveryTerminology(normalizeDeliveryProjectType(row.project.projectType)).subjectLabel,
+      departmentName: access.className,
+      projectType: normalizeDeliveryProjectType(row.project.projectType),
+    },
+    subject: {
+      firstName: access.student.firstName,
+      lastName: access.student.lastName,
+      displayName: `${access.student.firstName} ${access.student.lastName}`.trim(),
+      employeeName: `${access.student.firstName} ${access.student.lastName}`.trim(),
+      companyName: normalizeDeliveryProjectType(row.project.projectType) === "corporate"
+        ? row.project.schoolName
+        : null,
+      label: deliveryTerminology(normalizeDeliveryProjectType(row.project.projectType)).subjectLabel,
+      departmentName: access.className,
     },
     price: priced[0] ? { unitAmount: priced[0].unitAmount, currency: priced[0].currency } : null,
     offers: priced,
@@ -512,6 +572,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       inArray(studentPhotosTable.id, photoIds),
       isNotNull(studentPhotosTable.durableObjectPath),
       gt(studentPhotosTable.rating, 0),
+      eq(studentPhotosTable.shareWithParents, true),
     ));
   if (photos.length !== photoIds.length) {
     res.status(400).json({ error: "One or more selected photos are not available for ordering" });
@@ -734,6 +795,7 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
       eq(deliveryAccessesTable.galleryId, row.gallery.id),
       isNull(deliveryAccessesTable.revokedAt),
       gt(studentPhotosTable.rating, 0),
+      eq(studentPhotosTable.shareWithParents, true),
     ))
     .limit(1);
   if (!photo) {
@@ -750,6 +812,43 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     res.status(402).json({ error: "Complete payment before downloading this photo" });
     return;
   }
+
+  res.setHeader("Content-Type", photo.photo.mimeType || "image/jpeg");
+  res.setHeader("Content-Disposition", `${isPreview ? "inline" : "attachment"}; filename="${photo.photo.fileName.replace(/["\r\n]/g, "_")}"`);
+  res.setHeader("Cache-Control", "private, max-age=300");
+
+  // During the storage migration, a photo may already have a verified private
+  // R2 copy. Stream that copy through this authorized endpoint rather than
+  // returning an R2 URL (or exposing bucket credentials). Only fall back to
+  // Replit Object Storage when no verified copy exists yet.
+  const verifiedR2Copy = await getVerifiedR2Copy(photo.photo);
+  if (verifiedR2Copy) {
+    let r2Response: Response;
+    try {
+      r2Response = await getR2Object(verifiedR2Copy.objectKey);
+    } catch {
+      res.status(503).json({ error: "Photo file is temporarily unavailable" });
+      return;
+    }
+    if (!r2Response.body) {
+      res.status(503).json({ error: "Photo file is temporarily unavailable" });
+      return;
+    }
+    const input = Readable.fromWeb(r2Response.body as globalThis.ReadableStream<Uint8Array>);
+    if (isPreview) {
+      res.setHeader("Content-Type", "image/jpeg");
+      const watermarkText = row.gallery.watermarkText?.trim() || row.studio?.name?.trim() || "Volume Capture";
+      const transformer = sharp()
+        .resize({ width: 1200, withoutEnlargement: true })
+        .composite(row.gallery.watermarkEnabled ? [{ input: watermarkSvg(watermarkText), blend: "over" }] : [])
+        .jpeg({ quality: 78 });
+      input.pipe(transformer).pipe(res);
+      return;
+    }
+    input.pipe(res);
+    return;
+  }
+
   let objectFile;
   try {
     objectFile = await objectStorageService.getObjectEntityFile(photo.photo.durableObjectPath);
@@ -760,9 +859,6 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     }
     throw error;
   }
-  res.setHeader("Content-Type", photo.photo.mimeType || "image/jpeg");
-  res.setHeader("Content-Disposition", `${isPreview ? "inline" : "attachment"}; filename="${photo.photo.fileName.replace(/["\r\n]/g, "_")}"`);
-  res.setHeader("Cache-Control", "private, max-age=300");
   const input = objectFile.createReadStream();
   if (isPreview) {
     res.setHeader("Content-Type", "image/jpeg");
@@ -789,6 +885,11 @@ router.get("/projects/:projectId/delivery", requireAuth, async (req, res): Promi
     res.json({ gallery: null, accessCount: 0 });
     return;
   }
+  const [project] = await db.select({ projectType: projectsTable.projectType, schoolName: projectsTable.schoolName })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId))
+    .limit(1);
+  const projectType: DeliveryProjectType = project?.projectType === "corporate" ? "corporate" : "school";
   const accesses = await db.select().from(deliveryAccessesTable).where(eq(deliveryAccessesTable.galleryId, gallery.id));
   res.json({
     gallery: {
@@ -798,6 +899,8 @@ router.get("/projects/:projectId/delivery", requireAuth, async (req, res): Promi
       createdAt: gallery.createdAt.toISOString(),
       updatedAt: gallery.updatedAt.toISOString(),
     },
+    projectType,
+    ...deliveryTerminology(projectType),
     accessCount: accesses.filter((access) => !access.revokedAt).length,
   });
 });
@@ -892,6 +995,12 @@ router.get("/projects/:projectId/delivery/access-cards", requireAuth, async (req
     res.status(404).json({ error: "Publish the delivery gallery first" });
     return;
   }
+  const [project] = await db.select({ projectType: projectsTable.projectType, schoolName: projectsTable.schoolName })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId))
+    .limit(1);
+  const projectType: DeliveryProjectType = project?.projectType === "corporate" ? "corporate" : "school";
+  const terminology = deliveryTerminology(projectType);
   const rows = await db
     .select({ access: deliveryAccessesTable, student: studentsTable, className: classesTable.className })
     .from(deliveryAccessesTable)
@@ -908,8 +1017,14 @@ router.get("/projects/:projectId/delivery/access-cards", requireAuth, async (req
     return {
       firstName: student.firstName,
       lastName: student.lastName,
+      subjectLabel: terminology.subjectLabel,
+      groupLabel: terminology.groupLabel,
+      companyName: projectType === "corporate" ? project?.schoolName : null,
+      studentId: student.id,
+      subjectId: student.id,
       generatedStudentId: student.generatedStudentId,
       className,
+      departmentName: className,
       accessCode,
       accessUrl,
       qrDataUrl: await QRCode.toDataURL(`${origin}${accessUrl}`, {

@@ -666,6 +666,106 @@ function startActiveUploadRun(runs, projectId, work, onSettled) {
   runs.set(projectId, task);
   return task;
 }
+class RetryableUploadError extends Error {
+}
+function isJsonObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function isPositiveSafeInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+function isNonNegativeSafeInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function malformedUploadResponse(message) {
+  throw new RetryableUploadError(`${message}; retrying safely.`);
+}
+function parseR2UploadSession(value) {
+  if (!isJsonObject(value)) malformedUploadResponse("Upload returned a malformed R2 session");
+  const copyId = value.copyId;
+  const objectKey = value.objectKey;
+  const uploadUrl = value.uploadUrl;
+  const uploadMethod = value.uploadMethod;
+  const uploadHeaders = value.uploadHeaders;
+  const expiresAt = value.expiresAt;
+  const alreadyVerified = value.alreadyVerified;
+  if (!isPositiveSafeInteger(copyId) || !isNonEmptyString(objectKey) || typeof uploadUrl !== "string" || alreadyVerified !== true && !isNonEmptyString(uploadUrl) || (uploadUrl && (() => {
+    try {
+      return Boolean(new URL(uploadUrl));
+    } catch {
+      return false;
+    }
+  })()) === false || uploadMethod !== "PUT" || !isJsonObject(uploadHeaders) || !isNonEmptyString(expiresAt) || !Number.isFinite(Date.parse(expiresAt)) || typeof alreadyVerified !== "boolean") {
+    malformedUploadResponse("Upload returned a malformed R2 session");
+  }
+  for (const header of Object.values(uploadHeaders)) {
+    if (typeof header !== "string") malformedUploadResponse("Upload returned malformed R2 session headers");
+  }
+  const sessionSha256 = uploadHeaders["x-amz-meta-sha256"];
+  if (!alreadyVerified && (typeof sessionSha256 !== "string" || !/^[a-f0-9]{64}$/i.test(sessionSha256))) {
+    malformedUploadResponse("Upload returned an R2 session without a valid file hash");
+  }
+  return {
+    copyId,
+    objectKey,
+    uploadUrl,
+    uploadMethod,
+    uploadHeaders,
+    expiresAt,
+    alreadyVerified
+  };
+}
+function parseUploadResponseJson(responsePayload, kind) {
+  if (!isJsonObject(responsePayload)) {
+    malformedUploadResponse(`${kind} upload returned an incomplete response`);
+  }
+  const r2Present = Object.prototype.hasOwnProperty.call(responsePayload, "r2Upload");
+  let r2Upload;
+  if (r2Present) {
+    if (responsePayload.r2Upload === null) {
+      malformedUploadResponse(`${kind} upload returned a malformed r2Upload field`);
+    }
+    r2Upload = parseR2UploadSession(responsePayload.r2Upload);
+  }
+  if (kind === "photo") {
+    if (!isNonEmptyString(responsePayload.fileUrl)) {
+      malformedUploadResponse("Photo upload returned an incomplete response");
+    }
+    return { fileUrl: responsePayload.fileUrl, r2Upload };
+  }
+  if (!isPositiveSafeInteger(responsePayload.captureId) || !isNonEmptyString(responsePayload.captureKey) || !["jpeg_only", "raw_only", "complete"].includes(String(responsePayload.pairingStatus)) || !isJsonObject(responsePayload.file) || !isPositiveSafeInteger(responsePayload.file.id) || !["JPEG", "RAW"].includes(String(responsePayload.file.fileRole)) || !isNonEmptyString(responsePayload.file.fileFormat) || !isNonEmptyString(responsePayload.file.originalFilename) || !isNonEmptyString(responsePayload.file.mimeType) || !isNonNegativeSafeInteger(responsePayload.file.fileSize) || !isNonEmptyString(responsePayload.file.fileUrl) || typeof responsePayload.reused !== "boolean") {
+    malformedUploadResponse(`${kind} upload returned an incomplete response`);
+  }
+  if (kind === "group" && typeof responsePayload.galleryReady !== "boolean") {
+    malformedUploadResponse("Group upload returned an incomplete response");
+  }
+  return {
+    captureId: responsePayload.captureId,
+    captureKey: responsePayload.captureKey,
+    pairingStatus: String(responsePayload.pairingStatus),
+    file: responsePayload.file,
+    reused: responsePayload.reused,
+    galleryReady: responsePayload.galleryReady,
+    r2Upload
+  };
+}
+async function parseUploadResponse(response, kind) {
+  try {
+    return parseUploadResponseJson(await response.json(), kind);
+  } catch (error) {
+    if (error instanceof RetryableUploadError) throw error;
+    throw new RetryableUploadError(`${kind} upload returned an invalid response; retrying safely.`);
+  }
+}
+function assertR2VerifierResponse(responsePayload, expectedCopyId) {
+  const copy = isJsonObject(responsePayload) ? responsePayload.copy : void 0;
+  if (!isJsonObject(copy) || copy.id !== expectedCopyId || copy.destination !== "r2" || copy.state !== "ready" || !isNonEmptyString(copy.objectKey)) {
+    throw new RetryableUploadError("R2 verification returned an incomplete or non-ready copy; retrying safely.");
+  }
+}
 function getSetting(key) {
   const db = getDb();
   const row = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
@@ -736,8 +836,6 @@ const activeUploads = /* @__PURE__ */ new Set();
 const activePhotoUploads = /* @__PURE__ */ new Map();
 const activeCaptureFileUploads = /* @__PURE__ */ new Map();
 const cloudIdentityRepairs = /* @__PURE__ */ new Map();
-class RetryableUploadError extends Error {
-}
 function disableCloudSyncForRetirement() {
   cloudSyncDisabledForRetirement = true;
   cloudSessionVerified = false;
@@ -982,7 +1080,9 @@ function isConnectivityFailure(error) {
   return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
 }
 async function completeR2Upload(session, fileBuffer, apiUrl, connectionToken) {
-  if (!session || session.alreadyVerified) return;
+  if (!session) return;
+  session = parseR2UploadSession(session);
+  if (session.alreadyVerified) return;
   const expectedSha256 = session.uploadHeaders["x-amz-meta-sha256"];
   const actualSha256 = node_crypto.createHash("sha256").update(fileBuffer).digest("hex");
   if (expectedSha256?.toLowerCase() !== actualSha256) {
@@ -1020,6 +1120,13 @@ async function completeR2Upload(session, fileBuffer, apiUrl, connectionToken) {
     }
     throw new Error(`R2 verification failed with HTTP ${verifyResponse.status}${body ? `: ${body}` : ""}`);
   }
+  let verifierPayload;
+  try {
+    verifierPayload = await verifyResponse.json();
+  } catch {
+    throw new RetryableUploadError("R2 verification returned an invalid response; retrying safely.");
+  }
+  assertR2VerifierResponse(verifierPayload, session.copyId);
 }
 async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
   const db = getDb();
@@ -1062,11 +1169,11 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
       }
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    let fileUrl = null;
+    let fileUrl;
     let r2Upload;
     try {
-      const payload = await response.json();
-      if (typeof payload.fileUrl === "string") fileUrl = payload.fileUrl;
+      const payload = await parseUploadResponse(response, "photo");
+      fileUrl = payload.fileUrl;
       r2Upload = payload.r2Upload;
     } catch {
       throw new RetryableUploadError("Upload succeeded but returned an invalid response; retrying safely.");
@@ -1170,8 +1277,8 @@ async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
     let serverFileUrl = null;
     let r2Upload;
     try {
-      const payload = await response.json();
-      if (typeof payload.file?.fileUrl === "string") serverFileUrl = toServerFileUrl(payload.file.fileUrl);
+      const payload = await parseUploadResponse(response, "capture");
+      serverFileUrl = toServerFileUrl(payload.file.fileUrl);
       r2Upload = payload.r2Upload;
     } catch {
       throw new RetryableUploadError("Capture upload returned an invalid response; retrying safely.");
@@ -1227,7 +1334,7 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
     }
     let payload;
     try {
-      payload = await response.json();
+      payload = await parseUploadResponse(response, "group");
     } catch {
       throw new RetryableUploadError("Group capture upload returned an invalid response; retrying safely.");
     }
@@ -1239,7 +1346,7 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
     );
     db.update(groupCaptureFilesTable).set({
       uploadStatus: "done",
-      fileUrl: typeof payload.file?.fileUrl === "string" ? toServerFileUrl(payload.file.fileUrl) : null,
+      fileUrl: toServerFileUrl(payload.file.fileUrl),
       galleryReady: file.fileRole !== "JPEG" || payload.galleryReady === true
     }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
   } catch (error) {

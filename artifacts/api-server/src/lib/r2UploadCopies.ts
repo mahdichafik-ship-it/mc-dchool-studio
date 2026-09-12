@@ -1,14 +1,30 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import {
   db,
 } from "@workspace/db";
 import {
+  capturesTable,
+  captureFilesTable,
+  classesTable,
+  groupCaptureFilesTable,
+  groupCapturesTable,
+  groupsTable,
   photoStorageCopiesTable,
+  projectsTable,
+  studentPhotosTable,
+  studentsTable,
+  studiosTable,
   type PhotoStorageCopy,
 } from "@workspace/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
+import {
+  canonicalProjectFolderName,
+  canonicalStoragePathName,
+  canonicalStudentFolderName,
+  stableCollisionFileName,
+} from "./googleDriveBackup";
 import {
   createR2PutUpload,
   copyR2Object,
@@ -23,6 +39,17 @@ type R2Source =
   | { kind: "student"; id: number; projectId: number; studentId: number }
   | { kind: "capture"; id: number; projectId: number; captureId: number }
   | { kind: "group"; id: number; projectId: number; captureId: number };
+
+export type R2ObjectHierarchy = {
+  studioName: string;
+  projectName: string;
+  className: string;
+  subjectFolderName: string;
+  studioId: number;
+  projectId: number;
+  classId?: number;
+  subjectId: number;
+};
 
 export interface R2CopyUpload extends R2PutUpload {
   copyId: number;
@@ -67,16 +94,147 @@ function sourceCondition(source: R2Source) {
   );
 }
 
-function objectKeyFor(source: R2Source, originalFilename: string): string {
-  const safeName =
-    basename(originalFilename).replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
+export function readableR2ObjectKey(
+  hierarchy: R2ObjectHierarchy,
+  originalFilename: string,
+  collisionKey?: string,
+): string {
+  const originalName = canonicalStoragePathName(
+    basename(originalFilename),
+    "file",
+  );
+  const fileName = collisionKey
+    ? stableCollisionFileName(originalName, collisionKey)
+    : originalName;
+  return [
+    canonicalStoragePathName(hierarchy.studioName, `Studio ${hierarchy.studioId}`),
+    canonicalProjectFolderName(hierarchy.projectName, hierarchy.projectId),
+    canonicalStoragePathName(
+      hierarchy.className,
+      hierarchy.classId !== undefined ? `Class ${hierarchy.classId}` : "Groups",
+    ),
+    canonicalStoragePathName(
+      hierarchy.subjectFolderName,
+      `Student ${hierarchy.subjectId}`,
+    ),
+    fileName,
+  ].join("/");
+}
+
+export function readableR2CandidateKey(
+  readableObjectKey: string,
+  attemptKey: string,
+): string {
+  const directory = dirname(readableObjectKey);
+  const candidateName = stableCollisionFileName(
+    basename(readableObjectKey),
+    attemptKey,
+  );
+  return directory === "." ? candidateName : `${directory}/${candidateName}`;
+}
+
+async function resolveObjectHierarchy(
+  source: R2Source,
+): Promise<R2ObjectHierarchy> {
   if (source.kind === "student") {
-    return `projects/${source.projectId}/students/${source.studentId}/photos/${source.id}/${safeName}`;
+    const [row] = await db
+      .select({
+        studioId: studiosTable.id,
+        studioName: studiosTable.name,
+        projectId: projectsTable.id,
+        projectName: projectsTable.schoolName,
+        classId: classesTable.id,
+        className: classesTable.className,
+        subjectId: studentsTable.id,
+        firstName: studentsTable.firstName,
+        lastName: studentsTable.lastName,
+        generatedStudentId: studentsTable.generatedStudentId,
+      })
+      .from(studentPhotosTable)
+      .innerJoin(studentsTable, eq(studentsTable.id, source.studentId))
+      .innerJoin(projectsTable, eq(projectsTable.id, studentsTable.projectId))
+      .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
+      .innerJoin(classesTable, eq(classesTable.id, studentsTable.classId))
+      .where(and(
+        eq(studentPhotosTable.id, source.id),
+        eq(studentPhotosTable.projectId, source.projectId),
+      ))
+      .limit(1);
+    if (!row) throw new Error("Could not resolve the student R2 object hierarchy");
+    return {
+      ...row,
+      subjectFolderName: canonicalStudentFolderName(
+        row.firstName,
+        row.lastName,
+        row.generatedStudentId,
+      ),
+    };
   }
+
   if (source.kind === "capture") {
-    return `projects/${source.projectId}/captures/${source.captureId}/files/${source.id}/${safeName}`;
+    const [row] = await db
+      .select({
+        studioId: studiosTable.id,
+        studioName: studiosTable.name,
+        projectId: projectsTable.id,
+        projectName: projectsTable.schoolName,
+        classId: classesTable.id,
+        className: classesTable.className,
+        subjectId: studentsTable.id,
+        firstName: studentsTable.firstName,
+        lastName: studentsTable.lastName,
+        generatedStudentId: studentsTable.generatedStudentId,
+      })
+      .from(captureFilesTable)
+      .innerJoin(capturesTable, eq(capturesTable.id, source.captureId))
+      .innerJoin(studentsTable, eq(studentsTable.id, capturesTable.studentId))
+      .innerJoin(projectsTable, eq(projectsTable.id, capturesTable.projectId))
+      .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
+      .innerJoin(classesTable, eq(classesTable.id, studentsTable.classId))
+      .where(and(
+        eq(captureFilesTable.id, source.id),
+        eq(capturesTable.projectId, source.projectId),
+      ))
+      .limit(1);
+    if (!row) throw new Error("Could not resolve the capture R2 object hierarchy");
+    return {
+      ...row,
+      subjectFolderName: canonicalStudentFolderName(
+        row.firstName,
+        row.lastName,
+        row.generatedStudentId,
+      ),
+    };
   }
-  return `projects/${source.projectId}/group-captures/${source.captureId}/files/${source.id}/${safeName}`;
+
+  const [row] = await db
+    .select({
+      studioId: studiosTable.id,
+      studioName: studiosTable.name,
+      projectId: projectsTable.id,
+      projectName: projectsTable.schoolName,
+      classId: classesTable.id,
+      className: classesTable.className,
+      subjectId: groupsTable.id,
+    })
+    .from(groupCaptureFilesTable)
+    .innerJoin(groupCapturesTable, eq(groupCapturesTable.id, source.captureId))
+    .innerJoin(groupsTable, eq(groupsTable.id, groupCapturesTable.groupId))
+    .innerJoin(projectsTable, eq(projectsTable.id, groupCapturesTable.projectId))
+    .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
+    .leftJoin(classesTable, eq(classesTable.id, groupsTable.classId))
+    .where(and(
+      eq(groupCaptureFilesTable.id, source.id),
+      eq(groupCapturesTable.projectId, source.projectId),
+    ))
+    .limit(1);
+  if (!row) throw new Error("Could not resolve the group R2 object hierarchy");
+  return {
+    ...row,
+    classId: row.classId ?? undefined,
+    className: row.className ?? "Groups",
+    subjectFolderName: `Group_${row.subjectId}`,
+  };
 }
 
 function assertCopyMatches(
@@ -127,24 +285,40 @@ export async function createR2CopyUpload(input: {
     .from(photoStorageCopiesTable)
     .where(condition)
     .limit(1);
-  const objectKey =
-    copy?.objectKey ?? objectKeyFor(input.source, input.originalFilename);
-
-  if (copy) assertCopyMatches(copy, input);
-
   if (!copy) {
-    await db
-      .insert(photoStorageCopiesTable)
-      .values({
-        ...sourceValues(input.source),
-        destination: "r2",
-        objectKey,
-        state: "pending",
-        mimeType: input.mimeType,
-        fileSize: input.fileSize,
-        sha256: input.sha256.toLowerCase(),
-      })
-      .onConflictDoNothing();
+    const hierarchy = await resolveObjectHierarchy(input.source);
+    const collisionKey = `r2:${input.source.kind}:${input.source.id}`;
+    const baseObjectKey = readableR2ObjectKey(
+      hierarchy,
+      input.originalFilename,
+    );
+    const collisionObjectKey = readableR2ObjectKey(
+      hierarchy,
+      input.originalFilename,
+      collisionKey,
+    );
+    for (const candidate of [baseObjectKey, collisionObjectKey]) {
+      await db
+        .insert(photoStorageCopiesTable)
+        .values({
+          ...sourceValues(input.source),
+          destination: "r2",
+          objectKey: candidate,
+          state: "pending",
+          mimeType: input.mimeType,
+          fileSize: input.fileSize,
+          sha256: input.sha256.toLowerCase(),
+        })
+        .onConflictDoNothing();
+      [copy] = await db
+        .select()
+        .from(photoStorageCopiesTable)
+        .where(condition)
+        .limit(1);
+      if (copy) {
+        break;
+      }
+    }
     [copy] = await db
       .select()
       .from(photoStorageCopiesTable)
@@ -168,13 +342,28 @@ export async function createR2CopyUpload(input: {
     };
   }
 
+  const signedUpload = (stagingObjectKey: string): R2CopyUpload => ({
+    ...createR2PutUpload(
+      stagingObjectKey,
+      { contentType: input.mimeType, sha256: input.sha256 },
+      config,
+    ),
+    copyId: copy!.id,
+    objectKey: stagingObjectKey,
+    alreadyVerified: false,
+  });
+
+  // A retry for an active attempt must reuse its server-owned staging key.
+  // This prevents a second caller from replacing the first caller's attempt.
+  if (copy.state === "uploading") {
+    if (!copy.stagingObjectKey) {
+      throw new Error("R2 upload attempt has no staging object");
+    }
+    return signedUpload(copy.stagingObjectKey);
+  }
+
   const stagingObjectKey =
-    `staging/storage-copy-${copy.id}/${randomUUID()}/${basename(input.originalFilename).replace(/[^a-zA-Z0-9._-]/g, "_") || "file"}`;
-  const upload = createR2PutUpload(
-    stagingObjectKey,
-    { contentType: input.mimeType, sha256: input.sha256 },
-    config,
-  );
+    `staging/storage-copy-${copy.id}/${randomUUID()}/${canonicalStoragePathName(basename(input.originalFilename), "file")}`;
   const [updated] = await db
     .update(photoStorageCopiesTable)
     .set({
@@ -190,24 +379,79 @@ export async function createR2CopyUpload(input: {
     })
     .where(and(
       eq(photoStorageCopiesTable.id, copy.id),
+      or(
+        eq(photoStorageCopiesTable.state, "pending"),
+        eq(photoStorageCopiesTable.state, "failed"),
+      ),
       eq(photoStorageCopiesTable.fileSize, input.fileSize),
       eq(photoStorageCopiesTable.sha256, input.sha256.toLowerCase()),
     ))
     .returning();
   if (!updated) {
+    const [current] = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(condition)
+      .limit(1);
+    if (!current) {
+      throw new Error("R2 upload changed concurrently; retry with a fresh session");
+    }
+    assertCopyMatches(current, input);
+    if (current.state === "ready") {
+      return {
+        copyId: current.id,
+        objectKey: current.objectKey,
+        uploadUrl: "",
+        uploadMethod: "PUT",
+        uploadHeaders: {},
+        expiresAt: new Date().toISOString(),
+        alreadyVerified: true,
+      };
+    }
+    if (current.state === "uploading" && current.stagingObjectKey) {
+      return {
+        ...createR2PutUpload(
+          current.stagingObjectKey,
+          { contentType: input.mimeType, sha256: input.sha256 },
+          config,
+        ),
+        copyId: current.id,
+        objectKey: current.stagingObjectKey,
+        alreadyVerified: false,
+      };
+    }
     throw new Error("R2 upload changed concurrently; retry with a fresh session");
   }
 
   return {
-    ...upload,
+    ...createR2PutUpload(
+      stagingObjectKey,
+      { contentType: input.mimeType, sha256: input.sha256 },
+      config,
+    ),
     copyId: updated.id,
     objectKey: stagingObjectKey,
     alreadyVerified: false,
   };
 }
 
+/**
+ * The hook is intentionally limited to the point after the candidate has
+ * been fully read and hashed, but before the database compare-and-set. It
+ * gives integration tests a deterministic way to exercise two verifiers
+ * racing on the same server-owned upload attempt.
+ */
+export interface VerifyR2CopyTestHooks {
+  afterCandidateHashed?: (candidate: {
+    objectKey: string;
+    sha256: string;
+    size: number;
+  }) => void | Promise<void>;
+}
+
 export async function verifyR2Copy(
   copy: PhotoStorageCopy,
+  testHooks: VerifyR2CopyTestHooks = {},
 ): Promise<PhotoStorageCopy> {
   if (copy.destination !== "r2") {
     throw new Error("Storage copy is not an R2 destination");
@@ -255,21 +499,28 @@ export async function verifyR2Copy(
     });
   }
 
-  const candidateObjectKey =
-    `verified/storage-copy-${copy.id}/${randomUUID()}/${basename(copy.objectKey)}`;
+  // Keep the candidate in the human-readable hierarchy. The UUID makes
+  // concurrent verifiers own distinct candidates even when they inspect the
+  // same staging attempt; the suffix remains deterministically derived from
+  // that candidate's staging/attempt key.
+  const candidateAttemptKey = `${stagingObjectKey}:${randomUUID()}`;
+  const candidateObjectKey = readableR2CandidateKey(
+    copy.objectKey,
+    candidateAttemptKey,
+  );
   await copyR2Object(stagingObjectKey, candidateObjectKey, {
     sha256: actualSha256!,
   });
-  const finalMetadata = await headR2Object(candidateObjectKey);
-  const finalDigest = finalMetadata
+  const candidateMetadata = await headR2Object(candidateObjectKey);
+  const candidateDigest = candidateMetadata
     ? await readR2Digest(candidateObjectKey)
     : null;
   if (
-    !finalMetadata ||
-    !finalDigest ||
-    finalMetadata.contentLength !== finalDigest.size ||
-    finalDigest.size !== actualSize ||
-    finalDigest.sha256.toLowerCase() !== actualSha256
+    !candidateMetadata ||
+    !candidateDigest ||
+    candidateMetadata.contentLength !== candidateDigest.size ||
+    candidateDigest.size !== actualSize ||
+    candidateDigest.sha256.toLowerCase() !== actualSha256
   ) {
     await deleteR2Object(candidateObjectKey).catch(() => undefined);
     throw Object.assign(
@@ -277,6 +528,13 @@ export async function verifyR2Copy(
       { code: "R2_UPLOAD_NOT_VERIFIED" },
     );
   }
+
+  await testHooks.afterCandidateHashed?.({
+    objectKey: candidateObjectKey,
+    sha256: candidateDigest.sha256,
+    size: candidateDigest.size,
+  });
+
   const [ready] = await db
     .update(photoStorageCopiesTable)
     .set({
@@ -284,10 +542,10 @@ export async function verifyR2Copy(
       stagingObjectKey: null,
       objectKey: candidateObjectKey,
       providerObjectId: candidateObjectKey,
-      fileSize: finalDigest.size,
-      mimeType: finalMetadata.contentType ?? copy.mimeType,
-      sha256: finalDigest.sha256,
-      etag: finalMetadata.etag,
+      fileSize: candidateDigest.size,
+      mimeType: candidateMetadata.contentType ?? copy.mimeType,
+      sha256: candidateDigest.sha256,
+      etag: candidateMetadata.etag,
       verifiedAt: new Date(),
       nextRetryAt: null,
       lastError: null,
@@ -301,7 +559,6 @@ export async function verifyR2Copy(
     .returning();
   if (!ready) {
     await deleteR2Object(candidateObjectKey).catch(() => undefined);
-    await deleteR2Object(stagingObjectKey).catch(() => undefined);
     throw Object.assign(
       new Error("A newer R2 upload attempt replaced this verification"),
       { code: "R2_UPLOAD_NOT_VERIFIED" },

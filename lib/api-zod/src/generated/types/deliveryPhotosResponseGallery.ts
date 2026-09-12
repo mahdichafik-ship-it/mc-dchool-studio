@@ -5,10 +5,14 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeliveryPhotosResponseGalleryProjectType } from './deliveryPhotosResponseGalleryProjectType';
 
 export type DeliveryPhotosResponseGallery = {
   slug?: string;
   status?: string;
+  projectType?: DeliveryPhotosResponseGalleryProjectType;
+  subjectLabel?: string;
+  groupLabel?: string;
   /** @nullable */
   priceSheetId?: number | null;
   /** @nullable */

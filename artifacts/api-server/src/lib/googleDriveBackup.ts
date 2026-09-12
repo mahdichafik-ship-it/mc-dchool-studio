@@ -76,13 +76,13 @@ function escapeQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-function driveName(value: string, fallback: string): string {
-  return pathName(value, fallback);
-}
-
-function pathName(value: string, fallback: string): string {
+export function canonicalStoragePathName(value: string, fallback: string): string {
   const cleaned = value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ");
   return (cleaned || fallback).slice(0, 120);
+}
+
+function driveName(value: string, fallback: string): string {
+  return canonicalStoragePathName(value, fallback);
 }
 
 export function canonicalStudentFolderName(
@@ -90,14 +90,14 @@ export function canonicalStudentFolderName(
   lastName: string,
   generatedStudentId: string,
 ): string {
-  return pathName(
+  return canonicalStoragePathName(
     `${firstName}_${lastName}_${generatedStudentId}`,
     `Student_${generatedStudentId || "Unknown"}`,
   );
 }
 
 export function canonicalProjectFolderName(schoolName: string, projectId: number): string {
-  return pathName(schoolName, `Project ${projectId}`);
+  return canonicalStoragePathName(schoolName, `Project ${projectId}`);
 }
 
 export function stableCollisionFileName(fileName: string, backupKey: string): string {

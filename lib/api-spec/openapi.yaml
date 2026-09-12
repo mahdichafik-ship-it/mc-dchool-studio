@@ -1606,10 +1606,15 @@ components:
         status: { type: string, enum: [pending, paid, cancelled, refunded] }
     DeliveryGallery:
       type: object
-      required: [slug, status, photos, offers]
+      required: [slug, status, projectType, subjectLabel, groupLabel]
       properties:
         slug: { type: string }
         status: { type: string }
+        projectType: { type: string, enum: [school, corporate] }
+        subjectLabel: { type: string }
+        groupLabel: { type: string }
+        expiresAt: { type: ["string", "null"], format: date-time }
+        studio: { type: object, additionalProperties: true }
         photos:
           type: array
           items:
@@ -1655,9 +1660,13 @@ components:
           properties:
             slug: { type: string }
             status: { type: string }
+            projectType: { type: string, enum: [school, corporate] }
+            subjectLabel: { type: string }
+            groupLabel: { type: string }
             priceSheetId: { type: ["integer", "null"] }
             expiresAt: { type: ["string", "null"] }
         student: { type: object, additionalProperties: true }
+        subject: { type: object, additionalProperties: true }
         price: { type: object, additionalProperties: true }
         offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
         orderingAvailable:
@@ -1722,6 +1731,9 @@ components:
             id: { type: integer }
             slug: { type: string }
             status: { type: string }
+        projectType: { type: string, enum: [school, corporate] }
+        subjectLabel: { type: string }
+        groupLabel: { type: string }
         accessCount: { type: integer }
     DeliveryMutationResponse:
       type: object
@@ -1742,6 +1754,13 @@ components:
         properties:
           firstName: { type: string }
           lastName: { type: string }
+          subjectLabel: { type: string }
+          groupLabel: { type: string }
+          studentId: { type: integer, description: Legacy subject identifier retained for compatibility }
+          subjectId: { type: integer, description: Legacy subject identifier retained for compatibility }
+          generatedStudentId: { type: string }
+          className: { type: ["string", "null"] }
+          departmentName: { type: ["string", "null"] }
           accessCode: { type: string }
           accessUrl: { type: string }
           qrDataUrl: { type: string }

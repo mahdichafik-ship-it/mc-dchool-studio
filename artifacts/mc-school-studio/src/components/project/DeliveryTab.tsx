@@ -407,6 +407,8 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
   const { data: cards, isLoading } = useListDeliveryAccessCards(projectId);
   const [printLoading, setPrintLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const subjectLabel = isCorporate ? "Employee" : "Student";
+  const groupLabel = isCorporate ? "Department" : "Class";
 
   if (isLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading access cards...</div>;
@@ -415,7 +417,10 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
   const filteredCards = (cards || []).filter((card: any) => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return (card.firstName?.toLowerCase().includes(q) || card.lastName?.toLowerCase().includes(q) || card.accessCode?.toLowerCase().includes(q));
+    return (card.firstName?.toLowerCase().includes(q)
+      || card.lastName?.toLowerCase().includes(q)
+      || card.departmentName?.toLowerCase().includes(q)
+      || card.accessCode?.toLowerCase().includes(q));
   });
 
   const handlePrint = async () => {
@@ -457,7 +462,8 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
             .content { display: flex; gap: 24px; }
             .qr-code { width: 120px; height: 120px; flex-shrink: 0; }
             .details { flex: 1; }
-            .student-name { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 16px 0; }
+            .subject-name { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 6px 0; }
+            .subject-group { font-size: 12px; color: #64748b; margin: 0 0 12px 0; }
             .instructions { font-size: 13px; color: #475569; margin: 0 0 12px 0; line-height: 1.5; }
             .code-box {
               background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
@@ -481,7 +487,8 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
                 <div class="content">
                   ${card.qrDataUrl ? `<img src="${card.qrDataUrl}" class="qr-code" />` : '<div class="qr-code" style="background:#f1f5f9"></div>'}
                   <div class="details">
-                    <h3 class="student-name">${escapeHtml(card.firstName || "")} ${escapeHtml(card.lastName || "")}</h3>
+                    <h3 class="subject-name">${escapeHtml(card.firstName || "")} ${escapeHtml(card.lastName || "")}</h3>
+                    ${card.departmentName ? `<p class="subject-group">${escapeHtml(groupLabel)}: ${escapeHtml(card.departmentName)}</p>` : ""}
                     <p class="instructions">Scan the QR code or visit:<br/><strong>${window.location.host}/delivery</strong></p>
                     <div class="code-box">
                       <div class="code-label">Your Private Access Code</div>
@@ -542,8 +549,13 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
                 <h4 className="truncate font-semibold text-slate-900" title={`${card.firstName} ${card.lastName}`}>
                   {card.firstName} {card.lastName}
                 </h4>
+                {card.departmentName && (
+                  <div className="mt-1 truncate text-xs text-slate-500">
+                    {groupLabel}: {card.departmentName}
+                  </div>
+                )}
                 <div className="mt-2">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Access Code</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{subjectLabel} Access Code</div>
                   <div className="mt-0.5 font-mono text-lg font-bold tracking-widest text-slate-700">{card.accessCode}</div>
                 </div>
               </div>

@@ -6,9 +6,17 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DeliveryGalleryPhotosItem } from './deliveryGalleryPhotosItem';
+import type { DeliveryGalleryProjectType } from './deliveryGalleryProjectType';
+import type { DeliveryGalleryStudio } from './deliveryGalleryStudio';
 
 export interface DeliveryGallery {
   slug: string;
   status: string;
-  photos: DeliveryGalleryPhotosItem[];
+  projectType: DeliveryGalleryProjectType;
+  subjectLabel: string;
+  groupLabel: string;
+  /** @nullable */
+  expiresAt?: Date | null;
+  studio?: DeliveryGalleryStudio;
+  photos?: DeliveryGalleryPhotosItem[];
 }

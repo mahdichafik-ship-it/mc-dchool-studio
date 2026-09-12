@@ -798,7 +798,10 @@ router.patch("/projects/:projectId/groups/:groupId/captures/:captureKey/review",
     eq(groupCaptureFilesTable.fileRole, "JPEG"),
   )).limit(1);
   if (jpeg) {
-    await db.update(studentPhotosTable).set({ rating }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, jpeg.id));
+    await db.update(studentPhotosTable).set({
+      rating,
+      shareWithParents: rating > 0,
+    }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, jpeg.id));
     await projectGroupJpegToPhotographedStudents(capture, jpeg);
   }
   res.json({ capture });

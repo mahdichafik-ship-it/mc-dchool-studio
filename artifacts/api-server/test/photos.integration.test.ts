@@ -1239,4 +1239,5 @@ test("shows a class photo for every group member even without an individual port
     new Set([photographed.id, absent.id]),
   );
   assert(projected.every((photo) => photo.rating === 5));
+  assert(projected.every((photo) => photo.shareWithParents));
 });

@@ -656,6 +656,39 @@ function getEligibleUploadJobs(jobs, getKey, retryAfterByKey, now2) {
     return leftDeferred ? 1 : -1;
   });
 }
+class AsyncTaskLimiter {
+  active = 0;
+  waiting = [];
+  limit;
+  constructor(limit) {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error("Upload concurrency limit must be a positive integer.");
+    }
+    this.limit = limit;
+  }
+  async run(task) {
+    if (this.active >= this.limit) {
+      await new Promise((resolve) => this.waiting.push(resolve));
+    }
+    this.active++;
+    try {
+      return await task();
+    } finally {
+      this.active--;
+      this.waiting.shift()?.();
+    }
+  }
+}
+async function runWithConcurrency(items, limit, worker) {
+  let nextIndex = 0;
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++];
+      await worker(item);
+    }
+  }));
+}
 function startActiveUploadRun(runs, projectId, work, onSettled) {
   const existing = runs.get(projectId);
   if (existing) return existing;
@@ -835,7 +868,10 @@ let cloudSessionVerified = false;
 const activeUploads = /* @__PURE__ */ new Set();
 const activePhotoUploads = /* @__PURE__ */ new Map();
 const activeCaptureFileUploads = /* @__PURE__ */ new Map();
+const activeGroupCaptureFileUploads = /* @__PURE__ */ new Map();
 const cloudIdentityRepairs = /* @__PURE__ */ new Map();
+const MAX_CONCURRENT_UPLOADS = 3;
+const uploadLimiter = new AsyncTaskLimiter(MAX_CONCURRENT_UPLOADS);
 function disableCloudSyncForRetirement() {
   cloudSyncDisabledForRetirement = true;
   cloudSessionVerified = false;
@@ -1195,7 +1231,9 @@ function uploadPhoto(projectId, studentId, photoId, filePath, fileName, captured
   if (!isCloudSessionVerified()) return Promise.resolve();
   const existing = activePhotoUploads.get(photoId);
   if (existing) return existing;
-  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey);
+  const task = uploadLimiter.run(
+    () => performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey)
+  );
   activePhotoUploads.set(photoId, task);
   activeUploads.add(task);
   void task.finally(() => {
@@ -1390,7 +1428,7 @@ function uploadCaptureFile(captureId, fileId, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
   const existing = activeCaptureFileUploads.get(fileId);
   if (existing) return existing;
-  const task = performUploadCaptureFile(captureId, fileId, captureBatchKey);
+  const task = uploadLimiter.run(() => performUploadCaptureFile(captureId, fileId, captureBatchKey));
   activeCaptureFileUploads.set(fileId, task);
   activeUploads.add(task);
   void task.finally(() => {
@@ -1462,9 +1500,15 @@ async function syncPendingGroupCaptureReviews(projectId) {
 }
 function uploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
-  const task = performUploadGroupCaptureFile(captureId, fileId, captureBatchKey);
+  const existing = activeGroupCaptureFileUploads.get(fileId);
+  if (existing) return existing;
+  const task = uploadLimiter.run(() => performUploadGroupCaptureFile(captureId, fileId, captureBatchKey));
+  activeGroupCaptureFileUploads.set(fileId, task);
   activeUploads.add(task);
-  void task.finally(() => activeUploads.delete(task)).catch(() => {
+  void task.finally(() => {
+    activeUploads.delete(task);
+    activeGroupCaptureFileUploads.delete(fileId);
+  }).catch(() => {
   });
   return task;
 }
@@ -1737,22 +1781,13 @@ async function runLiveUpload(projectId, includeErrors = false) {
       );
       failedLiveRunRetryAfter.delete(projectId);
       failedLiveRunAttempts.delete(projectId);
-      let groupIdentitiesReady = false;
-      let groupIdentityError;
-      for (const job of jobs) {
-        if (!isCloudSessionVerified()) break;
+      let groupIdentityPromise;
+      await runWithConcurrency(jobs, MAX_CONCURRENT_UPLOADS, async (job) => {
+        if (!isCloudSessionVerified()) return;
         try {
           if (job.kind === "group-capture-file") {
-            if (groupIdentityError) throw groupIdentityError;
-            if (!groupIdentitiesReady) {
-              try {
-                await syncGroupCloudIdentities(projectId);
-                groupIdentitiesReady = true;
-              } catch (error) {
-                groupIdentityError = error;
-                throw error;
-              }
-            }
+            groupIdentityPromise ??= syncGroupCloudIdentities(projectId);
+            await groupIdentityPromise;
           }
           await uploadProjectJob(job, captureBatchKey);
           failedUploadRetryAfter.delete(projectSyncJobKey(job));
@@ -1765,10 +1800,10 @@ async function runLiveUpload(projectId, includeErrors = false) {
             ...liveUploadActivity.get(projectId),
             lastError: String(error)
           });
-          if (!isCloudSessionVerified()) break;
+          if (!isCloudSessionVerified()) return;
         }
         emitLiveUploadState(projectId);
-      }
+      });
     } catch (error) {
       deferFailedRun(projectId);
       liveUploadActivity.set(projectId, {
@@ -1824,26 +1859,12 @@ async function syncProjectUploads(projectId, onProgress, captureBatchKey) {
   let firstError;
   const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError });
   report();
-  for (const job of jobs) {
+  await runWithConcurrency(jobs, MAX_CONCURRENT_UPLOADS, async (job) => {
     try {
       if (!isCloudSessionVerified()) {
         throw new Error("Cloud sync is unavailable. Local captures are safe; reconnect and try again.");
       }
-      if (job.kind === "capture-file") {
-        await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey);
-      } else if (job.kind === "group-capture-file") {
-        await uploadGroupCaptureFile(job.captureId, job.fileId, captureBatchKey);
-      } else {
-        await uploadPhoto(
-          job.projectId,
-          job.studentId,
-          job.photoId,
-          job.filePath,
-          job.fileName,
-          job.capturedAt,
-          captureBatchKey
-        );
-      }
+      await uploadProjectJob(job, captureBatchKey);
     } catch (error) {
       failed++;
       firstError ??= String(error);
@@ -1851,7 +1872,7 @@ async function syncProjectUploads(projectId, onProgress, captureBatchKey) {
       completed++;
       report();
     }
-  }
+  });
   return { completed, total: jobs.length, failed, error: firstError };
 }
 async function beginProjectCaptureBatch(projectId, expectedFileCount) {

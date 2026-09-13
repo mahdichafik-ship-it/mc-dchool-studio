@@ -45,3 +45,4 @@
 - [R2 verified upload promotion](r2-verified-upload-promotion.md) — presigned R2 PUTs require unique staging keys and server-only verified candidates to prevent replay and promotion races.
 - [Release smoke contract fixtures](release-smoke-contract-fixtures.md) — packaged-app smoke servers must return the same strict response shapes as production APIs.
 - [R2 photo variants](r2-photo-variants.md) — immutable keys bind optimized derivatives to original bytes, rendering settings, and watermark configuration.
+- [Desktop upload concurrency](desktop-upload-concurrency.md) — all desktop transfer paths share a three-file limit held through verification and persistence.

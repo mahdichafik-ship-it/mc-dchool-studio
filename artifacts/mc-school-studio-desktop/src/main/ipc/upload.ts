@@ -29,6 +29,7 @@ import { eq, and, or, isNull } from 'drizzle-orm'
 import type { LiveUploadQueueItem, LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
+import { AsyncTaskLimiter, runWithConcurrency } from '../lib/uploadConcurrency'
 import { startActiveUploadRun } from '../lib/activeUploadRun'
 import {
   assertR2VerifierResponse,
@@ -149,7 +150,10 @@ let cloudSessionVerified = false
 const activeUploads = new Set<Promise<void>>()
 const activePhotoUploads = new Map<number, Promise<void>>()
 const activeCaptureFileUploads = new Map<number, Promise<void>>()
+const activeGroupCaptureFileUploads = new Map<number, Promise<void>>()
 const cloudIdentityRepairs = new Map<string, Promise<void>>()
+const MAX_CONCURRENT_UPLOADS = 3
+const uploadLimiter = new AsyncTaskLimiter(MAX_CONCURRENT_UPLOADS)
 
 type DesktopProjectSummary = {
   id: number
@@ -657,7 +661,9 @@ export function uploadPhoto(
   const existing = activePhotoUploads.get(photoId)
   if (existing) return existing
 
-  const task = performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey)
+  const task = uploadLimiter.run(() =>
+    performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey),
+  )
   activePhotoUploads.set(photoId, task)
   activeUploads.add(task)
   void task.finally(() => {
@@ -881,7 +887,7 @@ export function uploadCaptureFile(captureId: number, fileId: number, captureBatc
   const existing = activeCaptureFileUploads.get(fileId)
   if (existing) return existing
 
-  const task = performUploadCaptureFile(captureId, fileId, captureBatchKey)
+  const task = uploadLimiter.run(() => performUploadCaptureFile(captureId, fileId, captureBatchKey))
   activeCaptureFileUploads.set(fileId, task)
   activeUploads.add(task)
   void task.finally(() => {
@@ -969,9 +975,15 @@ async function syncPendingGroupCaptureReviews(projectId?: number): Promise<void>
 
 function uploadGroupCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
   if (!isCloudSessionVerified()) return Promise.resolve()
-  const task = performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
+  const existing = activeGroupCaptureFileUploads.get(fileId)
+  if (existing) return existing
+  const task = uploadLimiter.run(() => performUploadGroupCaptureFile(captureId, fileId, captureBatchKey))
+  activeGroupCaptureFileUploads.set(fileId, task)
   activeUploads.add(task)
-  void task.finally(() => activeUploads.delete(task)).catch(() => {})
+  void task.finally(() => {
+    activeUploads.delete(task)
+    activeGroupCaptureFileUploads.delete(fileId)
+  }).catch(() => {})
   return task
 }
 
@@ -1308,7 +1320,7 @@ function getProjectLiveUploadJobs(projectId: number, includeErrors: boolean): Pr
   return getEligibleUploadJobs(jobs, projectSyncJobKey, failedUploadRetryAfter, Date.now())
 }
 
-async function uploadProjectJob(job: ProjectSyncJob, captureBatchKey: string): Promise<void> {
+async function uploadProjectJob(job: ProjectSyncJob, captureBatchKey?: string): Promise<void> {
   if (job.kind === 'capture-file') {
     await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey)
   } else if (job.kind === 'group-capture-file') {
@@ -1350,22 +1362,13 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
       )
       failedLiveRunRetryAfter.delete(projectId)
       failedLiveRunAttempts.delete(projectId)
-      let groupIdentitiesReady = false
-      let groupIdentityError: unknown
-      for (const job of jobs) {
-        if (!isCloudSessionVerified()) break
+      let groupIdentityPromise: Promise<void> | undefined
+      await runWithConcurrency(jobs, MAX_CONCURRENT_UPLOADS, async (job) => {
+        if (!isCloudSessionVerified()) return
         try {
           if (job.kind === 'group-capture-file') {
-            if (groupIdentityError) throw groupIdentityError
-            if (!groupIdentitiesReady) {
-              try {
-                await syncGroupCloudIdentities(projectId)
-                groupIdentitiesReady = true
-              } catch (error) {
-                groupIdentityError = error
-                throw error
-              }
-            }
+            groupIdentityPromise ??= syncGroupCloudIdentities(projectId)
+            await groupIdentityPromise
           }
           await uploadProjectJob(job, captureBatchKey)
           failedUploadRetryAfter.delete(projectSyncJobKey(job))
@@ -1378,10 +1381,10 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
             ...liveUploadActivity.get(projectId),
             lastError: String(error),
           })
-          if (!isCloudSessionVerified()) break
+          if (!isCloudSessionVerified()) return
         }
         emitLiveUploadState(projectId)
-      }
+      })
     } catch (error) {
       deferFailedRun(projectId)
       liveUploadActivity.set(projectId, {
@@ -1439,9 +1442,9 @@ export async function pauseLiveUploadForFinish(projectId: number): Promise<void>
 
 /**
  * Upload a complete local project only when explicitly requested by the
- * photographer. This deliberately runs sequentially so progress is
- * deterministic and an offline transition cannot silently count skipped work
- * as complete.
+ * photographer. A bounded worker pool shortens the wait while per-file
+ * completion remains explicit and an offline transition cannot silently count
+ * skipped work as complete.
  */
 export async function syncProjectUploads(
   projectId: number,
@@ -1455,26 +1458,12 @@ export async function syncProjectUploads(
   const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError })
   report()
 
-  for (const job of jobs) {
+  await runWithConcurrency(jobs, MAX_CONCURRENT_UPLOADS, async (job) => {
     try {
       if (!isCloudSessionVerified()) {
         throw new Error('Cloud sync is unavailable. Local captures are safe; reconnect and try again.')
       }
-      if (job.kind === 'capture-file') {
-        await uploadCaptureFile(job.captureId, job.fileId, captureBatchKey)
-      } else if (job.kind === 'group-capture-file') {
-        await uploadGroupCaptureFile(job.captureId, job.fileId, captureBatchKey)
-      } else {
-        await uploadPhoto(
-          job.projectId,
-          job.studentId,
-          job.photoId,
-          job.filePath,
-          job.fileName,
-          job.capturedAt,
-          captureBatchKey,
-        )
-      }
+      await uploadProjectJob(job, captureBatchKey)
     } catch (error) {
       failed++
       firstError ??= String(error)
@@ -1482,7 +1471,7 @@ export async function syncProjectUploads(
       completed++
       report()
     }
-  }
+  })
 
   return { completed, total: jobs.length, failed, error: firstError }
 }

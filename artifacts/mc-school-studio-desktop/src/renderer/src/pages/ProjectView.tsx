@@ -754,6 +754,69 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
+  const errCount = liveUpload
+    ? liveUpload.error
+    : errorPhotoIds.length
+
+  const uploadingCount = liveUpload
+    ? liveUpload.uploading
+    : [...uploadStatusMap.values()].reduce((count, s) => count + s.uploading, 0)
+
+  const blockedCount = liveUpload?.blocked ?? 0
+
+  let LocalIcon = Folder
+  let localColor = "text-slate-400"
+  let localText = "Waiting for photos"
+
+  if (unmatchedPhotos.length > 0) {
+    localColor = "text-rose-400"
+    localText = `${captureSummary.total} safe · ${unmatchedPhotos.length} unmatched`
+    LocalIcon = AlertCircle
+  } else if (captureSummary.total === 0) {
+    localText = !isRunning && !project?.finishedAt
+      ? "No captures · watcher paused"
+      : "Waiting for photos"
+  } else {
+    LocalIcon = CheckCircle
+    localColor = !isRunning && !project?.finishedAt ? "text-amber-400" : "text-emerald-400"
+    localText = `${captureSummary.total} safe locally${!isRunning && !project?.finishedAt ? " · watcher paused" : ""}`
+  }
+
+  let CloudIcon = CloudUpload
+  let cloudColor = "text-slate-400"
+  let cloudText = liveUpload ? "No uploads waiting" : "Checking cloud…"
+  let showUploadDots = false
+
+  if (errCount > 0) {
+    cloudColor = "text-rose-400"
+    cloudText = `${errCount} failed${blockedCount > 0 ? ` · ${blockedCount} blocked` : ""}`
+    CloudIcon = XCircle
+  } else if (blockedCount > 0) {
+    cloudColor = "text-amber-400"
+    cloudText = `${blockedCount} blocked`
+    CloudIcon = AlertCircle
+  } else if (liveUpload && !liveUpload.cloudReady) {
+    cloudColor = "text-amber-400"
+    cloudText = "Cloud unavailable · files stay local"
+  } else if (uploadingCount > 0) {
+    cloudColor = "text-teal-400"
+    cloudText = `${uploadingCount}/3 uploading${(liveUpload?.pending ?? 0) > 0 ? ` · ${liveUpload?.pending} queued` : ""}`
+    showUploadDots = true
+  } else if ((liveUpload?.pending ?? 0) > 0) {
+    cloudColor = liveUpload?.enabled ? "text-blue-400" : "text-amber-400"
+    cloudText = `${liveUpload?.pending} queued${liveUpload?.enabled ? "" : " · Live Upload off"}`
+  } else if (captureSummary.total === 0) {
+    cloudColor = "text-slate-500"
+    cloudText = "Ready when captures arrive"
+  } else {
+    CloudIcon = CheckCircle
+    cloudColor = "text-emerald-400"
+    cloudText = "Cloud queue clear"
+  }
+
+  const activeDots = Math.min(3, uploadingCount)
+  const shootHealthLabel = `Shoot health. Local: ${localText}. Cloud: ${cloudText}. Open upload activity.`
+
   return (
     <div
       className="flex flex-col h-full font-sans bg-slate-50"
@@ -793,26 +856,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               <span>{project?.classCount} {departmentLabel.toLowerCase()}{project?.classCount === 1 ? '' : 's'}</span>
               <span className="w-1 h-1 rounded-full bg-slate-700" />
               <span>{project?.studentCount} {employeePlural.toLowerCase()}</span>
-              <span className="w-1 h-1 rounded-full bg-slate-700" />
-              <span className="text-slate-300">
+              <span className="w-1 h-1 rounded-full bg-slate-700 sm:hidden" />
+              <span className="text-slate-300 sm:hidden">
                 {captureSummary.total > 0 ? `${captureSummary.total} captures` : `${project?.photoCount ?? 0} photos`}
               </span>
-              {pendingUploadCount > 0 && (
-                <>
-                  <span className="w-1 h-1 rounded-full bg-amber-500/50" />
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <Upload className="size-3" /> {pendingUploadCount} pending
-                  </span>
-                </>
-              )}
-              {syncProgress?.phase === 'error' && (
-                 <>
-                   <span className="w-1 h-1 rounded-full bg-red-500/50" />
-                   <span className="text-red-400 flex items-center gap-1">
-                     <AlertCircle className="size-3" /> {syncProgress.failed} failed
-                   </span>
-                 </>
-              )}
             </div>
           </div>
         </div>
@@ -846,7 +893,51 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             </Button>
           )}
 
-          <div className="w-px h-6 bg-slate-800" />
+           <div className="w-px h-6 bg-slate-800" />
+
+           <button
+             onClick={() => void openUploadDialog()}
+             aria-label={shootHealthLabel}
+             className="hidden md:flex items-center gap-3 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-md hover:bg-slate-800 hover:border-slate-700 transition-all text-left focus:outline-none focus:ring-2 focus:ring-teal-500/50 group"
+             title={shootHealthLabel}
+           >
+             <div className="flex flex-col gap-1">
+               <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                 <LocalIcon className={cn("size-3.5", localColor)} />
+                 <span className={cn(localColor === 'text-slate-400' ? 'text-slate-400' : 'text-slate-200')}>
+                   {localText}
+                 </span>
+               </div>
+               <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                 <CloudIcon className={cn("size-3.5", cloudColor)} />
+                 <span className={cn(cloudColor === 'text-slate-400' || cloudColor === 'text-slate-500' ? 'text-slate-400' : 'text-slate-200')}>
+                   {cloudText}
+                 </span>
+               </div>
+             </div>
+
+             {showUploadDots && (
+               <div className="flex gap-1 items-center pl-1.5 border-l border-slate-800 h-6">
+                 {[0, 1, 2].map(i => (
+                    <span
+                      key={i}
+                     className={cn(
+                        "w-1.5 h-1.5 rounded-full transition-all duration-300",
+                        i < activeDots
+                          ? "bg-teal-400 animate-pulse"
+                         : "bg-slate-800"
+                      )}
+                   />
+                 ))}
+               </div>
+             )}
+
+             {!showUploadDots && (
+               <div className="pl-0.5 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                 <ChevronRight className="size-3.5 text-slate-500" />
+               </div>
+             )}
+           </button>
 
           {/* Exports & Finish */}
           <div className="flex items-center gap-2">
@@ -866,10 +957,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                  {liveUpload?.running ? <Loader className="size-3 animate-spin" /> : <CloudUpload className="size-3" />}
                  Live Upload {liveUpload?.enabled ? 'On' : 'Off'}
                </button>
-               <div className={cn("w-px h-full", liveUpload?.enabled ? "bg-blue-500/30" : "bg-slate-800")} />
+               <div className={cn("w-px h-full md:hidden", liveUpload?.enabled ? "bg-blue-500/30" : "bg-slate-800")} />
                <button
                   onClick={() => void openUploadDialog()}
-                 className="h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold"
+                 className="h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold md:hidden"
                  title="Open upload activity"
                >
                  {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}

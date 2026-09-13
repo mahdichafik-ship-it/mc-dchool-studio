@@ -39,6 +39,19 @@ import {
   RetryableUploadError,
 } from '../lib/uploadResponseValidation'
 import type { R2UploadSession } from '../lib/uploadResponseValidation'
+import {
+  getUploadTransferTimeoutMs,
+  hasSufficientUploadWindow,
+  isUploadTimeoutError,
+  UPLOAD_TIMEOUT_MESSAGE,
+} from '../lib/uploadTransferTimeout'
+
+export {
+  getUploadTransferTimeoutMs,
+  hasSufficientUploadWindow,
+  isUploadTimeoutError,
+  UPLOAD_TIMEOUT_MESSAGE,
+} from '../lib/uploadTransferTimeout'
 
 export {
   assertR2VerifierResponse,
@@ -130,6 +143,22 @@ function notifyCaptureFileStatus(
     fileRole,
     status,
   })
+}
+
+/**
+ * Do not expose DOM/undici TimeoutError details to photographers. Keep this
+ * conversion at the upload boundary so retry scheduling still sees a
+ * RetryableUploadError and the UI receives one concise, actionable message.
+ */
+export function normalizeUploadError(error: unknown): Error {
+  if (isUploadTimeoutError(error)) {
+    return new RetryableUploadError(UPLOAD_TIMEOUT_MESSAGE)
+  }
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+export function getUploadErrorMessage(error: unknown): string {
+  return normalizeUploadError(error).message
 }
 
 function toServerFileUrl(fileUrl: string | null): string | null {
@@ -370,7 +399,7 @@ export async function syncStudentCloudIdentity(
     await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken)
     return { synced: true }
   } catch (error) {
-    return { synced: false, error: error instanceof Error ? error.message : String(error) }
+    return { synced: false, error: getUploadErrorMessage(error) }
   }
 }
 
@@ -513,14 +542,23 @@ export async function completeR2Upload(
     throw new Error('R2 upload session does not match the local file bytes.')
   }
 
-  const uploadResponse = await fetch(session.uploadUrl, {
-    method: session.uploadMethod,
-    headers: session.uploadHeaders,
-    body: new Blob([fileBuffer], {
-      type: session.uploadHeaders['Content-Type'] || 'application/octet-stream',
-    }),
-    signal: AbortSignal.timeout(120_000),
-  })
+  if (!hasSufficientUploadWindow(session.expiresAt, fileBuffer.byteLength)) {
+    throw new RetryableUploadError('Upload session expires too soon; requesting a new upload session.')
+  }
+
+  let uploadResponse: Response
+  try {
+    uploadResponse = await fetch(session.uploadUrl, {
+      method: session.uploadMethod,
+      headers: session.uploadHeaders,
+      body: new Blob([fileBuffer], {
+        type: session.uploadHeaders['Content-Type'] || 'application/octet-stream',
+      }),
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength)),
+    })
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
   if (!uploadResponse.ok) {
     const body = await uploadResponse.text().catch(() => '')
     throw new RetryableUploadError(
@@ -528,14 +566,19 @@ export async function completeR2Upload(
     )
   }
 
-  const verifyResponse = await fetch(
-    `${apiUrl.replace(/\/+$/, '')}/api/desktop/storage-copies/${session.copyId}/r2/verify`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${connectionToken}` },
-      signal: AbortSignal.timeout(30_000),
-    },
-  )
+  let verifyResponse: Response
+  try {
+    verifyResponse = await fetch(
+      `${apiUrl.replace(/\/+$/, '')}/api/desktop/storage-copies/${session.copyId}/r2/verify`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(30_000),
+      },
+    )
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
   if (!verifyResponse.ok) {
     const body = await verifyResponse.text().catch(() => '')
     if (verifyResponse.status === 401) invalidateDesktopCredentials(true)
@@ -603,7 +646,7 @@ async function performUploadPhoto(
         ...(captureBatchKey ? { 'X-MC-Capture-Batch': captureBatchKey } : {}),
       },
       body: formData,
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength)),
     })
 
     if (!response.ok) {
@@ -638,15 +681,16 @@ async function performUploadPhoto(
 
     console.log(`[Upload] Photo ${photoId} uploaded successfully`)
   } catch (err) {
-    const retryable = isRetryableUploadFailure(err)
-    if (isConnectivityFailure(err)) markCloudSessionUnavailable()
-    console.error(`[Upload] Upload ${retryable ? 'waiting for connectivity' : 'failed'}:`, err)
+    const error = normalizeUploadError(err)
+    const retryable = isRetryableUploadFailure(error)
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable()
+    console.error(`[Upload] Upload ${retryable ? 'waiting for connectivity' : 'failed'}:`, error)
     db.update(photosTable)
       .set({ uploadStatus: retryable ? 'pending' : 'error' })
       .where(eq(photosTable.id, photoId))
       .run()
     notifyUploadStatus(photoId, studentId, retryable ? 'pending' : 'error')
-    throw err
+    throw error
   }
 }
 
@@ -755,7 +799,7 @@ async function performUploadCaptureFile(captureId: number, fileId: number, captu
         ...(captureBatchKey ? { 'X-MC-Capture-Batch': captureBatchKey } : {}),
       },
       body: formData,
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength)),
     })
 
     if (!response.ok) {
@@ -780,11 +824,12 @@ async function performUploadCaptureFile(captureId: number, fileId: number, captu
     setCaptureFileStatus(captureId, fileId, 'done', serverFileUrl)
     console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`)
   } catch (error) {
-    const retryable = isRetryableUploadFailure(error)
-    if (isConnectivityFailure(error)) markCloudSessionUnavailable()
-    console.error(`[Upload] Capture file ${retryable ? 'waiting for connectivity' : 'failed'}:`, error)
+    const normalizedError = normalizeUploadError(error)
+    const retryable = isRetryableUploadFailure(normalizedError)
+    if (isConnectivityFailure(normalizedError)) markCloudSessionUnavailable()
+    console.error(`[Upload] Capture file ${retryable ? 'waiting for connectivity' : 'failed'}:`, normalizedError)
     setCaptureFileStatus(captureId, fileId, retryable ? 'pending' : 'error', undefined)
-    throw error
+    throw normalizedError
   }
 }
 
@@ -801,9 +846,10 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
   }
   db.update(groupCaptureFilesTable).set({ uploadStatus: 'uploading' }).where(eq(groupCaptureFilesTable.id, fileId)).run()
   try {
+    const fileBuffer = readFileSync(file.storedPath)
     const formData = new FormData()
     const managedFilename = basename(file.storedPath)
-    formData.append('file', new Blob([readFileSync(file.storedPath)], {
+    formData.append('file', new Blob([fileBuffer], {
       type: file.fileRole === 'JPEG' ? 'image/jpeg' : 'application/octet-stream',
     }), managedFilename)
     formData.append('captureKey', capture.captureKey)
@@ -818,7 +864,7 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
         ...(captureBatchKey ? { 'X-MC-Capture-Batch': captureBatchKey } : {}),
       },
       body: formData,
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength)),
     })
     if (!response.ok) {
       const text = await response.text()
@@ -834,7 +880,7 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
     }
     await completeR2Upload(
       payload.r2Upload,
-      readFileSync(file.storedPath),
+      fileBuffer,
       apiUrl,
       connectionToken,
     )
@@ -844,11 +890,12 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
       galleryReady: file.fileRole !== 'JPEG' || payload.galleryReady === true,
     }).where(eq(groupCaptureFilesTable.id, fileId)).run()
   } catch (error) {
-    const retryable = isRetryableUploadFailure(error)
-    if (isConnectivityFailure(error)) markCloudSessionUnavailable()
+    const normalizedError = normalizeUploadError(error)
+    const retryable = isRetryableUploadFailure(normalizedError)
+    if (isConnectivityFailure(normalizedError)) markCloudSessionUnavailable()
     db.update(groupCaptureFilesTable).set({ uploadStatus: retryable ? 'pending' : 'error' })
       .where(eq(groupCaptureFilesTable.id, fileId)).run()
-    throw error
+    throw normalizedError
   }
 }
 
@@ -1203,7 +1250,7 @@ function deferFailedJob(job: ProjectSyncJob, error: unknown): void {
   const attempt = (failedUploadAttempts.get(key) ?? 0) + 1
   failedUploadAttempts.set(key, attempt)
   failedUploadRetryAfter.set(key, Date.now() + retryDelay(attempt))
-  failedUploadErrors.set(key, error instanceof Error ? error.message : String(error))
+  failedUploadErrors.set(key, getUploadErrorMessage(error))
 }
 
 function deferFailedRun(projectId: number): void {
@@ -1277,9 +1324,9 @@ function getUploadStatusCounts(projectId: number) {
       ))
   }
   const mirroredPhotoIds = new Set(
-    db.select({ id: capturesTable.legacyPhotoId }).from(capturesTable)
+    db.select({ legacyPhotoId: capturesTable.legacyPhotoId }).from(capturesTable)
       .where(eq(capturesTable.projectId, projectId)).all()
-      .flatMap((row) => row.id === null ? [] : [row.id]),
+      .flatMap((row) => row.legacyPhotoId === null ? [] : [row.legacyPhotoId]),
   )
   statuses.push(...db.select({ id: photosTable.id, status: photosTable.uploadStatus }).from(photosTable)
     .where(and(eq(photosTable.projectId, projectId), eq(photosTable.isMatched, true))).all()
@@ -1474,7 +1521,7 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
           deferFailedJob(job, error)
           liveUploadActivity.set(projectId, {
             ...liveUploadActivity.get(projectId),
-            lastError: String(error),
+            lastError: getUploadErrorMessage(error),
           })
           if (!isCloudSessionVerified()) return
         }
@@ -1484,7 +1531,7 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
       deferFailedRun(projectId)
       liveUploadActivity.set(projectId, {
         ...liveUploadActivity.get(projectId),
-        lastError: String(error),
+        lastError: getUploadErrorMessage(error),
       })
     }
   }, () => emitLiveUploadState(projectId))
@@ -1561,7 +1608,7 @@ export async function syncProjectUploads(
       await uploadProjectJob(job, captureBatchKey)
     } catch (error) {
       failed++
-      firstError ??= String(error)
+      firstError ??= getUploadErrorMessage(error)
     } finally {
       completed++
       report()
@@ -1730,7 +1777,7 @@ export function registerUploadHandlers() {
       return { ok: false, error: body.error ?? `Server returned ${response.status}` }
     } catch (err) {
       markCloudSessionUnavailable()
-      return { ok: false, error: String(err) }
+      return { ok: false, error: getUploadErrorMessage(err) }
     }
   })
 
@@ -1769,7 +1816,7 @@ export function registerUploadHandlers() {
       )
       return { ok: true }
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: getUploadErrorMessage(err) }
     }
   })
 
@@ -1786,7 +1833,7 @@ export function registerUploadHandlers() {
       await uploadCaptureFile(capture.id, file.id)
       return { ok: true }
     } catch (error) {
-      return { ok: false, error: String(error) }
+      return { ok: false, error: getUploadErrorMessage(error) }
     }
   })
 
@@ -1799,7 +1846,7 @@ export function registerUploadHandlers() {
       await uploadGroupCaptureFile(file.captureId, file.id)
       return { ok: true }
     } catch (error) {
-      return { ok: false, error: String(error) }
+      return { ok: false, error: getUploadErrorMessage(error) }
     }
   })
 

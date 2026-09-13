@@ -18,6 +18,7 @@
     "test:upload-retry": "node --experimental-strip-types --test test/upload-retry-schedule.test.ts",
     "test:upload-concurrency": "node --experimental-strip-types --test test/upload-concurrency.test.ts",
     "test:upload-response-validation": "node --experimental-strip-types --test test/upload-response-validation.test.ts",
+    "test:upload-transfer-timeout": "node --experimental-strip-types --test test/upload-transfer-timeout.test.ts",
     "test:live-preview": "node --experimental-strip-types --test test/live-preview.test.ts",
     "test:blank-portrait": "node --experimental-strip-types --test test/blank-portrait.test.ts",
     "benchmark:image-ingestion": "node --experimental-strip-types test/image-ingestion-benchmark.ts",

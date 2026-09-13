@@ -472,6 +472,7 @@ function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
     rating: photo.rating,
     colorLabel: photo.colorLabel,
     shareWithParents: photo.shareWithParents,
+    sourceGroupCaptureFileId: photo.sourceGroupCaptureFileId,
     capturedAt: photo.capturedAt,
     createdAt: photo.createdAt.toISOString(),
   };
@@ -1338,6 +1339,101 @@ router.patch("/:studentId/photos/:photoId/share", requireAuth, async (req, res):
     res.status(404).json({ error: "Photo not found" });
     return;
   }
+  res.json({ photo: photoToResponse(photo) });
+});
+
+router.patch("/:studentId/photos/:photoId/review", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const studentId = Number(req.params.studentId);
+  const photoId = Number(req.params.photoId);
+  const decision = req.body?.decision;
+  const requestedRating = Number(req.body?.rating);
+  if (
+    ![projectId, studentId, photoId].every((value) => Number.isSafeInteger(value) && value > 0)
+    || !["selected", "do_not_share"].includes(decision)
+    || (decision === "selected" && (!Number.isInteger(requestedRating) || requestedRating < 1 || requestedRating > 5))
+  ) {
+    res.status(400).json({ error: "Select a 1–5 star rating or mark the photo Do not share" });
+    return;
+  }
+  if (!(await canAccessProject(getUserId(req), projectId, "manage"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const rating = decision === "selected" ? requestedRating : 0;
+  const colorLabel = decision === "selected" ? "green" : "red";
+  const shareWithParents = decision === "selected";
+
+  const [existingPhoto] = await db.select().from(studentPhotosTable).where(and(
+    eq(studentPhotosTable.id, photoId),
+    eq(studentPhotosTable.projectId, projectId),
+    eq(studentPhotosTable.studentId, studentId),
+  )).limit(1);
+  if (!existingPhoto) {
+    res.status(404).json({ error: "Photo not found" });
+    return;
+  }
+
+  const [photo] = await db.transaction(async (tx) => {
+    const updatedPhotos = existingPhoto.sourceGroupCaptureFileId !== null
+      ? await tx.update(studentPhotosTable).set({
+          rating,
+          colorLabel,
+          shareWithParents,
+        }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, existingPhoto.sourceGroupCaptureFileId)).returning()
+      : await tx.update(studentPhotosTable).set({
+          rating,
+          colorLabel,
+          shareWithParents,
+        }).where(eq(studentPhotosTable.id, photoId)).returning();
+
+    if (existingPhoto.sourceGroupCaptureFileId !== null) {
+      const [groupFile] = await tx.select({ captureId: groupCaptureFilesTable.captureId })
+        .from(groupCaptureFilesTable)
+        .where(eq(groupCaptureFilesTable.id, existingPhoto.sourceGroupCaptureFileId))
+        .limit(1);
+      if (groupFile) {
+        await tx.update(groupCapturesTable).set({
+          rating,
+          favorite: rating >= 4,
+          selected: rating > 0,
+          rejected: false,
+          updatedAt: new Date(),
+        }).where(eq(groupCapturesTable.id, groupFile.captureId));
+      }
+    } else {
+      const captureIdentity = existingPhoto.clientUploadId
+        ? and(
+            eq(captureFilesTable.desktopConnectionId, existingPhoto.desktopConnectionId!),
+            eq(captureFilesTable.clientUploadId, existingPhoto.clientUploadId),
+          )
+        : eq(captureFilesTable.originalFilename, existingPhoto.fileName);
+      const [captureFile] = await tx.select({ captureId: captureFilesTable.captureId })
+        .from(captureFilesTable)
+        .innerJoin(capturesTable, eq(captureFilesTable.captureId, capturesTable.id))
+        .where(and(
+          eq(capturesTable.projectId, projectId),
+          eq(capturesTable.studentId, studentId),
+          eq(captureFilesTable.fileRole, "JPEG"),
+          captureIdentity,
+        ))
+        .limit(1);
+      if (captureFile) {
+        await tx.update(capturesTable).set({
+          rating,
+          colorLabel,
+          favorite: rating >= 4,
+          selected: rating > 0,
+          rejected: false,
+          updatedAt: new Date(),
+        }).where(eq(capturesTable.id, captureFile.captureId));
+      }
+    }
+
+    return [updatedPhotos.find((candidate) => candidate.id === photoId) ?? updatedPhotos[0]];
+  });
+
   res.json({ photo: photoToResponse(photo) });
 });
 

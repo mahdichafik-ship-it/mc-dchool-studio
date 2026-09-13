@@ -9,6 +9,9 @@ if (!releaseDirectoryArgument || !version) {
     'Usage: merge-mac-updater-metadata.mjs <release-directory> <version>',
   )
 }
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  throw new Error(`desktop release version must be stable semver: ${version}`)
+}
 
 const releaseDirectory = resolve(releaseDirectoryArgument)
 const expectedFiles = ['x64', 'arm64'].map(

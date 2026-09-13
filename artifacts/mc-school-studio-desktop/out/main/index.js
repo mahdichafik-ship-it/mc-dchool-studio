@@ -2552,6 +2552,29 @@ function registerProjectHandlers() {
     }
   );
 }
+const MAX_UNIFORM_CHANNEL_RANGE = 3;
+const MAX_UNIFORM_STANDARD_DEVIATION = 1.25;
+async function assessImageContent(filePath) {
+  try {
+    const stats = await sharp(filePath, { failOn: "none" }).stats();
+    const channels = stats.channels;
+    const minimum = Math.min(...channels.map((channel) => channel.min));
+    const maximum = Math.max(...channels.map((channel) => channel.max));
+    const channelRange = maximum - minimum;
+    const maximumStandardDeviation = Math.max(
+      ...channels.map((channel) => channel.stdev)
+    );
+    const uniform = channelRange <= MAX_UNIFORM_CHANNEL_RANGE && maximumStandardDeviation <= MAX_UNIFORM_STANDARD_DEVIATION;
+    return {
+      usable: !uniform,
+      ...uniform ? { reason: "uniform-frame" } : {},
+      channelRange,
+      maximumStandardDeviation
+    };
+  } catch {
+    return { usable: false, reason: "decode-failed" };
+  }
+}
 const LIVE_PREVIEW_EDGE = 1440;
 const LIVE_PREVIEW_QUALITY = 84;
 const RAW_EXTENSIONS$1 = /* @__PURE__ */ new Set([
@@ -2583,6 +2606,10 @@ async function existingFileSize(filePath) {
     return null;
   }
 }
+async function usablePreview(filePath) {
+  if (!await existingFileSize(filePath)) return false;
+  return (await assessImageContent(filePath)).usable;
+}
 async function extractEmbeddedPreview(sourcePath, destinationPath) {
   for (const tag of EMBEDDED_PREVIEW_TAGS) {
     await fs.rm(destinationPath, { force: true }).catch(() => {
@@ -2603,7 +2630,9 @@ async function generateLivePreview(sourcePath, { previewKey, cacheDir }) {
   let inputPath = sourcePath;
   try {
     await fs.mkdir(cacheDir, { recursive: true });
-    if (await existingFileSize(destinationPath)) return destinationPath;
+    if (await usablePreview(destinationPath)) return destinationPath;
+    await fs.rm(destinationPath, { force: true }).catch(() => {
+    });
     if (isRawFile(sourcePath)) {
       const extracted = await extractEmbeddedPreview(sourcePath, embeddedPath);
       if (!extracted) {
@@ -2612,12 +2641,20 @@ async function generateLivePreview(sourcePath, { previewKey, cacheDir }) {
       }
       inputPath = embeddedPath;
     }
+    const sourceAssessment = await assessImageContent(inputPath);
+    if (!sourceAssessment.usable) {
+      throw new Error(`Source image is not usable (${sourceAssessment.reason ?? "uniform frame"})`);
+    }
     await sharp(inputPath, { failOn: "none" }).rotate().resize({
       width: LIVE_PREVIEW_EDGE,
       height: LIVE_PREVIEW_EDGE,
       fit: "inside",
       withoutEnlargement: true
     }).jpeg({ quality: LIVE_PREVIEW_QUALITY, mozjpeg: true }).toFile(destinationPath);
+    const previewAssessment = await assessImageContent(destinationPath);
+    if (!previewAssessment.usable) {
+      throw new Error(`Generated preview is not usable (${previewAssessment.reason ?? "uniform frame"})`);
+    }
     return destinationPath;
   } catch (error) {
     await fs.rm(destinationPath, { force: true }).catch(() => {

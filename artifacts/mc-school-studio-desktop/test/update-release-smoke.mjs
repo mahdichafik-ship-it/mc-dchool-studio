@@ -88,6 +88,25 @@ function findAppExecutable(bundlePath) {
   return executables[0]
 }
 
+function verifyNativeArchitecture(executablePath) {
+  const nativeArchitecture = execFileSync('/usr/bin/uname', ['-m'], {
+    encoding: 'utf8',
+  }).trim()
+  const expectedArchitecture = nativeArchitecture === 'arm64' ? 'arm64' : (
+    nativeArchitecture === 'x86_64' ? 'x86_64' : null
+  )
+  assert(expectedArchitecture, `unsupported macOS runner architecture: ${nativeArchitecture}`)
+  const executableArchitectures = execFileSync('/usr/bin/lipo', [
+    '-archs',
+    executablePath,
+  ], { encoding: 'utf8' }).trim().split(/\s+/)
+  assert.deepEqual(
+    executableArchitectures,
+    [expectedArchitecture],
+    `expected a thin native executable, found ${executableArchitectures.join(', ')}`,
+  )
+}
+
 function findBundleByVersion(expectedVersion) {
   const candidates = readdirSync(installDirectory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.endsWith('.app'))
@@ -259,6 +278,7 @@ try {
     sourceVersion,
     `expected the installed app to be ${sourceVersion}`,
   )
+  verifyNativeArchitecture(appExecutable)
   record('installed', { version: sourceVersion, appPath })
   verifySignedBundle(appPath)
   record('gatekeeper-accepted', { version: sourceVersion })
@@ -356,6 +376,7 @@ try {
     processIsRunning(restartedPid),
     `updated app process ${restartedPid} exited before the restart smoke completed`,
   )
+  verifyNativeArchitecture(findAppExecutable(updatedAppPath))
   verifySignedBundle(updatedAppPath)
   record('restarted', { version: bundleVersion(updatedAppPath), pid: restartedPid })
   console.log(`Updater smoke passed: ${sourceVersion} -> ${targetVersion}`)

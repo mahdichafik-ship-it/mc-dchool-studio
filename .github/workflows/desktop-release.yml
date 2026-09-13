@@ -48,10 +48,40 @@ jobs:
         run: pnpm --filter @workspace/mc-school-studio-desktop run test:updater
 
   # ---------------------------------------------------------------------------
+  # Capture integrity — rejects valid-but-uniform blank JPEGs while retaining
+  # genuinely dark photographs. This gate runs before any desktop packaging.
+  # ---------------------------------------------------------------------------
+  test-capture-integrity:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test blank portrait protection
+        run: pnpm --filter @workspace/mc-school-studio-desktop run test:blank-portrait
+
+  # ---------------------------------------------------------------------------
   # macOS — produces separate installers for Intel and Apple silicon Macs.
   # ---------------------------------------------------------------------------
   build-mac:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: test-capture-integrity
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +109,7 @@ jobs:
       - name: Verify release tag matches app version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node -e "const fs=require('fs'); const tag=process.env.RELEASE_TAG; const version=JSON.parse(fs.readFileSync('artifacts/mc-school-studio-desktop/package.json','utf8')).version; if(tag !== 'v'+version){console.error('Release tag '+tag+' must match desktop package version v'+version);process.exit(1)}"
+        run: node -e "const fs=require('fs'); const tag=process.env.RELEASE_TAG; const version=JSON.parse(fs.readFileSync('artifacts/mc-school-studio-desktop/package.json','utf8')).version; if(!/^v\\d+\\.\\d+\\.\\d+$/.test(tag) || !/^\\d+\\.\\d+\\.\\d+$/.test(version) || tag !== 'v'+version){console.error('Release tag '+tag+' must be stable semver and match desktop package version v'+version);process.exit(1)}"
 
       - name: Verify macOS signing credentials
         env:
@@ -123,15 +153,34 @@ jobs:
           const fs = require('fs')
           const path = require('path')
 
-          const certificate = Buffer.from(process.env.CSC_LINK, 'base64')
-          if (certificate.length === 0) {
-            throw new Error('CSC_LINK did not decode to a certificate file')
+          const encoded = process.env.CSC_LINK?.trim() ?? ''
+          if (
+            encoded.length === 0 ||
+            !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) ||
+            encoded.length % 4 === 1
+          ) {
+            throw new Error('CSC_LINK is not valid base64')
           }
 
-          fs.writeFileSync(
-            path.join(process.env.RUNNER_TEMP, 'mac-signing-certificate.p12'),
-            certificate,
+          const certificate = Buffer.from(encoded, 'base64')
+          // A PKCS#12 certificate is a DER-encoded ASN.1 SEQUENCE. Buffer.from
+          // silently ignores invalid base64 characters, so validate both the
+          // input alphabet and the decoded container before invoking the
+          // signing toolchain.
+          if (certificate.length < 4 || certificate[0] !== 0x30) {
+            throw new Error('CSC_LINK did not decode to a PKCS#12 certificate file')
+          }
+
+          const certificatePath = path.join(
+            process.env.RUNNER_TEMP,
+            'mac-signing-certificate.p12',
           )
+          fs.writeFileSync(
+            certificatePath,
+            certificate,
+            { mode: 0o600 },
+          )
+          fs.chmodSync(certificatePath, 0o600)
           NODE
           echo "CSC_LINK=$RUNNER_TEMP/mac-signing-certificate.p12" >> "$GITHUB_ENV"
 
@@ -189,6 +238,15 @@ jobs:
               exit 1
             fi
 
+            test -d "$app_path/Contents/MacOS"
+            executable_count="$(find "$app_path/Contents/MacOS" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+            test "$executable_count" = "1"
+            executable="$(find "$app_path/Contents/MacOS" -maxdepth 1 -type f -print -quit)"
+            expected_macho_architecture="$PACKAGE_ARCHITECTURE"
+            if [ "$expected_macho_architecture" = "x64" ]; then
+              expected_macho_architecture="x86_64"
+            fi
+            test "$(lipo -archs "$executable")" = "$expected_macho_architecture"
             codesign --verify --deep --strict --verbose=2 "$app_path"
             spctl --assess --type execute --verbose=2 "$app_path"
             xcrun stapler validate "$app_path"

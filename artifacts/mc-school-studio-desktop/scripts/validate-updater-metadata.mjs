@@ -20,9 +20,17 @@ function expectedInstallerAssets(version) {
 }
 
 function parseMetadata(metadata) {
-  const version = metadata.match(/^version:\s*([^\s#]+)\s*$/m)?.[1]
-  const path = metadata.match(/^path:\s*([^\s#]+)\s*$/m)?.[1]
-  const topLevelSha512 = metadata.match(/^sha512:\s*([^\s#]+)\s*$/m)?.[1]
+  const versionMatches = [...metadata.matchAll(/^version:\s*([^\s#]+)\s*$/gm)]
+  const pathMatches = [...metadata.matchAll(/^path:\s*([^\s#]+)\s*$/gm)]
+  const topLevelChecksumMatches = [
+    ...metadata.matchAll(/^sha512:\s*([^\s#]+)\s*$/gm),
+  ]
+  const checksumMatches = [
+    ...metadata.matchAll(/^[ \t]*sha512:\s*([^\s#]+)\s*$/gm),
+  ]
+  const version = versionMatches[0]?.[1]
+  const path = pathMatches[0]?.[1]
+  const topLevelSha512 = topLevelChecksumMatches[0]?.[1]
   const files = []
   const lines = metadata.split(/\r?\n/)
 
@@ -34,7 +42,17 @@ function parseMetadata(metadata) {
     files.push({ url, sha512 })
   }
 
-  return { files, path, topLevelSha512, version }
+  return {
+    files,
+    path,
+    topLevelSha512,
+    version,
+    hasDuplicateTopLevelFields:
+      versionMatches.length > 1 ||
+      pathMatches.length > 1 ||
+      topLevelChecksumMatches.length > 1 ||
+      checksumMatches.length > files.length + 1,
+  }
 }
 
 export async function indexReleaseAssets(assetDirectory) {
@@ -67,29 +85,35 @@ export function validateLatestMacMetadata(
   releaseAssets,
 ) {
   const parsed = parseMetadata(metadata)
+  if (!/^\d+\.\d+\.\d+$/.test(expectedVersion)) {
+    throw new Error(`expected desktop version must be stable semver: ${expectedVersion}`)
+  }
+  if (parsed.hasDuplicateTopLevelFields) {
+    throw new Error('latest-mac.yml has duplicate or malformed top-level metadata fields')
+  }
   if (parsed.version !== expectedVersion) {
     throw new Error(
       `latest-mac.yml version ${parsed.version ?? '<missing>'} does not match ${expectedVersion}`,
     )
   }
 
-   const expected = expectedPayloads(expectedVersion)
-   const expectedSet = new Set([
-     ...expected,
-     ...architectures.map(
-       (architecture) => `mc-school-studio-${expectedVersion}-${architecture}.dmg`,
-     ),
-   ])
+  const expected = expectedPayloads(expectedVersion)
+  const expectedSet = new Set([
+    ...expected,
+    ...architectures.map(
+      (architecture) => `mc-school-studio-${expectedVersion}-${architecture}.dmg`,
+    ),
+  ])
   const actual = parsed.files.map(({ url }) => url)
   const missing = expected.filter((payload) => !actual.includes(payload))
   const unexpected = actual.filter((payload) => !expectedSet.has(payload))
 
-   if (
-     missing.length > 0 ||
-     unexpected.length > 0 ||
-     actual.length < expected.length ||
-     actual.length > expectedSet.size
-   ) {
+  if (
+    missing.length > 0 ||
+    unexpected.length > 0 ||
+    actual.length < expected.length ||
+    actual.length > expectedSet.size
+  ) {
     throw new Error(
       [
         missing.length > 0 ? `missing payloads: ${missing.join(', ')}` : '',
@@ -113,7 +137,7 @@ export function validateLatestMacMetadata(
   }
 
   const preferredFile = parsed.files.find(({ url }) => url === parsed.path)
-  if (!preferredFile || !parsed.path.endsWith('.zip')) {
+  if (!parsed.path || !preferredFile || !parsed.path.endsWith('.zip')) {
     throw new Error(
       `latest-mac.yml path ${parsed.path ?? '<missing>'} is not a release ZIP`,
     )
@@ -122,9 +146,9 @@ export function validateLatestMacMetadata(
     throw new Error('latest-mac.yml path checksum does not match its file entry')
   }
 
-   const missingAssets = expectedInstallerAssets(expectedVersion).filter(
-     (asset) => !releaseAssets.has(asset),
-   )
+  const missingAssets = expectedInstallerAssets(expectedVersion).filter(
+    (asset) => !releaseAssets.has(asset),
+  )
   if (missingAssets.length > 0) {
     throw new Error(`missing release assets: ${missingAssets.join(', ')}`)
   }

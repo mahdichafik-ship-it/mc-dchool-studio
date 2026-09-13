@@ -117,3 +117,34 @@ test('rejects metadata whose preferred path is not a release ZIP', () => {
     /latest-mac\.yml path releases\/mc-school-studio-1\.0\.11-arm64\.zip is not a release ZIP/,
   )
 })
+
+test('rejects metadata with duplicate top-level fields', () => {
+  const withDuplicateVersion = fixture.replace(
+    'version: 1.0.11\n',
+    'version: 1.0.11\nversion: 1.0.11\n',
+  )
+
+  assert.throws(
+    () => validateLatestMacMetadata(withDuplicateVersion, fixtureVersion, fixtureAssets),
+    /duplicate or malformed top-level metadata fields/,
+  )
+})
+
+test('rejects metadata without a preferred update path', () => {
+  const withoutPath = fixture.replace(
+    'path: mc-school-studio-1.0.11-arm64.zip\n',
+    '',
+  )
+
+  assert.throws(
+    () => validateLatestMacMetadata(withoutPath, fixtureVersion, fixtureAssets),
+    /latest-mac\.yml path <missing> is not a release ZIP/,
+  )
+})
+
+test('rejects a non-stable expected version', () => {
+  assert.throws(
+    () => validateLatestMacMetadata(fixture, '1.0.11-beta.1', fixtureAssets),
+    /expected desktop version must be stable semver/,
+  )
+})

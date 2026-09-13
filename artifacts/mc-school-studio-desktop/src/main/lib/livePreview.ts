@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { extname, join } from 'node:path'
 import sharp from 'sharp'
 import { getPhotoSystemLayout } from './storageLayout.ts'
+import { assessImageContent } from './imageContent.ts'
 
 export const LIVE_PREVIEW_EDGE = 1440
 export const LIVE_PREVIEW_QUALITY = 84
@@ -39,6 +40,11 @@ async function existingFileSize(filePath: string): Promise<number | null> {
   }
 }
 
+async function usablePreview(filePath: string): Promise<boolean> {
+  if (!(await existingFileSize(filePath))) return false
+  return (await assessImageContent(filePath)).usable
+}
+
 async function extractEmbeddedPreview(sourcePath: string, destinationPath: string): Promise<boolean> {
   for (const tag of EMBEDDED_PREVIEW_TAGS) {
     await rm(destinationPath, { force: true }).catch(() => {})
@@ -71,7 +77,8 @@ export async function generateLivePreview(
 
   try {
     await mkdir(cacheDir, { recursive: true })
-    if (await existingFileSize(destinationPath)) return destinationPath
+    if (await usablePreview(destinationPath)) return destinationPath
+    await rm(destinationPath, { force: true }).catch(() => {})
 
     if (isRawFile(sourcePath)) {
       const extracted = await extractEmbeddedPreview(sourcePath, embeddedPath)
@@ -80,6 +87,11 @@ export async function generateLivePreview(
         return null
       }
       inputPath = embeddedPath
+    }
+
+    const sourceAssessment = await assessImageContent(inputPath)
+    if (!sourceAssessment.usable) {
+      throw new Error(`Source image is not usable (${sourceAssessment.reason ?? 'uniform frame'})`)
     }
 
     await sharp(inputPath, { failOn: 'none' })
@@ -92,6 +104,11 @@ export async function generateLivePreview(
       })
       .jpeg({ quality: LIVE_PREVIEW_QUALITY, mozjpeg: true })
       .toFile(destinationPath)
+
+    const previewAssessment = await assessImageContent(destinationPath)
+    if (!previewAssessment.usable) {
+      throw new Error(`Generated preview is not usable (${previewAssessment.reason ?? 'uniform frame'})`)
+    }
 
     return destinationPath
   } catch (error) {

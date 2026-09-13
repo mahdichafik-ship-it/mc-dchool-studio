@@ -926,6 +926,21 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaignInput" } } }
       responses:
         "201": { description: Campaign draft, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaign" } } } }
+  /marketing/email-status:
+    get:
+      operationId: getMarketingEmailStatus
+      tags: [marketing]
+      responses:
+        "200": { description: Resend configuration status, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingEmailStatus" } } } }
+  /marketing/campaigns/{campaignId}/send:
+    post:
+      operationId: sendMarketingCampaign
+      tags: [marketing]
+      parameters: [{ name: campaignId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Sent campaign, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaignSendResponse" } } } }
+        "409": { description: Campaign cannot be sent }
+        "503": { description: Resend is not configured }
   /delivery/{slug}/gallery:
     get:
       operationId: getDeliveryPhotos
@@ -1745,15 +1760,30 @@ components:
       allOf:
         - $ref: "#/components/schemas/MarketingCampaignInput"
         - type: object
-          required: [id, studioId, audienceFilterSnapshot, recipientCount, status, createdAt, updatedAt]
+          required: [id, studioId, audienceFilterSnapshot, recipientCount, status, sentCount, sentAt, lastError, createdAt, updatedAt]
           properties:
             id: { type: integer }
             studioId: { type: integer }
             audienceFilterSnapshot: { type: string }
             recipientCount: { type: integer }
-            status: { type: string, enum: [draft] }
+            status: { type: string, enum: [draft, sending, sent, failed] }
+            sentCount: { type: integer }
+            sentAt: { type: ["string", "null"], format: date-time }
+            lastError: { type: ["string", "null"] }
             createdAt: { type: string, format: date-time }
             updatedAt: { type: string, format: date-time }
+    MarketingEmailStatus:
+      type: object
+      required: [configured, fromEmail]
+      properties:
+        configured: { type: boolean }
+        fromEmail: { type: ["string", "null"] }
+    MarketingCampaignSendResponse:
+      type: object
+      required: [campaign, sentCount]
+      properties:
+        campaign: { $ref: "#/components/schemas/MarketingCampaign" }
+        sentCount: { type: integer }
     DeliveryOrderInput:
       type: object
       required: [paymentMethod]

@@ -6,6 +6,8 @@ import {
   useUnsubscribeMarketingContact,
   useListMarketingTemplates,
   useListMarketingCampaigns,
+  useGetMarketingEmailStatus,
+  useSendMarketingCampaign,
   useCreateMarketingTemplate,
   useUpdateMarketingTemplate,
   useDeleteMarketingTemplate,
@@ -32,6 +34,7 @@ import {
   MoreVertical,
   Calendar,
   AlertCircle
+  ,Send
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -392,6 +395,7 @@ function MetricCard({ title, value, loading, valueColor = "text-slate-900" }: { 
 function MarketingCampaigns() {
   const { data, isLoading } = useListMarketingCampaigns();
   const { data: templatesData } = useListMarketingTemplates();
+  const { data: emailStatus } = useGetMarketingEmailStatus();
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -400,6 +404,7 @@ function MarketingCampaigns() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const createCampaign = useCreateMarketingCampaignDraft();
+  const sendCampaign = useSendMarketingCampaign();
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -428,16 +433,43 @@ function MarketingCampaigns() {
     );
   }
 
+  function handleSend(campaign: MarketingCampaign) {
+    if (!window.confirm(`Send “${campaign.name}” to ${campaign.recipientCount} currently eligible contacts? This cannot be undone.`)) return;
+    sendCampaign.mutate(
+      { campaignId: campaign.id },
+      {
+        onSuccess: ({ sentCount }) => {
+          queryClient.invalidateQueries({ queryKey: getListMarketingCampaignsQueryKey() });
+          toast({
+            title: "Campaign sent",
+            description: `${sentCount} consented contact${sentCount === 1 ? "" : "s"} received the email.`,
+          });
+        },
+        onError: (error) => {
+          queryClient.invalidateQueries({ queryKey: getListMarketingCampaignsQueryKey() });
+          toast({
+            title: "Campaign could not be sent",
+            description: error instanceof Error ? error.message : "Resend rejected the campaign.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
+      <div className={`rounded-xl border p-5 shadow-sm ${emailStatus?.configured ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
         <div className="flex gap-4">
-          <Mail className="size-6 text-sky-600 shrink-0" />
+          <Mail className={`size-6 shrink-0 ${emailStatus?.configured ? "text-emerald-600" : "text-amber-600"}`} />
           <div>
-            <h3 className="text-sm font-bold text-sky-900">Sending is not available yet</h3>
-            <p className="mt-1 text-sm text-sky-800">
-              You can prepare campaign drafts and compute their audience size now. 
-              Sending will be enabled once your Resend integration is connected in a future update.
+            <h3 className={`text-sm font-bold ${emailStatus?.configured ? "text-emerald-900" : "text-amber-900"}`}>
+              {emailStatus?.configured ? "Resend is ready" : "Resend sender setup is incomplete"}
+            </h3>
+            <p className={`mt-1 text-sm ${emailStatus?.configured ? "text-emerald-800" : "text-amber-800"}`}>
+              {emailStatus?.configured
+                ? `Campaigns will be sent from ${emailStatus.fromEmail}. Eligible recipients are checked again immediately before sending.`
+                : "Add RESEND_FROM_EMAIL after verifying a sender domain in Resend. Draft preparation remains available."}
             </p>
           </div>
         </div>
@@ -556,12 +588,32 @@ function MarketingCampaigns() {
                 <h3 className="text-base font-semibold text-slate-900">{campaign.name}</h3>
                 <p className="mt-1 text-sm text-slate-500 line-clamp-1">{template?.subject ?? "Unknown template"}</p>
                 
-                <div className="mt-auto pt-6 flex items-end justify-between">
+                <div className="mt-auto pt-6 flex items-end justify-between gap-4">
                   <div>
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Recipients</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-0.5">{campaign.recipientCount}</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-0.5">
+                      {campaign.status === "sent" ? campaign.sentCount : campaign.recipientCount}
+                    </p>
                   </div>
-                  <span className="text-xs font-medium text-slate-400">Draft only</span>
+                  {campaign.status === "draft" ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSend(campaign)}
+                      disabled={!emailStatus?.configured || campaign.recipientCount < 1 || sendCampaign.isPending}
+                      className="inline-flex items-center gap-2 rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Send className="size-4" />
+                      {sendCampaign.isPending ? "Sending..." : "Send now"}
+                    </button>
+                  ) : (
+                    <span className={`text-xs font-medium ${campaign.status === "failed" ? "text-red-600" : "text-slate-500"}`}>
+                      {campaign.status === "sent" && campaign.sentAt
+                        ? `Sent ${format(new Date(campaign.sentAt), "MMM d")}`
+                        : campaign.status === "sending"
+                          ? "Sending…"
+                          : campaign.lastError || "Send failed"}
+                    </span>
+                  )}
                 </div>
               </div>
             );

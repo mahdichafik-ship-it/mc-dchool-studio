@@ -1122,7 +1122,10 @@ export const ListMarketingCampaignsResponse = zod.object({
   "studioId": zod.number(),
   "audienceFilterSnapshot": zod.string(),
   "recipientCount": zod.number(),
-  "status": zod.enum(['draft']),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed']),
+  "sentCount": zod.number(),
+  "sentAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))).optional()
@@ -1152,10 +1155,48 @@ export const CreateMarketingCampaignDraftResponse = zod.object({
   "studioId": zod.number(),
   "audienceFilterSnapshot": zod.string(),
   "recipientCount": zod.number(),
-  "status": zod.enum(['draft']),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed']),
+  "sentCount": zod.number(),
+  "sentAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
+
+
+export const GetMarketingEmailStatusResponse = zod.object({
+  "configured": zod.boolean(),
+  "fromEmail": zod.string().nullable()
+})
+
+
+export const SendMarketingCampaignParams = zod.object({
+  "campaignId": zod.coerce.number()
+})
+
+export const sendMarketingCampaignResponseCampaignOneNameMax = 120;
+
+
+
+export const SendMarketingCampaignResponse = zod.object({
+  "campaign": zod.object({
+  "name": zod.string().min(1).max(sendMarketingCampaignResponseCampaignOneNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "audienceFilterSnapshot": zod.string(),
+  "recipientCount": zod.number(),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed']),
+  "sentCount": zod.number(),
+  "sentAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "sentCount": zod.number()
+})
 
 
 export const GetDeliveryPhotosParams = zod.object({

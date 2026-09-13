@@ -11,4 +11,7 @@ export type MarketingCampaignStatus = typeof MarketingCampaignStatus[keyof typeo
 
 export const MarketingCampaignStatus = {
   draft: 'draft',
+  sending: 'sending',
+  sent: 'sent',
+  failed: 'failed',
 } as const;

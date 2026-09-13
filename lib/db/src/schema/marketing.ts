@@ -54,7 +54,10 @@ export const marketingCampaignsTable = pgTable("marketing_campaigns", {
   templateId: integer("template_id").notNull().references(() => marketingTemplatesTable.id, { onDelete: "restrict" }),
   audienceFilterSnapshot: text("audience_filter_snapshot").notNull(),
   recipientCount: integer("recipient_count").notNull().default(0),
-  status: text("status", { enum: ["draft"] }).notNull().default("draft"),
+  status: text("status", { enum: ["draft", "sending", "sent", "failed"] }).notNull().default("draft"),
+  sentCount: integer("sent_count").notNull().default(0),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  lastError: text("last_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

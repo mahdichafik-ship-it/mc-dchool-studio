@@ -8,12 +8,17 @@
 import type { MarketingCampaignInput } from './marketingCampaignInput';
 import type { MarketingCampaignStatus } from './marketingCampaignStatus';
 
-export type MarketingCampaign = MarketingCampaignInput & {
+export type MarketingCampaign = MarketingCampaignInput & ({
   id: number;
   studioId: number;
   audienceFilterSnapshot: string;
   recipientCount: number;
   status: MarketingCampaignStatus;
+  sentCount: number;
+  /** @nullable */
+  sentAt: Date | null;
+  /** @nullable */
+  lastError: string | null;
   createdAt: Date;
   updatedAt: Date;
-};
+});

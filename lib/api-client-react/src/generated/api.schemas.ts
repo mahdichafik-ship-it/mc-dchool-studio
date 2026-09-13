@@ -534,17 +534,36 @@ export type MarketingCampaignStatus = typeof MarketingCampaignStatus[keyof typeo
 
 export const MarketingCampaignStatus = {
   draft: 'draft',
+  sending: 'sending',
+  sent: 'sent',
+  failed: 'failed',
 } as const;
 
-export type MarketingCampaign = MarketingCampaignInput & {
+export type MarketingCampaign = MarketingCampaignInput & ({
   id: number;
   studioId: number;
   audienceFilterSnapshot: string;
   recipientCount: number;
   status: MarketingCampaignStatus;
+  sentCount: number;
+  /** @nullable */
+  sentAt: string | null;
+  /** @nullable */
+  lastError: string | null;
   createdAt: string;
   updatedAt: string;
-};
+});
+
+export interface MarketingEmailStatus {
+  configured: boolean;
+  /** @nullable */
+  fromEmail: string | null;
+}
+
+export interface MarketingCampaignSendResponse {
+  campaign: MarketingCampaign;
+  sentCount: number;
+}
 
 export type DeliveryOrderInputPaymentMethod = typeof DeliveryOrderInputPaymentMethod[keyof typeof DeliveryOrderInputPaymentMethod];
 

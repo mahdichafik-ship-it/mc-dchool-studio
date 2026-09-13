@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { Readable } from "node:stream";
 import { db } from "@workspace/db";
 import {
   capturesTable,
@@ -33,6 +34,11 @@ import {
   createR2CopyUpload,
   sha256File,
 } from "../lib/r2UploadCopies";
+import { getR2Object } from "../lib/r2Storage";
+import {
+  ensureR2PhotoVariant,
+  getVerifiedR2CopyForPhoto,
+} from "../lib/photoVariants";
 
 const router = Router({ mergeParams: true });
 
@@ -1501,10 +1507,25 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
     return;
   }
 
-  if (photo.sourceGroupCaptureFileId !== null) {
-    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photo.id));
-    res.status(204).send();
-    return;
+  const verifiedR2Copy = await getVerifiedR2CopyForPhoto(photo);
+  if (verifiedR2Copy) {
+    try {
+      const variantKey = await ensureR2PhotoVariant(
+        verifiedR2Copy,
+        req.query.size === "preview" ? "preview" : "thumbnail",
+      );
+      const r2Response = await getR2Object(variantKey);
+      if (!r2Response.body) throw new Error("R2 variant body is missing");
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      Readable.fromWeb(
+        r2Response.body as globalThis.ReadableStream<Uint8Array>,
+      ).pipe(res);
+      return;
+    } catch {
+      res.status(503).json({ error: "Photo preview is temporarily unavailable" });
+      return;
+    }
   }
 
   const filePath = resolveFilePath(photo.fileUrl);

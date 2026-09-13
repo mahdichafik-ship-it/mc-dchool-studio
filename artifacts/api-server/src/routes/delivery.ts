@@ -26,6 +26,10 @@ import { canAccessProject, getStudioMember } from "../lib/studioAccess";
 import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
 import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { getR2Object } from "../lib/r2Storage";
+import {
+  ensureR2PhotoVariant,
+  getVerifiedR2CopyForPhoto,
+} from "../lib/photoVariants";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
 import { materializeGroupJpegsForDelivery } from "../lib/groupDeliveryPhotos";
@@ -323,11 +327,10 @@ function watermarkSvg(text: string): Buffer {
     '"': "&quot;",
     "'": "&apos;",
   }[character] ?? character)).slice(0, 120);
-  return Buffer.from(`<svg width="900" height="600" xmlns="http://www.w3.org/2000/svg">
-    <g transform="rotate(-28 450 300)" fill="white" fill-opacity=".28"
-      font-family="Arial,sans-serif" font-size="42" font-weight="700">
-      <text x="-120" y="180">${safeText}</text><text x="280" y="180">${safeText}</text>
-      <text x="-120" y="390">${safeText}</text><text x="280" y="390">${safeText}</text>
+  return Buffer.from(`<svg width="320" height="190" xmlns="http://www.w3.org/2000/svg">
+    <g transform="rotate(-28 160 95)" fill="white" fill-opacity=".30"
+      font-family="Arial,sans-serif" font-size="24" font-weight="700">
+      <text x="-30" y="105">${safeText}</text>
     </g>
   </svg>`);
 }
@@ -356,26 +359,6 @@ async function photoHasBeenPaid(accessId: number, photoId: number): Promise<bool
  * materialized row can therefore use either its own copy or the copy of the
  * source group file while the migration is in progress.
  */
-async function getVerifiedR2Copy(photo: typeof studentPhotosTable.$inferSelect) {
-  const sourceCondition = photo.sourceGroupCaptureFileId === null
-    ? eq(photoStorageCopiesTable.studentPhotoId, photo.id)
-    : or(
-      eq(photoStorageCopiesTable.studentPhotoId, photo.id),
-      eq(photoStorageCopiesTable.groupCaptureFileId, photo.sourceGroupCaptureFileId),
-    );
-  const [copy] = await db
-    .select()
-    .from(photoStorageCopiesTable)
-    .where(and(
-      eq(photoStorageCopiesTable.destination, "r2"),
-      eq(photoStorageCopiesTable.state, "ready"),
-      sourceCondition,
-    ))
-    .orderBy(photoStorageCopiesTable.verifiedAt)
-    .limit(1);
-  return copy ?? null;
-}
-
 // Public metadata for the code-entry page. No student or photo information is returned.
 router.get("/delivery/:slug", async (req, res): Promise<void> => {
   const row = await getGalleryBySlug(String(req.params.slug));
@@ -514,7 +497,7 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       id: photo.id,
       fileName: photo.fileName,
       mimeType: photo.mimeType,
-      fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?preview=1&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
+      fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?preview=1&size=thumbnail&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
       downloadUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?download=1&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
     })),
   });
@@ -815,17 +798,35 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
 
   res.setHeader("Content-Type", photo.photo.mimeType || "image/jpeg");
   res.setHeader("Content-Disposition", `${isPreview ? "inline" : "attachment"}; filename="${photo.photo.fileName.replace(/["\r\n]/g, "_")}"`);
-  res.setHeader("Cache-Control", "private, max-age=300");
+  res.setHeader(
+    "Cache-Control",
+    isPreview && typeof req.query.mediaToken === "string"
+      ? "public, max-age=900, s-maxage=900, immutable"
+      : "private, max-age=300",
+  );
 
   // During the storage migration, a photo may already have a verified private
   // R2 copy. Stream that copy through this authorized endpoint rather than
   // returning an R2 URL (or exposing bucket credentials). Only fall back to
   // Replit Object Storage when no verified copy exists yet.
-  const verifiedR2Copy = await getVerifiedR2Copy(photo.photo);
+  const verifiedR2Copy = await getVerifiedR2CopyForPhoto(photo.photo);
   if (verifiedR2Copy) {
     let r2Response: Response;
     try {
-      r2Response = await getR2Object(verifiedR2Copy.objectKey);
+      if (isPreview) {
+        const variantKind = req.query.size === "thumbnail" ? "thumbnail" : "preview";
+        const watermarkText = row.gallery.watermarkEnabled
+          ? row.gallery.watermarkText?.trim() || row.studio?.name?.trim() || "Volume Capture"
+          : undefined;
+        const variantKey = await ensureR2PhotoVariant(
+          verifiedR2Copy,
+          variantKind,
+          watermarkText,
+        );
+        r2Response = await getR2Object(variantKey);
+      } else {
+        r2Response = await getR2Object(verifiedR2Copy.objectKey);
+      }
     } catch {
       res.status(503).json({ error: "Photo file is temporarily unavailable" });
       return;
@@ -835,16 +836,7 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
       return;
     }
     const input = Readable.fromWeb(r2Response.body as globalThis.ReadableStream<Uint8Array>);
-    if (isPreview) {
-      res.setHeader("Content-Type", "image/jpeg");
-      const watermarkText = row.gallery.watermarkText?.trim() || row.studio?.name?.trim() || "Volume Capture";
-      const transformer = sharp()
-        .resize({ width: 1200, withoutEnlargement: true })
-        .composite(row.gallery.watermarkEnabled ? [{ input: watermarkSvg(watermarkText), blend: "over" }] : [])
-        .jpeg({ quality: 78 });
-      input.pipe(transformer).pipe(res);
-      return;
-    }
+    if (isPreview) res.setHeader("Content-Type", "image/jpeg");
     input.pipe(res);
     return;
   }
@@ -864,9 +856,9 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     res.setHeader("Content-Type", "image/jpeg");
     const watermarkText = row.gallery.watermarkText?.trim() || row.studio?.name?.trim() || "Volume Capture";
     const transformer = sharp()
-      .resize({ width: 1200, withoutEnlargement: true })
-      .composite(row.gallery.watermarkEnabled ? [{ input: watermarkSvg(watermarkText), blend: "over" }] : [])
-      .jpeg({ quality: 78 });
+      .resize({ width: req.query.size === "thumbnail" ? 480 : 1600, withoutEnlargement: true })
+      .composite(row.gallery.watermarkEnabled ? [{ input: watermarkSvg(watermarkText), tile: true, blend: "over" }] : [])
+      .jpeg({ quality: req.query.size === "thumbnail" ? 72 : 82, progressive: true });
     input.pipe(transformer).pipe(res);
     return;
   }

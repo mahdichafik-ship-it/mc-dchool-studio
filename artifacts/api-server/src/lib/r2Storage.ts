@@ -298,6 +298,34 @@ export async function putR2File(
   };
 }
 
+export async function putR2Buffer(
+  objectKey: string,
+  bytes: Buffer,
+  options: { contentType?: string; sha256?: string } = {},
+  config = getR2Config(),
+): Promise<R2ObjectMetadata> {
+  if (!config) throw new Error("R2 is not configured");
+  const payloadHash = options.sha256 || createHash("sha256").update(bytes).digest("hex");
+  const request = signedHeaders(config, "PUT", objectKey, payloadHash);
+  request.headers.set("content-length", String(bytes.length));
+  if (options.contentType) request.headers.set("content-type", options.contentType);
+  request.headers.set("x-amz-meta-sha256", payloadHash);
+  const response = await expectR2Response(
+    await fetch(request.url, {
+      method: "PUT",
+      headers: request.headers,
+      body: bytes,
+    }),
+    "upload",
+  );
+  return {
+    contentLength: bytes.length,
+    contentType: options.contentType || null,
+    etag: response.headers.get("etag"),
+    sha256: payloadHash,
+  };
+}
+
 export async function headR2Object(
   objectKey: string,
   config = getR2Config(),

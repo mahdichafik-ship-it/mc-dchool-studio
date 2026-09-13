@@ -3,11 +3,14 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import { Readable } from "node:stream";
+import sharp from "sharp";
 import test, { after, before } from "node:test";
 import express from "express";
 import { eq } from "drizzle-orm";
 import {
   classesTable,
+  captureFilesTable,
+  capturesTable,
   db,
   deliveryAccessesTable,
   deliveryGalleriesTable,
@@ -35,8 +38,8 @@ process.env.R2_BUCKET_NAME = "delivery-r2-test-bucket";
 process.env.R2_ENDPOINT = "https://delivery-r2-test.invalid";
 process.env.PRIVATE_OBJECT_DIR = "/delivery-r2-test";
 
-const readyStudentBytes = Buffer.from("ready student R2 bytes");
-const readyGroupBytes = Buffer.from("ready group R2 bytes");
+let readyStudentBytes = Buffer.alloc(0);
+let readyGroupBytes = Buffer.alloc(0);
 const fallbackUploadingBytes = Buffer.from("replit fallback for uploading copy");
 const fallbackFailedBytes = Buffer.from("replit fallback for failed copy");
 const accessCode = "READY123";
@@ -55,6 +58,7 @@ let unsharedPhotoId: number;
 let paidAccessToken: string;
 let unpaidAccessToken: string;
 const r2RequestedKeys: string[] = [];
+const r2Requests: Array<{ method: string; objectKey: string }> = [];
 const r2Bodies = new Map<string, Buffer>();
 const r2Failures = new Set<string>();
 let objectStorageReads = 0;
@@ -128,11 +132,18 @@ let paidAccessId: number;
 let unpaidAccessId: number;
 let studentId: number;
 let unpaidStudentId: number;
+let readyCaptureFileId: number;
 
 const originalFetch = globalThis.fetch;
 const originalObjectStorageGet = ObjectStorageService.prototype.getObjectEntityFile;
 
 before(async () => {
+  readyStudentBytes = await sharp({
+    create: { width: 1800, height: 2400, channels: 3, background: "#496f8a" },
+  }).jpeg({ quality: 94 }).toBuffer();
+  readyGroupBytes = await sharp({
+    create: { width: 1600, height: 1200, channels: 3, background: "#7f5b45" },
+  }).jpeg({ quality: 94 }).toBuffer();
   server = createServer(app);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -147,13 +158,25 @@ before(async () => {
     }
     const pathname = new URL(url).pathname.split("/").slice(2).join("/");
     const objectKey = decodeURIComponent(pathname);
+    const method = String(init?.method ?? "GET").toUpperCase();
     r2RequestedKeys.push(objectKey);
+    r2Requests.push({ method, objectKey });
     if (r2Failures.has(objectKey)) {
       return new Response("R2 test read failure", { status: 503 });
     }
+    if (method === "PUT") {
+      const bytes = Buffer.from(init?.body as Buffer);
+      r2Bodies.set(objectKey, bytes);
+      return new Response(null, { headers: { etag: `"${createHash("md5").update(bytes).digest("hex")}"` } });
+    }
     const body = r2Bodies.get(objectKey);
+    const headers = body ? {
+      "content-type": "image/jpeg",
+      "content-length": String(body.length),
+      "x-amz-meta-sha256": createHash("sha256").update(body).digest("hex"),
+    } : undefined;
     return body
-      ? new Response(body, { headers: { "content-type": "image/jpeg" } })
+      ? new Response(method === "HEAD" ? null : body, { headers })
       : new Response("not found", { status: 404 });
   };
   ObjectStorageService.prototype.getObjectEntityFile = async function () {
@@ -222,6 +245,25 @@ before(async () => {
   unpaidAccessId = unpaidAccess.id;
 
   readyStudentPhotoId = await insertPhoto(studentId, "ready-student.jpg");
+  const [readyCapture] = await db.insert(capturesTable).values({
+    captureKey: `ready-student-${suffix}`,
+    projectId,
+    studentId,
+    baseFilename: "ready-student",
+    pairingStatus: "jpeg_only",
+    rating: 1,
+  }).returning({ id: capturesTable.id });
+  const [readyCaptureFile] = await db.insert(captureFilesTable).values({
+    captureId: readyCapture.id,
+    fileRole: "JPEG",
+    fileFormat: "JPG",
+    originalFilename: "ready-student.jpg",
+    fileUrl: "/objects/ready-student.jpg",
+    durableObjectPath: "/objects/ready-student.jpg",
+    mimeType: "image/jpeg",
+    fileSize: readyStudentBytes.length,
+  }).returning({ id: captureFilesTable.id });
+  readyCaptureFileId = readyCaptureFile.id;
   uploadingPhotoId = await insertPhoto(studentId, "uploading.jpg");
   failedPhotoId = await insertPhoto(studentId, "failed.jpg");
   unpaidPhotoId = await insertPhoto(unpaidStudentId, "unpaid.jpg");
@@ -265,10 +307,12 @@ before(async () => {
 
   await db.insert(photoStorageCopiesTable).values([
     {
-      studentPhotoId: readyStudentPhotoId,
+      captureFileId: readyCaptureFileId,
       destination: "r2",
       objectKey: "ready/student.jpg",
       state: "ready",
+      fileSize: readyStudentBytes.length,
+      sha256: createHash("sha256").update(readyStudentBytes).digest("hex"),
       verifiedAt: new Date(),
     },
     {
@@ -288,6 +332,8 @@ before(async () => {
       destination: "r2",
       objectKey: "ready/group.jpg",
       state: "ready",
+      fileSize: readyGroupBytes.length,
+      sha256: createHash("sha256").update(readyGroupBytes).digest("hex"),
       verifiedAt: new Date(),
     },
     {
@@ -354,6 +400,45 @@ test("selects a ready student R2 copy and keeps uploading/failed copies on Objec
   assert.deepEqual(Buffer.from(await failedResponse.arrayBuffer()), fallbackFailedBytes);
   assert.deepEqual(r2RequestedKeys, ["ready/student.jpg"]);
   assert.equal(objectStorageReads, 2);
+});
+
+test("creates one persistent watermarked thumbnail and reuses it for later gallery views", async () => {
+  r2Requests.length = 0;
+  const galleryResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/gallery`, {
+    headers: { "x-delivery-token": paidAccessToken },
+  });
+  assert.equal(galleryResponse.status, 200);
+  const gallery = await galleryResponse.json() as {
+    photos: Array<{ id: number; fileUrl: string }>;
+  };
+  const listed = gallery.photos.find((photo) => photo.id === readyStudentPhotoId);
+  assert(listed);
+  assert.match(listed.fileUrl, /preview=1&size=thumbnail/);
+
+  const first = await fetch(`${baseUrl}${listed.fileUrl}`);
+  assert.equal(first.status, 200);
+  assert.equal(
+    first.headers.get("cache-control"),
+    "public, max-age=900, s-maxage=900, immutable",
+  );
+  const firstBytes = Buffer.from(await first.arrayBuffer());
+  assert(firstBytes.length > 0);
+  assert(firstBytes.length < readyStudentBytes.length);
+  const variantPut = r2Requests.find((request) =>
+    request.method === "PUT" && request.objectKey.includes("/.variants/")
+  );
+  assert(variantPut, "the first gallery view should persist a derivative in R2");
+  assert.match(variantPut.objectKey, /thumbnail-watermarked/);
+
+  const putCount = r2Requests.filter((request) => request.method === "PUT").length;
+  const second = await fetch(`${baseUrl}${listed.fileUrl}`);
+  assert.equal(second.status, 200);
+  assert.deepEqual(Buffer.from(await second.arrayBuffer()), firstBytes);
+  assert.equal(
+    r2Requests.filter((request) => request.method === "PUT").length,
+    putCount,
+    "a stored derivative must be reused instead of regenerated",
+  );
 });
 
 test("selects a ready group source copy for a materialized group photo", async () => {

@@ -59,7 +59,7 @@ async function reviewPhoto(
 
 /** Build the URL that streams a photo file — same-origin, Clerk session cookie is sent by the browser */
 function photoFileUrl(projectId: number, studentId: number, photoId: number): string {
-  return `/api/projects/${projectId}/students/${studentId}/photos/${photoId}/file`;
+  return `/api/projects/${projectId}/students/${studentId}/photos/${photoId}/file?size=thumbnail`;
 }
 
 export function PhotosTab({ projectId, isCorporate }: { projectId: number, isCorporate?: boolean }) {

@@ -233,6 +233,9 @@ importers:
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
+      sharp:
+        specifier: ^0.35.4
+        version: 0.35.4(@types/node@25.9.5)
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5

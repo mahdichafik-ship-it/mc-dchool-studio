@@ -27,6 +27,8 @@ import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
 import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable, groupCapturesTable } from "@workspace/db";
 import { verifyR2Copy } from "../lib/r2UploadCopies";
+import { prepareBaseR2PhotoVariants } from "../lib/photoVariants";
+import { logger } from "../lib/logger";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
@@ -114,6 +116,9 @@ router.post(
           etag: verified.etag,
           verifiedAt: verified.verifiedAt,
         },
+      });
+      void prepareBaseR2PhotoVariants(verified).catch((error) => {
+        logger.error({ err: error, copyId: verified.id }, "R2 photo variant preparation failed");
       });
     } catch (error) {
       const code =

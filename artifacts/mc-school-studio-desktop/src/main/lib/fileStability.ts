@@ -1,4 +1,4 @@
-import { open } from 'node:fs/promises'
+import { open, readFile, stat } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 
 export const FILE_STABILITY_DELAY_MS = 75
@@ -46,4 +46,30 @@ export async function waitForStableFile(
   }
 
   throw new Error(`Capture file did not become stable: ${filePath}`)
+}
+
+/**
+ * Read a capture only after waitForStableFile has confirmed that it stopped
+ * growing. The returned bytes are the input boundary for all image work:
+ * callers must pass this Buffer to decoders instead of reopening filePath.
+ *
+ * A final size check catches a truncation/replacement that happened between
+ * the stability check and the snapshot. Even when a camera replaces a file
+ * immediately afterwards, libvips still only ever sees the already-read
+ * bytes.
+ */
+export async function readStableFile(
+  filePath: string,
+  expectedSize?: number,
+): Promise<Buffer> {
+  const bytes = await readFile(filePath)
+  const current = await stat(filePath)
+  if (
+    !current.isFile()
+    || (expectedSize !== undefined && current.size !== expectedSize)
+    || current.size !== bytes.length
+  ) {
+    throw new Error(`Capture file changed while it was being snapshotted: ${filePath}`)
+  }
+  return bytes
 }

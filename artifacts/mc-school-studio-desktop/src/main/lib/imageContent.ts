@@ -17,9 +17,13 @@ export interface ImageContentAssessment {
 const MAX_UNIFORM_CHANNEL_RANGE = 3
 const MAX_UNIFORM_STANDARD_DEVIATION = 1.25
 
-export async function assessImageContent(filePath: string): Promise<ImageContentAssessment> {
+export async function assessImageContent(source: string | Buffer): Promise<ImageContentAssessment> {
   try {
-    const stats = await sharp(filePath, { failOn: 'none' }).stats()
+    // The watcher supplies a snapshot Buffer. Never hand a camera/source path
+    // to libvips: removable and network-backed cameras can truncate or replace
+    // it while a JPEG worker is still decoding.
+    const input = Buffer.isBuffer(source) ? Buffer.from(source) : source
+    const stats = await sharp(input, { failOn: 'warning' }).stats()
     const channels = stats.channels
     const minimum = Math.min(...channels.map((channel) => channel.min))
     const maximum = Math.max(...channels.map((channel) => channel.max))

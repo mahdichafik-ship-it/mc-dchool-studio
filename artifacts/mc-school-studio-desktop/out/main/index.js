@@ -2605,9 +2605,10 @@ function registerProjectHandlers() {
 }
 const MAX_UNIFORM_CHANNEL_RANGE = 3;
 const MAX_UNIFORM_STANDARD_DEVIATION = 1.25;
-async function assessImageContent(filePath) {
+async function assessImageContent(source) {
   try {
-    const stats = await sharp(filePath, { failOn: "none" }).stats();
+    const input = Buffer.isBuffer(source) ? Buffer.from(source) : source;
+    const stats = await sharp(input, { failOn: "warning" }).stats();
     const channels = stats.channels;
     const minimum = Math.min(...channels.map((channel) => channel.min));
     const maximum = Math.max(...channels.map((channel) => channel.max));
@@ -2659,7 +2660,11 @@ async function existingFileSize(filePath) {
 }
 async function usablePreview(filePath) {
   if (!await existingFileSize(filePath)) return false;
-  return (await assessImageContent(filePath)).usable;
+  try {
+    return (await assessImageContent(await fs.readFile(filePath))).usable;
+  } catch {
+    return false;
+  }
 }
 async function extractEmbeddedPreview(sourcePath, destinationPath) {
   for (const tag of EMBEDDED_PREVIEW_TAGS) {
@@ -2675,34 +2680,54 @@ async function extractEmbeddedPreview(sourcePath, destinationPath) {
   }
   return false;
 }
-async function generateLivePreview(sourcePath, { previewKey, cacheDir }) {
+async function generateLivePreview(sourcePath, options) {
+  const destinationPath = node_path.join(options.cacheDir, cacheName(options.previewKey));
+  const active = previewJobs.get(destinationPath);
+  if (active) return active;
+  const job = generateLivePreviewFromSource(sourcePath, options);
+  previewJobs.set(destinationPath, job);
+  try {
+    return await job;
+  } finally {
+    if (previewJobs.get(destinationPath) === job) previewJobs.delete(destinationPath);
+  }
+}
+const previewJobs = /* @__PURE__ */ new Map();
+async function generateLivePreviewFromSource(sourcePath, { previewKey, cacheDir, sourceBuffer }) {
   const destinationPath = node_path.join(cacheDir, cacheName(previewKey));
   const embeddedPath = node_path.join(cacheDir, `.embedded-${cacheName(previewKey)}`);
-  let inputPath = sourcePath;
+  const sourceCopyPath = node_path.join(cacheDir, `.source-${cacheName(previewKey)}${node_path.extname(sourcePath)}`);
+  let sourceBytes;
+  let inputBuffer;
   try {
     await fs.mkdir(cacheDir, { recursive: true });
     if (await usablePreview(destinationPath)) return destinationPath;
     await fs.rm(destinationPath, { force: true }).catch(() => {
     });
     if (isRawFile(sourcePath)) {
-      const extracted = await extractEmbeddedPreview(sourcePath, embeddedPath);
+      sourceBytes = Buffer.from(sourceBuffer ?? await fs.readFile(sourcePath));
+      await fs.writeFile(sourceCopyPath, sourceBytes);
+      const extracted = await extractEmbeddedPreview(sourceCopyPath, embeddedPath);
       if (!extracted) {
         console.warn(`[LivePreview] No embedded JPEG preview found for ${sourcePath}`);
         return null;
       }
-      inputPath = embeddedPath;
+      inputBuffer = await fs.readFile(embeddedPath);
+    } else {
+      inputBuffer = Buffer.from(sourceBuffer ?? await fs.readFile(sourcePath));
     }
-    const sourceAssessment = await assessImageContent(inputPath);
+    const sourceAssessment = await assessImageContent(inputBuffer);
     if (!sourceAssessment.usable) {
       throw new Error(`Source image is not usable (${sourceAssessment.reason ?? "uniform frame"})`);
     }
-    await sharp(inputPath, { failOn: "none" }).rotate().resize({
+    const previewBytes = await sharp(inputBuffer, { failOn: "warning" }).rotate().resize({
       width: LIVE_PREVIEW_EDGE,
       height: LIVE_PREVIEW_EDGE,
       fit: "inside",
       withoutEnlargement: true
-    }).jpeg({ quality: LIVE_PREVIEW_QUALITY, mozjpeg: true }).toFile(destinationPath);
-    const previewAssessment = await assessImageContent(destinationPath);
+    }).jpeg({ quality: LIVE_PREVIEW_QUALITY, mozjpeg: true }).toBuffer();
+    await fs.writeFile(destinationPath, previewBytes);
+    const previewAssessment = await assessImageContent(previewBytes);
     if (!previewAssessment.usable) {
       throw new Error(`Generated preview is not usable (${previewAssessment.reason ?? "uniform frame"})`);
     }
@@ -2713,10 +2738,10 @@ async function generateLivePreview(sourcePath, { previewKey, cacheDir }) {
     console.warn(`[LivePreview] Could not create preview for ${sourcePath}:`, error);
     return null;
   } finally {
-    if (inputPath === embeddedPath) {
-      await fs.rm(embeddedPath, { force: true }).catch(() => {
-      });
-    }
+    await fs.rm(embeddedPath, { force: true }).catch(() => {
+    });
+    await fs.rm(sourceCopyPath, { force: true }).catch(() => {
+    });
   }
 }
 const previewFiles = /* @__PURE__ */ new Map();
@@ -43683,9 +43708,9 @@ function qrScanVariants(image) {
   }
   return variants;
 }
-async function readQrFromImage(filePath) {
+async function readQrFromImage(filePath, sourceBuffer) {
   try {
-    const image = await Jimp.read(filePath);
+    const image = sourceBuffer ? await Jimp.read(Buffer.from(sourceBuffer)) : await Jimp.read(filePath);
     for (const candidate of qrScanVariants(image)) {
       const result = decodeBitmap(candidate);
       if (result) return result;
@@ -43748,6 +43773,14 @@ async function waitForStableFile(filePath, statFile, delayMs = FILE_STABILITY_DE
     previous = current;
   }
   throw new Error(`Capture file did not become stable: ${filePath}`);
+}
+async function readStableFile(filePath, expectedSize) {
+  const bytes = await fs.readFile(filePath);
+  const current = await fs.stat(filePath);
+  if (!current.isFile() || expectedSize !== void 0 && current.size !== expectedSize || current.size !== bytes.length) {
+    throw new Error(`Capture file changed while it was being snapshotted: ${filePath}`);
+  }
+  return bytes;
 }
 const traces = /* @__PURE__ */ new Map();
 let sequence = 0;
@@ -44010,11 +44043,19 @@ async function persistMatchedPhoto(store, photosDir, context, diagnosticId) {
   await fs.mkdir(destDir, { recursive: true });
   const destPath = node_path.join(destDir, outputFileName);
   markImagePipeline(diagnosticId, "file move started", `destination=${destPath} mode=async-copy`);
-  await fs.copyFile(context.filePath, destPath);
+  if (context.sourceBuffer) {
+    await fs.writeFile(destPath, Buffer.from(context.sourceBuffer));
+  } else {
+    await fs.copyFile(context.filePath, destPath);
+  }
   if (context.projectJpegOriginalsDir) {
     const projectOriginalPath = node_path.join(context.projectJpegOriginalsDir, outputFileName);
     await fs.mkdir(context.projectJpegOriginalsDir, { recursive: true });
-    await fs.copyFile(context.filePath, projectOriginalPath);
+    if (context.sourceBuffer) {
+      await fs.writeFile(projectOriginalPath, Buffer.from(context.sourceBuffer));
+    } else {
+      await fs.copyFile(context.filePath, projectOriginalPath);
+    }
     markImagePipeline(
       diagnosticId,
       "project original copy complete",
@@ -44039,6 +44080,7 @@ async function processWatchedPhoto(projectId, filePath, {
   photosDir,
   projectJpegOriginalsDir,
   readQr,
+  sourceBuffer,
   targetStudentId = null,
   capturedAt,
   diagnosticId,
@@ -44053,7 +44095,7 @@ async function processWatchedPhoto(projectId, filePath, {
     fileName,
     knownStudents.map((student2) => student2.generatedStudentId)
   );
-  const qrResult = filenameReference || targetStudentId !== null ? null : await readQr(filePath);
+  const qrResult = filenameReference || targetStudentId !== null ? null : await readQr(filePath, sourceBuffer);
   const reference = targetStudentId !== null ? null : filenameReference ?? qrResult?.studentId;
   if (!reference && targetStudentId === null) {
     return saveUnmatchedPhoto(store, projectId, filePath, fileName, "No QR code detected");
@@ -44089,7 +44131,8 @@ async function processWatchedPhoto(projectId, filePath, {
     filePath,
     fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
-    student
+    student,
+    sourceBuffer
   });
   const context = {
     project,
@@ -44098,6 +44141,7 @@ async function processWatchedPhoto(projectId, filePath, {
     filePath,
     fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
+    sourceBuffer,
     projectJpegOriginalsDir
   };
   if (deferPersistence) {
@@ -44365,7 +44409,8 @@ async function prepareAndEmitLocalPreview(win, projectId, capture, student, cont
   );
   const previewPath = await generateLivePreview(context.filePath, {
     previewKey,
-    cacheDir: getLivePreviewCacheDir(electron.app.getPath("home"))
+    cacheDir: getLivePreviewCacheDir(electron.app.getPath("home")),
+    sourceBuffer: context.sourceBuffer
   });
   if (!previewPath) return null;
   return emitLocalPreview(win, projectId, capture, student, context, previewPath);
@@ -44639,15 +44684,22 @@ async function enqueueCapture(projectId, filePath, diagnosticId, options = {}) {
       finishImagePipelineTrace(diagnosticId);
       throw new Error("Capture session stopped before the file became available");
     }
-    if (!registerCapturePath(session.seenPaths, filePath)) return "duplicate";
     const db = getDb();
     if (hasProcessedCaptureSource(db, filePath) || hasProcessedQrMarkerSource(db, filePath)) {
       return "duplicate";
     }
+    const sourceBuffer = getCaptureFileRole(filePath) === "JPEG" ? await readStableFile(filePath, fileStat.size) : void 0;
+    markImagePipeline(
+      diagnosticId,
+      "source bytes snapshotted",
+      sourceBuffer ? `bytes=${sourceBuffer.length} decoder-input=buffer` : "decoder-input=managed-source"
+    );
+    if (!registerCapturePath(session.seenPaths, filePath)) return "duplicate";
     session.pendingFiles.push({
       filePath,
       fileName: path.basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
+      sourceBuffer,
       diagnosticId,
       // Capture the effective target at arrival time. Processing can be
       // delayed by image copies or a burst of filesystem events, and a
@@ -44873,6 +44925,7 @@ async function handleNewPhoto(projectId, capture, session) {
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
+      sourceBuffer: capture.sourceBuffer,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
@@ -44903,6 +44956,7 @@ async function handleNewPhoto(projectId, capture, session) {
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
+      sourceBuffer: capture.sourceBuffer,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
@@ -44927,7 +44981,7 @@ async function handleNewPhoto(projectId, capture, session) {
     }
     return "imported";
   }
-  const qrResult = await readQrFromImage(capture.filePath);
+  const qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer);
   if (qrResult) {
     const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase();
     const student2 = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all().find((candidate) => candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId);
@@ -44973,6 +45027,7 @@ async function handleNewPhoto(projectId, capture, session) {
         photosDir: getPhotosDir(),
         projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
         readQr: async () => null,
+        sourceBuffer: capture.sourceBuffer,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
         diagnosticId: capture.diagnosticId,
         deferPersistence: true,
@@ -45018,6 +45073,7 @@ async function handleNewPhoto(projectId, capture, session) {
     photosDir: getPhotosDir(),
     projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
     readQr: async () => null,
+    sourceBuffer: capture.sourceBuffer,
     targetStudentId: student.id,
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
     diagnosticId: capture.diagnosticId,

@@ -2,6 +2,11 @@ export interface CaptureFile {
   filePath: string
   fileName: string
   capturedAtMs: number
+  /**
+   * JPEG bytes captured after the source passed file-stability checks. Image
+   * decoders and preview generation must use this snapshot, never filePath.
+   */
+  sourceBuffer?: Buffer
   diagnosticId?: string
   /**
    * The effective student target at the moment the watcher saw the file,

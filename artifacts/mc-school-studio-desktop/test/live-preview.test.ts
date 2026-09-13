@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { readFileSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
@@ -9,6 +9,8 @@ import {
   LIVE_PREVIEW_EDGE,
   LIVE_PREVIEW_QUALITY,
 } from '../src/main/lib/livePreview.ts'
+import { assessImageContent } from '../src/main/lib/imageContent.ts'
+import { readStableFile } from '../src/main/lib/fileStability.ts'
 import { NewestLivePreviewScheduler } from '../src/main/lib/livePreviewScheduler.ts'
 
 test('creates a reduced JPEG artifact without changing the source', async () => {
@@ -63,6 +65,69 @@ test('does not decode a RAW file when no embedded JPEG is available', async () =
     })
     assert.equal(previewPath, null)
     assert.deepEqual(readFileSync(sourcePath), sourceBytes)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('uses the immutable snapshot when the watched source is replaced after snapshot', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mc-school-studio-preview-snapshot-'))
+  const sourcePath = join(root, 'capture.jpg')
+  const cacheDir = join(root, 'cache')
+  try {
+    const sourcePixels = Buffer.alloc(64 * 64 * 3)
+    for (let index = 0; index < sourcePixels.length; index += 3) {
+      sourcePixels[index] = index % 6 === 0 ? 220 : 12
+      sourcePixels[index + 1] = index % 9 === 0 ? 180 : 16
+      sourcePixels[index + 2] = 24
+    }
+    await sharp(sourcePixels, { raw: { width: 64, height: 64, channels: 3 } })
+      .jpeg({ quality: 92 })
+      .toFile(sourcePath)
+
+    const snapshot = await readStableFile(sourcePath, statSync(sourcePath).size)
+    writeFileSync(sourcePath, snapshot.subarray(0, 24))
+
+    const assessment = await assessImageContent(snapshot)
+    assert.equal(assessment.usable, true)
+    const previewPath = await generateLivePreview(sourcePath, {
+      previewKey: 'replaced-after-snapshot',
+      cacheDir,
+      sourceBuffer: snapshot,
+    })
+    assert.ok(previewPath)
+    assert.equal((await sharp(previewPath).metadata()).format, 'jpeg')
+    assert.equal((await assessImageContent(readFileSync(sourcePath))).usable, false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('rejects malformed and truncated JPEG bytes before preview generation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mc-school-studio-preview-truncated-'))
+  const sourcePath = join(root, 'truncated.jpg')
+  const cacheDir = join(root, 'cache')
+  try {
+    const valid = await sharp({
+      create: {
+        width: 640,
+        height: 480,
+        channels: 3,
+        background: { r: 48, g: 96, b: 160 },
+      },
+    }).jpeg({ quality: 92 }).toBuffer()
+    const truncated = valid.subarray(0, Math.max(2, valid.length - 24))
+    writeFileSync(sourcePath, truncated)
+
+    assert.equal((await assessImageContent(truncated)).usable, false)
+    assert.equal(
+      await generateLivePreview(sourcePath, {
+        previewKey: 'truncated-jpeg',
+        cacheDir,
+        sourceBuffer: truncated,
+      }),
+      null,
+    )
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

@@ -1,5 +1,5 @@
 import { exiftool } from 'exiftool-vendored'
-import { copyFile, mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { extname, join } from 'node:path'
 import sharp from 'sharp'
@@ -17,6 +17,11 @@ const EMBEDDED_PREVIEW_TAGS = ['PreviewImage', 'JpgFromRaw', 'ThumbnailImage'] a
 export interface LivePreviewOptions {
   cacheDir: string
   previewKey: string
+  /**
+   * Snapshot taken after the watched source passed stability checks. When
+   * present, no decoder or preview stage reopens the mutable source path.
+   */
+  sourceBuffer?: Buffer
 }
 
 function isRawFile(filePath: string): boolean {
@@ -42,7 +47,11 @@ async function existingFileSize(filePath: string): Promise<number | null> {
 
 async function usablePreview(filePath: string): Promise<boolean> {
   if (!(await existingFileSize(filePath))) return false
-  return (await assessImageContent(filePath)).usable
+  try {
+    return (await assessImageContent(await readFile(filePath))).usable
+  } catch {
+    return false
+  }
 }
 
 async function extractEmbeddedPreview(sourcePath: string, destinationPath: string): Promise<boolean> {
@@ -69,11 +78,31 @@ async function extractEmbeddedPreview(sourcePath: string, destinationPath: strin
  */
 export async function generateLivePreview(
   sourcePath: string,
-  { previewKey, cacheDir }: LivePreviewOptions,
+  options: LivePreviewOptions,
+): Promise<string | null> {
+  const destinationPath = join(options.cacheDir, cacheName(options.previewKey))
+  const active = previewJobs.get(destinationPath)
+  if (active) return active
+  const job = generateLivePreviewFromSource(sourcePath, options)
+  previewJobs.set(destinationPath, job)
+  try {
+    return await job
+  } finally {
+    if (previewJobs.get(destinationPath) === job) previewJobs.delete(destinationPath)
+  }
+}
+
+const previewJobs = new Map<string, Promise<string | null>>()
+
+async function generateLivePreviewFromSource(
+  sourcePath: string,
+  { previewKey, cacheDir, sourceBuffer }: LivePreviewOptions,
 ): Promise<string | null> {
   const destinationPath = join(cacheDir, cacheName(previewKey))
   const embeddedPath = join(cacheDir, `.embedded-${cacheName(previewKey)}`)
-  let inputPath = sourcePath
+  const sourceCopyPath = join(cacheDir, `.source-${cacheName(previewKey)}${extname(sourcePath)}`)
+  let sourceBytes: Buffer | undefined
+  let inputBuffer: Buffer | undefined
 
   try {
     await mkdir(cacheDir, { recursive: true })
@@ -81,20 +110,28 @@ export async function generateLivePreview(
     await rm(destinationPath, { force: true }).catch(() => {})
 
     if (isRawFile(sourcePath)) {
-      const extracted = await extractEmbeddedPreview(sourcePath, embeddedPath)
+      // exiftool also gets a stable managed copy for RAW files. Sharp never
+      // receives either the camera path or the extraction path.
+      sourceBytes = Buffer.from(sourceBuffer ?? await readFile(sourcePath))
+      await writeFile(sourceCopyPath, sourceBytes)
+      const extracted = await extractEmbeddedPreview(sourceCopyPath, embeddedPath)
       if (!extracted) {
         console.warn(`[LivePreview] No embedded JPEG preview found for ${sourcePath}`)
         return null
       }
-      inputPath = embeddedPath
+      inputBuffer = await readFile(embeddedPath)
+    } else {
+      // Make a private copy even when a caller supplied a Buffer so a
+      // concurrently-running caller cannot mutate the decoder input.
+      inputBuffer = Buffer.from(sourceBuffer ?? await readFile(sourcePath))
     }
 
-    const sourceAssessment = await assessImageContent(inputPath)
+    const sourceAssessment = await assessImageContent(inputBuffer)
     if (!sourceAssessment.usable) {
       throw new Error(`Source image is not usable (${sourceAssessment.reason ?? 'uniform frame'})`)
     }
 
-    await sharp(inputPath, { failOn: 'none' })
+    const previewBytes = await sharp(inputBuffer, { failOn: 'warning' })
       .rotate()
       .resize({
         width: LIVE_PREVIEW_EDGE,
@@ -103,9 +140,10 @@ export async function generateLivePreview(
         withoutEnlargement: true,
       })
       .jpeg({ quality: LIVE_PREVIEW_QUALITY, mozjpeg: true })
-      .toFile(destinationPath)
+      .toBuffer()
+    await writeFile(destinationPath, previewBytes)
 
-    const previewAssessment = await assessImageContent(destinationPath)
+    const previewAssessment = await assessImageContent(previewBytes)
     if (!previewAssessment.usable) {
       throw new Error(`Generated preview is not usable (${previewAssessment.reason ?? 'uniform frame'})`)
     }
@@ -116,8 +154,7 @@ export async function generateLivePreview(
     console.warn(`[LivePreview] Could not create preview for ${sourcePath}:`, error)
     return null
   } finally {
-    if (inputPath === embeddedPath) {
-      await rm(embeddedPath, { force: true }).catch(() => {})
-    }
+    await rm(embeddedPath, { force: true }).catch(() => {})
+    await rm(sourceCopyPath, { force: true }).catch(() => {})
   }
 }

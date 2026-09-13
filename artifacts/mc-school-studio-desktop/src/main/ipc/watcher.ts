@@ -25,7 +25,7 @@ import { copyManagedCaptureFile } from '../lib/managedCaptureCopy'
 import { readQrFromImage } from '../lib/qrReader'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
-import { waitForStableFile } from '../lib/fileStability'
+import { readStableFile, waitForStableFile } from '../lib/fileStability'
 import {
   finishImagePipelineTrace,
   getImagePipelinePreviewContext,
@@ -326,7 +326,7 @@ async function emitLocalPreview(
   projectId: number,
   capture: CaptureFile,
   student: typeof studentsTable.$inferSelect,
-  context: { filePath: string; fileName: string; capturedAt: string },
+  context: { filePath: string; fileName: string; capturedAt: string; sourceBuffer?: Buffer },
   previewPath: string,
 ): Promise<string | null> {
   const diagnosticId = capture.diagnosticId
@@ -372,7 +372,7 @@ async function prepareAndEmitLocalPreview(
   projectId: number,
   capture: CaptureFile,
   student: typeof studentsTable.$inferSelect,
-  context: { filePath: string; fileName: string; capturedAt: string },
+  context: { filePath: string; fileName: string; capturedAt: string; sourceBuffer?: Buffer },
 ): Promise<string | null> {
   const previewKey = capture.diagnosticId ?? `${projectId}:${capture.filePath}`
   markImagePipeline(
@@ -383,6 +383,7 @@ async function prepareAndEmitLocalPreview(
   const previewPath = await generateLivePreview(context.filePath, {
     previewKey,
     cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+    sourceBuffer: context.sourceBuffer,
   })
   if (!previewPath) return null
   return emitLocalPreview(win, projectId, capture, student, context, previewPath)
@@ -394,7 +395,7 @@ function enqueueLocalPreview(
   projectId: number,
   capture: CaptureFile,
   student: typeof studentsTable.$inferSelect,
-  context: { filePath: string; fileName: string; capturedAt: string },
+  context: { filePath: string; fileName: string; capturedAt: string; sourceBuffer?: Buffer },
 ): null {
   // The trace must outlive the capture-processing loop because generation now
   // runs independently of persistence and may start after the loop advances.
@@ -739,7 +740,6 @@ async function enqueueCapture(
       finishImagePipelineTrace(diagnosticId)
       throw new Error('Capture session stopped before the file became available')
     }
-    if (!registerCapturePath(session.seenPaths, filePath)) return 'duplicate'
     const db = getDb()
     if (
       hasProcessedCaptureSource(db, filePath)
@@ -747,10 +747,20 @@ async function enqueueCapture(
     ) {
       return 'duplicate'
     }
+    const sourceBuffer = getCaptureFileRole(filePath) === 'JPEG'
+      ? await readStableFile(filePath, fileStat.size)
+      : undefined
+    markImagePipeline(
+      diagnosticId,
+      'source bytes snapshotted',
+      sourceBuffer ? `bytes=${sourceBuffer.length} decoder-input=buffer` : 'decoder-input=managed-source',
+    )
+    if (!registerCapturePath(session.seenPaths, filePath)) return 'duplicate'
     session.pendingFiles.push({
       filePath,
       fileName: basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
+      sourceBuffer,
       diagnosticId,
       // Capture the effective target at arrival time. Processing can be
       // delayed by image copies or a burst of filesystem events, and a
@@ -1031,6 +1041,7 @@ async function handleNewPhoto(
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
+      sourceBuffer: capture.sourceBuffer,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
@@ -1064,6 +1075,7 @@ async function handleNewPhoto(
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
+      sourceBuffer: capture.sourceBuffer,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
@@ -1093,7 +1105,7 @@ async function handleNewPhoto(
 
   // A QR marker can select the next student when the photographer has not
   // explicitly selected one in the roster.
-  const qrResult = await readQrFromImage(capture.filePath)
+  const qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
 
   if (qrResult) {
     const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
@@ -1154,6 +1166,7 @@ async function handleNewPhoto(
         photosDir: getPhotosDir(),
         projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
         readQr: async () => null,
+        sourceBuffer: capture.sourceBuffer,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
         diagnosticId: capture.diagnosticId,
         deferPersistence: true,
@@ -1209,6 +1222,7 @@ async function handleNewPhoto(
     photosDir: getPhotosDir(),
     projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
     readQr: async () => null,
+    sourceBuffer: capture.sourceBuffer,
     targetStudentId: student.id,
     capturedAt: new Date(capture.capturedAtMs).toISOString(),
     diagnosticId: capture.diagnosticId,

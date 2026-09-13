@@ -16971,6 +16971,11 @@ function ProjectView({ projectId, onBack, offline = false }) {
     retryFailed: retryProjectFailed
   } = useLiveUpload(projectId);
   const [search, setSearch] = reactExports.useState("");
+  const filteredStudents = students.filter((s) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return s.firstName.toLowerCase().includes(q) || s.lastName.toLowerCase().includes(q) || s.generatedStudentId.toLowerCase().includes(q);
+  });
   const [addStudentOpen, setAddStudentOpen] = reactExports.useState(false);
   const [reassignDialogPhoto, setReassignDialogPhoto] = reactExports.useState(null);
   const [retrying, setRetrying] = reactExports.useState(false);
@@ -16988,7 +16993,125 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [reviewSummary, setReviewSummary] = reactExports.useState({ unratedPortraits: 0, unratedGroups: 0 });
   const [dropProgress, setDropProgress] = reactExports.useState(null);
   const [draggedStudentId, setDraggedStudentId] = reactExports.useState(null);
+  const searchInputRef = reactExports.useRef(null);
   const autoStartAttemptedRef = reactExports.useRef(null);
+  const actionsRef = reactExports.useRef({
+    handleSelectCaptureStudent,
+    handleClearCaptureStudent,
+    setActiveGroupTarget,
+    setSelectedGroup
+  });
+  actionsRef.current = {
+    handleSelectCaptureStudent,
+    handleClearCaptureStudent,
+    setActiveGroupTarget,
+    setSelectedGroup
+  };
+  reactExports.useEffect(() => {
+    const handleKeyDown = (e) => {
+      const target = e.target;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable;
+      if (isInput) {
+        if (e.key === "Escape" && target === searchInputRef.current) {
+          setSearch("");
+          target.blur();
+        }
+        return;
+      }
+      const anyDialogOpen = addStudentOpen || uploadDialogOpen || finishDialogOpen || reassignDialogPhoto !== null || renamingGroupId !== null || document.querySelector('[role="dialog"], [aria-modal="true"]') !== null;
+      if (anyDialogOpen) return;
+      if (project?.finishedAt) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (search) {
+          setSearch("");
+        } else if (activeStudentId !== null || selectedStudent !== null || activeGroupId !== null || selectedGroup !== null) {
+          void actionsRef.current.handleClearCaptureStudent();
+          setSelectedStudent(null);
+          actionsRef.current.setSelectedGroup(null);
+          void actionsRef.current.setActiveGroupTarget(null);
+        }
+        return;
+      }
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        if (filteredStudents.length === 0) return;
+        let currentIndex = -1;
+        if (selectedStudent) {
+          currentIndex = filteredStudents.findIndex((s) => s.id === selectedStudent.id);
+        } else if (activeStudentId) {
+          currentIndex = filteredStudents.findIndex((s) => s.id === activeStudentId);
+        }
+        let nextIndex = 0;
+        if (e.key === "ArrowUp") {
+          nextIndex = currentIndex > 0 ? currentIndex - 1 : 0;
+        } else {
+          nextIndex = currentIndex >= 0 && currentIndex < filteredStudents.length - 1 ? currentIndex + 1 : currentIndex >= 0 ? currentIndex : 0;
+        }
+        const nextStudent = filteredStudents[nextIndex];
+        if (nextStudent) {
+          void actionsRef.current.handleSelectCaptureStudent(nextStudent);
+        }
+        return;
+      }
+      if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        if (filteredStudents.length === 0) return;
+        let currentIndex = -1;
+        if (selectedStudent) {
+          currentIndex = filteredStudents.findIndex((s) => s.id === selectedStudent.id);
+        } else if (activeStudentId) {
+          currentIndex = filteredStudents.findIndex((s) => s.id === activeStudentId);
+        }
+        const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+        let nextStudent = null;
+        for (let i = startIndex; i < filteredStudents.length; i++) {
+          if (filteredStudents[i].photoCount === 0) {
+            nextStudent = filteredStudents[i];
+            break;
+          }
+        }
+        if (!nextStudent) {
+          for (let i = 0; i < startIndex; i++) {
+            if (filteredStudents[i].photoCount === 0) {
+              nextStudent = filteredStudents[i];
+              break;
+            }
+          }
+        }
+        if (nextStudent) {
+          void actionsRef.current.handleSelectCaptureStudent(nextStudent);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    addStudentOpen,
+    uploadDialogOpen,
+    finishDialogOpen,
+    reassignDialogPhoto,
+    renamingGroupId,
+    project?.finishedAt,
+    search,
+    activeStudentId,
+    selectedStudent,
+    selectedGroup,
+    activeGroupId,
+    filteredStudents
+  ]);
+  reactExports.useEffect(() => {
+    if (selectedStudent) {
+      const el = document.querySelector(`[data-student-row="${selectedStudent.id}"]`);
+      if (el) {
+        el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    }
+  }, [selectedStudent]);
   const pendingUploadCount = liveUpload ? liveUpload.pending + liveUpload.uploading : [...uploadStatusMap.values()].reduce(
     (count, summary) => count + summary.pending + summary.uploading,
     0
@@ -17397,11 +17520,6 @@ function ProjectView({ projectId, onBack, offline = false }) {
       setUploadActionRunning(false);
     }
   }
-  const filteredStudents = students.filter((s) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return s.firstName.toLowerCase().includes(q) || s.lastName.toLowerCase().includes(q) || s.generatedStudentId.toLowerCase().includes(q);
-  });
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
@@ -17828,7 +17946,10 @@ function ProjectView({ projectId, onBack, offline = false }) {
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "input",
                   {
+                    ref: searchInputRef,
                     type: "text",
+                    "aria-keyshortcuts": "/",
+                    title: "Press / to search the roster",
                     placeholder: `Search ${employeePlural.toLowerCase()}...`,
                     value: search,
                     onChange: (e) => setSearch(e.target.value),
@@ -17918,6 +18039,24 @@ function ProjectView({ projectId, onBack, offline = false }) {
                   employeePlural.toLowerCase(),
                   " found"
                 ] })
+              ] })
+            ] }),
+            !project?.finishedAt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-2 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[10px] text-slate-500 font-medium shrink-0", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm", children: "/" }),
+                " Search"
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm", children: "↑↓" }),
+                " Navigate"
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm", children: "N" }),
+                " Next unphotographed"
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm", children: "Esc" }),
+                " Clear"
               ] })
             ] })
           ] }),
@@ -18203,6 +18342,8 @@ function StudentRow({
   return /* @__PURE__ */ jsxRuntimeExports.jsx(
     "button",
     {
+      "data-student-row": s.id,
+      "aria-keyshortcuts": "ArrowUp ArrowDown N",
       onClick,
       onDragEnter,
       onDragOver: (event) => {

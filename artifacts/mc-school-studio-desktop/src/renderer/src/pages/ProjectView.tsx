@@ -3,7 +3,7 @@ import {
   ArrowLeft, Folder, Play, Square, Search, Image, User,
   ChevronRight, ArrowRight, Camera, AlertCircle, ExternalLink, Download,
   Upload, CloudUpload, CheckCircle, XCircle, Loader,
-  RefreshCw, Star, Check, Plus, Pencil, Trash2
+  RefreshCw, Star, Check, Plus, Pencil, Trash2, QrCode
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -2104,22 +2104,31 @@ function StudentDetail({
         <div className="max-w-[1400px] mx-auto flex flex-col gap-5">
           {/* Latest confirmation stage and filmstrip */}
           <div className="min-w-0 flex flex-col gap-3">
-            {livePreviewMatchesLatest && livePreview ? (
-              <LivePreview
-                photo={livePreview.photo}
-                traceId={livePreview.pipeline?.traceId}
-              />
-            ) : selectedCapture ? (
-              <CaptureStage capture={selectedCapture} />
-            ) : (
-              <div className="flex aspect-[16/7] min-h-[220px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-900 text-center text-sm font-semibold text-slate-400">
-                <div>
-                  <Camera className="mx-auto mb-3 size-9 text-slate-600" />
-                  <p>Latest JPEG preview will appear here</p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">Ready for the next capture</p>
-                </div>
+            <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_164px]">
+              <div className="min-w-0">
+                {livePreviewMatchesLatest && livePreview ? (
+                  <LivePreview
+                    photo={livePreview.photo}
+                    traceId={livePreview.pipeline?.traceId}
+                  />
+                ) : selectedCapture ? (
+                  <CaptureStage capture={selectedCapture} />
+                ) : (
+                  <div className="flex aspect-[16/7] min-h-[220px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-900 text-center text-sm font-semibold text-slate-400">
+                    <div>
+                      <Camera className="mx-auto mb-3 size-9 text-slate-600" />
+                      <p>Latest JPEG preview will appear here</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">Ready for the next capture</p>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+              <PersistentQrCard
+                student={student}
+                employeeLabel={employeeLabel}
+                onOpen={() => setShowQrOpen(true)}
+              />
+            </div>
 
             {selectedCapture && (
               <CaptureStageMeta
@@ -2339,6 +2348,58 @@ function captureUploadSummary(
 
 function captureReviewKey(capture: CaptureReview) {
   return `${capture.projectId}:${capture.studentId ?? 'none'}:${capture.capturedAt}:${capture.baseFilename}`
+}
+
+function PersistentQrCard({
+  student,
+  employeeLabel,
+  onOpen,
+}: {
+  student: Student
+  employeeLabel: string
+  onOpen: () => void
+}) {
+  return (
+    <aside
+      className="flex min-w-0 items-center gap-3 rounded-2xl border border-teal-200 bg-teal-50/80 p-3 shadow-sm lg:flex-col lg:justify-center lg:gap-2.5 lg:p-3"
+      aria-label={`${employeeLabel} QR code`}
+      data-testid="card-persistent-qr"
+    >
+      <div className="flex size-[92px] shrink-0 items-center justify-center rounded-xl border border-teal-100 bg-white p-2 shadow-inner sm:size-[104px] lg:size-[132px] lg:p-2.5">
+        {student.simpleQr ? (
+          <img
+            src={student.simpleQr}
+            alt={`${employeeLabel} QR code for ${student.firstName} ${student.lastName}`}
+            className="block aspect-square size-full object-contain"
+            draggable={false}
+            data-testid="img-persistent-qr"
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center text-center">
+            <QrCode className="size-7 text-slate-300" />
+            <span className="mt-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">Not generated</span>
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1 lg:w-full lg:flex-none lg:text-center">
+        <div className="flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-[.16em] text-teal-800 lg:justify-center">
+          <QrCode className="size-3.5" />
+          Capture QR
+        </div>
+        <p className="mt-1 truncate font-mono text-[10px] font-semibold text-teal-950" title={`${student.firstName}.${student.lastName}.${student.generatedStudentId}`}>
+          {student.firstName}.{student.lastName}.{student.generatedStudentId}
+        </p>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="mt-2 inline-flex min-h-7 items-center rounded-md border border-teal-200 bg-white px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider text-teal-800 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1"
+          data-testid="button-open-persistent-qr"
+        >
+          Show larger
+        </button>
+      </div>
+    </aside>
+  )
 }
 
 function CaptureStage({ capture }: { capture: CaptureReview }) {

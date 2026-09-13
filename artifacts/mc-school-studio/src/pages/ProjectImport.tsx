@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useRoute, Link, useLocation } from 'wouter';
-import { useParseImportFile, useConfirmImport, ParseResult, SheetMapping } from '@workspace/api-client-react';
+import { useParseImportFile, useConfirmImport, useGetProject, ParseResult, SheetMapping } from '@workspace/api-client-react';
 import { ArrowLeft, Upload, FileText, CheckCircle2, ChevronRight, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,12 +14,61 @@ import * as XLSX from 'xlsx';
 
 type Step = 'upload' | 'map' | 'confirm' | 'done';
 
+function guessIdColumn(headers: string[]): string {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+  return headers.find((_, i) => {
+    const h = lowerHeaders[i];
+    if (h.includes('email') || h.includes('mail') || h.includes('courriel')) return false;
+    return /\bid\b/.test(h) || h.includes('identifier') || h.includes('number') || h.includes('matricule') || h.includes('numero');
+  }) || '';
+}
+
+function guessPrimaryEmailColumn(headers: string[]): string {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+
+  // Prefer exact primary/guardian match without secondary modifiers
+  const primaryMatch = headers.find((_, i) => {
+    const h = lowerHeaders[i];
+    const isEmail = h.includes('email') || h.includes('mail') || h.includes('courriel');
+    const isSecondary = h.includes('secondary') || h.includes('second') || h.includes('alternate') || h.includes('autre');
+    const hasPrimarySemantics = h.includes('primary') || h.includes('guardian') || h.includes('parent') || h.includes('work') || h.includes('delivery');
+    return isEmail && hasPrimarySemantics && !isSecondary;
+  });
+  if (primaryMatch) return primaryMatch;
+
+  // Fallback to any non-secondary email
+  return headers.find((_, i) => {
+    const h = lowerHeaders[i];
+    const isEmail = h.includes('email') || h.includes('mail') || h.includes('courriel');
+    const isSecondary = h.includes('secondary') || h.includes('second') || h.includes('alternate') || h.includes('autre');
+    return isEmail && !isSecondary;
+  }) || '';
+}
+
+function guessSecondaryEmailColumn(headers: string[]): string {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+  return headers.find((_, i) => {
+    const h = lowerHeaders[i];
+    const isEmail = h.includes('email') || h.includes('mail') || h.includes('courriel');
+    const isSecondary = h.includes('secondary') || h.includes('second') || h.includes('alternate') || h.includes('autre');
+    return isEmail && isSecondary;
+  }) || '';
+}
+
+function guessColumnByKeywords(headers: string[], keywords: string[]): string {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+  return headers.find((_, i) => keywords.some(k => lowerHeaders[i].includes(k))) || '';
+}
+
 export default function ProjectImport() {
   const [match, params] = useRoute('/projects/:projectId/import');
   const projectId = match && params?.projectId ? parseInt(params.projectId, 10) : null;
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const { data: project } = useGetProject(projectId as number, { query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId as number) } });
+  const isCorporate = project?.projectType === 'corporate';
 
   const parseFile = useParseImportFile();
   const confirmImport = useConfirmImport();
@@ -41,6 +90,10 @@ export default function ProjectImport() {
     studentIdColumn: string;
     emailColumn: string;
     phoneColumn: string;
+    secondaryEmailColumn: string;
+    jobTitleColumn: string;
+    officeLocationColumn: string;
+    photoSessionColumn: string;
   }>>({});
 
   // State from Confirm
@@ -69,18 +122,17 @@ export default function ProjectImport() {
         // Initialize default mappings
         const initialMappings: typeof mappings = {};
         data.sheets.forEach(sheet => {
-          // Try to guess columns
-          const lowerHeaders = sheet.headers.map(h => h.toLowerCase());
-          const guessFn = (...keywords: string[]) => sheet.headers.find((_, i) => keywords.some(k => lowerHeaders[i].includes(k))) || '';
-          const guessLast = (...keywords: string[]) => sheet.headers.find((_, i) => keywords.some(k => lowerHeaders[i].includes(k))) || '';
-          
           initialMappings[sheet.name] = {
             className: file.name.endsWith('.csv') ? csvClassName : sheet.name,
-            firstNameColumn: guessFn('first', 'prenom', 'prénom'),
-            lastNameColumn: guessLast('last', 'nom', 'surname'),
-            studentIdColumn: guessFn('id', 'student', 'matricule', 'numero'),
-            emailColumn: guessFn('email', 'mail', 'courriel'),
-            phoneColumn: guessFn('phone', 'tel', 'mobile', 'gsm', 'portable'),
+            firstNameColumn: guessColumnByKeywords(sheet.headers, ['first', 'prenom', 'prénom']),
+            lastNameColumn: guessColumnByKeywords(sheet.headers, ['last', 'nom', 'surname']),
+            studentIdColumn: guessIdColumn(sheet.headers),
+            emailColumn: guessPrimaryEmailColumn(sheet.headers),
+            phoneColumn: guessColumnByKeywords(sheet.headers, ['phone', 'tel', 'mobile', 'gsm', 'portable']),
+            secondaryEmailColumn: guessSecondaryEmailColumn(sheet.headers),
+            jobTitleColumn: guessColumnByKeywords(sheet.headers, ['job', 'title', 'role', 'poste']),
+            officeLocationColumn: guessColumnByKeywords(sheet.headers, ['office', 'location', 'bureau', 'lieu']),
+            photoSessionColumn: guessColumnByKeywords(sheet.headers, ['session', 'group', 'groupe']),
           };
         });
         setMappings(initialMappings);
@@ -115,7 +167,10 @@ export default function ProjectImport() {
       const sheetsData: SheetMapping[] = [];
 
       for (const sheetPreview of parsedData.sheets) {
-        const worksheet = workbook.Sheets[sheetPreview.name];
+        const workbookSheetName = file.name.toLowerCase().endsWith('.csv')
+          ? workbook.SheetNames[0]
+          : sheetPreview.name;
+        const worksheet = workbook.Sheets[workbookSheetName];
         if (!worksheet) continue;
         
         // Convert to array of arrays
@@ -138,6 +193,10 @@ export default function ProjectImport() {
           studentIdColumn: map.studentIdColumn || null,
           emailColumn: map.emailColumn || null,
           phoneColumn: map.phoneColumn || null,
+          secondaryEmailColumn: map.secondaryEmailColumn || null,
+          jobTitleColumn: map.jobTitleColumn || null,
+          officeLocationColumn: map.officeLocationColumn || null,
+          photoSessionColumn: map.photoSessionColumn || null,
           rows: rows,
           headers: sheetPreview.headers
         });
@@ -292,7 +351,7 @@ export default function ProjectImport() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-500">Student ID Column <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                        <Label className="text-slate-500">{isCorporate ? 'Employee ID' : 'Student ID'} Column <span className="text-slate-400 font-normal">(Optional)</span></Label>
                         <Select value={mappings[sheet.name]?.studentIdColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'studentIdColumn', v === 'none' ? '' : v)}>
                           <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
                           <SelectContent>
@@ -302,12 +361,22 @@ export default function ProjectImport() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-500">Email Column <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                        <Label className="text-slate-500">{isCorporate ? 'Primary Delivery Email' : 'Parent/Guardian Email'} <span className="text-slate-400 font-normal">(Optional)</span></Label>
                         <Select value={mappings[sheet.name]?.emailColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'emailColumn', v === 'none' ? '' : v)}>
                           <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">-- Skip --</SelectItem>
                             {sheet.headers.map((h, i) => <SelectItem key={`em-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-500">{isCorporate ? 'Secondary Delivery Email' : 'Second Parent/Guardian Email'} <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                        <Select value={mappings[sheet.name]?.secondaryEmailColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'secondaryEmailColumn', v === 'none' ? '' : v)}>
+                          <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">-- Skip --</SelectItem>
+                            {sheet.headers.map((h, i) => <SelectItem key={`sem-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -321,6 +390,40 @@ export default function ProjectImport() {
                           </SelectContent>
                         </Select>
                       </div>
+                      {isCorporate && (
+                        <>
+                          <div className="space-y-2">
+                            <Label className="text-slate-500">Job Title <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                            <Select value={mappings[sheet.name]?.jobTitleColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'jobTitleColumn', v === 'none' ? '' : v)}>
+                              <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-- Skip --</SelectItem>
+                                {sheet.headers.map((h, i) => <SelectItem key={`jt-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-slate-500">Office/Location <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                            <Select value={mappings[sheet.name]?.officeLocationColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'officeLocationColumn', v === 'none' ? '' : v)}>
+                              <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-- Skip --</SelectItem>
+                                {sheet.headers.map((h, i) => <SelectItem key={`ol-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-slate-500">Photography Group/Session <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                            <Select value={mappings[sheet.name]?.photoSessionColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'photoSessionColumn', v === 'none' ? '' : v)}>
+                              <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-- Skip --</SelectItem>
+                                {sheet.headers.map((h, i) => <SelectItem key={`ps-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
                     </div>
                     
                     <div className="p-6 bg-slate-50/50">

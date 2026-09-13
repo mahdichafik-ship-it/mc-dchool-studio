@@ -18,4 +18,12 @@ export interface StudentPatch {
   email?: string | null;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
 }

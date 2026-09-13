@@ -1,13 +1,32 @@
-import React, { useState, useMemo } from 'react';
-import { useListStudents, useBulkDeleteStudents, useGenerateQrCodes, getListStudentsQueryKey, Student, useListClasses } from '@workspace/api-client-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useListStudents, useBulkDeleteStudents, useGenerateQrCodes, getListStudentsQueryKey, Student, useListClasses, useCreateStudent, useUpdateStudent } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Search, Trash2, QrCode, Filter, X } from 'lucide-react';
+import { Search, Trash2, QrCode, Filter, X, Pencil, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+
+const studentSchema = z.object({
+  classId: z.coerce.number().min(1, "Required"),
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  generatedStudentId: z.string().optional(),
+  email: z.string().email("Invalid email").or(z.literal("")).optional(),
+  secondaryEmail: z.string().email("Invalid email").or(z.literal("")).optional(),
+  phone: z.string().optional(),
+  jobTitle: z.string().optional(),
+  officeLocation: z.string().optional(),
+  photoSession: z.string().optional(),
+});
+
+type StudentFormValues = z.infer<typeof studentSchema>;
 
 export function StudentsTab({ projectId, isCorporate }: { projectId: number, isCorporate?: boolean }) {
   const { data: students = [], isLoading: studentsLoading } = useListStudents(projectId);
@@ -17,19 +36,115 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
 
   const bulkDelete = useBulkDeleteStudents();
   const generateQr = useGenerateQrCodes();
+  const createStudent = useCreateStudent();
+  const updateStudent = useUpdateStudent();
 
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+
+  const form = useForm<StudentFormValues>({
+    resolver: zodResolver(studentSchema),
+    defaultValues: {
+      classId: undefined,
+      firstName: "",
+      lastName: "",
+      generatedStudentId: "",
+      email: "",
+      secondaryEmail: "",
+      phone: "",
+      jobTitle: "",
+      officeLocation: "",
+      photoSession: "",
+    },
+  });
+
+  useEffect(() => {
+    if (editingStudent && isFormOpen) {
+      form.reset({
+        classId: editingStudent.classId,
+        firstName: editingStudent.firstName,
+        lastName: editingStudent.lastName,
+        generatedStudentId: editingStudent.generatedStudentId || "",
+        email: editingStudent.email || "",
+        secondaryEmail: editingStudent.secondaryEmail || "",
+        phone: editingStudent.phone || "",
+        jobTitle: editingStudent.jobTitle || "",
+        officeLocation: editingStudent.officeLocation || "",
+        photoSession: editingStudent.photoSession || "",
+      });
+    } else if (!isFormOpen) {
+      form.reset({
+        classId: classes[0]?.id,
+        firstName: "",
+        lastName: "",
+        generatedStudentId: "",
+        email: "",
+        secondaryEmail: "",
+        phone: "",
+        jobTitle: "",
+        officeLocation: "",
+        photoSession: "",
+      });
+      setEditingStudent(null);
+    }
+  }, [editingStudent, isFormOpen, form, classes]);
+
+  const onFormSubmit = (data: StudentFormValues) => {
+    // clean empty strings to null/undefined if necessary
+    const payload = {
+      ...data,
+      generatedStudentId: data.generatedStudentId || null,
+      email: data.email || null,
+      secondaryEmail: data.secondaryEmail || null,
+      phone: data.phone || null,
+      jobTitle: data.jobTitle || null,
+      officeLocation: data.officeLocation || null,
+      photoSession: data.photoSession || null,
+    };
+
+    if (editingStudent) {
+      updateStudent.mutate({ projectId, studentId: editingStudent.id, data: payload }, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId) });
+          setIsFormOpen(false);
+          toast({ title: `${isCorporate ? 'Employee' : 'Student'} updated` });
+        },
+        onError: (err) => {
+          toast({ title: 'Failed to update', description: String(err), variant: 'destructive' });
+        }
+      });
+    } else {
+      createStudent.mutate({ projectId, data: payload }, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey(projectId) });
+          setIsFormOpen(false);
+          toast({ title: `${isCorporate ? 'Employee' : 'Student'} added` });
+        },
+        onError: (err) => {
+          toast({ title: 'Failed to add', description: String(err), variant: 'destructive' });
+        }
+      });
+    }
+  };
 
   const filteredStudents = useMemo(() => {
     return students.filter(s => {
+      const searchStr = search.toLowerCase();
       const matchesSearch = 
-        s.firstName.toLowerCase().includes(search.toLowerCase()) || 
-        s.lastName.toLowerCase().includes(search.toLowerCase()) ||
-        s.generatedStudentId.toLowerCase().includes(search.toLowerCase());
+        s.firstName.toLowerCase().includes(searchStr) ||
+        s.lastName.toLowerCase().includes(searchStr) ||
+        (s.generatedStudentId && s.generatedStudentId.toLowerCase().includes(searchStr)) ||
+        (s.email && s.email.toLowerCase().includes(searchStr)) ||
+        (s.secondaryEmail && s.secondaryEmail.toLowerCase().includes(searchStr)) ||
+        (s.phone && s.phone.toLowerCase().includes(searchStr)) ||
+        (s.jobTitle && s.jobTitle.toLowerCase().includes(searchStr)) ||
+        (s.officeLocation && s.officeLocation.toLowerCase().includes(searchStr)) ||
+        (s.photoSession && s.photoSession.toLowerCase().includes(searchStr));
         
       const matchesClass = classFilter === 'all' || s.classId.toString() === classFilter;
       
@@ -111,7 +226,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
           )}
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {selectedIds.size > 0 && (
             <>
               <span className="text-sm font-medium text-slate-600">{selectedIds.size} selected</span>
@@ -130,8 +245,177 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
             <QrCode className="w-4 h-4 mr-2" /> 
             {generateQr.isPending ? 'Generating...' : selectedIds.size > 0 ? 'Generate Selected QR' : 'Generate All QR'}
           </Button>
+          <Button
+            size="sm"
+            className="bg-teal-600 hover:bg-teal-700 text-white"
+            onClick={() => setIsFormOpen(true)}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add {isCorporate ? 'Employee' : 'Student'}
+          </Button>
         </div>
       </div>
+
+      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingStudent ? 'Edit' : 'Add'} {isCorporate ? 'Employee' : 'Student'}</DialogTitle>
+            <DialogDescription>
+              {isCorporate ? 'Update employee directory information and contact details.' : 'Update student roster information and contact details.'}
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onFormSubmit)} className="space-y-4 py-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="firstName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>First Name *</FormLabel>
+                      <FormControl><Input {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="lastName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Last Name *</FormLabel>
+                      <FormControl><Input {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="classId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{isCorporate ? 'Department' : 'Class'} *</FormLabel>
+                      <Select value={field.value?.toString()} onValueChange={(val) => field.onChange(parseInt(val, 10))}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select..." />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {classes.map(c => (
+                            <SelectItem key={c.id} value={c.id.toString()}>{c.className}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="generatedStudentId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{isCorporate ? 'Employee ID' : 'Student ID'}</FormLabel>
+                      <FormControl><Input {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{isCorporate ? 'Primary Delivery Email' : 'Parent/Guardian Email'}</FormLabel>
+                      <FormControl><Input type="email" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="secondaryEmail"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{isCorporate ? 'Secondary Delivery Email' : 'Second Parent/Guardian Email'}</FormLabel>
+                      <FormControl><Input type="email" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone</FormLabel>
+                      <FormControl><Input type="tel" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {isCorporate && (
+                  <FormField
+                    control={form.control}
+                    name="jobTitle"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Job Title</FormLabel>
+                        <FormControl><Input {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+              </div>
+
+              {isCorporate && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="officeLocation"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Office/Location</FormLabel>
+                        <FormControl><Input {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="photoSession"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Photography Session/Group</FormLabel>
+                        <FormControl><Input {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
+
+              <DialogFooter className="sticky bottom-0 z-10 mt-6 border-t border-slate-200 bg-white py-4">
+                <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancel</Button>
+                <Button type="submit" className="bg-teal-600 hover:bg-teal-700" disabled={createStudent.isPending || updateStudent.isPending}>
+                  {editingStudent ? 'Save Changes' : `Add ${isCorporate ? 'Employee' : 'Student'}`}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
@@ -164,13 +448,15 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
               <th className="px-4 py-3">First Name</th>
               <th className="px-4 py-3">Last Name</th>
               <th className="px-4 py-3">{isCorporate ? 'Department' : 'Class'}</th>
+              <th className="px-4 py-3">Contact</th>
               <th className="px-4 py-3 text-center">QR Code</th>
+              <th className="sticky right-0 bg-slate-50 px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredStudents.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                   No {isCorporate ? 'employees' : 'students'} found.
                 </td>
               </tr>
@@ -187,6 +473,11 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
                   <td className="px-4 py-3 font-medium text-slate-900">{student.firstName}</td>
                   <td className="px-4 py-3 font-medium text-slate-900">{student.lastName}</td>
                   <td className="px-4 py-3 text-slate-600">{student.className}</td>
+                  <td className="px-4 py-3 text-slate-500 text-xs">
+                    {student.email && <div>{student.email}</div>}
+                    {student.phone && <div>{student.phone}</div>}
+                    {!student.email && !student.phone && <span className="text-slate-400 italic">None</span>}
+                  </td>
                   <td className="px-4 py-3 text-center">
                     {student.simpleQr ? (
                       <div className="inline-flex w-8 h-8 items-center justify-center bg-teal-50 rounded">
@@ -195,6 +486,19 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
                     ) : (
                       <span className="text-xs text-slate-400">Missing</span>
                     )}
+                  </td>
+                  <td className="sticky right-0 bg-white px-4 py-3 text-right group-hover:bg-slate-50">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        setEditingStudent(student);
+                        setIsFormOpen(true);
+                      }}
+                      className="text-slate-400 hover:text-teal-600"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
                   </td>
                 </tr>
               ))

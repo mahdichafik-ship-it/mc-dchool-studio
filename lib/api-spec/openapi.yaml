@@ -1256,6 +1256,14 @@ components:
           type: ["string", "null"]
         phone:
           type: ["string", "null"]
+        secondaryEmail:
+          type: ["string", "null"]
+        jobTitle:
+          type: ["string", "null"]
+        officeLocation:
+          type: ["string", "null"]
+        photoSession:
+          type: ["string", "null"]
         simpleQr:
           type: ["string", "null"]
         jsonQr:
@@ -1283,6 +1291,14 @@ components:
           type: ["string", "null"]
         phone:
           type: ["string", "null"]
+        secondaryEmail:
+          type: ["string", "null"]
+        jobTitle:
+          type: ["string", "null"]
+        officeLocation:
+          type: ["string", "null"]
+        photoSession:
+          type: ["string", "null"]
 
     StudentPatch:
       type: object
@@ -1300,6 +1316,14 @@ components:
         email:
           type: ["string", "null"]
         phone:
+          type: ["string", "null"]
+        secondaryEmail:
+          type: ["string", "null"]
+        jobTitle:
+          type: ["string", "null"]
+        officeLocation:
+          type: ["string", "null"]
+        photoSession:
           type: ["string", "null"]
 
     BulkStudentIds:
@@ -1386,6 +1410,14 @@ components:
         emailColumn:
           type: ["string", "null"]
         phoneColumn:
+          type: ["string", "null"]
+        secondaryEmailColumn:
+          type: ["string", "null"]
+        jobTitleColumn:
+          type: ["string", "null"]
+        officeLocationColumn:
+          type: ["string", "null"]
+        photoSessionColumn:
           type: ["string", "null"]
         rows:
           type: array

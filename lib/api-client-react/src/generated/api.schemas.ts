@@ -133,6 +133,14 @@ export interface Student {
   /** @nullable */
   phone?: string | null;
   /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
+  /** @nullable */
   simpleQr?: string | null;
   /** @nullable */
   jsonQr?: string | null;
@@ -152,6 +160,14 @@ export interface StudentInput {
   email?: string | null;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
 }
 
 export interface StudentPatch {
@@ -166,6 +182,14 @@ export interface StudentPatch {
   email?: string | null;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
 }
 
 export interface BulkStudentIds {
@@ -206,6 +230,14 @@ export interface SheetMapping {
   emailColumn?: string | null;
   /** @nullable */
   phoneColumn?: string | null;
+  /** @nullable */
+  secondaryEmailColumn?: string | null;
+  /** @nullable */
+  jobTitleColumn?: string | null;
+  /** @nullable */
+  officeLocationColumn?: string | null;
+  /** @nullable */
+  photoSessionColumn?: string | null;
   rows: string[][];
   headers?: string[];
 }

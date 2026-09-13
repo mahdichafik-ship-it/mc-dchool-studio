@@ -256,6 +256,10 @@ export const ListStudentsResponseItem = zod.object({
   "generatedStudentId": zod.string(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -281,7 +285,11 @@ export const CreateStudentBody = zod.object({
   "lastName": zod.string().min(1),
   "generatedStudentId": zod.string().nullish(),
   "email": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish()
 })
 
 export const CreateStudentResponse = zod.object({
@@ -294,6 +302,10 @@ export const CreateStudentResponse = zod.object({
   "generatedStudentId": zod.string(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -449,7 +461,11 @@ export const UpdateStudentBody = zod.object({
   "generatedStudentId": zod.string().nullish(),
   "classId": zod.number().optional(),
   "email": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish()
 })
 
 export const UpdateStudentResponse = zod.object({
@@ -462,6 +478,10 @@ export const UpdateStudentResponse = zod.object({
   "generatedStudentId": zod.string(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -549,6 +569,10 @@ export const ConfirmImportBody = zod.object({
   "studentIdColumn": zod.string().nullish(),
   "emailColumn": zod.string().nullish(),
   "phoneColumn": zod.string().nullish(),
+  "secondaryEmailColumn": zod.string().nullish(),
+  "jobTitleColumn": zod.string().nullish(),
+  "officeLocationColumn": zod.string().nullish(),
+  "photoSessionColumn": zod.string().nullish(),
   "rows": zod.array(zod.array(zod.string())),
   "headers": zod.array(zod.string()).optional()
 }))

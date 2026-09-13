@@ -194,7 +194,7 @@ export function registerPhotoHandlers() {
           and(isNull(capturesTable.groupId), eq(capturesTable.studentId, studentId)),
           eq(photosTable.studentId, studentId),
         ))
-        .orderBy(capturesTable.capturedAt)
+        .orderBy(capturesTable.capturedAt, capturesTable.id)
         .all()
 
       const result: CaptureReview[] = []

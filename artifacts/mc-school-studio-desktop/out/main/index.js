@@ -2974,7 +2974,7 @@ function registerPhotoHandlers() {
       const rows = db.select({ capture: capturesTable, photo: photosTable }).from(capturesTable).leftJoin(photosTable, drizzleOrm.eq(capturesTable.legacyPhotoId, photosTable.id)).where(drizzleOrm.or(
         drizzleOrm.and(drizzleOrm.isNull(capturesTable.groupId), drizzleOrm.eq(capturesTable.studentId, studentId)),
         drizzleOrm.eq(photosTable.studentId, studentId)
-      )).orderBy(capturesTable.capturedAt).all();
+      )).orderBy(capturesTable.capturedAt, capturesTable.id).all();
       const result = [];
       for (const { capture, photo } of rows) {
         const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();

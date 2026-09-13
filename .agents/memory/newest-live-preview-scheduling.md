@@ -14,3 +14,9 @@ Explicit manual or active-student targets must bypass full-image QR decoding bef
 **Why:** Serial QR scans of large camera JPEGs can build a minutes-long ingestion backlog before the live-preview scheduler receives any work.
 
 **How to apply:** Preserve filename-conflict validation, but route captures with an already-known target directly to matching and local preview generation.
+
+The large review stage must render a live preview only when that preview can be matched to the same latest capture whose metadata is shown. Capture loads must also be scoped to the currently viewed subject, and manual review should use an identity that survives optimistic-to-persisted ID replacement.
+
+**Why:** Preview generation, SQLite persistence, realtime events, and subject navigation complete independently. Without identity checks, the UI can show one frame's pixels beside another frame's metadata or briefly expose the previous subject's review controls.
+
+**How to apply:** Reject stale subject-load responses, clear or mask prior-subject data immediately, match live previews by stable source identity, and keep manual selection on a stable capture key rather than a temporary database ID.

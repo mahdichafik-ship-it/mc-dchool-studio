@@ -332,17 +332,24 @@ export function useUnmatchedPhotos(projectId: number | null) {
 
 export function useCaptures(studentId: number | null) {
   const [data, setData] = useState<StudentCaptureReview>({ captures: [], qrMarkers: [] })
+  const [dataStudentId, setDataStudentId] = useState<number | null>(null)
   const [livePreview, setLivePreview] = useState<PhotoMatchedEvent | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const liveTraceRef = useRef<PhotoMatchedEvent['pipeline']>(undefined)
+  const activeStudentIdRef = useRef(studentId)
+  const requestIdRef = useRef(0)
+  activeStudentIdRef.current = studentId
 
   const load = useCallback(async () => {
     if (!studentId) return
+    const requestedStudentId = studentId
+    const requestId = ++requestIdRef.current
     setLoading(true)
     setError(null)
     try {
-      const result = await api.invoke('captures:list', { studentId })
+      const result = await api.invoke('captures:list', { studentId: requestedStudentId })
+      if (activeStudentIdRef.current !== requestedStudentId || requestIdRef.current !== requestId) return
       const loaded = result as StudentCaptureReview
       setData((current) => {
         // An initial/reconciliation load can finish after the fast preview
@@ -361,16 +368,23 @@ export function useCaptures(studentId: number | null) {
           ? { ...loaded, captures: [...loaded.captures, ...pending] }
           : loaded
       })
+      setDataStudentId(requestedStudentId)
     } catch (loadError) {
+      if (activeStudentIdRef.current !== requestedStudentId || requestIdRef.current !== requestId) return
+      setDataStudentId(requestedStudentId)
       setError(loadError instanceof Error ? loadError.message : String(loadError))
     } finally {
-      setLoading(false)
+      if (activeStudentIdRef.current === requestedStudentId && requestIdRef.current === requestId) {
+        setLoading(false)
+      }
     }
   }, [studentId])
 
-  useEffect(() => { load() }, [load])
-
   useEffect(() => {
+    requestIdRef.current++
+    setData({ captures: [], qrMarkers: [] })
+    setDataStudentId(null)
+    setError(null)
     if (liveTraceRef.current) {
       reportImagePipelineStage(
         liveTraceRef.current,
@@ -381,6 +395,8 @@ export function useCaptures(studentId: number | null) {
     }
     setLivePreview(null)
   }, [studentId])
+
+  useEffect(() => { void load() }, [load])
 
   useEffect(() => {
     if (!studentId) return
@@ -404,6 +420,7 @@ export function useCaptures(studentId: number | null) {
         liveTraceRef.current = event.pipeline
         setLivePreview(event)
       }
+      setDataStudentId(studentId)
 
       // A preview event is emitted before the managed copy and SQLite work.
       // The persisted event replaces that temporary row, while the database
@@ -482,7 +499,13 @@ export function useCaptures(studentId: number | null) {
     }
   }, [studentId, load])
 
-  return { data, loading, error, reload: load, livePreview }
+  const visibleData = dataStudentId === studentId
+    ? data
+    : { captures: [], qrMarkers: [] }
+  const visibleLivePreview = livePreview?.student.id === studentId ? livePreview : null
+  const visibleError = dataStudentId === studentId ? error : null
+
+  return { data: visibleData, loading, error: visibleError, reload: load, livePreview: visibleLivePreview }
 }
 
 export function useCaptureSummary(projectId: number | null) {

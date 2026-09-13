@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   ArrowLeft, Folder, Play, Square, Search, Image, User,
-  ChevronRight, Camera, AlertCircle, ExternalLink, Download,
+  ChevronRight, ArrowRight, Camera, AlertCircle, ExternalLink, Download,
   Upload, CloudUpload, CheckCircle, XCircle, Loader,
   RefreshCw, Star, Check, Plus, Pencil, Trash2
 } from 'lucide-react'
@@ -1892,6 +1892,8 @@ function StudentDetail({
   const [retryingPhotoId, setRetryingPhotoId] = useState<number | null>(null)
   const [retryingFileId, setRetryingFileId] = useState<number | null>(null)
   const [pairingFilter, setPairingFilter] = useState<CaptureFilter>('all')
+  const [reviewCaptureKey, setReviewCaptureKey] = useState<string | null>(null)
+  const [showQrOpen, setShowQrOpen] = useState(false)
 
   const captureCounts = captures.reduce(
     (counts, capture) => {
@@ -1903,6 +1905,67 @@ function StudentDetail({
   const filteredCaptures = pairingFilter === 'all'
     ? captures
     : captures.filter((capture) => capture.pairingStatus === pairingFilter)
+  const latestCapture = captures[captures.length - 1] ?? null
+  const isFollowingLatest = reviewCaptureKey === null
+  const selectedCapture = isFollowingLatest
+    ? latestCapture
+    : captures.find((capture) => captureReviewKey(capture) === reviewCaptureKey) ?? latestCapture
+  const livePreviewMatchesLatest = Boolean(
+    isFollowingLatest
+    && livePreview?.photo.previewUrl
+    && latestCapture?.legacyPhoto
+    && (
+      (livePreview.previewKey && livePreview.previewKey === latestCapture.legacyPhoto.previewKey)
+      || livePreview.photo.id === latestCapture.legacyPhoto.id
+      || livePreview.photo.filePath === latestCapture.legacyPhoto.filePath
+    ),
+  )
+
+  useEffect(() => {
+    if (reviewCaptureKey !== null && !captures.some((capture) => captureReviewKey(capture) === reviewCaptureKey)) {
+      setReviewCaptureKey(null)
+    }
+  }, [captures, reviewCaptureKey])
+
+  useEffect(() => {
+    setReviewCaptureKey(null)
+  }, [student.id])
+
+  useEffect(() => {
+    const handleReviewShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      const isInput =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable
+      if (
+        isInput ||
+        showQrOpen ||
+        reassignOpen ||
+        document.querySelector('[role="dialog"], [aria-modal="true"]')
+      ) return
+      if (event.key.toLowerCase() === 'l' && latestCapture) {
+        event.preventDefault()
+        setReviewCaptureKey(null)
+        return
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault()
+        const currentIndex = isFollowingLatest
+          ? captures.length - 1
+          : captures.findIndex((capture) => capture.id === selectedCapture?.id)
+        if (event.key === 'ArrowLeft' && currentIndex > 0) {
+          setReviewCaptureKey(captureReviewKey(captures[currentIndex - 1]))
+        } else if (event.key === 'ArrowRight' && currentIndex >= 0 && currentIndex < captures.length - 1) {
+          const nextCapture = captures[currentIndex + 1]
+          setReviewCaptureKey(nextCapture.id === latestCapture?.id ? null : captureReviewKey(nextCapture))
+        }
+      }
+    }
+    window.addEventListener('keydown', handleReviewShortcut)
+    return () => window.removeEventListener('keydown', handleReviewShortcut)
+  }, [captures, isFollowingLatest, latestCapture, reassignOpen, selectedCapture?.id, showQrOpen])
 
   async function handleDeletePhoto(photoId: number) {
     await window.api.invoke('photos:delete', { photoId })
@@ -2015,34 +2078,104 @@ function StudentDetail({
             {student.firstName} {student.lastName}
           </h2>
         </div>
-        <div className="flex flex-col items-end gap-3 justify-center shrink-0">
-          {isActiveCaptureTarget && (
-            <Button variant="outline" size="sm" onClick={onClearCaptureTarget} className="text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm">
-              <XCircle className="size-3.5 mr-1.5" /> Clear Target
+        <div className="flex flex-col items-end gap-2 justify-center shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isActiveCaptureTarget && (
+              <Button variant="outline" size="sm" onClick={onClearCaptureTarget} className="text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm">
+                <XCircle className="size-3.5 mr-1.5" /> Clear Target
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowQrOpen(true)}
+              className="h-8 border-slate-300 bg-white text-[10px] font-extrabold uppercase tracking-wider text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <Camera className="mr-1.5 size-3.5" /> Show QR
             </Button>
-          )}
+          </div>
           <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
             {captures.length} Capture{captures.length !== 1 ? 's' : ''} recorded
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-[1400px] mx-auto flex flex-col-reverse xl:flex-row gap-8">
-          {/* Photo gallery */}
-          <div className="flex-1 min-w-0 flex flex-col gap-6">
-            {livePreview?.photo.previewUrl && (
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="max-w-[1400px] mx-auto flex flex-col gap-5">
+          {/* Latest confirmation stage and filmstrip */}
+          <div className="min-w-0 flex flex-col gap-3">
+            {livePreviewMatchesLatest && livePreview ? (
               <LivePreview
                 photo={livePreview.photo}
                 traceId={livePreview.pipeline?.traceId}
               />
+            ) : selectedCapture ? (
+              <CaptureStage capture={selectedCapture} />
+            ) : (
+              <div className="flex aspect-[16/7] min-h-[220px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-900 text-center text-sm font-semibold text-slate-400">
+                <div>
+                  <Camera className="mx-auto mb-3 size-9 text-slate-600" />
+                  <p>Latest JPEG preview will appear here</p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">Ready for the next capture</p>
+                </div>
+              </div>
             )}
 
-            <div>
+            {selectedCapture && (
+              <CaptureStageMeta
+                capture={selectedCapture}
+                uploadStatus={selectedCapture.legacyPhoto ? photoStatusMap.get(selectedCapture.legacyPhoto.id) : undefined}
+                onUpdateReview={handleUpdateCaptureReview}
+              />
+            )}
+
+            {!isFollowingLatest && selectedCapture && latestCapture && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-950">
+                <span><strong>Manual review:</strong> browsing this capture does not change the active {employeeLabel.toLowerCase()} or capture target.</span>
+                <button
+                  type="button"
+                  onClick={() => setReviewCaptureKey(null)}
+                  className="flex items-center gap-1 font-extrabold uppercase tracking-wider text-amber-800 hover:text-amber-950"
+                >
+                  Latest capture <ArrowRight className="size-3.5" />
+                  <kbd className="ml-1 rounded border border-amber-300 bg-amber-100 px-1 py-0.5 text-[9px]">L</kbd>
+                </button>
+              </div>
+            )}
+
+            <CaptureFilmstrip
+              captures={captures}
+              selectedCaptureId={selectedCapture?.id ?? null}
+              isFollowingLatest={isFollowingLatest}
+              onSelect={(captureId) => {
+                const capture = captures.find((candidate) => candidate.id === captureId)
+                setReviewCaptureKey(captureId === latestCapture?.id || !capture ? null : captureReviewKey(capture))
+              }}
+              onLatest={() => setReviewCaptureKey(null)}
+              onPrevious={() => {
+                const index = isFollowingLatest
+                  ? captures.length - 1
+                  : captures.findIndex((capture) => capture.id === selectedCapture?.id)
+                if (index > 0) setReviewCaptureKey(captureReviewKey(captures[index - 1]))
+              }}
+              onNext={() => {
+                const index = isFollowingLatest
+                  ? captures.length - 1
+                  : captures.findIndex((capture) => capture.id === selectedCapture?.id)
+                if (index >= 0 && index < captures.length - 1) {
+                  const nextCapture = captures[index + 1]
+                  setReviewCaptureKey(nextCapture.id === latestCapture?.id ? null : captureReviewKey(nextCapture))
+                }
+              }}
+            />
+          </div>
+
+          {/* Detailed capture review remains below the latest stage. */}
+          <div>
               <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <div>
                   <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
-                    2. Live Captures
+                    Capture review
                   </div>
                   <p className="mt-2 text-xs font-semibold text-slate-500">Star a photo to include it in the parent gallery.</p>
                 </div>
@@ -2135,44 +2268,7 @@ function StudentDetail({
               )}
             </div>
           </div>
-
-          {/* QR code panel */}
-          <div className="w-full xl:w-[300px] shrink-0">
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 flex flex-col sm:flex-row xl:flex-col items-center sm:items-stretch xl:items-center gap-6">
-              <div className="flex flex-col flex-1 justify-center items-center sm:items-start xl:items-center min-w-0 w-full">
-                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-4 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm">
-                  1. Scan to link
-                </div>
-                <p className="text-[11px] text-slate-500 font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center sm:text-left xl:text-center border border-slate-100 hidden sm:block xl:hidden mb-4">
-                  {student.firstName}.{student.lastName}.{student.generatedStudentId}
-                </p>
-                <div className="hidden sm:block xl:hidden text-xs text-slate-400 font-medium max-w-[200px]">
-                  Present this code to the camera before capturing portraits.
-                </div>
-              </div>
-              <div className="shrink-0 w-48 sm:w-40 xl:w-full flex flex-col items-center">
-                {student.simpleQr ? (
-                  <img
-                    src={student.simpleQr}
-                    alt="Student QR Code"
-                    className="w-full aspect-square bg-slate-50 rounded-2xl border-2 border-slate-100 p-3 shadow-inner"
-                    draggable={false}
-                  />
-                ) : (
-                  <div className="w-full aspect-square bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-4">
-                    <AlertCircle className="size-8 text-slate-300 mb-2" />
-                    <p className="text-xs font-bold text-slate-500 text-center">QR not generated</p>
-                    <p className="text-[10px] font-medium text-slate-400 text-center mt-1">Generate in the web app</p>
-                  </div>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-2 sm:hidden xl:block font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center border border-slate-100">
-                {student.firstName}.{student.lastName}.{student.generatedStudentId}
-              </p>
-            </div>
-          </div>
         </div>
-      </div>
 
       {reassignOpen && reassignPhoto && (
         <ReassignDialog
@@ -2186,6 +2282,277 @@ function StudentDetail({
           }}
         />
       )}
+      <Dialog
+        open={showQrOpen}
+        onClose={() => setShowQrOpen(false)}
+        title={`Scan to link ${employeeLabel.toLowerCase()}`}
+        className="max-w-sm"
+      >
+        <div className="flex flex-col items-center gap-4">
+          {student.simpleQr ? (
+            <img
+              src={student.simpleQr}
+              alt={`${employeeLabel} QR Code`}
+              className="w-64 max-w-full aspect-square rounded-2xl border-2 border-slate-100 bg-slate-50 p-3 shadow-inner"
+              draggable={false}
+            />
+          ) : (
+            <div className="flex aspect-square w-64 max-w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-4">
+              <AlertCircle className="mb-2 size-8 text-slate-300" />
+              <p className="text-xs font-bold text-slate-500 text-center">QR not generated</p>
+              <p className="mt-1 text-[10px] font-medium text-slate-400 text-center">Generate in the web app</p>
+            </div>
+          )}
+          <p className="w-full truncate rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-center font-mono text-[11px] font-medium text-slate-500">
+            {student.firstName}.{student.lastName}.{student.generatedStudentId}
+          </p>
+          <p className="text-center text-xs font-medium text-slate-500">
+            Present this code to the camera before capturing portraits.
+          </p>
+        </div>
+      </Dialog>
+    </div>
+  )
+}
+
+function captureUploadSummary(
+  capture: CaptureReview,
+  legacyUploadStatus?: ProjectUploadStatusRow,
+) {
+  const statuses = capture.files.map((file) => file.uploadStatus)
+  const status = legacyUploadStatus?.uploadStatus
+    ?? (statuses.includes('error')
+      ? 'error'
+      : statuses.includes('uploading')
+        ? 'uploading'
+        : statuses.includes('pending')
+          ? 'pending'
+          : statuses.length > 0 && statuses.every((fileStatus) => fileStatus === 'done')
+            ? 'done'
+            : null)
+  if (status === 'error') return { label: 'Upload error', className: 'text-rose-600', icon: <XCircle className="size-3.5" /> }
+  if (status === 'uploading') return { label: 'Uploading', className: 'text-blue-600', icon: <Loader className="size-3.5 animate-spin" /> }
+  if (status === 'pending') return { label: 'Queued', className: 'text-amber-600', icon: <CloudUpload className="size-3.5" /> }
+  if (status === 'done') return { label: 'Synced', className: 'text-emerald-600', icon: <CheckCircle className="size-3.5" /> }
+  return { label: 'Local', className: 'text-slate-500', icon: <Image className="size-3.5" /> }
+}
+
+function captureReviewKey(capture: CaptureReview) {
+  return `${capture.projectId}:${capture.studentId ?? 'none'}:${capture.capturedAt}:${capture.baseFilename}`
+}
+
+function CaptureStage({ capture }: { capture: CaptureReview }) {
+  const imageSource = capture.legacyPhoto?.previewUrl ?? capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData
+  return (
+    <div className="relative flex aspect-[16/7] min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg">
+      {imageSource ? (
+        <img
+          src={imageSource}
+          alt={`Capture ${capture.baseFilename}`}
+          className="block h-full w-full object-contain"
+          draggable={false}
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center text-center text-slate-500">
+          <Image className="mb-3 size-10 text-slate-600" />
+          <p className="text-sm font-bold text-slate-300">JPEG preview unavailable</p>
+          <p className="mt-1 text-xs font-medium">The capture remains safely stored below.</p>
+        </div>
+      )}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/75 to-transparent p-4">
+        <span className="rounded bg-black/55 px-2 py-1 font-mono text-[10px] font-bold text-white">
+          {capture.baseFilename}
+        </span>
+        <span className="rounded bg-black/55 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-white/80">
+          JPEG preview
+        </span>
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-7 text-[10px] font-medium text-white/80">
+        <span>{new Date(capture.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+        <span>{capture.pairingStatus === 'complete' ? 'JPEG + RAW' : capture.pairingStatus.replace('_', ' ')}</span>
+      </div>
+    </div>
+  )
+}
+
+function CaptureStageMeta({
+  capture,
+  uploadStatus,
+  onUpdateReview,
+}: {
+  capture: CaptureReview
+  uploadStatus?: ProjectUploadStatusRow
+  onUpdateReview: (
+    captureId: number,
+    values: {
+      favorite?: boolean
+      rejected?: boolean
+      selected?: boolean
+      rating?: number
+      colorLabel?: CaptureReview['colorLabel']
+    },
+  ) => void
+}) {
+  const upload = captureUploadSummary(capture, uploadStatus)
+  return (
+    <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-4">
+      <div className="min-w-0">
+        <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Rating</p>
+        <div className="mt-1.5 flex items-center gap-0.5" aria-label={`${capture.rating} out of 5 stars`}>
+          {Array.from({ length: 5 }, (_, index) => (
+            <button
+              key={index}
+              type="button"
+              title={`Rate ${index + 1} out of 5`}
+              aria-label={`Rate ${index + 1} out of 5`}
+              onClick={() => onUpdateReview(capture.id, { rating: index + 1 })}
+              className="rounded p-0.5 hover:bg-amber-50"
+            >
+              <Star className="size-3.5 text-amber-400" fill={index < capture.rating ? 'currentColor' : 'none'} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="min-w-0">
+        <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Pairing</p>
+        <p className={cn('mt-2 truncate text-xs font-bold', capture.pairingStatus === 'unpaired' ? 'text-rose-600' : 'text-slate-700')}>
+          {capture.pairingStatus === 'complete' ? 'JPEG + RAW' : capture.pairingStatus === 'jpeg_only' ? 'JPEG only' : capture.pairingStatus === 'raw_only' ? 'RAW only' : capture.pairingStatus === 'unpaired' ? 'Needs review' : 'Pending'}
+        </p>
+      </div>
+      <div className="min-w-0">
+        <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Upload</p>
+        <span className={cn('mt-2 flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider', upload.className)}>
+          {upload.icon} {upload.label}
+        </span>
+      </div>
+      <div className="flex items-end gap-2 sm:justify-end">
+        <button
+          type="button"
+          onClick={() => onUpdateReview(capture.id, { selected: !capture.selected })}
+          className={cn('rounded-lg border px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider', capture.selected ? 'border-teal-200 bg-teal-50 text-teal-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}
+        >
+          <Check className="mr-1 inline size-3" /> {capture.selected ? 'Selected' : 'Select'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onUpdateReview(capture.id, { favorite: !capture.favorite })}
+          className={cn('rounded-lg border px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider', capture.favorite ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}
+        >
+          <Star className="mr-1 inline size-3" fill={capture.favorite ? 'currentColor' : 'none'} /> {capture.favorite ? 'Favorite' : 'Favorite'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CaptureFilmstrip({
+  captures,
+  selectedCaptureId,
+  isFollowingLatest,
+  onSelect,
+  onLatest,
+  onPrevious,
+  onNext,
+}: {
+  captures: CaptureReview[]
+  selectedCaptureId: number | null
+  isFollowingLatest: boolean
+  onSelect: (captureId: number) => void
+  onLatest: () => void
+  onPrevious: () => void
+  onNext: () => void
+}) {
+  const stripRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    if (isFollowingLatest) {
+      strip.scrollTo({ left: strip.scrollWidth, behavior: 'smooth' })
+      return
+    }
+    strip.querySelector<HTMLElement>(`[data-filmstrip-capture="${selectedCaptureId}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [captures.length, isFollowingLatest, selectedCaptureId])
+
+  if (captures.length === 0) return null
+  const latestCaptureId = captures[captures.length - 1].id
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-slate-500">Recent captures</p>
+          <p className="mt-1 text-[11px] text-slate-400">Newest on the right · click to review without changing target</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onPrevious}
+            disabled={isFollowingLatest && captures.length < 2}
+            aria-label="Previous capture"
+            title="Previous capture"
+            className="rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <ArrowLeft className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={isFollowingLatest || captures.length < 2}
+            aria-label="Next capture"
+            title="Next capture"
+            className="rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <ArrowRight className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onLatest}
+            className={cn('rounded-full px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider', isFollowingLatest ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700 hover:bg-amber-100')}
+          >
+            {isFollowingLatest ? 'Following latest' : 'Latest capture'}
+          </button>
+        </div>
+      </div>
+      <div ref={stripRef} className="flex gap-2 overflow-x-auto pb-1">
+        {captures.map((capture) => {
+          const isCurrent = selectedCaptureId === capture.id
+          const isNewest = capture.id === latestCaptureId
+          const source = capture.legacyPhoto?.previewUrl
+          const fallback = capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData
+          return (
+            <button
+              key={capture.id}
+              data-filmstrip-capture={capture.id}
+              type="button"
+              onClick={() => onSelect(capture.id)}
+              className={cn(
+                'group relative min-w-[132px] overflow-hidden rounded-lg border-2 text-left transition-all sm:min-w-[150px]',
+                isCurrent ? 'border-teal-500 shadow-[0_0_0_2px_rgba(20,184,166,.14)]' : 'border-slate-200 hover:border-slate-400',
+              )}
+              aria-label={`Review capture ${capture.baseFilename}`}
+              aria-pressed={isCurrent}
+            >
+              <div className="relative aspect-[1.45] overflow-hidden bg-slate-900">
+                <GalleryThumbnail source={source} fallback={fallback} alt={`Capture ${capture.baseFilename}`} />
+                <span className={cn('absolute left-2 top-2 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-white', isNewest ? 'bg-red-600' : 'bg-black/60')}>
+                  {isNewest ? 'Newest' : `Frame ${capture.sequence ?? ''}`}
+                </span>
+                {capture.favorite && <Star className="absolute right-2 top-2 size-3.5 text-amber-300" fill="currentColor" />}
+              </div>
+              <div className="flex items-center justify-between gap-2 bg-white px-2 py-2">
+                <span className="font-mono text-[9px] text-slate-500">
+                  {new Date(capture.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+                <span className={cn('text-[9px] font-extrabold uppercase', capture.pairingStatus === 'complete' ? 'text-emerald-600' : capture.pairingStatus === 'unpaired' ? 'text-rose-600' : 'text-slate-500')}>
+                  {capture.pairingStatus === 'complete' ? 'JPG+RAW' : capture.pairingStatus === 'jpeg_only' ? 'JPG' : capture.pairingStatus.replace('_', ' ')}
+                </span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -2786,6 +3153,18 @@ function CaptureTile({
   const rawFile = capture.files.find((file) => file.fileRole === 'RAW')
   const zoomSource = photo?.previewUrl ?? photo?.thumbnailData ?? undefined
 
+  useEffect(() => {
+    if (!zoomOpen) return
+    const handleZoomKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setZoomOpen(false)
+    }
+    window.addEventListener('keydown', handleZoomKeyDown)
+    return () => window.removeEventListener('keydown', handleZoomKeyDown)
+  }, [zoomOpen])
+
   if (photo) {
     return (
       <div className="group relative flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
@@ -2813,7 +3192,13 @@ function CaptureTile({
           </button>
         )}
         {zoomOpen && zoomSource && (
-          <div className="fixed inset-0 z-[100] flex flex-col bg-black/95" onClick={() => setZoomOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Inspect ${capture.baseFilename}`}
+            className="fixed inset-0 z-[100] flex flex-col bg-black/95"
+            onClick={() => setZoomOpen(false)}
+          >
             <div className="flex items-center justify-between border-b border-white/15 px-5 py-3 text-white" onClick={(event) => event.stopPropagation()}>
               <span className="text-sm font-bold">{capture.baseFilename}</span>
               <div className="flex items-center gap-2">

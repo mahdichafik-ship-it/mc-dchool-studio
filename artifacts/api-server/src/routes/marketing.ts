@@ -1,10 +1,11 @@
 import { Router } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   db,
   deliveryGalleriesTable,
   deliveryOrdersTable,
+  marketingCampaignRecipientsTable,
   marketingCampaignsTable,
   marketingContactsTable,
   marketingTemplatesTable,
@@ -13,7 +14,7 @@ import {
 } from "@workspace/db";
 import { getUserId, requireAuth } from "../lib/auth";
 import { getStudioMember } from "../lib/studioAccess";
-import { resendConfiguration, sendResendEmails } from "../lib/resendEmail";
+import { ResendSendError, resendConfiguration, sendResendEmailBatch } from "../lib/resendEmail";
 
 const router = Router();
 
@@ -69,8 +70,13 @@ async function applyUnsubscribe(token: unknown): Promise<boolean> {
 }
 
 router.get("/marketing/unsubscribe", async (req, res): Promise<void> => {
-  const success = await applyUnsubscribe(req.query.token);
-  res.status(success ? 200 : 400).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Email preferences</title></head><body style="font-family:system-ui,sans-serif;margin:48px auto;max-width:560px;padding:0 20px;color:#0f172a"><h1>${success ? "You’re unsubscribed" : "This link is invalid"}</h1><p>${success ? "You will no longer receive promotional emails from this studio." : "The unsubscribe link could not be verified."}</p></body></html>`);
+  const parsed = parseUnsubscribeToken(req.query.token);
+  if (!parsed) {
+    res.status(400).type("html").send("<!doctype html><html><body><h1>This unsubscribe link is invalid.</h1></body></html>");
+    return;
+  }
+  const token = escapeHtml(String(req.query.token));
+  res.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Email preferences</title></head><body style="font-family:system-ui,sans-serif;margin:48px auto;max-width:560px;padding:0 20px;color:#0f172a"><h1>Stop promotional emails?</h1><p>Confirm that you no longer want promotional email from this studio.</p><form method="post" action="/api/marketing/unsubscribe?token=${token}"><button style="border:0;border-radius:6px;background:#0f766e;color:white;padding:12px 18px;font-weight:600" type="submit">Unsubscribe</button></form></body></html>`);
 });
 
 router.post("/marketing/unsubscribe", async (req, res): Promise<void> => {
@@ -84,6 +90,23 @@ type AudienceFilter = {
   engagement?: "visited" | "repeat" | "purchaser" | "all";
   search?: string;
 };
+
+function parseAudienceFilter(value: unknown): AudienceFilter | null {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some((key) => !["consent", "engagement", "search"].includes(key))) return null;
+  const consentValues = ["consented", "unconsented", "all"];
+  const engagementValues = ["visited", "repeat", "purchaser", "all"];
+  if (input.consent !== undefined && (typeof input.consent !== "string" || !consentValues.includes(input.consent))) return null;
+  if (input.engagement !== undefined && (typeof input.engagement !== "string" || !engagementValues.includes(input.engagement))) return null;
+  if (input.search !== undefined && (typeof input.search !== "string" || input.search.length > 200)) return null;
+  return {
+    ...(input.consent ? { consent: input.consent as AudienceFilter["consent"] } : {}),
+    ...(input.engagement ? { engagement: input.engagement as AudienceFilter["engagement"] } : {}),
+    ...(typeof input.search === "string" && input.search.trim() ? { search: input.search.trim().toLowerCase() } : {}),
+  };
+}
 
 function matchesAudience(contact: typeof marketingContactsTable.$inferSelect, filter: AudienceFilter): boolean {
   if (filter.search && !contact.email.includes(filter.search.toLowerCase())) return false;
@@ -221,11 +244,21 @@ router.patch("/marketing/contacts/:contactId/consent", requireAuth, async (req, 
     : typeof req.body?.consent === "boolean" ? req.body.consent : undefined;
   if (consented === undefined) { res.status(400).json({ error: "consented must be a boolean" }); return; }
   const now = new Date();
+  if (consented) {
+    const [existing] = await db.select({ unsubscribedAt: marketingContactsTable.unsubscribedAt })
+      .from(marketingContactsTable)
+      .where(and(eq(marketingContactsTable.id, contactId), eq(marketingContactsTable.studioId, member.studioId)))
+      .limit(1);
+    if (!existing) { res.status(404).json({ error: "Contact not found" }); return; }
+    if (existing.unsubscribedAt) {
+      res.status(409).json({ error: "An unsubscribed contact must opt in again themselves" });
+      return;
+    }
+  }
   const [contact] = await db.update(marketingContactsTable).set({
     marketingConsent: consented,
     consentAt: now,
     consentSource: typeof req.body.source === "string" ? req.body.source.slice(0, 100) : "studio",
-    ...(consented ? { unsubscribedAt: null } : {}),
   }).where(and(eq(marketingContactsTable.id, contactId), eq(marketingContactsTable.studioId, member.studioId))).returning();
   if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
   res.json({ contact: contactResponse(contact, 0, 0) });
@@ -245,7 +278,11 @@ router.patch("/marketing/contacts/:contactId/unsubscribe", requireAuth, async (r
   const member = await manager(req);
   const contactId = Number(req.params.contactId);
   if (!member || !Number.isInteger(contactId)) { res.status(404).json({ error: "Contact not found" }); return; }
-  const [contact] = await db.update(marketingContactsTable).set({ unsubscribedAt: req.body?.unsubscribed === false ? null : new Date() })
+  if (req.body?.unsubscribed === false) {
+    res.status(409).json({ error: "An unsubscribed contact must opt in again themselves" });
+    return;
+  }
+  const [contact] = await db.update(marketingContactsTable).set({ unsubscribedAt: new Date() })
     .where(and(eq(marketingContactsTable.id, contactId), eq(marketingContactsTable.studioId, member.studioId))).returning();
   if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
   res.json({ contact: contactResponse(contact, 0, 0) });
@@ -305,6 +342,16 @@ router.delete("/marketing/templates/:templateId", requireAuth, async (req, res):
 router.get(["/marketing/campaigns", "/marketing/campaign-drafts"], requireAuth, async (req, res): Promise<void> => {
   const member = await manager(req);
   if (!member) { res.status(403).json({ error: "Studio owner or admin access is required" }); return; }
+  const staleBefore = new Date(Date.now() - 5 * 60_000);
+  await db.update(marketingCampaignsTable).set({
+    status: "needs_review",
+    lastError: "The sending process stopped before delivery could be confirmed. Review this campaign in Resend before taking further action.",
+    updatedAt: new Date(),
+  }).where(and(
+    eq(marketingCampaignsTable.studioId, member.studioId),
+    eq(marketingCampaignsTable.status, "sending"),
+    lt(marketingCampaignsTable.updatedAt, staleBefore),
+  ));
   const campaigns = await db.select().from(marketingCampaignsTable).where(eq(marketingCampaignsTable.studioId, member.studioId)).orderBy(desc(marketingCampaignsTable.updatedAt));
   res.json({ campaigns });
 });
@@ -313,7 +360,8 @@ router.get("/marketing/email-status", requireAuth, async (req, res): Promise<voi
   const member = await manager(req);
   if (!member) { res.status(403).json({ error: "Studio owner or admin access is required" }); return; }
   const config = resendConfiguration();
-  res.json({ configured: config.configured, fromEmail: config.from || null });
+  const usesOnboardingSender = config.from.toLowerCase().includes("onboarding@resend.dev");
+  res.json({ configured: config.configured && !usesOnboardingSender, fromEmail: config.from || null });
 });
 
 router.post(["/marketing/campaigns", "/marketing/campaign-drafts"], requireAuth, async (req, res): Promise<void> => {
@@ -325,7 +373,8 @@ router.post(["/marketing/campaigns", "/marketing/campaign-drafts"], requireAuth,
   const [template] = await db.select().from(marketingTemplatesTable).where(and(eq(marketingTemplatesTable.id, templateId), eq(marketingTemplatesTable.studioId, member.studioId))).limit(1);
   if (!template) { res.status(404).json({ error: "Template not found" }); return; }
   const data = await studioData(member.studioId);
-  const filter = (req.body?.audienceFilter ?? req.body?.audience ?? {}) as AudienceFilter;
+  const filter = parseAudienceFilter(req.body?.audienceFilter ?? req.body?.audience);
+  if (!filter) { res.status(400).json({ error: "The audience filter is invalid" }); return; }
   const snapshot = JSON.stringify(filter);
   const recipientCount = data.contacts.filter((contact) =>
     contact.marketingConsent === true && !contact.unsubscribedAt && matchesAudience(contact, filter),
@@ -343,7 +392,7 @@ router.post("/marketing/campaigns/:campaignId/send", requireAuth, async (req, re
 
   const config = resendConfiguration();
   if (!config.configured) {
-    res.status(503).json({ error: "Resend requires both RESEND_API_KEY and RESEND_FROM_EMAIL" });
+    res.status(503).json({ error: "Resend requires RESEND_API_KEY, RESEND_FROM_EMAIL, and PUBLIC_APP_URL" });
     return;
   }
 
@@ -353,7 +402,11 @@ router.post("/marketing/campaigns/:campaignId/send", requireAuth, async (req, re
   )).limit(1);
   if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
   if (campaign.status !== "draft") {
-    res.status(409).json({ error: `This campaign is already ${campaign.status} and cannot be sent again` });
+    res.status(409).json({ error: `This campaign is ${campaign.status} and cannot be sent again` });
+    return;
+  }
+  if (config.from.toLowerCase().includes("onboarding@resend.dev")) {
+    res.status(503).json({ error: "Verify your own domain in Resend and replace the onboarding sender before sending customer campaigns" });
     return;
   }
 
@@ -363,77 +416,141 @@ router.post("/marketing/campaigns/:campaignId/send", requireAuth, async (req, re
   )).limit(1);
   if (!template) { res.status(409).json({ error: "The campaign template no longer exists" }); return; }
 
-  let filter: AudienceFilter;
+  let filter: AudienceFilter | null;
   try {
-    filter = JSON.parse(campaign.audienceFilterSnapshot) as AudienceFilter;
+    filter = parseAudienceFilter(JSON.parse(campaign.audienceFilterSnapshot));
   } catch {
+    filter = null;
+  }
+  if (!filter) {
     res.status(409).json({ error: "The saved audience filter is invalid" });
     return;
   }
-  const contacts = await db.select().from(marketingContactsTable).where(eq(marketingContactsTable.studioId, member.studioId));
-  const recipients = contacts.filter((contact) =>
+
+  const contacts = await db.select().from(marketingContactsTable)
+    .where(eq(marketingContactsTable.studioId, member.studioId))
+    .orderBy(asc(marketingContactsTable.id));
+  const initialRecipients = contacts.filter((contact) =>
     contact.marketingConsent === true && !contact.unsubscribedAt && matchesAudience(contact, filter),
   );
-  if (recipients.length === 0) {
+  if (initialRecipients.length === 0) {
     res.status(409).json({ error: "No currently consented recipients match this campaign" });
     return;
   }
+  if (initialRecipients.length > 100) {
+    res.status(409).json({ error: "Campaign sending is currently limited to 100 recipients per draft" });
+    return;
+  }
 
-  const [claimed] = await db.update(marketingCampaignsTable).set({
-    status: "sending",
-    recipientCount: recipients.length,
-    sentCount: 0,
-    lastError: null,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(marketingCampaignsTable.id, campaignId),
-    eq(marketingCampaignsTable.studioId, member.studioId),
-    eq(marketingCampaignsTable.status, "draft"),
-  )).returning();
-  if (!claimed) { res.status(409).json({ error: "Campaign sending has already started" }); return; }
-
-  const protocol = String(req.headers["x-forwarded-proto"] ?? req.protocol).split(",")[0].trim();
-  const host = req.get("host");
-  const baseUrl = `${protocol}://${host}`;
-  let sentCount = 0;
+  let claimed = false;
   try {
-    const messages = recipients.map((contact) => {
-      const unsubscribeUrl = `${baseUrl}/api/marketing/unsubscribe?token=${encodeURIComponent(unsubscribeToken(contact.id, member.studioId))}`;
-      const text = `${template.bodyText.trim()}\n\nUnsubscribe: ${unsubscribeUrl}`;
-      const html = `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">${escapeHtml(template.bodyText).replace(/\n/g, "<br>")}<hr style="margin:32px 0 16px;border:0;border-top:1px solid #e2e8f0"><p style="font-size:12px;color:#64748b">Don’t want promotional email from this studio? <a href="${escapeHtml(unsubscribeUrl)}">Unsubscribe</a>.</p></div>`;
+    await db.transaction(async (tx) => {
+      const [campaignClaim] = await tx.update(marketingCampaignsTable).set({
+        status: "sending",
+        recipientCount: initialRecipients.length,
+        sentCount: 0,
+        lastError: null,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(marketingCampaignsTable.id, campaignId),
+        eq(marketingCampaignsTable.studioId, member.studioId),
+        eq(marketingCampaignsTable.status, "draft"),
+      )).returning({ id: marketingCampaignsTable.id });
+      if (!campaignClaim) throw new Error("CAMPAIGN_ALREADY_CLAIMED");
+      await tx.insert(marketingCampaignRecipientsTable).values(initialRecipients.map((contact) => ({
+        campaignId,
+        contactId: contact.id,
+        studioId: member.studioId,
+        batchNumber: 0,
+        status: "pending" as const,
+      })));
+    });
+    claimed = true;
+
+    const currentContacts = await db.select().from(marketingContactsTable).where(and(
+      eq(marketingContactsTable.studioId, member.studioId),
+      inArray(marketingContactsTable.id, initialRecipients.map((contact) => contact.id)),
+    )).orderBy(asc(marketingContactsTable.id));
+    const eligibleContacts = currentContacts.filter((contact) =>
+      contact.marketingConsent === true && !contact.unsubscribedAt && matchesAudience(contact, filter),
+    );
+    const eligibleIds = new Set(eligibleContacts.map((contact) => contact.id));
+    const suppressedIds = initialRecipients.map((contact) => contact.id).filter((id) => !eligibleIds.has(id));
+    if (suppressedIds.length > 0) {
+      await db.update(marketingCampaignRecipientsTable).set({
+        status: "suppressed",
+        updatedAt: new Date(),
+      }).where(and(
+        eq(marketingCampaignRecipientsTable.campaignId, campaignId),
+        inArray(marketingCampaignRecipientsTable.contactId, suppressedIds),
+      ));
+    }
+    if (eligibleContacts.length === 0) throw new Error("All recipients became ineligible before dispatch");
+
+    const messages = eligibleContacts.map((contact) => {
+      const unsubscribeUrl = `${config.publicAppUrl}/api/marketing/unsubscribe?token=${encodeURIComponent(unsubscribeToken(contact.id, member.studioId))}`;
       return {
         to: [contact.email],
         subject: template.subject,
-        text,
-        html,
+        text: `${template.bodyText.trim()}\n\nUnsubscribe: ${unsubscribeUrl}`,
+        html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">${escapeHtml(template.bodyText).replace(/\n/g, "<br>")}<hr style="margin:32px 0 16px;border:0;border-top:1px solid #e2e8f0"><p style="font-size:12px;color:#64748b">Don’t want promotional email from this studio? <a href="${escapeHtml(unsubscribeUrl)}">Unsubscribe</a>.</p></div>`,
         headers: {
           "List-Unsubscribe": `<${unsubscribeUrl}>`,
           "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         },
       };
     });
-    sentCount = await sendResendEmails(messages);
-    const [sentCampaign] = await db.update(marketingCampaignsTable).set({
-      status: "sent",
-      sentCount,
-      sentAt: new Date(),
-      updatedAt: new Date(),
-    }).where(and(
-      eq(marketingCampaignsTable.id, campaignId),
-      eq(marketingCampaignsTable.studioId, member.studioId),
-    )).returning();
+    const providerIds = await sendResendEmailBatch(messages, `volume-capture-campaign-${campaignId}-v1`);
+    const sentAt = new Date();
+    const [sentCampaign] = await db.transaction(async (tx) => {
+      for (let index = 0; index < eligibleContacts.length; index++) {
+        await tx.update(marketingCampaignRecipientsTable).set({
+          status: "sent",
+          providerEmailId: providerIds[index],
+          sentAt,
+          updatedAt: sentAt,
+        }).where(and(
+          eq(marketingCampaignRecipientsTable.campaignId, campaignId),
+          eq(marketingCampaignRecipientsTable.contactId, eligibleContacts[index].id),
+        ));
+      }
+      return tx.update(marketingCampaignsTable).set({
+        status: "sent",
+        sentCount: eligibleContacts.length,
+        sentAt,
+        updatedAt: sentAt,
+      }).where(and(
+        eq(marketingCampaignsTable.id, campaignId),
+        eq(marketingCampaignsTable.studioId, member.studioId),
+      )).returning();
+    });
+    const sentCount = eligibleContacts.length;
     res.json({ campaign: sentCampaign, sentCount });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Resend error";
-    await db.update(marketingCampaignsTable).set({
-      status: "failed",
-      sentCount,
-      lastError: message.slice(0, 1_000),
-      updatedAt: new Date(),
-    }).where(and(
-      eq(marketingCampaignsTable.id, campaignId),
-      eq(marketingCampaignsTable.studioId, member.studioId),
-    ));
+    if (message === "CAMPAIGN_ALREADY_CLAIMED") {
+      res.status(409).json({ error: "Campaign sending has already started" });
+      return;
+    }
+    if (claimed) {
+      await db.update(marketingCampaignRecipientsTable).set({
+        status: "failed",
+        lastError: message.slice(0, 1_000),
+        updatedAt: new Date(),
+      }).where(and(
+        eq(marketingCampaignRecipientsTable.campaignId, campaignId),
+        eq(marketingCampaignRecipientsTable.status, "pending"),
+      ));
+      await db.update(marketingCampaignsTable).set({
+        status: error instanceof ResendSendError && error.outcome === "rejected" ? "failed" : "needs_review",
+        sentCount: 0,
+        lastError: message.slice(0, 1_000),
+        updatedAt: new Date(),
+      }).where(and(
+        eq(marketingCampaignsTable.id, campaignId),
+        eq(marketingCampaignsTable.studioId, member.studioId),
+      ));
+    }
     res.status(502).json({ error: "Resend could not send this campaign", detail: message });
   }
 });

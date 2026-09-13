@@ -1110,19 +1110,25 @@ export const DeleteMarketingTemplateResponse = zod.void()
 
 export const listMarketingCampaignsResponseCampaignsItemOneNameMax = 120;
 
+export const listMarketingCampaignsResponseCampaignsItemOneAudienceFilterSearchMax = 200;
+
 
 
 export const ListMarketingCampaignsResponse = zod.object({
   "campaigns": zod.array(zod.object({
   "name": zod.string().min(1).max(listMarketingCampaignsResponseCampaignsItemOneNameMax),
   "templateId": zod.number(),
-  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(listMarketingCampaignsResponseCampaignsItemOneAudienceFilterSearchMax).optional()
+}).optional()
 }).and(zod.object({
   "id": zod.number(),
   "studioId": zod.number(),
   "audienceFilterSnapshot": zod.string(),
   "recipientCount": zod.number(),
-  "status": zod.enum(['draft', 'sending', 'sent', 'failed']),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed', 'needs_review']),
   "sentCount": zod.number(),
   "sentAt": zod.coerce.date().nullable(),
   "lastError": zod.string().nullable(),
@@ -1134,28 +1140,40 @@ export const ListMarketingCampaignsResponse = zod.object({
 
 export const createMarketingCampaignDraftBodyNameMax = 120;
 
+export const createMarketingCampaignDraftBodyAudienceFilterSearchMax = 200;
+
 
 
 export const CreateMarketingCampaignDraftBody = zod.object({
   "name": zod.string().min(1).max(createMarketingCampaignDraftBodyNameMax),
   "templateId": zod.number(),
-  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(createMarketingCampaignDraftBodyAudienceFilterSearchMax).optional()
+}).optional()
 })
 
 export const createMarketingCampaignDraftResponseOneNameMax = 120;
+
+export const createMarketingCampaignDraftResponseOneAudienceFilterSearchMax = 200;
 
 
 
 export const CreateMarketingCampaignDraftResponse = zod.object({
   "name": zod.string().min(1).max(createMarketingCampaignDraftResponseOneNameMax),
   "templateId": zod.number(),
-  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(createMarketingCampaignDraftResponseOneAudienceFilterSearchMax).optional()
+}).optional()
 }).and(zod.object({
   "id": zod.number(),
   "studioId": zod.number(),
   "audienceFilterSnapshot": zod.string(),
   "recipientCount": zod.number(),
-  "status": zod.enum(['draft', 'sending', 'sent', 'failed']),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed', 'needs_review']),
   "sentCount": zod.number(),
   "sentAt": zod.coerce.date().nullable(),
   "lastError": zod.string().nullable(),
@@ -1176,19 +1194,25 @@ export const SendMarketingCampaignParams = zod.object({
 
 export const sendMarketingCampaignResponseCampaignOneNameMax = 120;
 
+export const sendMarketingCampaignResponseCampaignOneAudienceFilterSearchMax = 200;
+
 
 
 export const SendMarketingCampaignResponse = zod.object({
   "campaign": zod.object({
   "name": zod.string().min(1).max(sendMarketingCampaignResponseCampaignOneNameMax),
   "templateId": zod.number(),
-  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(sendMarketingCampaignResponseCampaignOneAudienceFilterSearchMax).optional()
+}).optional()
 }).and(zod.object({
   "id": zod.number(),
   "studioId": zod.number(),
   "audienceFilterSnapshot": zod.string(),
   "recipientCount": zod.number(),
-  "status": zod.enum(['draft', 'sending', 'sent', 'failed']),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed', 'needs_review']),
   "sentCount": zod.number(),
   "sentAt": zod.coerce.date().nullable(),
   "lastError": zod.string().nullable(),

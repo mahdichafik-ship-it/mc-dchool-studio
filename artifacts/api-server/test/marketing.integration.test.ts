@@ -10,6 +10,8 @@ import {
   db,
   deliveryAccessesTable,
   deliveryGalleriesTable,
+  marketingCampaignRecipientsTable,
+  marketingCampaignsTable,
   marketingContactsTable,
   marketingVisitsTable,
   pool,
@@ -34,6 +36,7 @@ let resendServer: Server;
 let baseUrl: string;
 let resendBaseUrl: string;
 const resendBatches: Array<Array<Record<string, unknown>>> = [];
+let resendResponseMode: "success" | "incomplete" = "success";
 let studioId: number;
 let otherStudioId: number;
 let galleryId: number;
@@ -79,9 +82,12 @@ before(async () => {
     }
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    resendBatches.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Array<Record<string, unknown>>);
+    const batch = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Array<Record<string, unknown>>;
+    resendBatches.push(batch);
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ data: [{ id: "email_test" }] }));
+    res.end(JSON.stringify({
+      data: resendResponseMode === "success" ? batch.map((_, index) => ({ id: `email_test_${index}` })) : [],
+    }));
   });
   resendServer.listen(0, "127.0.0.1");
   await once(resendServer, "listening");
@@ -144,6 +150,7 @@ before(async () => {
   const address = server.address();
   assert(address && typeof address !== "string");
   baseUrl = `http://127.0.0.1:${address.port}`;
+  process.env.PUBLIC_APP_URL = baseUrl;
   return gallery.slug;
 });
 
@@ -284,6 +291,12 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   });
   assert.equal((await request(viewerUserId, "/api/marketing/email-status")).status, 403);
 
+  process.env.RESEND_FROM_EMAIL = "Volume Capture <onboarding@resend.dev>";
+  const onboardingSend = await request(ownerUserId, `/api/marketing/campaigns/${draft.id}/send`, { method: "POST" });
+  assert.equal(onboardingSend.status, 503);
+  assert.equal(resendBatches.length, 0);
+  process.env.RESEND_FROM_EMAIL = "Volume Capture <test@volume.example>";
+
   const sent = await request(ownerUserId, `/api/marketing/campaigns/${draft.id}/send`, { method: "POST" });
   assert.equal(sent.status, 200);
   const result = await json<{ campaign: { status: string; sentCount: number; sentAt: string }; sentCount: number }>(sent);
@@ -298,6 +311,10 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   assert.equal(resendBatches[0][0].subject, "News");
   assert(!JSON.stringify(resendBatches).includes("unconsented@example.com"));
   assert(!JSON.stringify(resendBatches).includes("unsubscribed@example.com"));
+  const [ledgerEntry] = await db.select().from(marketingCampaignRecipientsTable)
+    .where(eq(marketingCampaignRecipientsTable.campaignId, draft.id));
+  assert.equal(ledgerEntry.status, "sent");
+  assert.equal(ledgerEntry.providerEmailId, "email_test_0");
 
   const headers = resendBatches[0][0].headers as Record<string, string>;
   const unsubscribeHeader = headers["List-Unsubscribe"];
@@ -305,11 +322,44 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   const unsubscribeUrl = unsubscribeHeader.slice(1, -1);
   const unsubscribeResponse = await fetch(unsubscribeUrl);
   assert.equal(unsubscribeResponse.status, 200);
+  const [leadBeforeConfirmation] = await db.select().from(marketingContactsTable)
+    .where(eq(marketingContactsTable.email, "lead@example.com"));
+  assert.equal(leadBeforeConfirmation.unsubscribedAt, null);
+  const confirmedUnsubscribe = await fetch(unsubscribeUrl, { method: "POST" });
+  assert.equal(confirmedUnsubscribe.status, 204);
   const [lead] = await db.select().from(marketingContactsTable)
     .where(eq(marketingContactsTable.email, "lead@example.com"));
   assert(lead.unsubscribedAt);
 
+  const forbiddenReconsent = await request(ownerUserId, `/api/marketing/contacts/${lead.id}/consent`, {
+    method: "PATCH",
+    body: JSON.stringify({ consented: true, source: "studio_manual" }),
+  });
+  assert.equal(forbiddenReconsent.status, 409);
+
   const duplicateSend = await request(ownerUserId, `/api/marketing/campaigns/${draft.id}/send`, { method: "POST" });
   assert.equal(duplicateSend.status, 409);
   assert.equal(resendBatches.length, 1);
+
+  const [uncertainContact] = await db.insert(marketingContactsTable).values({
+    studioId,
+    email: "uncertain@example.com",
+    marketingConsent: true,
+    consentAt: new Date(),
+    consentSource: "test",
+  }).returning();
+  const uncertainCampaignResponse = await request(ownerUserId, "/api/marketing/campaigns", {
+    method: "POST",
+    body: JSON.stringify({ name: "Uncertain delivery", templateId: template.id }),
+  });
+  const uncertainCampaign = await json<{ id: number }>(uncertainCampaignResponse);
+  resendResponseMode = "incomplete";
+  const uncertainSend = await request(ownerUserId, `/api/marketing/campaigns/${uncertainCampaign.id}/send`, { method: "POST" });
+  assert.equal(uncertainSend.status, 502);
+  const [storedUncertainCampaign] = await db.select().from(marketingCampaignsTable)
+    .where(eq(marketingCampaignsTable.id, uncertainCampaign.id));
+  assert.equal(storedUncertainCampaign.status, "needs_review");
+  assert.equal(storedUncertainCampaign.sentCount, 0);
+  resendResponseMode = "success";
+  assert(uncertainContact.id);
 });

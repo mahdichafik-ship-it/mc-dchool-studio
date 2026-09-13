@@ -10,6 +10,16 @@ type ResendEmail = {
   reply_to?: string;
 };
 
+export class ResendSendError extends Error {
+  constructor(
+    public readonly outcome: "rejected" | "unknown",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ResendSendError";
+  }
+}
+
 function resendApiBaseUrl(): string {
   if (process.env.NODE_ENV === "test" && process.env.RESEND_API_BASE_URL) {
     return process.env.RESEND_API_BASE_URL.replace(/\/+$/, "");
@@ -20,42 +30,57 @@ function resendApiBaseUrl(): string {
 export function resendConfiguration() {
   const apiKey = process.env.RESEND_API_KEY?.trim() ?? "";
   const from = process.env.RESEND_FROM_EMAIL?.trim() ?? "";
+  const publicAppUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "") ?? "";
   return {
-    configured: Boolean(apiKey && from),
+    configured: Boolean(apiKey && from && /^https?:\/\//.test(publicAppUrl)),
     apiKey,
     from,
+    publicAppUrl,
     replyTo: process.env.RESEND_REPLY_TO?.trim() || undefined,
   };
 }
 
-export async function sendResendEmails(
+export async function sendResendEmailBatch(
   messages: Omit<ResendEmail, "from" | "reply_to">[],
-): Promise<number> {
+  idempotencyKey: string,
+): Promise<string[]> {
   const config = resendConfiguration();
   if (!config.apiKey) throw new Error("RESEND_API_KEY is not configured");
   if (!config.from) throw new Error("RESEND_FROM_EMAIL is not configured");
+  if (messages.length < 1 || messages.length > RESEND_BATCH_SIZE) {
+    throw new Error(`Resend batches must contain 1-${RESEND_BATCH_SIZE} messages`);
+  }
 
-  let sent = 0;
-  for (let index = 0; index < messages.length; index += RESEND_BATCH_SIZE) {
-    const batch = messages.slice(index, index + RESEND_BATCH_SIZE).map((message) => ({
-      ...message,
-      from: config.from,
-      ...(config.replyTo ? { reply_to: config.replyTo } : {}),
-    }));
-    const response = await fetch(`${resendApiBaseUrl()}/emails/batch`, {
+  const batch = messages.map((message) => ({
+    ...message,
+    from: config.from,
+    ...(config.replyTo ? { reply_to: config.replyTo } : {}),
+  }));
+  let response: Response;
+  try {
+    response = await fetch(`${resendApiBaseUrl()}/emails/batch`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${config.apiKey}`,
         "content-type": "application/json",
+        "idempotency-key": idempotencyKey,
       },
       body: JSON.stringify(batch),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 500);
-      throw new Error(`Resend rejected the batch (${response.status}): ${detail || response.statusText}`);
-    }
-    sent += batch.length;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "network error";
+    throw new ResendSendError("unknown", `Resend delivery outcome is unknown: ${detail}`);
   }
-  return sent;
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    const outcome = response.status >= 400 && response.status < 500 ? "rejected" : "unknown";
+    throw new ResendSendError(outcome, `Resend rejected the batch (${response.status}): ${detail || response.statusText}`);
+  }
+  const payload = await response.json() as { data?: Array<{ id?: unknown }> };
+  const ids = payload.data?.map((item) => typeof item.id === "string" ? item.id : "") ?? [];
+  if (ids.length !== batch.length || ids.some((id) => !id)) {
+    throw new ResendSendError("unknown", "Resend returned an incomplete batch result");
+  }
+  return ids;
 }

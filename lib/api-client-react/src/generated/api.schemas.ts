@@ -517,7 +517,31 @@ export type MarketingTemplate = MarketingTemplateInput & {
   updatedAt: string;
 };
 
-export type MarketingCampaignInputAudienceFilter = { [key: string]: unknown };
+export type MarketingCampaignInputAudienceFilterConsent = typeof MarketingCampaignInputAudienceFilterConsent[keyof typeof MarketingCampaignInputAudienceFilterConsent];
+
+
+export const MarketingCampaignInputAudienceFilterConsent = {
+  consented: 'consented',
+  unconsented: 'unconsented',
+  all: 'all',
+} as const;
+
+export type MarketingCampaignInputAudienceFilterEngagement = typeof MarketingCampaignInputAudienceFilterEngagement[keyof typeof MarketingCampaignInputAudienceFilterEngagement];
+
+
+export const MarketingCampaignInputAudienceFilterEngagement = {
+  visited: 'visited',
+  repeat: 'repeat',
+  purchaser: 'purchaser',
+  all: 'all',
+} as const;
+
+export type MarketingCampaignInputAudienceFilter = {
+  consent?: MarketingCampaignInputAudienceFilterConsent;
+  engagement?: MarketingCampaignInputAudienceFilterEngagement;
+  /** @maxLength 200 */
+  search?: string;
+};
 
 export interface MarketingCampaignInput {
   /**
@@ -537,6 +561,7 @@ export const MarketingCampaignStatus = {
   sending: 'sending',
   sent: 'sent',
   failed: 'failed',
+  needs_review: 'needs_review',
 } as const;
 
 export type MarketingCampaign = MarketingCampaignInput & ({

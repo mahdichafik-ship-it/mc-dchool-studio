@@ -1755,7 +1755,11 @@ components:
         templateId: { type: integer }
         audienceFilter:
           type: object
-          additionalProperties: true
+          additionalProperties: false
+          properties:
+            consent: { type: string, enum: [consented, unconsented, all] }
+            engagement: { type: string, enum: [visited, repeat, purchaser, all] }
+            search: { type: string, maxLength: 200 }
     MarketingCampaign:
       allOf:
         - $ref: "#/components/schemas/MarketingCampaignInput"
@@ -1766,7 +1770,7 @@ components:
             studioId: { type: integer }
             audienceFilterSnapshot: { type: string }
             recipientCount: { type: integer }
-            status: { type: string, enum: [draft, sending, sent, failed] }
+            status: { type: string, enum: [draft, sending, sent, failed, needs_review] }
             sentCount: { type: integer }
             sentAt: { type: ["string", "null"], format: date-time }
             lastError: { type: ["string", "null"] }

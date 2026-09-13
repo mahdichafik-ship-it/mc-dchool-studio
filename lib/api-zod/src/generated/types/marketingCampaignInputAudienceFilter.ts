@@ -5,5 +5,12 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MarketingCampaignInputAudienceFilterConsent } from './marketingCampaignInputAudienceFilterConsent';
+import type { MarketingCampaignInputAudienceFilterEngagement } from './marketingCampaignInputAudienceFilterEngagement';
 
-export type MarketingCampaignInputAudienceFilter = { [key: string]: unknown };
+export type MarketingCampaignInputAudienceFilter = {
+  consent?: MarketingCampaignInputAudienceFilterConsent;
+  engagement?: MarketingCampaignInputAudienceFilterEngagement;
+  /** @maxLength 200 */
+  search?: string;
+};

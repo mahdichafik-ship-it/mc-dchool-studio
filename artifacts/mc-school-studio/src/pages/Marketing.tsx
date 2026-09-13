@@ -314,22 +314,26 @@ function MarketingOverview() {
                     </td>
                     <td className="px-5 py-4 text-right">
                       <div className="flex flex-wrap justify-end gap-2">
-                        <button
-                          onClick={() => toggleConsent(contact, !(contact.marketingConsent === true && !contact.unsubscribedAt))}
-                          className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1"
-                          style={{
-                            backgroundColor: contact.marketingConsent === true && !contact.unsubscribedAt ? "#f0fdfa" : "#f1f5f9",
-                            color: contact.marketingConsent === true && !contact.unsubscribedAt ? "#0f766e" : "#64748b",
-                          }}
-                        >
-                          {contact.marketingConsent === true && !contact.unsubscribedAt ? (
-                            <><CheckCircle2 className="size-3.5" /> Consented</>
-                          ) : contact.unsubscribedAt ? (
-                            <><XCircle className="size-3.5 text-red-500" /> Unsubscribed</>
-                          ) : (
-                            <><AlertCircle className="size-3.5" /> Unknown</>
-                          )}
-                        </button>
+                        {contact.unsubscribedAt ? (
+                          <span className="flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">
+                            <XCircle className="size-3.5" /> Unsubscribed
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => toggleConsent(contact, contact.marketingConsent !== true)}
+                            className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1"
+                            style={{
+                              backgroundColor: contact.marketingConsent === true ? "#f0fdfa" : "#f1f5f9",
+                              color: contact.marketingConsent === true ? "#0f766e" : "#64748b",
+                            }}
+                          >
+                            {contact.marketingConsent === true ? (
+                              <><CheckCircle2 className="size-3.5" /> Consented</>
+                            ) : (
+                              <><AlertCircle className="size-3.5" /> Unknown</>
+                            )}
+                          </button>
+                        )}
                         {!contact.unsubscribedAt && (
                           <button
                             type="button"
@@ -469,7 +473,9 @@ function MarketingCampaigns() {
             <p className={`mt-1 text-sm ${emailStatus?.configured ? "text-emerald-800" : "text-amber-800"}`}>
               {emailStatus?.configured
                 ? `Campaigns will be sent from ${emailStatus.fromEmail}. Eligible recipients are checked again immediately before sending.`
-                : "Add RESEND_FROM_EMAIL after verifying a sender domain in Resend. Draft preparation remains available."}
+                : emailStatus?.fromEmail?.includes("onboarding@resend.dev")
+                  ? "The onboarding sender is connected for setup only. Verify your own domain in Resend, then update RESEND_FROM_EMAIL before sending customer campaigns."
+                  : "Add RESEND_FROM_EMAIL after verifying a sender domain in Resend. Draft preparation remains available."}
             </p>
           </div>
         </div>
@@ -599,7 +605,7 @@ function MarketingCampaigns() {
                     <button
                       type="button"
                       onClick={() => handleSend(campaign)}
-                      disabled={!emailStatus?.configured || campaign.recipientCount < 1 || sendCampaign.isPending}
+                      disabled={!emailStatus?.configured || campaign.recipientCount < 1 || campaign.recipientCount > 100 || sendCampaign.isPending}
                       className="inline-flex items-center gap-2 rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Send className="size-4" />
@@ -611,10 +617,17 @@ function MarketingCampaigns() {
                         ? `Sent ${format(new Date(campaign.sentAt), "MMM d")}`
                         : campaign.status === "sending"
                           ? "Sending…"
+                          : campaign.status === "needs_review"
+                            ? "Delivery uncertain — review in Resend"
                           : campaign.lastError || "Send failed"}
                     </span>
                   )}
                 </div>
+                {campaign.status === "draft" && campaign.recipientCount > 100 && (
+                  <p className="mt-3 text-xs text-amber-700">
+                    Narrow this audience to 100 contacts or fewer before sending.
+                  </p>
+                )}
               </div>
             );
           })}

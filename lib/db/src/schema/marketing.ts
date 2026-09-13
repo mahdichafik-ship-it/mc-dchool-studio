@@ -54,7 +54,7 @@ export const marketingCampaignsTable = pgTable("marketing_campaigns", {
   templateId: integer("template_id").notNull().references(() => marketingTemplatesTable.id, { onDelete: "restrict" }),
   audienceFilterSnapshot: text("audience_filter_snapshot").notNull(),
   recipientCount: integer("recipient_count").notNull().default(0),
-  status: text("status", { enum: ["draft", "sending", "sent", "failed"] }).notNull().default("draft"),
+  status: text("status", { enum: ["draft", "sending", "sent", "failed", "needs_review"] }).notNull().default("draft"),
   sentCount: integer("sent_count").notNull().default(0),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   lastError: text("last_error"),
@@ -62,7 +62,25 @@ export const marketingCampaignsTable = pgTable("marketing_campaigns", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const marketingCampaignRecipientsTable = pgTable("marketing_campaign_recipients", {
+  id: serial("id").primaryKey(),
+  campaignId: integer("campaign_id").notNull().references(() => marketingCampaignsTable.id, { onDelete: "cascade" }),
+  contactId: integer("contact_id").notNull().references(() => marketingContactsTable.id, { onDelete: "cascade" }),
+  studioId: integer("studio_id").notNull().references(() => studiosTable.id, { onDelete: "cascade" }),
+  batchNumber: integer("batch_number").notNull(),
+  status: text("status", { enum: ["pending", "sent", "suppressed", "failed"] }).notNull().default("pending"),
+  providerEmailId: text("provider_email_id"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("marketing_campaign_recipient_unique").on(table.campaignId, table.contactId),
+  index("marketing_campaign_recipient_batch_idx").on(table.campaignId, table.batchNumber),
+]);
+
 export type MarketingContact = typeof marketingContactsTable.$inferSelect;
 export type MarketingVisit = typeof marketingVisitsTable.$inferSelect;
 export type MarketingTemplate = typeof marketingTemplatesTable.$inferSelect;
 export type MarketingCampaign = typeof marketingCampaignsTable.$inferSelect;
+export type MarketingCampaignRecipient = typeof marketingCampaignRecipientsTable.$inferSelect;

@@ -80,6 +80,8 @@ export * from './listMarketingContactsParams';
 export * from './marketingCampaign';
 export * from './marketingCampaignInput';
 export * from './marketingCampaignInputAudienceFilter';
+export * from './marketingCampaignInputAudienceFilterConsent';
+export * from './marketingCampaignInputAudienceFilterEngagement';
 export * from './marketingCampaignSendResponse';
 export * from './marketingCampaignStatus';
 export * from './marketingConsentInput';

@@ -14,4 +14,5 @@ export const MarketingCampaignStatus = {
   sending: 'sending',
   sent: 'sent',
   failed: 'failed',
+  needs_review: 'needs_review',
 } as const;

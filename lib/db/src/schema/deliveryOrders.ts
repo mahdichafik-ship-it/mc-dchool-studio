@@ -1,11 +1,13 @@
 import { pgTable, serial, text, timestamp, integer, boolean } from "drizzle-orm/pg-core";
 import { deliveryGalleriesTable } from "./deliveries";
 import { studentPhotosTable } from "./photos";
+import { marketingContactsTable } from "./marketing";
 
 export const deliveryOrdersTable = pgTable("delivery_orders", {
   id: serial("id").primaryKey(),
   galleryId: integer("gallery_id").notNull().references(() => deliveryGalleriesTable.id, { onDelete: "cascade" }),
   accessId: integer("access_id").notNull(),
+  contactId: integer("contact_id").references(() => marketingContactsTable.id, { onDelete: "set null" }),
   status: text("status", { enum: ["pending", "paid", "expired", "refunded", "cancelled"] }).notNull().default("pending"),
   paymentMethod: text("payment_method", { enum: ["stripe", "establishment", "bank_transfer"] }).notNull().default("stripe"),
   stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),

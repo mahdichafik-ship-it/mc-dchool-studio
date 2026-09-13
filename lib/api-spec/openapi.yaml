@@ -26,6 +26,8 @@ tags:
     description: QR code export operations
   - name: platform
     description: Global platform-owner and studio-owner onboarding operations
+  - name: marketing
+    description: Consent-aware studio marketing contacts and campaign drafts
 
 paths:
   /healthz:
@@ -840,6 +842,90 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessInput" } } }
       responses: { "200": { description: Access token, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessResponse" } } } }, "401": { description: Invalid access } }
+  /marketing/overview:
+    get:
+      operationId: getMarketingOverview
+      tags: [marketing]
+      responses:
+        "200": { description: Studio marketing metrics, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingOverview" } } } }
+        "401": { description: Unauthorized }
+        "403": { description: Studio owner or admin required }
+  /marketing/contacts:
+    get:
+      operationId: listMarketingContacts
+      tags: [marketing]
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: engagement, in: query, schema: { type: string, enum: [all, visited, repeat, purchaser] } }
+        - { name: consent, in: query, schema: { type: string, enum: [all, consented, unconsented] } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        "200": { description: Contacts, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingContactsResponse" } } } }
+        "403": { description: Studio owner or admin required }
+  /marketing/contacts/{contactId}/consent:
+    patch:
+      operationId: updateMarketingConsent
+      tags: [marketing]
+      parameters: [{ name: contactId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingConsentInput" } } }
+      responses:
+        "200": { description: Updated contact, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingContactMutationResponse" } } } }
+        "403": { description: Studio owner or admin required }
+  /marketing/contacts/{contactId}/unsubscribe:
+    post:
+      operationId: unsubscribeMarketingContact
+      tags: [marketing]
+      parameters: [{ name: contactId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Unsubscribed contact, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingContactMutationResponse" } } } }
+        "403": { description: Studio owner or admin required }
+  /marketing/templates:
+    get:
+      operationId: listMarketingTemplates
+      tags: [marketing]
+      responses:
+        "200": { description: Studio templates, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/MarketingTemplate" } } } } }
+    post:
+      operationId: createMarketingTemplate
+      tags: [marketing]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplateInput" } } }
+      responses:
+        "201": { description: Created template, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplate" } } } }
+  /marketing/templates/{templateId}:
+    patch:
+      operationId: updateMarketingTemplate
+      tags: [marketing]
+      parameters: [{ name: templateId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplateInput" } } }
+      responses:
+        "200": { description: Updated template, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplate" } } } }
+    delete:
+      operationId: deleteMarketingTemplate
+      tags: [marketing]
+      parameters: [{ name: templateId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "204": { description: Deleted template }
+  /marketing/campaigns:
+    get:
+      operationId: listMarketingCampaigns
+      tags: [marketing]
+      responses:
+        "200": { description: Campaign drafts, content: { application/json: { schema: { type: object, properties: { campaigns: { type: array, items: { $ref: "#/components/schemas/MarketingCampaign" } } } } } } }
+    post:
+      operationId: createMarketingCampaignDraft
+      tags: [marketing]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaignInput" } } }
+      responses:
+        "201": { description: Campaign draft, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaign" } } } }
   /delivery/{slug}/gallery:
     get:
       operationId: getDeliveryPhotos
@@ -1523,8 +1609,119 @@ components:
 
     DeliveryAccessInput:
       type: object
-      required: [code]
-      properties: { code: { type: string, minLength: 8, maxLength: 8 } }
+      required: [email, code]
+      properties:
+        code: { type: string, minLength: 8, maxLength: 8 }
+        email: { type: string, maxLength: 254 }
+        consentSource: { type: string, maxLength: 100 }
+        marketingConsent:
+          type: boolean
+          description: Optional explicit consent to receive promotional email from the studio.
+    MarketingContactResponse:
+      type: object
+      required: [id, studioId, email, firstSeenAt, lastSeenAt, successfulGalleryAccesses, marketingConsent, unsubscribedAt]
+      properties:
+        id: { type: integer }
+        studioId: { type: integer }
+        email: { type: string }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        successfulGalleryAccesses: { type: integer }
+        marketingConsent: { type: ["boolean", "null"] }
+        consentAt: { type: ["string", "null"], format: date-time }
+        consentSource: { type: ["string", "null"] }
+        unsubscribedAt: { type: ["string", "null"], format: date-time }
+        lastOrderAt: { type: ["string", "null"], format: date-time }
+        identifiedVisits: { type: integer }
+        purchases: { type: integer }
+    MarketingContactsResponse:
+      type: object
+      required: [contacts, page, pageSize, total, totalPages]
+      properties:
+        contacts: { type: array, items: { $ref: "#/components/schemas/MarketingContactResponse" } }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    MarketingContactMutationResponse:
+      type: object
+      required: [contact]
+      properties:
+        contact: { $ref: "#/components/schemas/MarketingContactResponse" }
+    MarketingOverview:
+      type: object
+      required: [uniqueContacts, identifiedVisits, repeatVisitors, purchasers, conversionRate, consentedContacts, unsubscribedContacts, projects]
+      properties:
+        uniqueContacts: { type: integer }
+        identifiedVisits: { type: integer }
+        repeatVisitors: { type: integer }
+        purchasers: { type: integer }
+        conversionRate: { type: number }
+        consentedContacts: { type: integer }
+        unsubscribedContacts: { type: integer }
+        projects:
+          type: array
+          items: { $ref: "#/components/schemas/MarketingProjectOverview" }
+        perProject:
+          type: array
+          items: { $ref: "#/components/schemas/MarketingProjectOverview" }
+    MarketingProjectOverview:
+      type: object
+      required: [projectId, projectName, projectType, identifiedVisits, uniqueContacts, purchasers, conversionRate]
+      properties:
+        projectId: { type: integer }
+        projectName: { type: string }
+        projectType: { type: string, enum: [school, corporate] }
+        identifiedVisits: { type: integer }
+        uniqueContacts: { type: integer }
+        purchasers: { type: integer }
+        conversionRate: { type: number }
+    MarketingConsentInput:
+      type: object
+      required: [consented]
+      properties:
+        consented: { type: boolean }
+        source: { type: string, maxLength: 100 }
+    MarketingTemplateInput:
+      type: object
+      required: [name, subject, bodyText, category]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        bodyText: { type: string, minLength: 1 }
+        category: { type: string, minLength: 1, maxLength: 80 }
+    MarketingTemplate:
+      allOf:
+        - $ref: "#/components/schemas/MarketingTemplateInput"
+        - type: object
+          required: [id, studioId, createdAt, updatedAt]
+          properties:
+            id: { type: integer }
+            studioId: { type: integer }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    MarketingCampaignInput:
+      type: object
+      required: [name, templateId]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        templateId: { type: integer }
+        audienceFilter:
+          type: object
+          additionalProperties: true
+    MarketingCampaign:
+      allOf:
+        - $ref: "#/components/schemas/MarketingCampaignInput"
+        - type: object
+          required: [id, studioId, audienceFilterSnapshot, recipientCount, status, createdAt, updatedAt]
+          properties:
+            id: { type: integer }
+            studioId: { type: integer }
+            audienceFilterSnapshot: { type: string }
+            recipientCount: { type: integer }
+            status: { type: string, enum: [draft] }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     DeliveryOrderInput:
       type: object
       required: [paymentMethod]

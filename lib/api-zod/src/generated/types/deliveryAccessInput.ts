@@ -12,4 +12,10 @@ export interface DeliveryAccessInput {
      * @maxLength 8
      */
   code: string;
+  /** @maxLength 254 */
+  email: string;
+  /** @maxLength 100 */
+  consentSource?: string;
+  /** Optional explicit consent to receive promotional email from the studio. */
+  marketingConsent?: boolean;
 }

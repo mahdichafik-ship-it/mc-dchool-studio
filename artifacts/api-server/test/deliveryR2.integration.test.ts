@@ -16,6 +16,8 @@ import {
   deliveryGalleriesTable,
   deliveryOrderItemsTable,
   deliveryOrdersTable,
+  marketingContactsTable,
+  marketingVisitsTable,
   groupCaptureFilesTable,
   groupCapturesTable,
   groupsTable,
@@ -389,17 +391,33 @@ before(async () => {
   const readyAccessResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/access`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code: accessCode }),
+    body: JSON.stringify({ code: accessCode, email: `ready-${suffix}@example.com` }),
   });
   assert.equal(readyAccessResponse.status, 200);
   paidAccessToken = (await readyAccessResponse.json() as { token: string }).token;
   const unpaidAccessResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/access`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code: unpaidAccessCode }),
+    body: JSON.stringify({ code: unpaidAccessCode, email: `unpaid-${suffix}@example.com` }),
   });
   assert.equal(unpaidAccessResponse.status, 200);
   unpaidAccessToken = (await unpaidAccessResponse.json() as { token: string }).token;
+  const [readyContact] = await db.select().from(marketingContactsTable)
+    .where(eq(marketingContactsTable.email, `ready-${suffix}@example.com`));
+  assert(readyContact, "successful access should create a normalized studio contact");
+  assert.equal(readyContact.successfulGalleryAccesses, 1);
+  const readyVisits = await db.select().from(marketingVisitsTable)
+    .where(eq(marketingVisitsTable.contactId, readyContact.id));
+  assert.equal(readyVisits.length, 1, "successful access should append one visit event");
+  const wrongCodeResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/access`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: "WRONG123", email: `wrong-${suffix}@example.com` }),
+  });
+  assert.equal(wrongCodeResponse.status, 401);
+  const [wrongContact] = await db.select().from(marketingContactsTable)
+    .where(eq(marketingContactsTable.email, `wrong-${suffix}@example.com`));
+  assert.equal(wrongContact, undefined, "wrong codes must not create contacts");
 });
 
 after(async () => {

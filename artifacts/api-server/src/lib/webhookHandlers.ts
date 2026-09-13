@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { db, deliveryOrdersTable, deliveryOrderItemsTable } from "@workspace/db";
+import { db, deliveryOrdersTable, deliveryOrderItemsTable, deliveryGalleriesTable } from "@workspace/db";
 import { getStripeSync } from "./stripeClient";
+import { markContactOrder, normalizeMarketingEmail } from "./marketing";
 
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string, managedWebhookUuid?: string): Promise<void> {
@@ -25,10 +26,20 @@ export class WebhookHandlers {
     const address = details?.address
       ? Object.entries(details.address).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`).join(", ")
       : null;
+    const normalizedEmail = normalizeMarketingEmail(session.customer_details?.email ?? session.customer_email);
+    const [existingOrder] = await db.select().from(deliveryOrdersTable).where(eq(deliveryOrdersTable.id, orderId)).limit(1);
+    const [gallery] = existingOrder
+      ? await db.select({ studioId: deliveryGalleriesTable.studioId })
+        .from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.id, existingOrder.galleryId)).limit(1)
+      : [];
+    const contact = normalizedEmail && gallery?.studioId
+      ? await markContactOrder(gallery.studioId, normalizedEmail, existingOrder?.contactId)
+      : null;
     await db.update(deliveryOrdersTable).set({
       status: "paid",
       stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : null,
-      customerEmail: session.customer_details?.email ?? session.customer_email ?? null,
+      customerEmail: normalizedEmail,
+      ...(contact ? { contactId: contact.id } : {}),
       ...(details?.name ? { customerName: details.name } : {}),
       ...(address ? { deliveryAddress: address } : {}),
       fulfillmentStatus: hasPhysicalItem ? "paid" : "not_required",

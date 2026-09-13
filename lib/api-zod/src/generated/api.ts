@@ -835,16 +835,303 @@ export const EnterDeliveryAccessParams = zod.object({
 export const enterDeliveryAccessBodyCodeMin = 8;
 export const enterDeliveryAccessBodyCodeMax = 8;
 
+export const enterDeliveryAccessBodyEmailMax = 254;
+
+export const enterDeliveryAccessBodyConsentSourceMax = 100;
+
 
 
 export const EnterDeliveryAccessBody = zod.object({
-  "code": zod.string().min(enterDeliveryAccessBodyCodeMin).max(enterDeliveryAccessBodyCodeMax)
+  "code": zod.string().min(enterDeliveryAccessBodyCodeMin).max(enterDeliveryAccessBodyCodeMax),
+  "email": zod.string().max(enterDeliveryAccessBodyEmailMax),
+  "consentSource": zod.string().max(enterDeliveryAccessBodyConsentSourceMax).optional(),
+  "marketingConsent": zod.boolean().optional().describe('Optional explicit consent to receive promotional email from the studio.')
 })
 
 export const EnterDeliveryAccessResponse = zod.object({
   "token": zod.string(),
   "expiresIn": zod.number()
 })
+
+
+export const GetMarketingOverviewResponse = zod.object({
+  "uniqueContacts": zod.number(),
+  "identifiedVisits": zod.number(),
+  "repeatVisitors": zod.number(),
+  "purchasers": zod.number(),
+  "conversionRate": zod.number(),
+  "consentedContacts": zod.number(),
+  "unsubscribedContacts": zod.number(),
+  "projects": zod.array(zod.object({
+  "projectId": zod.number(),
+  "projectName": zod.string(),
+  "projectType": zod.enum(['school', 'corporate']),
+  "identifiedVisits": zod.number(),
+  "uniqueContacts": zod.number(),
+  "purchasers": zod.number(),
+  "conversionRate": zod.number()
+})),
+  "perProject": zod.array(zod.object({
+  "projectId": zod.number(),
+  "projectName": zod.string(),
+  "projectType": zod.enum(['school', 'corporate']),
+  "identifiedVisits": zod.number(),
+  "uniqueContacts": zod.number(),
+  "purchasers": zod.number(),
+  "conversionRate": zod.number()
+})).optional()
+})
+
+
+
+export const listMarketingContactsQueryPageSizeMax = 100;
+
+
+
+export const ListMarketingContactsQueryParams = zod.object({
+  "search": zod.coerce.string().optional(),
+  "engagement": zod.enum(['all', 'visited', 'repeat', 'purchaser']).optional(),
+  "consent": zod.enum(['all', 'consented', 'unconsented']).optional(),
+  "page": zod.coerce.number().min(1).optional(),
+  "pageSize": zod.coerce.number().min(1).max(listMarketingContactsQueryPageSizeMax).optional()
+})
+
+export const ListMarketingContactsResponse = zod.object({
+  "contacts": zod.array(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "email": zod.string(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date(),
+  "successfulGalleryAccesses": zod.number(),
+  "marketingConsent": zod.boolean().nullable(),
+  "consentAt": zod.coerce.date().nullish(),
+  "consentSource": zod.string().nullish(),
+  "unsubscribedAt": zod.coerce.date().nullable(),
+  "lastOrderAt": zod.coerce.date().nullish(),
+  "identifiedVisits": zod.number().optional(),
+  "purchases": zod.number().optional()
+})),
+  "page": zod.number(),
+  "pageSize": zod.number(),
+  "total": zod.number(),
+  "totalPages": zod.number()
+})
+
+
+export const UpdateMarketingConsentParams = zod.object({
+  "contactId": zod.coerce.number()
+})
+
+export const updateMarketingConsentBodySourceMax = 100;
+
+
+
+export const UpdateMarketingConsentBody = zod.object({
+  "consented": zod.boolean(),
+  "source": zod.string().max(updateMarketingConsentBodySourceMax).optional()
+})
+
+export const UpdateMarketingConsentResponse = zod.object({
+  "contact": zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "email": zod.string(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date(),
+  "successfulGalleryAccesses": zod.number(),
+  "marketingConsent": zod.boolean().nullable(),
+  "consentAt": zod.coerce.date().nullish(),
+  "consentSource": zod.string().nullish(),
+  "unsubscribedAt": zod.coerce.date().nullable(),
+  "lastOrderAt": zod.coerce.date().nullish(),
+  "identifiedVisits": zod.number().optional(),
+  "purchases": zod.number().optional()
+})
+})
+
+
+export const UnsubscribeMarketingContactParams = zod.object({
+  "contactId": zod.coerce.number()
+})
+
+export const UnsubscribeMarketingContactResponse = zod.object({
+  "contact": zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "email": zod.string(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date(),
+  "successfulGalleryAccesses": zod.number(),
+  "marketingConsent": zod.boolean().nullable(),
+  "consentAt": zod.coerce.date().nullish(),
+  "consentSource": zod.string().nullish(),
+  "unsubscribedAt": zod.coerce.date().nullable(),
+  "lastOrderAt": zod.coerce.date().nullish(),
+  "identifiedVisits": zod.number().optional(),
+  "purchases": zod.number().optional()
+})
+})
+
+
+export const listMarketingTemplatesResponseOneNameMax = 120;
+
+export const listMarketingTemplatesResponseOneSubjectMax = 200;
+
+
+export const listMarketingTemplatesResponseOneCategoryMax = 80;
+
+
+
+export const ListMarketingTemplatesResponseItem = zod.object({
+  "name": zod.string().min(1).max(listMarketingTemplatesResponseOneNameMax),
+  "subject": zod.string().min(1).max(listMarketingTemplatesResponseOneSubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(listMarketingTemplatesResponseOneCategoryMax)
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+export const ListMarketingTemplatesResponse = zod.array(ListMarketingTemplatesResponseItem)
+
+
+export const createMarketingTemplateBodyNameMax = 120;
+
+export const createMarketingTemplateBodySubjectMax = 200;
+
+
+export const createMarketingTemplateBodyCategoryMax = 80;
+
+
+
+export const CreateMarketingTemplateBody = zod.object({
+  "name": zod.string().min(1).max(createMarketingTemplateBodyNameMax),
+  "subject": zod.string().min(1).max(createMarketingTemplateBodySubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(createMarketingTemplateBodyCategoryMax)
+})
+
+export const createMarketingTemplateResponseOneNameMax = 120;
+
+export const createMarketingTemplateResponseOneSubjectMax = 200;
+
+
+export const createMarketingTemplateResponseOneCategoryMax = 80;
+
+
+
+export const CreateMarketingTemplateResponse = zod.object({
+  "name": zod.string().min(1).max(createMarketingTemplateResponseOneNameMax),
+  "subject": zod.string().min(1).max(createMarketingTemplateResponseOneSubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(createMarketingTemplateResponseOneCategoryMax)
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+
+
+export const UpdateMarketingTemplateParams = zod.object({
+  "templateId": zod.coerce.number()
+})
+
+export const updateMarketingTemplateBodyNameMax = 120;
+
+export const updateMarketingTemplateBodySubjectMax = 200;
+
+
+export const updateMarketingTemplateBodyCategoryMax = 80;
+
+
+
+export const UpdateMarketingTemplateBody = zod.object({
+  "name": zod.string().min(1).max(updateMarketingTemplateBodyNameMax),
+  "subject": zod.string().min(1).max(updateMarketingTemplateBodySubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(updateMarketingTemplateBodyCategoryMax)
+})
+
+export const updateMarketingTemplateResponseOneNameMax = 120;
+
+export const updateMarketingTemplateResponseOneSubjectMax = 200;
+
+
+export const updateMarketingTemplateResponseOneCategoryMax = 80;
+
+
+
+export const UpdateMarketingTemplateResponse = zod.object({
+  "name": zod.string().min(1).max(updateMarketingTemplateResponseOneNameMax),
+  "subject": zod.string().min(1).max(updateMarketingTemplateResponseOneSubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(updateMarketingTemplateResponseOneCategoryMax)
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+
+
+export const DeleteMarketingTemplateParams = zod.object({
+  "templateId": zod.coerce.number()
+})
+
+export const DeleteMarketingTemplateResponse = zod.void()
+
+
+export const listMarketingCampaignsResponseCampaignsItemOneNameMax = 120;
+
+
+
+export const ListMarketingCampaignsResponse = zod.object({
+  "campaigns": zod.array(zod.object({
+  "name": zod.string().min(1).max(listMarketingCampaignsResponseCampaignsItemOneNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "audienceFilterSnapshot": zod.string(),
+  "recipientCount": zod.number(),
+  "status": zod.enum(['draft']),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))).optional()
+})
+
+
+export const createMarketingCampaignDraftBodyNameMax = 120;
+
+
+
+export const CreateMarketingCampaignDraftBody = zod.object({
+  "name": zod.string().min(1).max(createMarketingCampaignDraftBodyNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+})
+
+export const createMarketingCampaignDraftResponseOneNameMax = 120;
+
+
+
+export const CreateMarketingCampaignDraftResponse = zod.object({
+  "name": zod.string().min(1).max(createMarketingCampaignDraftResponseOneNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.record(zod.string(), zod.unknown()).optional()
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "audienceFilterSnapshot": zod.string(),
+  "recipientCount": zod.number(),
+  "status": zod.enum(['draft']),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
 
 
 export const GetDeliveryPhotosParams = zod.object({

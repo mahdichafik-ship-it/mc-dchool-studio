@@ -31,6 +31,7 @@ import {
   getVerifiedR2CopyForPhoto,
 } from "../lib/photoVariants";
 import { getUncachableStripeClient } from "../lib/stripeClient";
+import { normalizeMarketingEmail, recordSuccessfulGalleryAccess, markContactOrder } from "../lib/marketing";
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
 import { materializeGroupJpegsForDelivery } from "../lib/groupDeliveryPhotos";
 import {
@@ -385,6 +386,11 @@ router.post("/delivery/:slug/access", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Delivery gallery not found or no longer available" });
     return;
   }
+  const email = normalizeMarketingEmail(req.body?.email);
+  if (!email) {
+    res.status(400).json({ error: "Enter a valid email address" });
+    return;
+  }
   const code = String(req.body?.code ?? "").trim().toUpperCase();
   if (!/^[A-Z0-9]{8}$/.test(code)) {
     res.status(400).json({ error: "Enter the 8-character access code from your card" });
@@ -428,6 +434,18 @@ router.post("/delivery/:slug/access", async (req, res): Promise<void> => {
     failedAttempts: 0,
     lockedUntil: null,
   }).where(eq(deliveryAccessesTable.id, access.id));
+
+  const studioId = row.gallery.studioId ?? row.project.studioId;
+  if (!studioId) {
+    res.status(503).json({ error: "Delivery gallery is not attached to a studio" });
+    return;
+  }
+  await recordSuccessfulGalleryAccess(studioId, email, {
+    galleryId: row.gallery.id,
+    accessId: access.id,
+    projectId: row.gallery.projectId,
+    marketingConsent: req.body?.marketingConsent === true,
+  });
 
   const token = signToken({
     galleryId: row.gallery.id,
@@ -604,11 +622,11 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       res.status(400).json({ error: "A shipping address is required" }); return;
     }
     const customerName = typeof req.body?.customerName === "string" ? req.body.customerName.trim() : "";
-    const customerEmail = typeof req.body?.customerEmail === "string" ? req.body.customerEmail.trim() : "";
+    const customerEmail = req.body?.customerEmail ? normalizeMarketingEmail(req.body.customerEmail) : null;
     if (!customerName) {
       res.status(400).json({ error: "Customer name is required" }); return;
     }
-    if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+    if (req.body?.customerEmail && !customerEmail) {
       res.status(400).json({ error: "Enter a valid customer email" }); return;
     }
     const pricedLines = validLines.map((line) => {
@@ -619,10 +637,15 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     });
     const amountTotal = pricedLines.reduce((total, line) => total + line.lineTotal, 0);
     const currency = pricedLines[0].offer.currency;
+    const studioId = row.gallery.studioId ?? row.project.studioId;
+    const contact = customerEmail && studioId
+      ? await markContactOrder(studioId, customerEmail)
+      : null;
     const order = await db.transaction(async (tx) => {
       const [created] = await tx.insert(deliveryOrdersTable).values({
         galleryId: row.gallery.id,
         accessId: access.access.id,
+        contactId: contact?.id ?? null,
         status: "pending",
         paymentMethod: paymentMethod as "stripe" | "establishment" | "bank_transfer",
         stripeCheckoutSessionId: null,
@@ -1384,6 +1407,11 @@ router.patch("/projects/:projectId/delivery/orders/:orderId/payment", requireAut
     ...(status === "paid" ? { fulfillmentStatus: hasPhysicalItem ? "paid" as const : "not_required" as const } : {}),
   }).where(eq(deliveryOrdersTable.id, orderId)).returning();
   if (!updated) { res.status(404).json({ error: "Order not found" }); return; }
+  if (status === "paid" && updated.customerEmail) {
+    const [gallery] = await db.select({ studioId: deliveryGalleriesTable.studioId, projectId: deliveryGalleriesTable.projectId })
+      .from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.id, updated.galleryId)).limit(1);
+    if (gallery?.studioId) await markContactOrder(gallery.studioId, updated.customerEmail, updated.contactId);
+  }
   res.json({ order: updated });
 });
 

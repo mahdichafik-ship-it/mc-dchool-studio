@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, LayoutDashboard, FolderKanban, LogOut, Users, ShieldCheck, Settings, FileText } from 'lucide-react';
+import { Camera, LayoutDashboard, FolderKanban, LogOut, Users, ShieldCheck, Settings, FileText, Mail } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
@@ -72,6 +72,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { label: 'Projects', icon: FolderKanban, href: '/dashboard' },
     { label: 'Team', icon: Users, href: '/team' },
     ...(canManageStudio ? [
+      { label: 'Marketing', icon: Mail, href: '/marketing' },
       { label: 'Price sheets', icon: FileText, href: '/price-sheets' },
       { label: 'Studio settings', icon: Settings, href: '/studio/settings' }
     ] : []),

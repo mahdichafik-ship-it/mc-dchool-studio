@@ -15,6 +15,7 @@ import ProjectQrPreview from "./pages/ProjectQrPreview";
 import Team from "./pages/Team";
 import DesktopConnect from "./pages/DesktopConnect";
 import Platform from "./pages/Platform";
+import Marketing from "./pages/Marketing";
 import StudioInvite from "./pages/StudioInvite";
 import StudioSettings from "./pages/StudioSettings";
 import PlatformStudio from "./pages/PlatformStudio";
@@ -193,6 +194,7 @@ function Router() {
       <Route path="/projects/:projectId" component={() => <AuthenticatedRoute component={ProjectOverview} />} />
       <Route path="/projects/:projectId/import" component={() => <AuthenticatedRoute component={ProjectImport} />} />
       <Route path="/projects/:projectId/qr-preview" component={() => <AuthenticatedRoute component={ProjectQrPreview} />} />
+      <Route path="/marketing" component={() => <AuthenticatedRoute component={Marketing} />} />
       <Route path="/team" component={() => <AuthenticatedRoute component={Team} />} />
       <Route path="/studio/settings" component={() => <AuthenticatedRoute component={StudioSettings} />} />
       <Route path="/price-sheets" component={() => <AuthenticatedRoute component={PriceSheets} />} />

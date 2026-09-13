@@ -381,7 +381,138 @@ export interface DeliveryAccessInput {
      * @maxLength 8
      */
   code: string;
+  /** @maxLength 254 */
+  email: string;
+  /** @maxLength 100 */
+  consentSource?: string;
+  /** Optional explicit consent to receive promotional email from the studio. */
+  marketingConsent?: boolean;
 }
+
+export interface MarketingContactResponse {
+  id: number;
+  studioId: number;
+  email: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  successfulGalleryAccesses: number;
+  /** @nullable */
+  marketingConsent: boolean | null;
+  /** @nullable */
+  consentAt?: string | null;
+  /** @nullable */
+  consentSource?: string | null;
+  /** @nullable */
+  unsubscribedAt: string | null;
+  /** @nullable */
+  lastOrderAt?: string | null;
+  identifiedVisits?: number;
+  purchases?: number;
+}
+
+export interface MarketingContactsResponse {
+  contacts: MarketingContactResponse[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface MarketingContactMutationResponse {
+  contact: MarketingContactResponse;
+}
+
+export type MarketingProjectOverviewProjectType = typeof MarketingProjectOverviewProjectType[keyof typeof MarketingProjectOverviewProjectType];
+
+
+export const MarketingProjectOverviewProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export interface MarketingProjectOverview {
+  projectId: number;
+  projectName: string;
+  projectType: MarketingProjectOverviewProjectType;
+  identifiedVisits: number;
+  uniqueContacts: number;
+  purchasers: number;
+  conversionRate: number;
+}
+
+export interface MarketingOverview {
+  uniqueContacts: number;
+  identifiedVisits: number;
+  repeatVisitors: number;
+  purchasers: number;
+  conversionRate: number;
+  consentedContacts: number;
+  unsubscribedContacts: number;
+  projects: MarketingProjectOverview[];
+  perProject?: MarketingProjectOverview[];
+}
+
+export interface MarketingConsentInput {
+  consented: boolean;
+  /** @maxLength 100 */
+  source?: string;
+}
+
+export interface MarketingTemplateInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  subject: string;
+  /** @minLength 1 */
+  bodyText: string;
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  category: string;
+}
+
+export type MarketingTemplate = MarketingTemplateInput & {
+  id: number;
+  studioId: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MarketingCampaignInputAudienceFilter = { [key: string]: unknown };
+
+export interface MarketingCampaignInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  templateId: number;
+  audienceFilter?: MarketingCampaignInputAudienceFilter;
+}
+
+export type MarketingCampaignStatus = typeof MarketingCampaignStatus[keyof typeof MarketingCampaignStatus];
+
+
+export const MarketingCampaignStatus = {
+  draft: 'draft',
+} as const;
+
+export type MarketingCampaign = MarketingCampaignInput & {
+  id: number;
+  studioId: number;
+  audienceFilterSnapshot: string;
+  recipientCount: number;
+  status: MarketingCampaignStatus;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type DeliveryOrderInputPaymentMethod = typeof DeliveryOrderInputPaymentMethod[keyof typeof DeliveryOrderInputPaymentMethod];
 
@@ -802,4 +933,42 @@ export interface PhotoShareResponse {
   photo: PhotoShareResponsePhoto;
   offers?: DeliveryOffer[];
 }
+
+export type ListMarketingContactsParams = {
+search?: string;
+engagement?: ListMarketingContactsEngagement;
+consent?: ListMarketingContactsConsent;
+/**
+ * @minimum 1
+ */
+page?: number;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+pageSize?: number;
+};
+
+export type ListMarketingContactsEngagement = typeof ListMarketingContactsEngagement[keyof typeof ListMarketingContactsEngagement];
+
+
+export const ListMarketingContactsEngagement = {
+  all: 'all',
+  visited: 'visited',
+  repeat: 'repeat',
+  purchaser: 'purchaser',
+} as const;
+
+export type ListMarketingContactsConsent = typeof ListMarketingContactsConsent[keyof typeof ListMarketingContactsConsent];
+
+
+export const ListMarketingContactsConsent = {
+  all: 'all',
+  consented: 'consented',
+  unconsented: 'unconsented',
+} as const;
+
+export type ListMarketingCampaigns200 = {
+  campaigns?: MarketingCampaign[];
+};
 

@@ -8,7 +8,7 @@ export default function Privacy() {
       description="How Volume Capture collects, uses, stores, and protects personal information."
     >
       <h1 className="text-3xl font-bold tracking-tight text-slate-900">Privacy Policy</h1>
-      <p className="mt-2 text-sm text-slate-500">Effective date: September 9, 2026</p>
+      <p className="mt-2 text-sm text-slate-500">Effective date: September 13, 2026</p>
 
       <LegalHeading>1. Who we are</LegalHeading>
       <LegalParagraph>
@@ -33,6 +33,7 @@ export default function Privacy() {
         <li><strong>Photography files:</strong> JPEG and RAW images, previews, QR codes, filenames, capture metadata, review choices, and upload status.</li>
         <li><strong>Storage and integration information:</strong> the connected storage provider, connection status, destination paths, and provider tokens required to perform authorized transfers.</li>
         <li><strong>Technical information:</strong> device, browser, IP address, timestamps, security events, diagnostics, and service logs.</li>
+        <li><strong>Gallery contact and engagement information:</strong> email addresses entered to access private galleries, gallery access times, repeat visits, consent choices, and links between gallery visits and orders.</li>
         <li><strong>Communications:</strong> messages and support requests sent to us.</li>
       </LegalList>
 
@@ -42,6 +43,7 @@ export default function Privacy() {
         <li>Store and transfer files to destinations selected by an authorized studio.</li>
         <li>Protect accounts, investigate abuse, diagnose failures, and maintain service reliability.</li>
         <li>Respond to support, privacy, and legal requests.</li>
+        <li>Identify private gallery access, provide gallery and order communications, measure gallery engagement, and send promotional messages only where the studio has recorded an appropriate permission.</li>
         <li>Meet legal obligations and enforce our Terms of Service.</li>
       </LegalList>
       <LegalParagraph>
@@ -58,6 +60,7 @@ export default function Privacy() {
         <li><strong>Replit:</strong> application hosting, managed infrastructure, databases, logs, and file storage.</li>
         <li><strong>Google Drive and Dropbox:</strong> optional storage destinations selected and connected by a studio.</li>
         <li><strong>GitHub:</strong> public distribution of desktop application installers; it does not receive project rosters or portraits through Volume Capture.</li>
+        <li><strong>Resend:</strong> transactional and promotional email delivery when a studio connects and enables that service.</li>
       </LegalList>
       <LegalParagraph>
         We may disclose limited information to professional advisers, authorities, or a successor in

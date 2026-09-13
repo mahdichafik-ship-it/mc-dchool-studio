@@ -58,6 +58,8 @@ export default function Delivery() {
   
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [code, setCode] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [notice, setNotice] = useState<DeliveryNotice | null>(null);
@@ -170,7 +172,7 @@ export default function Delivery() {
     event?.preventDefault();
     if (!slug) return;
     
-    enterAccess.mutate({ slug, data: { code } }, {
+    enterAccess.mutate({ slug, data: { code, email, marketingConsent } }, {
       onSuccess: (res) => {
         setToken(res.token);
         setSelected(new Set());
@@ -355,20 +357,49 @@ export default function Delivery() {
           <div className="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
              <h1 className="text-2xl font-bold tracking-tight">{t("privateGallery")}</h1>
              <p className="mt-2 text-sm leading-6 text-slate-500">{t("accessText")}</p>
+             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+               Your email is used to identify your gallery access and send important updates about this gallery.
+             </div>
             <form onSubmit={openGallery} className="mt-6 space-y-4">
               <label className="block text-sm font-medium text-slate-700">
-                 {t("accessCode")}
-                <input 
-                  autoFocus 
-                  value={code} 
-                  onChange={(event) => setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))} 
-                  placeholder="ABCD2345" 
-                  maxLength={8} 
-                  data-testid="input-access-code"
-                  className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-4 text-center font-mono text-lg tracking-[0.25em] outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100" 
+                 {t("email") || "Email"}
+                <input
+                  autoFocus
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  data-testid="input-access-email"
+                  className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-4 text-lg outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
                 />
               </label>
-              
+
+              <label className="block text-sm font-medium text-slate-700">
+                 {t("accessCode")}
+                <input
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))}
+                  placeholder="ABCD2345"
+                  maxLength={8}
+                  required
+                  data-testid="input-access-code"
+                  className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-4 text-center font-mono text-lg tracking-[0.25em] outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+                />
+              </label>
+
+              <label className="flex items-start gap-3 mt-4">
+                <input
+                  type="checkbox"
+                  checked={marketingConsent}
+                  onChange={(e) => setMarketingConsent(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
+                />
+                <span className="text-sm text-slate-600">
+                  I agree to receive marketing communications and special offers from this studio.
+                </span>
+              </label>
+
               {enterAccess.isError && (
                 <p role="alert" className="text-sm text-red-700">{t("invalidCode")}</p>
               )}

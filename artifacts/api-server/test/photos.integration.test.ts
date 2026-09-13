@@ -41,6 +41,7 @@ import {
 } from "../src/lib/groupDeliveryPhotos";
 
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
+let authUserId = userId;
 const jpegBytes = Buffer.from(
   "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/AX//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/AX//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
   "base64",
@@ -112,8 +113,8 @@ app.use(express.json());
 const authHandler = Object.assign(
   () => ({
     tokenType: "session_token",
-    userId,
-    sessionClaims: { userId },
+    userId: authUserId,
+    sessionClaims: { userId: authUserId },
   }),
   { [Symbol.for("@clerk/express.auth")]: true },
 );
@@ -458,6 +459,99 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(rawFileResponse.headers.get("content-type"), "application/octet-stream");
   assert.deepEqual(Buffer.from(await rawFileResponse.arrayBuffer()), rawBytes);
   await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, projectedDeliveryPhoto.id));
+});
+
+test("lets a studio admin review a photo and keeps parent visibility synchronized", async () => {
+  const captureKey = `web-review-${process.pid}-${Date.now()}`;
+  const fileName = `${captureKey}.jpg`;
+  const form = new (globalThis as any).FormData();
+  form.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), fileName);
+  form.append("captureKey", captureKey);
+  form.append("baseFilename", captureKey);
+  form.append("fileRole", "JPEG");
+  form.append("capturedAt", "2026-08-22T12:34:56.000Z");
+  form.append("sequence", "1");
+
+  const uploadResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": `${captureKey}-jpeg`,
+      },
+      body: form,
+    },
+  );
+  assert.equal(uploadResponse.status, 201);
+  const uploaded = await uploadResponse.json() as {
+    captureId: number;
+    file: { id: number; fileUrl: string };
+  };
+  const filePath = path.resolve(process.cwd(), uploaded.file.fileUrl.replace(/^\//, ""));
+  captureFilePaths.push(filePath);
+
+  const [photo] = await db.select().from(studentPhotosTable).where(and(
+    eq(studentPhotosTable.projectId, projectId),
+    eq(studentPhotosTable.studentId, studentId),
+    eq(studentPhotosTable.fileName, fileName),
+  ));
+  assert(photo, "the capture should project a reviewable delivery photo");
+
+  authUserId = `${userId}-admin`;
+  try {
+    const selectedResponse = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}/review`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: "selected", rating: 5 }),
+      },
+    );
+    assert.equal(selectedResponse.status, 200);
+    const selected = await selectedResponse.json() as { photo: PhotoResponse & { rating: number; shareWithParents: boolean } };
+    assert.equal(selected.photo.rating, 5);
+    assert.equal(selected.photo.shareWithParents, true);
+
+    const [selectedCapture] = await db.select().from(capturesTable).where(eq(capturesTable.id, uploaded.captureId));
+    assert.equal(selectedCapture?.rating, 5);
+    assert.equal(selectedCapture?.colorLabel, "green");
+
+    const doNotShareResponse = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}/review`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: "do_not_share" }),
+      },
+    );
+    assert.equal(doNotShareResponse.status, 200);
+    const hidden = await doNotShareResponse.json() as { photo: PhotoResponse & { rating: number; colorLabel: string; shareWithParents: boolean } };
+    assert.equal(hidden.photo.rating, 0);
+    assert.equal(hidden.photo.colorLabel, "red");
+    assert.equal(hidden.photo.shareWithParents, false);
+
+    const [hiddenCapture] = await db.select().from(capturesTable).where(eq(capturesTable.id, uploaded.captureId));
+    assert.equal(hiddenCapture?.rating, 0);
+    assert.equal(hiddenCapture?.colorLabel, "red");
+
+    authUserId = userId;
+    const photographerResponse = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}/review`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: "selected", rating: 4 }),
+      },
+    );
+    assert.equal(photographerResponse.status, 404, "non-manager review attempts must be rejected");
+  } finally {
+    authUserId = userId;
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photo.id));
+    await db.delete(captureFilesTable).where(eq(captureFilesTable.id, uploaded.file.id));
+    await db.delete(capturesTable).where(eq(capturesTable.id, uploaded.captureId));
+    await rm(filePath, { force: true });
+  }
 });
 
 test("keeps identical local capture keys isolated between photographer desktops", async () => {

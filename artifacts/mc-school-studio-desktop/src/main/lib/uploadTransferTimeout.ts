@@ -8,8 +8,9 @@ export const UPLOAD_MIN_THROUGHPUT_BYTES_PER_SECOND = 128 * 1024
 export const UPLOAD_SETUP_ALLOWANCE_MS = 60_000
 export const UPLOAD_MIN_TRANSFER_TIMEOUT_MS = 120_000
 
-// R2 presigned PUTs live for at most 15 minutes. Keep a two-minute reserve for
-// request setup, clock skew, and the short verification call that follows.
+// R2 presigned PUTs live for at most 15 minutes. A 13-minute transfer cap plus
+// the expiry safety margin leaves one minute for clock skew and verification;
+// the separate setup allowance is already included in the transfer budget.
 export const UPLOAD_MAX_TRANSFER_TIMEOUT_MS = 13 * 60_000
 export const UPLOAD_EXPIRY_SAFETY_MARGIN_MS = 60_000
 export const UPLOAD_TIMEOUT_MESSAGE = 'Upload timed out and will retry.'

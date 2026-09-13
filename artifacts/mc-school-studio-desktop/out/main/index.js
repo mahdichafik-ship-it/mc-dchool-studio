@@ -820,6 +820,31 @@ function assertR2VerifierResponse(responsePayload, expectedCopyId) {
     throw new RetryableUploadError("R2 verification returned an incomplete or non-ready copy; retrying safely.");
   }
 }
+const UPLOAD_MIN_THROUGHPUT_BYTES_PER_SECOND = 128 * 1024;
+const UPLOAD_SETUP_ALLOWANCE_MS = 6e4;
+const UPLOAD_MIN_TRANSFER_TIMEOUT_MS = 12e4;
+const UPLOAD_MAX_TRANSFER_TIMEOUT_MS = 13 * 6e4;
+const UPLOAD_EXPIRY_SAFETY_MARGIN_MS = 6e4;
+const UPLOAD_TIMEOUT_MESSAGE = "Upload timed out and will retry.";
+function isUploadTimeoutError(error) {
+  if (!(error instanceof Error)) return false;
+  return error.name === "TimeoutError" || error.name === "AbortError" || /timed?\s*out|timeout/i.test(error.message);
+}
+function getUploadTransferTimeoutMs(byteSize) {
+  if (!Number.isFinite(byteSize) || byteSize < 0) {
+    throw new RangeError("Upload size must be a finite non-negative number.");
+  }
+  const transferMs = Math.ceil(byteSize / UPLOAD_MIN_THROUGHPUT_BYTES_PER_SECOND * 1e3);
+  return Math.min(
+    UPLOAD_MAX_TRANSFER_TIMEOUT_MS,
+    Math.max(UPLOAD_MIN_TRANSFER_TIMEOUT_MS, UPLOAD_SETUP_ALLOWANCE_MS + transferMs)
+  );
+}
+function hasSufficientUploadWindow(expiresAt, byteSize, nowMs = Date.now()) {
+  const expiryMs = expiresAt instanceof Date ? expiresAt.getTime() : typeof expiresAt === "number" ? expiresAt : Date.parse(expiresAt);
+  if (!Number.isFinite(expiryMs) || !Number.isFinite(nowMs)) return false;
+  return expiryMs - nowMs >= getUploadTransferTimeoutMs(byteSize) + UPLOAD_EXPIRY_SAFETY_MARGIN_MS;
+}
 function getSetting(key) {
   const db = getDb();
   const row = db.select().from(settingsTable).where(drizzleOrm.eq(settingsTable.key, key)).get();
@@ -877,6 +902,15 @@ function notifyCaptureFileStatus(captureId, fileId, studentId, fileRole, status)
     fileRole,
     status
   });
+}
+function normalizeUploadError(error) {
+  if (isUploadTimeoutError(error)) {
+    return new RetryableUploadError(UPLOAD_TIMEOUT_MESSAGE);
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+function getUploadErrorMessage(error) {
+  return normalizeUploadError(error).message;
 }
 function toServerFileUrl(fileUrl) {
   if (!fileUrl) return null;
@@ -1039,7 +1073,7 @@ async function syncStudentCloudIdentity(projectId, studentId) {
     await ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken);
     return { synced: true };
   } catch (error) {
-    return { synced: false, error: error instanceof Error ? error.message : String(error) };
+    return { synced: false, error: getUploadErrorMessage(error) };
   }
 }
 async function syncGroupCloudIdentities(projectId) {
@@ -1147,28 +1181,41 @@ async function completeR2Upload(session, fileBuffer, apiUrl, connectionToken) {
   if (expectedSha256?.toLowerCase() !== actualSha256) {
     throw new Error("R2 upload session does not match the local file bytes.");
   }
-  const uploadResponse = await fetch(session.uploadUrl, {
-    method: session.uploadMethod,
-    headers: session.uploadHeaders,
-    body: new Blob([fileBuffer], {
-      type: session.uploadHeaders["Content-Type"] || "application/octet-stream"
-    }),
-    signal: AbortSignal.timeout(12e4)
-  });
+  if (!hasSufficientUploadWindow(session.expiresAt, fileBuffer.byteLength)) {
+    throw new RetryableUploadError("Upload session expires too soon; requesting a new upload session.");
+  }
+  let uploadResponse;
+  try {
+    uploadResponse = await fetch(session.uploadUrl, {
+      method: session.uploadMethod,
+      headers: session.uploadHeaders,
+      body: new Blob([fileBuffer], {
+        type: session.uploadHeaders["Content-Type"] || "application/octet-stream"
+      }),
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength))
+    });
+  } catch (error) {
+    throw normalizeUploadError(error);
+  }
   if (!uploadResponse.ok) {
     const body = await uploadResponse.text().catch(() => "");
     throw new RetryableUploadError(
       `R2 upload failed with HTTP ${uploadResponse.status}${body ? `: ${body}` : ""}`
     );
   }
-  const verifyResponse = await fetch(
-    `${apiUrl.replace(/\/+$/, "")}/api/desktop/storage-copies/${session.copyId}/r2/verify`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${connectionToken}` },
-      signal: AbortSignal.timeout(3e4)
-    }
-  );
+  let verifyResponse;
+  try {
+    verifyResponse = await fetch(
+      `${apiUrl.replace(/\/+$/, "")}/api/desktop/storage-copies/${session.copyId}/r2/verify`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${connectionToken}` },
+        signal: AbortSignal.timeout(3e4)
+      }
+    );
+  } catch (error) {
+    throw normalizeUploadError(error);
+  }
   if (!verifyResponse.ok) {
     const body = await verifyResponse.text().catch(() => "");
     if (verifyResponse.status === 401) invalidateDesktopCredentials(true);
@@ -1216,7 +1263,7 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
         ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
       },
       body: formData,
-      signal: AbortSignal.timeout(3e4)
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength))
     });
     if (!response.ok) {
       const text = await response.text();
@@ -1242,12 +1289,13 @@ async function performUploadPhoto(projectId, studentId, photoId, filePath, fileN
     notifyUploadStatus(photoId, studentId, "done");
     console.log(`[Upload] Photo ${photoId} uploaded successfully`);
   } catch (err) {
-    const retryable = isRetryableUploadFailure(err);
-    if (isConnectivityFailure(err)) markCloudSessionUnavailable();
-    console.error(`[Upload] Upload ${retryable ? "waiting for connectivity" : "failed"}:`, err);
+    const error = normalizeUploadError(err);
+    const retryable = isRetryableUploadFailure(error);
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable();
+    console.error(`[Upload] Upload ${retryable ? "waiting for connectivity" : "failed"}:`, error);
     db.update(photosTable).set({ uploadStatus: retryable ? "pending" : "error" }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
     notifyUploadStatus(photoId, studentId, retryable ? "pending" : "error");
-    throw err;
+    throw error;
   }
 }
 function uploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
@@ -1325,7 +1373,7 @@ async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
         ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
       },
       body: formData,
-      signal: AbortSignal.timeout(12e4)
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength))
     });
     if (!response.ok) {
       const text = await response.text();
@@ -1348,11 +1396,12 @@ async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
     setCaptureFileStatus(captureId, fileId, "done", serverFileUrl);
     console.log(`[Upload] Capture file ${fileId} (${file.fileRole}) uploaded successfully`);
   } catch (error) {
-    const retryable = isRetryableUploadFailure(error);
-    if (isConnectivityFailure(error)) markCloudSessionUnavailable();
-    console.error(`[Upload] Capture file ${retryable ? "waiting for connectivity" : "failed"}:`, error);
+    const normalizedError = normalizeUploadError(error);
+    const retryable = isRetryableUploadFailure(normalizedError);
+    if (isConnectivityFailure(normalizedError)) markCloudSessionUnavailable();
+    console.error(`[Upload] Capture file ${retryable ? "waiting for connectivity" : "failed"}:`, normalizedError);
     setCaptureFileStatus(captureId, fileId, retryable ? "pending" : "error", void 0);
-    throw error;
+    throw normalizedError;
   }
 }
 async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
@@ -1368,9 +1417,10 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
   }
   db.update(groupCaptureFilesTable).set({ uploadStatus: "uploading" }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
   try {
+    const fileBuffer = require$$0.readFileSync(file.storedPath);
     const formData = new FormData();
     const managedFilename = node_path.basename(file.storedPath);
-    formData.append("file", new Blob([require$$0.readFileSync(file.storedPath)], {
+    formData.append("file", new Blob([fileBuffer], {
       type: file.fileRole === "JPEG" ? "image/jpeg" : "application/octet-stream"
     }), managedFilename);
     formData.append("captureKey", capture.captureKey);
@@ -1385,7 +1435,7 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
         ...captureBatchKey ? { "X-MC-Capture-Batch": captureBatchKey } : {}
       },
       body: formData,
-      signal: AbortSignal.timeout(12e4)
+      signal: AbortSignal.timeout(getUploadTransferTimeoutMs(fileBuffer.byteLength))
     });
     if (!response.ok) {
       const text = await response.text();
@@ -1401,7 +1451,7 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
     }
     await completeR2Upload(
       payload.r2Upload,
-      require$$0.readFileSync(file.storedPath),
+      fileBuffer,
       apiUrl,
       connectionToken
     );
@@ -1411,10 +1461,11 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
       galleryReady: file.fileRole !== "JPEG" || payload.galleryReady === true
     }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
   } catch (error) {
-    const retryable = isRetryableUploadFailure(error);
-    if (isConnectivityFailure(error)) markCloudSessionUnavailable();
+    const normalizedError = normalizeUploadError(error);
+    const retryable = isRetryableUploadFailure(normalizedError);
+    if (isConnectivityFailure(normalizedError)) markCloudSessionUnavailable();
     db.update(groupCaptureFilesTable).set({ uploadStatus: retryable ? "pending" : "error" }).where(drizzleOrm.eq(groupCaptureFilesTable.id, fileId)).run();
-    throw error;
+    throw normalizedError;
   }
 }
 async function performSyncGroupCaptureReview(captureId) {
@@ -1657,7 +1708,7 @@ function deferFailedJob(job, error) {
   const attempt = (failedUploadAttempts.get(key) ?? 0) + 1;
   failedUploadAttempts.set(key, attempt);
   failedUploadRetryAfter.set(key, Date.now() + retryDelay(attempt));
-  failedUploadErrors.set(key, error instanceof Error ? error.message : String(error));
+  failedUploadErrors.set(key, getUploadErrorMessage(error));
 }
 function deferFailedRun(projectId) {
   const attempt = (failedLiveRunAttempts.get(projectId) ?? 0) + 1;
@@ -1720,7 +1771,7 @@ function getUploadStatusCounts(projectId) {
     ));
   }
   const mirroredPhotoIds = new Set(
-    db.select({ id: capturesTable.legacyPhotoId }).from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().flatMap((row) => row.id === null ? [] : [row.id])
+    db.select({ legacyPhotoId: capturesTable.legacyPhotoId }).from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all().flatMap((row) => row.legacyPhotoId === null ? [] : [row.legacyPhotoId])
   );
   statuses.push(...db.select({ id: photosTable.id, status: photosTable.uploadStatus }).from(photosTable).where(drizzleOrm.and(drizzleOrm.eq(photosTable.projectId, projectId), drizzleOrm.eq(photosTable.isMatched, true))).all().filter((row) => !mirroredPhotoIds.has(row.id)).map((row) => row.status));
   return {
@@ -1877,7 +1928,7 @@ async function runLiveUpload(projectId, includeErrors = false) {
           deferFailedJob(job, error);
           liveUploadActivity.set(projectId, {
             ...liveUploadActivity.get(projectId),
-            lastError: String(error)
+            lastError: getUploadErrorMessage(error)
           });
           if (!isCloudSessionVerified()) return;
         }
@@ -1887,7 +1938,7 @@ async function runLiveUpload(projectId, includeErrors = false) {
       deferFailedRun(projectId);
       liveUploadActivity.set(projectId, {
         ...liveUploadActivity.get(projectId),
-        lastError: String(error)
+        lastError: getUploadErrorMessage(error)
       });
     }
   }, () => emitLiveUploadState(projectId));
@@ -1946,7 +1997,7 @@ async function syncProjectUploads(projectId, onProgress, captureBatchKey) {
       await uploadProjectJob(job, captureBatchKey);
     } catch (error) {
       failed++;
-      firstError ??= String(error);
+      firstError ??= getUploadErrorMessage(error);
     } finally {
       completed++;
       report();
@@ -2095,7 +2146,7 @@ function registerUploadHandlers() {
       return { ok: false, error: body.error ?? `Server returned ${response.status}` };
     } catch (err) {
       markCloudSessionUnavailable();
-      return { ok: false, error: String(err) };
+      return { ok: false, error: getUploadErrorMessage(err) };
     }
   });
   electron.ipcMain.handle("upload:retry", async (_e, { photoId }) => {
@@ -2122,7 +2173,7 @@ function registerUploadHandlers() {
       );
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: String(err) };
+      return { ok: false, error: getUploadErrorMessage(err) };
     }
   });
   electron.ipcMain.handle("upload:retryFile", async (_e, { fileId }) => {
@@ -2138,7 +2189,7 @@ function registerUploadHandlers() {
       await uploadCaptureFile(capture.id, file.id);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: String(error) };
+      return { ok: false, error: getUploadErrorMessage(error) };
     }
   });
   electron.ipcMain.handle("upload:retryGroupFile", async (_e, { fileId }) => {
@@ -2150,7 +2201,7 @@ function registerUploadHandlers() {
       await uploadGroupCaptureFile(file.captureId, file.id);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: String(error) };
+      return { ok: false, error: getUploadErrorMessage(error) };
     }
   });
   electron.ipcMain.handle(

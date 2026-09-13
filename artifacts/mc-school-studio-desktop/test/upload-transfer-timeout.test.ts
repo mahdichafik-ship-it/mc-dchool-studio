@@ -12,12 +12,14 @@ import {
   UPLOAD_SETUP_ALLOWANCE_MS,
 } from '../src/main/lib/uploadTransferTimeout.ts'
 
-test('transfer budget includes setup allowance and scales with file size', () => {
+test('small files use the floor and larger files include setup allowance', () => {
   assert.equal(getUploadTransferTimeoutMs(0), UPLOAD_MIN_TRANSFER_TIMEOUT_MS)
-  const size = UPLOAD_MIN_THROUGHPUT_BYTES_PER_SECOND * 10
+  assert.equal(getUploadTransferTimeoutMs(UPLOAD_MIN_THROUGHPUT_BYTES_PER_SECOND * 10), UPLOAD_MIN_TRANSFER_TIMEOUT_MS)
+  const transferSeconds = 120
+  const size = UPLOAD_MIN_THROUGHPUT_BYTES_PER_SECOND * transferSeconds
   assert.equal(
     getUploadTransferTimeoutMs(size),
-    UPLOAD_SETUP_ALLOWANCE_MS + 10_000,
+    UPLOAD_SETUP_ALLOWANCE_MS + transferSeconds * 1_000,
   )
 })
 

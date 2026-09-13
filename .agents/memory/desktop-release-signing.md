@@ -64,6 +64,18 @@ the retired Intel image never acquired a hosted runner.
 on supported native architecture labels. Treat prolonged queueing on a retired
 label as runner configuration, not authentication failure.
 
+Every release job that performs a frozen workspace install must use the same
+pnpm major version that generated the committed lockfile and workspace override
+configuration.
+
+**Why:** A release tag failed before packaging when pnpm 9 rejected a lockfile
+and override configuration maintained by pnpm 10, even though local pnpm 10
+installation and all application tests were healthy.
+
+**How to apply:** Keep the pnpm setup version consistent across validation,
+packaging, metadata, retirement-smoke, and installed-update jobs. Reproduce the
+CI install with that exact pnpm version and `--frozen-lockfile` before tagging.
+
 Replit's GitHub OAuth connection may have repository access without permission
 to modify workflow files. When that occurs, use a user-provided GitHub token with
 `repo` and `workflow` scopes through Replit Secrets, never through chat.

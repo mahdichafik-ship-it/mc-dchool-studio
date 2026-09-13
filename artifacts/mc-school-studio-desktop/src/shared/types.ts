@@ -149,6 +149,17 @@ export interface ImagePipelineRendererStage {
 
 export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
 export type CaptureColorLabel = 'none' | 'red' | 'yellow' | 'green' | 'blue' | 'purple'
+export type CaptureAspectRatio = 'original' | '1:1' | '4:5' | '3:2' | '16:9'
+
+export interface CaptureFraming {
+  cropX: number
+  cropY: number
+  cropScale: number
+  aspectRatio: CaptureAspectRatio
+  straightenAngle: number
+  rotation: 0 | 90 | 180 | 270
+  pending: boolean
+}
 
 export interface CaptureFileReview {
   id: number
@@ -159,6 +170,7 @@ export interface CaptureFileReview {
   fileSize: number | null
   uploadStatus: UploadStatus
   fileUrl: string | null
+  previewUrl?: string
 }
 
 export interface CaptureReview {
@@ -179,6 +191,7 @@ export interface CaptureReview {
   files: CaptureFileReview[]
   thumbnailData: string | null
   legacyPhoto: Photo | null
+  framing: CaptureFraming
   previewPipeline?: ImagePipelinePreviewContext
 }
 
@@ -310,6 +323,10 @@ export interface ProjectSyncResult {
   failed: number
   error?: string
   finishedAt?: string
+}
+
+export interface ProjectFinishOptions {
+  photographerComment?: string
 }
 
 export interface LiveUploadState {

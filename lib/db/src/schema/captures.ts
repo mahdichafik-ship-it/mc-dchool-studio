@@ -2,6 +2,7 @@ import {
   boolean,
   integer,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
@@ -27,6 +28,7 @@ export const captureBatchesTable = pgTable("capture_batches", {
   expectedFileCount: integer("expected_file_count").notNull().default(0),
   uploadedFileCount: integer("uploaded_file_count").notNull().default(0),
   failedFileCount: integer("failed_file_count").notNull().default(0),
+  handoffComment: text("handoff_comment"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   lastSyncAt: timestamp("last_sync_at", { withTimezone: true }).notNull().defaultNow(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -54,6 +56,14 @@ export const capturesTable = pgTable("captures", {
   colorLabel: text("color_label", {
     enum: ["none", "red", "yellow", "green", "blue", "purple"],
   }).notNull().default("none"),
+  // Edits are deliberately nullable: null means identity and keeps captures
+  // uploaded by older desktop clients backwards compatible.
+  cropPositionX: real("crop_position_x"),
+  cropPositionY: real("crop_position_y"),
+  cropScale: real("crop_scale"),
+  aspectRatio: text("aspect_ratio"),
+  straightenAngle: real("straighten_angle"),
+  rotation: integer("rotation"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [

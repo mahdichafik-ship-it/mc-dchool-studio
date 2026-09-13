@@ -11,9 +11,11 @@ import {
   isCloudSessionVerified,
   syncProjectUploads,
   syncGroupCloudIdentities,
+  flushPendingCaptureReviews,
   pauseLiveUploadForFinish,
 } from './upload'
-import type { ProjectSyncProgressEvent, ProjectSyncResult } from '../../shared/types'
+import type { ProjectFinishOptions, ProjectSyncProgressEvent, ProjectSyncResult } from '../../shared/types'
+import { hasPendingReviewSync } from '../lib/reviewSyncBarrier'
 
 const activeSyncs = new Map<number, Promise<ProjectSyncResult>>()
 
@@ -25,12 +27,19 @@ function emitProgress(event: ProjectSyncProgressEvent): void {
 export function registerProjectSyncHandlers(): void {
   ipcMain.handle(
     'project:uploadAndFinish',
-    async (_event, { projectId }: { projectId: number }): Promise<ProjectSyncResult> => {
+    async (
+      _event,
+      {
+        projectId,
+        photographerComment,
+      }: { projectId: number } & ProjectFinishOptions,
+    ): Promise<ProjectSyncResult> => {
       const existing = activeSyncs.get(projectId)
       if (existing) return existing
 
       const task = (async (): Promise<ProjectSyncResult> => {
         const db = getDb()
+        const normalizedComment = photographerComment?.trim().slice(0, 2000) || undefined
         const project = db
           .select()
           .from(projectsTable)
@@ -100,7 +109,7 @@ export function registerProjectSyncHandlers(): void {
         if (progress.failed > 0) {
           let batchStatusError: string | undefined
           try {
-            await finishProjectCaptureBatch(projectId, captureBatchKey, 'failed', progress.failed)
+            await finishProjectCaptureBatch(projectId, captureBatchKey, 'failed', progress.failed, normalizedComment)
           } catch (error) {
             batchStatusError = ` Batch status could not be updated: ${String(error)}`
           }
@@ -117,8 +126,34 @@ export function registerProjectSyncHandlers(): void {
           return result
         }
 
+        // File uploads and review/edit PATCHes are separate durable writes.
+        // Flush the latter before closing the batch; an offline, 404, or
+        // superseded response leaves its pending flag set and therefore keeps
+        // Finish My Shoot retryable instead of falsely completing the shoot.
+        const pendingReviews = await flushPendingCaptureReviews(projectId)
+        const pendingReviewCount = pendingReviews.portrait + pendingReviews.group
+        if (hasPendingReviewSync(pendingReviews)) {
+          let batchStatusError: string | undefined
+          try {
+            await finishProjectCaptureBatch(projectId, captureBatchKey, 'failed', progress.failed, normalizedComment)
+          } catch (error) {
+            batchStatusError = ` Batch status could not be updated: ${String(error)}`
+          }
+          const result: ProjectSyncResult = {
+            ok: false,
+            ...progress,
+            error: `${pendingReviewCount} capture review or framing change${pendingReviewCount === 1 ? ' remains' : 's remain'} unsynced. Retry Upload & Finish when the connection is available.${batchStatusError ?? ''}`,
+          }
+          emitProgress({
+            projectId,
+            phase: 'error',
+            ...result,
+          })
+          return result
+        }
+
         try {
-          await finishProjectCaptureBatch(projectId, captureBatchKey, 'complete', 0)
+          await finishProjectCaptureBatch(projectId, captureBatchKey, 'complete', 0, normalizedComment)
         } catch (error) {
           const result: ProjectSyncResult = {
             ok: false,

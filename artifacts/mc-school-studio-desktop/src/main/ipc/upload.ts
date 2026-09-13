@@ -151,6 +151,8 @@ const activeUploads = new Set<Promise<void>>()
 const activePhotoUploads = new Map<number, Promise<void>>()
 const activeCaptureFileUploads = new Map<number, Promise<void>>()
 const activeGroupCaptureFileUploads = new Map<number, Promise<void>>()
+const activeCaptureReviewSyncs = new Map<number, Promise<void>>()
+const activeGroupCaptureReviewSyncs = new Map<number, Promise<void>>()
 const cloudIdentityRepairs = new Map<string, Promise<void>>()
 const MAX_CONCURRENT_UPLOADS = 3
 const uploadLimiter = new AsyncTaskLimiter(MAX_CONCURRENT_UPLOADS)
@@ -850,7 +852,7 @@ async function performUploadGroupCaptureFile(captureId: number, fileId: number, 
   }
 }
 
-export async function syncGroupCaptureReview(captureId: number): Promise<void> {
+async function performSyncGroupCaptureReview(captureId: number): Promise<void> {
   if (!isCloudSessionVerified()) return
   const db = getDb()
   const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get()
@@ -871,15 +873,35 @@ export async function syncGroupCaptureReview(captureId: number): Promise<void> {
     )
     if (response.status === 401) invalidateDesktopCredentials(true)
     if (response.ok) {
+      // A review can be edited while this request is in flight. Only clear
+      // pending when the row still contains the exact version we sent.
+      const latest = db.select({ rating: groupCapturesTable.rating })
+        .from(groupCapturesTable)
+        .where(eq(groupCapturesTable.id, captureId))
+        .get()
+      if (latest?.rating !== capture.rating) return
       db.update(groupCapturesTable).set({ reviewSyncPending: false, updatedAt: new Date().toISOString() })
-        .where(eq(groupCapturesTable.id, captureId)).run()
+        .where(and(eq(groupCapturesTable.id, captureId), eq(groupCapturesTable.rating, capture.rating))).run()
       return
     }
     const body = await response.text().catch(() => '')
     console.warn(`[Review] Group review sync failed with HTTP ${response.status}${body ? `: ${body}` : ''}`)
   } catch (error) {
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable()
     console.warn('[Review] Group review sync deferred:', error)
   }
+}
+
+export function syncGroupCaptureReview(captureId: number): Promise<void> {
+  const previous = activeGroupCaptureReviewSyncs.get(captureId) ?? Promise.resolve()
+  const task = previous.catch(() => {}).then(() => performSyncGroupCaptureReview(captureId))
+  activeGroupCaptureReviewSyncs.set(captureId, task)
+  void task.finally(() => {
+    if (activeGroupCaptureReviewSyncs.get(captureId) === task) {
+      activeGroupCaptureReviewSyncs.delete(captureId)
+    }
+  }).catch(() => {})
+  return task
 }
 
 export function uploadCaptureFile(captureId: number, fileId: number, captureBatchKey?: string): Promise<void> {
@@ -897,7 +919,7 @@ export function uploadCaptureFile(captureId: number, fileId: number, captureBatc
   return task
 }
 
-export async function syncCaptureReview(captureId: number): Promise<void> {
+async function performSyncCaptureReview(captureId: number): Promise<void> {
   if (!isCloudSessionVerified()) return
   const db = getDb()
   const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
@@ -921,6 +943,21 @@ export async function syncCaptureReview(captureId: number): Promise<void> {
           selected: capture.selected,
           rating: capture.rating,
           colorLabel: capture.colorLabel,
+          editSettings: {
+            // Desktop stores crop position as a centered percentage (-100..100);
+            // the cloud contract stores the normalized focal point (0..1).
+            cropPositionX: Math.max(0, Math.min(1, ((capture.cropX ?? 0) + 100) / 200)),
+            cropPositionY: Math.max(0, Math.min(1, ((capture.cropY ?? 0) + 100) / 200)),
+            // Desktop stores scale as a percentage (100..300); cloud uses 1..3.
+            cropScale: Math.max(1, Math.min(3, (capture.cropScale ?? 100) / 100)),
+            aspectRatio: capture.aspectRatio && capture.aspectRatio !== 'original'
+              ? capture.aspectRatio
+              : null,
+            // Defaults from legacy captures are 0/0/100/original, which is
+            // an identity edit in this normalized representation.
+            straightenAngle: capture.straightenAngle ?? 0,
+            rotation: capture.rotation ?? 0,
+          },
         }),
         signal: AbortSignal.timeout(10_000),
       },
@@ -930,17 +967,53 @@ export async function syncCaptureReview(captureId: number): Promise<void> {
       return
     }
     if (response.ok) {
-      db.update(capturesTable)
-        .set({ reviewSyncPending: false, updatedAt: new Date().toISOString() })
+      // Do not let an older response acknowledge a newer local edit. The
+      // explicit review/framing values are the sent version; updatedAt is
+      // included as an additional guard for unrelated local writes.
+      const latest = db.select().from(capturesTable)
         .where(eq(capturesTable.id, captureId))
+        .get()
+      if (!latest || latest.updatedAt !== capture.updatedAt
+        || latest.favorite !== capture.favorite
+        || latest.rejected !== capture.rejected
+        || latest.selected !== capture.selected
+        || latest.rating !== capture.rating
+        || latest.colorLabel !== capture.colorLabel
+        || latest.cropX !== capture.cropX
+        || latest.cropY !== capture.cropY
+        || latest.cropScale !== capture.cropScale
+        || latest.aspectRatio !== capture.aspectRatio
+        || latest.straightenAngle !== capture.straightenAngle
+        || latest.rotation !== capture.rotation) {
+        return
+      }
+      db.update(capturesTable)
+        .set({ reviewSyncPending: false, reframePending: false, updatedAt: new Date().toISOString() })
+        .where(and(eq(capturesTable.id, captureId), eq(capturesTable.updatedAt, capture.updatedAt)))
         .run()
       return
     }
     const body = await response.text().catch(() => '')
     console.warn(`[Review] Portrait review sync failed with HTTP ${response.status}${body ? `: ${body}` : ''}`)
   } catch (error) {
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable()
     console.warn('[Review] Cloud review sync deferred:', error)
   }
+}
+
+export function syncCaptureReview(captureId: number): Promise<void> {
+  // Serialize each capture independently. This avoids an unbounded set of
+  // overlapping PATCHes while still allowing different captures to sync in
+  // parallel. The sent-version checks above protect the response boundary.
+  const previous = activeCaptureReviewSyncs.get(captureId) ?? Promise.resolve()
+  const task = previous.catch(() => {}).then(() => performSyncCaptureReview(captureId))
+  activeCaptureReviewSyncs.set(captureId, task)
+  void task.finally(() => {
+    if (activeCaptureReviewSyncs.get(captureId) === task) {
+      activeCaptureReviewSyncs.delete(captureId)
+    }
+  }).catch(() => {})
+  return task
 }
 
 async function syncPendingCaptureReviews(projectId?: number): Promise<void> {
@@ -970,6 +1043,28 @@ async function syncPendingGroupCaptureReviews(projectId?: number): Promise<void>
   for (const capture of captures) {
     if (!isCloudSessionVerified()) return
     await syncGroupCaptureReview(capture.id)
+  }
+}
+
+/**
+ * Finish uses this as a hard review barrier. A failed/offline/404 response
+ * intentionally leaves the durable pending flags set, so this returns a
+ * non-zero count and Finish My Shoot remains retryable.
+ */
+export async function flushPendingCaptureReviews(projectId: number): Promise<{
+  portrait: number
+  group: number
+}> {
+  await syncPendingCaptureReviews(projectId)
+  await syncPendingGroupCaptureReviews(projectId)
+  const db = getDb()
+  return {
+    portrait: db.select({ id: capturesTable.id }).from(capturesTable)
+      .where(and(eq(capturesTable.projectId, projectId), eq(capturesTable.reviewSyncPending, true)))
+      .all().length,
+    group: db.select({ id: groupCapturesTable.id }).from(groupCapturesTable)
+      .where(and(eq(groupCapturesTable.projectId, projectId), eq(groupCapturesTable.reviewSyncPending, true)))
+      .all().length,
   }
 }
 
@@ -1503,6 +1598,7 @@ export async function finishProjectCaptureBatch(
   batchKey: string,
   status: 'failed' | 'complete',
   failedFileCount: number,
+  photographerComment?: string,
 ): Promise<void> {
   const db = getDb()
   const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
@@ -1514,7 +1610,11 @@ export async function finishProjectCaptureBatch(
       Authorization: `Bearer ${connectionToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ status, failedFileCount }),
+    body: JSON.stringify({
+      status,
+      failedFileCount,
+      ...(photographerComment?.trim() ? { handoffComment: photographerComment.trim() } : {}),
+    }),
     signal: AbortSignal.timeout(30_000),
   })
   if (!response.ok) throw new Error(`Could not update capture batch: HTTP ${response.status}: ${await response.text()}`)

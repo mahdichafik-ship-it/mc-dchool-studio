@@ -23,6 +23,7 @@ import type {
   CaptureExportLayout,
   CaptureExportResult,
   CaptureFileUploadStatusChangedEvent,
+  CaptureFraming,
   ProjectSyncProgressEvent,
   CreateStudentResult,
   StudentGroup,
@@ -119,6 +120,10 @@ interface ElectronAPI {
     rating?: number
     colorLabel?: import('../shared/types').CaptureColorLabel
   }): Promise<CaptureReview | null>
+  invoke(channel: 'captures:updateFraming', args: {
+    captureId: number
+    framing: Omit<CaptureFraming, 'pending'>
+  }): Promise<CaptureReview | null>
   invoke(channel: 'photos:getThumbnail', args: { filePath: string }): Promise<string | null>
   invoke(channel: 'photos:reassign', args: { photoId: number; studentId: number }): Promise<void>
   invoke(channel: 'photos:delete', args: { photoId: number }): Promise<void>
@@ -160,7 +165,7 @@ interface ElectronAPI {
   invoke(channel: 'upload:setLiveEnabled', args: { projectId: number; enabled: boolean }): Promise<import('../shared/types').LiveUploadState>
   invoke(channel: 'upload:runNow', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
   invoke(channel: 'upload:retryProjectFailed', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
-  invoke(channel: 'project:uploadAndFinish', args: { projectId: number }): Promise<import('../shared/types').ProjectSyncResult>
+  invoke(channel: 'project:uploadAndFinish', args: { projectId: number } & import('../shared/types').ProjectFinishOptions): Promise<import('../shared/types').ProjectSyncResult>
   invoke(channel: 'captures:export', args: {
     projectId: number
     destinationDir: string

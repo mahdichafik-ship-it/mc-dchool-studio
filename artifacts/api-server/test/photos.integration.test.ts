@@ -384,6 +384,44 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   captureFilePaths.push(rawPath);
   assert.deepEqual(await readFile(rawPath), rawBytes);
 
+  const captureReviewResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures/${captureKey}/review`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        rating: 4,
+        colorLabel: "green",
+        favorite: true,
+        cropPosition: { x: 0.25, y: 0.75 },
+        cropScale: 1.5,
+        aspectRatio: "4:5",
+        straightenAngle: 2,
+        rotation: 90,
+      }),
+    },
+  );
+  assert.equal(captureReviewResponse.status, 200);
+  const reviewedCapture = await captureReviewResponse.json() as {
+    capture: {
+      cropPositionX: number;
+      cropPositionY: number;
+      cropScale: number;
+      aspectRatio: string;
+      straightenAngle: number;
+      rotation: number;
+    };
+  };
+  assert.equal(reviewedCapture.capture.cropPositionX, 0.25);
+  assert.equal(reviewedCapture.capture.cropPositionY, 0.75);
+  assert.equal(reviewedCapture.capture.cropScale, 1.5);
+  assert.equal(reviewedCapture.capture.aspectRatio, "4:5");
+  assert.equal(reviewedCapture.capture.straightenAngle, 2);
+  assert.equal(reviewedCapture.capture.rotation, 90);
+
   const [capture] = await db
     .select()
     .from(capturesTable)
@@ -407,22 +445,37 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
       Authorization: `Bearer ${desktopCredentials.token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ status: "complete", failedFileCount: 0 }),
+    body: JSON.stringify({
+      status: "complete",
+      failedFileCount: 0,
+      handoffComment: "Two students need a retake in the left hallway.",
+    }),
   });
   assert.equal(batchFinish.status, 200);
   const completedBatch = await batchFinish.json() as { status: string; uploadedFileCount: number };
   assert.equal(completedBatch.status, "complete");
   assert.equal(completedBatch.uploadedFileCount, 2);
+  const nonStandardHandoff = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches/${batchKey}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${desktopCredentials.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: "complete", failedFileCount: 0, comment: "must not be accepted" }),
+  });
+  assert.equal(nonStandardHandoff.status, 400);
   const [storedBatch] = await db.select().from(captureBatchesTable).where(eq(captureBatchesTable.batchKey, batchKey));
   assert.equal(storedBatch.status, "complete");
+  assert.equal(storedBatch.handoffComment, "Two students need a retake in the left hallway.");
 
   const collaborationResponse = await fetch(`${baseUrl}/api/projects/${projectId}/collaboration`);
   assert.equal(collaborationResponse.status, 200);
   const collaboration = await collaborationResponse.json() as {
     summary: { photographedStudents: number; totalCaptures: number; pairing: { complete: number } };
-    batches: Array<{ batchKey: string; status: string; uploadedFileCount: number }>;
+    batches: Array<{ batchKey: string; status: string; uploadedFileCount: number; handoffComment: string | null }>;
   };
   assert.equal(collaboration.summary.photographedStudents, 1);
+  assert.equal(collaboration.batches.find((batch) => batch.batchKey === batchKey)?.handoffComment, "Two students need a retake in the left hallway.");
   assert(collaboration.summary.totalCaptures >= 1);
   assert(collaboration.summary.pairing.complete >= 1);
   const visibleBatch = collaboration.batches.find((batch) => batch.batchKey === batchKey);

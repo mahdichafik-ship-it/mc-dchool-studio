@@ -147,6 +147,13 @@ export const capturesTable = sqliteTable('captures', {
     .$type<'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'>()
     .notNull()
     .default('pending'),
+  cropX: integer('crop_x').notNull().default(0),
+  cropY: integer('crop_y').notNull().default(0),
+  cropScale: integer('crop_scale').notNull().default(100),
+  aspectRatio: text('aspect_ratio').notNull().default('original'),
+  straightenAngle: integer('straighten_angle').notNull().default(0),
+  rotation: integer('rotation').notNull().default(0),
+  reframePending: integer('reframe_pending', { mode: 'boolean' }).notNull().default(false),
   legacyPhotoId: integer('legacy_photo_id').references(() => photosTable.id, { onDelete: 'set null' }),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),

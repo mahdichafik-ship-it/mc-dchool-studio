@@ -383,8 +383,21 @@ router.patch("/projects/:projectId/capture-batches/:batchKey", requireDesktopCon
   const batchKey = req.params.batchKey;
   const failedFileCount = Number(req.body?.failedFileCount ?? 0);
   const requestedStatus = req.body?.status;
+  const handoffComment = req.body?.handoffComment;
+  const hasNonStandardHandoffField = ["comment", "handoffNotes", "handoff_note"]
+    .some((field) => req.body?.[field] !== undefined);
   const connection = getDesktopConnection(req);
-  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey) || !Number.isInteger(failedFileCount) || failedFileCount < 0 || !["failed", "complete"].includes(requestedStatus)) {
+  if (
+    !Number.isInteger(projectId)
+    || !validCaptureBatchKey(batchKey)
+    || !Number.isInteger(failedFileCount)
+    || failedFileCount < 0
+    || !["failed", "complete"].includes(requestedStatus)
+    || hasNonStandardHandoffField
+    || (handoffComment !== undefined
+      && handoffComment !== null
+      && (typeof handoffComment !== "string" || handoffComment.trim().length > 2000))
+  ) {
     res.status(400).json({ error: "Invalid capture batch update" });
     return;
   }
@@ -427,15 +440,19 @@ router.patch("/projects/:projectId/capture-batches/:batchKey", requireDesktopCon
   const status = requestedStatus === "complete" && failedFileCount === 0 && uploadedFileCount >= batch.expectedFileCount
     ? "complete"
     : "failed";
-  const [updated] = await db
-    .update(captureBatchesTable)
-    .set({
+  const update: Partial<typeof captureBatchesTable.$inferInsert> = {
       status,
       uploadedFileCount,
       failedFileCount,
       lastSyncAt: new Date(),
       completedAt: status === "complete" ? new Date() : null,
-    })
+      ...(handoffComment !== undefined && status === "complete"
+        ? { handoffComment: typeof handoffComment === "string" ? handoffComment.trim() || null : null }
+        : {}),
+    };
+  const [updated] = await db
+    .update(captureBatchesTable)
+    .set(update)
     .where(eq(captureBatchesTable.id, batch.id))
     .returning();
   res.json(updated);

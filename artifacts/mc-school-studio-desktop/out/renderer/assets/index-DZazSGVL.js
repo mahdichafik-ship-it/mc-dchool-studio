@@ -12090,29 +12090,29 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$A = [
+const __iconNode$C = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$A);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$C);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$z = [
+const __iconNode$B = [
   ["path", { d: "M5 12h14", key: "1ays0h" }],
   ["path", { d: "m12 5 7 7-7 7", key: "xquz4c" }]
 ];
-const ArrowRight = createLucideIcon("arrow-right", __iconNode$z);
+const ArrowRight = createLucideIcon("arrow-right", __iconNode$B);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$y = [
+const __iconNode$A = [
   ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
   [
     "path",
@@ -12122,14 +12122,14 @@ const __iconNode$y = [
     }
   ]
 ];
-const Bell = createLucideIcon("bell", __iconNode$y);
+const Bell = createLucideIcon("bell", __iconNode$A);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$x = [
+const __iconNode$z = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12139,14 +12139,14 @@ const __iconNode$x = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$x);
+const BookOpen = createLucideIcon("book-open", __iconNode$z);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$w = [
+const __iconNode$y = [
   [
     "path",
     {
@@ -12156,23 +12156,46 @@ const __iconNode$w = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$w);
+const Camera = createLucideIcon("camera", __iconNode$y);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$v = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-const Check = createLucideIcon("check", __iconNode$v);
+const __iconNode$x = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
+const Check = createLucideIcon("check", __iconNode$x);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$u = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$u);
+const __iconNode$w = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$w);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$v = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$v);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$u = [
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+];
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$u);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12181,10 +12204,10 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$u);
  */
 const __iconNode$t = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
+  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$t);
+const CircleUser = createLucideIcon("circle-user", __iconNode$t);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12192,10 +12215,11 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$t);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$s = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$s);
+const CircleX = createLucideIcon("circle-x", __iconNode$s);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12203,11 +12227,11 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$s);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$r = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
-  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
+  ["path", { d: "M12 13v8", key: "1l5pq0" }],
+  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
+  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
 ];
-const CircleUser = createLucideIcon("circle-user", __iconNode$r);
+const CloudUpload = createLucideIcon("cloud-upload", __iconNode$r);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12215,11 +12239,9 @@ const CircleUser = createLucideIcon("circle-user", __iconNode$r);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$q = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$q);
+const Cloud = createLucideIcon("cloud", __iconNode$q);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12227,11 +12249,11 @@ const CircleX = createLucideIcon("circle-x", __iconNode$q);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$p = [
-  ["path", { d: "M12 13v8", key: "1l5pq0" }],
-  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
-  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const CloudUpload = createLucideIcon("cloud-upload", __iconNode$p);
+const Download = createLucideIcon("download", __iconNode$p);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12239,9 +12261,11 @@ const CloudUpload = createLucideIcon("cloud-upload", __iconNode$p);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$o = [
-  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const Cloud = createLucideIcon("cloud", __iconNode$o);
+const ExternalLink = createLucideIcon("external-link", __iconNode$o);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12249,30 +12273,6 @@ const Cloud = createLucideIcon("cloud", __iconNode$o);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$n = [
-  ["path", { d: "M12 15V3", key: "m9g1x1" }],
-  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
-  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
-];
-const Download = createLucideIcon("download", __iconNode$n);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$m = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
-];
-const ExternalLink = createLucideIcon("external-link", __iconNode$m);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$l = [
   [
     "path",
     {
@@ -12281,14 +12281,14 @@ const __iconNode$l = [
     }
   ]
 ];
-const FolderOpen = createLucideIcon("folder-open", __iconNode$l);
+const FolderOpen = createLucideIcon("folder-open", __iconNode$n);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$k = [
+const __iconNode$m = [
   [
     "path",
     {
@@ -12297,7 +12297,31 @@ const __iconNode$k = [
     }
   ]
 ];
-const Folder = createLucideIcon("folder", __iconNode$k);
+const Folder = createLucideIcon("folder", __iconNode$m);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$l = [
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+];
+const Image = createLucideIcon("image", __iconNode$l);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$k = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+];
+const Info = createLucideIcon("info", __iconNode$k);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12305,11 +12329,12 @@ const Folder = createLucideIcon("folder", __iconNode$k);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$j = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
+  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
+  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
+  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
 ];
-const Image = createLucideIcon("image", __iconNode$j);
+const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$j);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12317,31 +12342,6 @@ const Image = createLucideIcon("image", __iconNode$j);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$i = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
-];
-const Info = createLucideIcon("info", __iconNode$i);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$h = [
-  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
-  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
-  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
-  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
-];
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$h);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$g = [
   ["path", { d: "M12 2v4", key: "3427ic" }],
   ["path", { d: "m16.2 7.8 2.9-2.9", key: "r700ao" }],
   ["path", { d: "M18 12h4", key: "wj9ykh" }],
@@ -12351,7 +12351,32 @@ const __iconNode$g = [
   ["path", { d: "M2 12h4", key: "j09sii" }],
   ["path", { d: "m4.9 4.9 2.9 2.9", key: "giyufr" }]
 ];
-const Loader = createLucideIcon("loader", __iconNode$g);
+const Loader = createLucideIcon("loader", __iconNode$i);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$h = [
+  ["path", { d: "m16 17 5-5-5-5", key: "1bji2h" }],
+  ["path", { d: "M21 12H9", key: "dn1m92" }],
+  ["path", { d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", key: "1uf3rs" }]
+];
+const LogOut = createLucideIcon("log-out", __iconNode$h);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$g = [
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "m21 3-7 7", key: "1l2asr" }],
+  ["path", { d: "m3 21 7-7", key: "tjx5ai" }],
+  ["path", { d: "M9 21H3v-6", key: "wtvkvv" }]
+];
+const Maximize2 = createLucideIcon("maximize-2", __iconNode$g);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12359,11 +12384,16 @@ const Loader = createLucideIcon("loader", __iconNode$g);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$f = [
-  ["path", { d: "m16 17 5-5-5-5", key: "1bji2h" }],
-  ["path", { d: "M21 12H9", key: "dn1m92" }],
-  ["path", { d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", key: "1uf3rs" }]
+  [
+    "path",
+    {
+      d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
+      key: "1a8usu"
+    }
+  ],
+  ["path", { d: "m15 5 4 4", key: "1mk7zo" }]
 ];
-const LogOut = createLucideIcon("log-out", __iconNode$f);
+const Pencil = createLucideIcon("pencil", __iconNode$f);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12374,13 +12404,12 @@ const __iconNode$e = [
   [
     "path",
     {
-      d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
-      key: "1a8usu"
+      d: "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z",
+      key: "10ikf1"
     }
-  ],
-  ["path", { d: "m15 5 4 4", key: "1mk7zo" }]
+  ]
 ];
-const Pencil = createLucideIcon("pencil", __iconNode$e);
+const Play = createLucideIcon("play", __iconNode$e);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12388,15 +12417,10 @@ const Pencil = createLucideIcon("pencil", __iconNode$e);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$d = [
-  [
-    "path",
-    {
-      d: "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z",
-      key: "10ikf1"
-    }
-  ]
+  ["path", { d: "M5 12h14", key: "1ays0h" }],
+  ["path", { d: "M12 5v14", key: "s699le" }]
 ];
-const Play = createLucideIcon("play", __iconNode$d);
+const Plus = createLucideIcon("plus", __iconNode$d);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12404,17 +12428,6 @@ const Play = createLucideIcon("play", __iconNode$d);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$c = [
-  ["path", { d: "M5 12h14", key: "1ays0h" }],
-  ["path", { d: "M12 5v14", key: "s699le" }]
-];
-const Plus = createLucideIcon("plus", __iconNode$c);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$b = [
   ["rect", { width: "5", height: "5", x: "3", y: "3", rx: "1", key: "1tu5fj" }],
   ["rect", { width: "5", height: "5", x: "16", y: "3", rx: "1", key: "1v8r4q" }],
   ["rect", { width: "5", height: "5", x: "3", y: "16", rx: "1", key: "1x03jg" }],
@@ -12428,7 +12441,20 @@ const __iconNode$b = [
   ["path", { d: "M21 12v.01", key: "1lwtk9" }],
   ["path", { d: "M12 21v-1", key: "1880an" }]
 ];
-const QrCode = createLucideIcon("qr-code", __iconNode$b);
+const QrCode = createLucideIcon("qr-code", __iconNode$c);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$b = [
+  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
+  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
+  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
+  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+];
+const RefreshCw = createLucideIcon("refresh-cw", __iconNode$b);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12436,12 +12462,10 @@ const QrCode = createLucideIcon("qr-code", __iconNode$b);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$a = [
-  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
-  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
-  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
-  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+  ["path", { d: "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8", key: "1p45f6" }],
+  ["path", { d: "M21 3v5h-5", key: "1q7to0" }]
 ];
-const RefreshCw = createLucideIcon("refresh-cw", __iconNode$a);
+const RotateCw = createLucideIcon("rotate-cw", __iconNode$a);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -16348,6 +16372,15 @@ function useCaptures(studentId) {
           files: [jpegFile],
           thumbnailData: null,
           legacyPhoto: galleryPhoto,
+          framing: {
+            cropX: 0,
+            cropY: 0,
+            cropScale: 100,
+            aspectRatio: "original",
+            straightenAngle: 0,
+            rotation: 0,
+            pending: false
+          },
           previewPipeline: event.pipeline
         };
         return {
@@ -16987,6 +17020,129 @@ function waitForPaintFrames(frameCount = 2) {
     wait(frameCount);
   });
 }
+function capturePreviewViewportStyle(geometry, maxBlockSize) {
+  return {
+    width: `min(100%, calc(${maxBlockSize} * ${geometry.aspectRatio}))`,
+    maxHeight: maxBlockSize,
+    aspectRatio: `${geometry.cropWidth} / ${geometry.cropHeight}`
+  };
+}
+function finiteDimension(value) {
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+function normalizeRotation(rotation) {
+  const normalized = (Math.round(rotation / 90) * 90 % 360 + 360) % 360;
+  return normalized;
+}
+function aspectRatioValue(aspectRatio) {
+  if (aspectRatio === "original") return null;
+  const [width, height] = aspectRatio.split(":").map(Number);
+  return width > 0 && height > 0 ? width / height : null;
+}
+function getCaptureCropGeometry(sourceWidth, sourceHeight, framing) {
+  const width = finiteDimension(sourceWidth);
+  const height = finiteDimension(sourceHeight);
+  const rotation = normalizeRotation(framing.rotation);
+  const rotatedWidth = rotation === 90 || rotation === 270 ? height : width;
+  const rotatedHeight = rotation === 90 || rotation === 270 ? width : height;
+  const straightenAngle = Number.isFinite(framing.straightenAngle) ? framing.straightenAngle : 0;
+  const radians = Math.abs(straightenAngle) * Math.PI / 180;
+  const transformedWidth = rotatedWidth * Math.cos(radians) + rotatedHeight * Math.sin(radians);
+  const transformedHeight = rotatedWidth * Math.sin(radians) + rotatedHeight * Math.cos(radians);
+  const targetRatio = aspectRatioValue(framing.aspectRatio) ?? transformedWidth / transformedHeight;
+  const fittedWidth = transformedWidth / transformedHeight > targetRatio ? transformedHeight * targetRatio : transformedWidth;
+  const fittedHeight = transformedWidth / transformedHeight > targetRatio ? transformedHeight : transformedWidth / targetRatio;
+  const scale = Math.max(1, Math.min(3, framing.cropScale / 100));
+  const cropWidth = Math.max(1, Math.round(fittedWidth / scale));
+  const cropHeight = Math.max(1, Math.round(fittedHeight / scale));
+  const focalX = Math.max(0, Math.min(1, 0.5 + framing.cropX / 200));
+  const focalY = Math.max(0, Math.min(1, 0.5 + framing.cropY / 200));
+  const fittedLeft = (transformedWidth - fittedWidth) / 2;
+  const fittedTop = (transformedHeight - fittedHeight) / 2;
+  const cropLeft = Math.max(
+    0,
+    Math.min(transformedWidth - cropWidth, Math.round(fittedLeft + (fittedWidth - cropWidth) * focalX))
+  );
+  const cropTop = Math.max(
+    0,
+    Math.min(transformedHeight - cropHeight, Math.round(fittedTop + (fittedHeight - cropHeight) * focalY))
+  );
+  return {
+    sourceWidth: width,
+    sourceHeight: height,
+    transformedWidth,
+    transformedHeight,
+    cropWidth,
+    cropHeight,
+    cropLeft,
+    cropTop,
+    aspectRatio: cropWidth / cropHeight,
+    rotation,
+    straightenAngle
+  };
+}
+function CaptureFramingPreview({ source, alt, framing, maxBlockSize, className }) {
+  const [naturalSize, setNaturalSize] = reactExports.useState(null);
+  reactExports.useEffect(() => {
+    setNaturalSize(null);
+  }, [source]);
+  if (!source) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cn("relative flex items-center justify-center overflow-hidden bg-black", className), children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-slate-400", children: "Preview unavailable" }) });
+  }
+  const geometry = naturalSize ? getCaptureCropGeometry(naturalSize.width, naturalSize.height, framing) : null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: cn("relative overflow-hidden bg-black", className),
+      style: geometry ? capturePreviewViewportStyle(geometry, maxBlockSize) : void 0,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: source,
+            alt,
+            draggable: false,
+            onLoad: (event) => {
+              const image = event.currentTarget;
+              setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight });
+            },
+            className: cn(
+              "absolute inset-0 h-full w-full",
+              geometry ? "opacity-0" : "opacity-100"
+            ),
+            "aria-hidden": geometry ? true : void 0
+          }
+        ),
+        geometry && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "div",
+          {
+            className: "absolute",
+            style: {
+              width: `${geometry.transformedWidth / geometry.cropWidth * 100}%`,
+              height: `${geometry.transformedHeight / geometry.cropHeight * 100}%`,
+              left: `${-(geometry.cropLeft / geometry.cropWidth) * 100}%`,
+              top: `${-(geometry.cropTop / geometry.cropHeight) * 100}%`
+            },
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "img",
+              {
+                src: source,
+                alt,
+                draggable: false,
+                className: "absolute left-1/2 top-1/2 max-w-none",
+                style: {
+                  width: `${geometry.sourceWidth / geometry.transformedWidth * 100}%`,
+                  height: `${geometry.sourceHeight / geometry.transformedHeight * 100}%`,
+                  transform: `translate(-50%, -50%) rotate(${geometry.rotation + geometry.straightenAngle}deg)`
+                }
+              }
+            )
+          }
+        )
+      ]
+    }
+  );
+}
 const captureFilterOptions = [
   { value: "all", label: "All" },
   { value: "complete", label: "JPEG + RAW" },
@@ -17049,6 +17205,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [uploadQueue, setUploadQueue] = reactExports.useState([]);
   const [deletingQueueItem, setDeletingQueueItem] = reactExports.useState(null);
   const [finishDialogOpen, setFinishDialogOpen] = reactExports.useState(false);
+  const [photographerComment, setPhotographerComment] = reactExports.useState("");
   const [uploadActionRunning, setUploadActionRunning] = reactExports.useState(false);
   const [reviewSummary, setReviewSummary] = reactExports.useState({ unratedPortraits: 0, unratedGroups: 0 });
   const [dropProgress, setDropProgress] = reactExports.useState(null);
@@ -17501,7 +17658,10 @@ function ProjectView({ projectId, onBack, offline = false }) {
       failed: 0
     });
     try {
-      const result = await window.api.invoke("project:uploadAndFinish", { projectId });
+      const result = await window.api.invoke("project:uploadAndFinish", {
+        projectId,
+        photographerComment: photographerComment.trim() || void 0
+      });
       await reloadProject();
       await reloadUploadStatus();
       if (result.ok) {
@@ -18014,6 +18174,29 @@ function ProjectView({ projectId, onBack, offline = false }) {
                 ] })
               ] }) }),
               !liveUpload?.cloudReady && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-600", children: "Connect to Volume Capture before finishing. Your local captures remain safe." }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { htmlFor: "photographer-comment", className: "text-xs font-extrabold uppercase tracking-wider text-slate-600", children: [
+                  "Photographer comment ",
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium normal-case tracking-normal text-slate-400", children: "(optional)" })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "textarea",
+                  {
+                    id: "photographer-comment",
+                    value: photographerComment,
+                    onChange: (event) => setPhotographerComment(event.target.value),
+                    disabled: finishing,
+                    maxLength: 2e3,
+                    rows: 3,
+                    placeholder: "Anything the studio should know about this shoot?",
+                    className: "mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 text-right text-[10px] text-slate-400", children: [
+                  photographerComment.length,
+                  "/2000"
+                ] })
+              ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3 justify-end", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { variant: "outline", disabled: finishing, onClick: () => setFinishDialogOpen(false), children: "Keep Shooting" }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -18535,6 +18718,8 @@ function StudentDetail({
   const [pairingFilter, setPairingFilter] = reactExports.useState("all");
   const [reviewCaptureKey, setReviewCaptureKey] = reactExports.useState(null);
   const [showQrOpen, setShowQrOpen] = reactExports.useState(false);
+  const [framingCapture, setFramingCapture] = reactExports.useState(null);
+  const [quickLookCapture, setQuickLookCapture] = reactExports.useState(null);
   const captureCounts = captures.reduce(
     (counts, capture) => {
       counts[capture.pairingStatus]++;
@@ -18561,7 +18746,7 @@ function StudentDetail({
     const handleReviewShortcut = (event) => {
       const target = event.target;
       const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable;
-      if (isInput || showQrOpen || reassignOpen || document.querySelector('[role="dialog"], [aria-modal="true"]')) return;
+      if (isInput || showQrOpen || reassignOpen || framingCapture !== null || quickLookCapture !== null || document.querySelector('[role="dialog"], [aria-modal="true"]')) return;
       if (event.key.toLowerCase() === "l" && latestCapture) {
         event.preventDefault();
         setReviewCaptureKey(null);
@@ -18580,7 +18765,7 @@ function StudentDetail({
     };
     window.addEventListener("keydown", handleReviewShortcut);
     return () => window.removeEventListener("keydown", handleReviewShortcut);
-  }, [captures, isFollowingLatest, latestCapture, reassignOpen, selectedCapture?.id, showQrOpen]);
+  }, [captures, framingCapture, isFollowingLatest, latestCapture, quickLookCapture, reassignOpen, selectedCapture?.id, showQrOpen]);
   async function handleDeletePhoto(photoId) {
     await window.api.invoke("photos:delete", { photoId });
     reloadCaptures();
@@ -18639,6 +18824,16 @@ function StudentDetail({
       await reloadCaptures();
     } catch (error) {
       addToast({ type: "error", title: "Could not update capture review", description: String(error) });
+    }
+  }
+  async function handleSaveFraming(captureId, framing) {
+    try {
+      await window.api.invoke("captures:updateFraming", { captureId, framing });
+      setFramingCapture(null);
+      await reloadCaptures();
+      addToast({ type: "success", title: "Framing saved", description: "The original capture remains unchanged." });
+    } catch (error) {
+      addToast({ type: "error", title: "Could not save framing", description: String(error) });
     }
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -18729,7 +18924,8 @@ function StudentDetail({
               {
                 capture: selectedCapture,
                 uploadStatus: selectedCapture.legacyPhoto ? photoStatusMap.get(selectedCapture.legacyPhoto.id) : void 0,
-                onUpdateReview: handleUpdateCaptureReview
+                onUpdateReview: handleUpdateCaptureReview,
+                onEditFraming: () => setFramingCapture(selectedCapture)
               }
             ),
             !isFollowingLatest && selectedCapture && latestCapture && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-950", children: [
@@ -18764,6 +18960,7 @@ function StudentDetail({
                   setReviewCaptureKey(captureId === latestCapture?.id || !capture ? null : captureReviewKey(capture));
                 },
                 onLatest: () => setReviewCaptureKey(null),
+                onQuickLook: (capture) => setQuickLookCapture(capture),
                 onPrevious: () => {
                   const index2 = isFollowingLatest ? captures.length - 1 : captures.findIndex((capture) => capture.id === selectedCapture?.id);
                   if (index2 > 0) setReviewCaptureKey(captureReviewKey(captures[index2 - 1]));
@@ -18902,6 +19099,22 @@ function StudentDetail({
               /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-center text-xs font-medium text-slate-500", children: "Present this code to the camera before capturing portraits." })
             ] })
           }
+        ),
+        framingCapture && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          ReframeEditor,
+          {
+            capture: framingCapture,
+            onCancel: () => setFramingCapture(null),
+            onSave: handleSaveFraming
+          }
+        ),
+        quickLookCapture && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          QuickLookDialog,
+          {
+            capture: quickLookCapture,
+            latestCapture,
+            onClose: () => setQuickLookCapture(null)
+          }
         )
       ]
     }
@@ -18972,38 +19185,47 @@ function PersistentQrCard({
   );
 }
 function CaptureStage({ capture }) {
-  const imageSource = capture.legacyPhoto?.previewUrl ?? capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative flex aspect-[16/7] min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg", children: [
-    imageSource ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "img",
-      {
-        src: imageSource,
-        alt: `Capture ${capture.baseFilename}`,
-        className: "block h-full w-full object-contain",
-        draggable: false
-      }
-    ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center text-center text-slate-500", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "mb-3 size-10 text-slate-600" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-slate-300", children: "JPEG preview unavailable" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-xs font-medium", children: "The capture remains safely stored below." })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/75 to-transparent p-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded bg-black/55 px-2 py-1 font-mono text-[10px] font-bold text-white", children: capture.baseFilename }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded bg-black/55 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-white/80", children: "JPEG preview" })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-7 text-[10px] font-medium text-white/80", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: new Date(capture.capturedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: capture.pairingStatus === "complete" ? "JPEG + RAW" : capture.pairingStatus.replace("_", " ") })
-    ] })
-  ] });
+  const imageSource = capture.legacyPhoto?.previewUrl ?? capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl ?? capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData;
+  const framing = capture.framing;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "relative flex min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg",
+      children: [
+        imageSource ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          CaptureFramingPreview,
+          {
+            source: imageSource,
+            alt: `Capture ${capture.baseFilename}`,
+            framing: framing ?? defaultCaptureFraming,
+            maxBlockSize: "430px",
+            className: "max-w-full"
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center text-center text-slate-500", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "mb-3 size-10 text-slate-600" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-slate-300", children: "JPEG preview unavailable" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-xs font-medium", children: "The capture remains safely stored below." })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/75 to-transparent p-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded bg-black/55 px-2 py-1 font-mono text-[10px] font-bold text-white", children: capture.baseFilename }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded bg-black/55 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-white/80", children: "JPEG preview" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-7 text-[10px] font-medium text-white/80", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: new Date(capture.capturedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: capture.pairingStatus === "complete" ? "JPEG + RAW" : capture.pairingStatus.replace("_", " ") })
+        ] })
+      ]
+    }
+  );
 }
 function CaptureStageMeta({
   capture,
   uploadStatus,
-  onUpdateReview
+  onUpdateReview,
+  onEditFraming
 }) {
   const upload = captureUploadSummary(capture, uploadStatus);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-4", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[9px] font-extrabold uppercase tracking-widest text-slate-400", children: "Rating" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1.5 flex items-center gap-0.5", "aria-label": `${capture.rating} out of 5 stars`, children: Array.from({ length: 5 }, (_, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -19036,6 +19258,18 @@ function CaptureStageMeta({
         "button",
         {
           type: "button",
+          onClick: onEditFraming,
+          className: "rounded-lg border border-slate-200 px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-500 hover:bg-slate-50",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Pencil, { className: "mr-1 inline size-3" }),
+            " Edit framing"
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
           onClick: () => onUpdateReview(capture.id, { selected: !capture.selected }),
           className: cn("rounded-lg border px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider", capture.selected ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"),
           children: [
@@ -19061,11 +19295,239 @@ function CaptureStageMeta({
     ] })
   ] });
 }
+function QuickLookDialog({
+  capture,
+  latestCapture,
+  onClose
+}) {
+  const [zoom, setZoom] = reactExports.useState(1);
+  const [compareLatest, setCompareLatest] = reactExports.useState(false);
+  const captureSource = capture.legacyPhoto?.previewUrl ?? capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl ?? capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData;
+  const latestSource = latestCapture?.legacyPhoto?.previewUrl ?? latestCapture?.files.find((file) => file.fileRole === "JPEG")?.previewUrl ?? latestCapture?.thumbnailData ?? latestCapture?.legacyPhoto?.thumbnailData;
+  const displayedSource = compareLatest && latestSource ? latestSource : captureSource;
+  const displayedName = compareLatest && latestCapture ? latestCapture.baseFilename : capture.baseFilename;
+  reactExports.useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": `Quick Look ${capture.baseFilename}`,
+      className: "fixed inset-0 z-[100] flex flex-col bg-slate-950/95",
+      onClick: onClose,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "flex flex-wrap items-center justify-between gap-3 border-b border-white/15 px-5 py-3 text-white",
+            onClick: (event) => event.stopPropagation(),
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold", children: "Quick Look" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "truncate text-xs text-white/60", children: displayedName })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-end gap-2", children: [
+                latestCapture && latestCapture.id !== capture.id && latestSource && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setCompareLatest((value) => !value),
+                    className: cn(
+                      "rounded-lg px-3 py-2 text-xs font-bold transition-colors",
+                      compareLatest ? "bg-teal-500 text-white" : "bg-white/10 text-white hover:bg-white/20"
+                    ),
+                    children: compareLatest ? "Showing latest" : "Compare with latest"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setZoom((value) => Math.max(0.5, value - 0.25)),
+                    className: "rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20",
+                    children: "−"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "w-14 text-center text-xs font-bold", children: [
+                  Math.round(zoom * 100),
+                  "%"
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setZoom((value) => Math.min(4, value + 0.25)),
+                    className: "rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20",
+                    children: "+"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onClose, className: "rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-900", children: "Close" })
+              ] })
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex min-h-0 flex-1 items-center justify-center overflow-auto p-6", onClick: (event) => event.stopPropagation(), children: displayedSource ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: displayedSource,
+            alt: displayedName,
+            draggable: false,
+            style: { transform: `scale(${zoom})` },
+            className: "max-h-[82vh] max-w-[92vw] origin-center object-contain transition-transform"
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-slate-400", children: "Preview unavailable for this capture." }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "border-t border-white/10 px-5 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-white/45", children: "Escape or click outside to close · Original file is unchanged" })
+      ]
+    }
+  );
+}
+const defaultCaptureFraming = {
+  cropX: 0,
+  cropY: 0,
+  cropScale: 100,
+  aspectRatio: "original",
+  straightenAngle: 0,
+  rotation: 0
+};
+function ReframeEditor({
+  capture,
+  onCancel,
+  onSave
+}) {
+  const [framing, setFraming] = reactExports.useState({
+    ...defaultCaptureFraming,
+    ...capture.framing
+  });
+  const source = capture.legacyPhoto?.previewUrl ?? capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl ?? capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData;
+  reactExports.useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+  const update = (key, value) => {
+    setFraming((current) => ({ ...current, [key]: value }));
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { role: "dialog", "aria-modal": "true", "aria-label": `Edit framing ${capture.baseFilename}`, className: "fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/70 p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between border-b border-slate-200 px-5 py-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-extrabold text-slate-900", children: "Edit framing" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 text-xs text-slate-500", children: [
+          capture.baseFilename,
+          " · non-destructive"
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onCancel, className: "rounded-lg p-2 text-slate-500 hover:bg-slate-100", "aria-label": "Close framing editor", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "size-5" }) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_280px]", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex min-h-[280px] items-center justify-center overflow-hidden rounded-xl bg-slate-950 p-5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex max-h-[62vh] w-full items-center justify-center overflow-hidden bg-black", children: source ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        CaptureFramingPreview,
+        {
+          source,
+          alt: `Framing preview ${capture.baseFilename}`,
+          framing,
+          maxBlockSize: "62vh",
+          className: "max-w-full"
+        }
+      ) : /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-slate-400", children: "Preview unavailable" }) }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("label", { htmlFor: "reframe-aspect", className: "text-[10px] font-extrabold uppercase tracking-wider text-slate-500", children: "Aspect ratio" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "select",
+            {
+              id: "reframe-aspect",
+              value: framing.aspectRatio,
+              onChange: (event) => update("aspectRatio", event.target.value),
+              className: "mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "original", children: "Original" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "1:1", children: "Square · 1:1" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "4:5", children: "Portrait · 4:5" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "3:2", children: "Classic · 3:2" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "16:9", children: "Widescreen · 16:9" })
+              ]
+            }
+          )
+        ] }),
+        [
+          ["cropX", "Horizontal position", -100, 100, 1],
+          ["cropY", "Vertical position", -100, 100, 1],
+          ["cropScale", "Crop scale", 100, 300, 1],
+          ["straightenAngle", "Straighten angle", -15, 15, 1]
+        ].map(([key, label, min, max, step]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-500", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: label }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "font-mono text-slate-700", children: [
+              framing[key],
+              key === "cropScale" ? "%" : key === "straightenAngle" ? "°" : ""
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min,
+              max,
+              step,
+              value: framing[key],
+              onChange: (event) => update(key, Number(event.target.value)),
+              className: "mt-2 w-full accent-teal-600"
+            }
+          )
+        ] }, key)),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] font-extrabold uppercase tracking-wider text-slate-500", children: "Rotate" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              type: "button",
+              onClick: () => update("rotation", (framing.rotation + 90) % 360),
+              className: "mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(RotateCw, { className: "size-3.5" }),
+                " 90° clockwise · ",
+                framing.rotation,
+                "°"
+              ]
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => setFraming(defaultCaptureFraming),
+            className: "w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50",
+            children: "Reset adjustments"
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-end gap-2 border-t border-slate-200 px-5 py-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onCancel, className: "rounded-lg border border-slate-200 px-4 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50", children: "Cancel" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => void onSave(capture.id, framing), className: "rounded-lg bg-teal-600 px-4 py-2 text-xs font-extrabold uppercase tracking-wider text-white hover:bg-teal-700", children: "Save framing" })
+    ] })
+  ] }) });
+}
 function CaptureFilmstrip({
   captures,
   selectedCaptureId,
   isFollowingLatest,
   onSelect,
+  onQuickLook,
   onLatest,
   onPrevious,
   onNext
@@ -19127,7 +19589,7 @@ function CaptureFilmstrip({
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: stripRef, className: "flex gap-2 overflow-x-auto pb-1", children: captures.map((capture) => {
       const isCurrent = selectedCaptureId === capture.id;
       const isNewest = capture.id === latestCaptureId;
-      const source = capture.legacyPhoto?.previewUrl;
+      const source = capture.legacyPhoto?.previewUrl ?? capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl;
       const fallback = capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData;
       return /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
@@ -19144,6 +19606,28 @@ function CaptureFilmstrip({
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative aspect-[1.45] overflow-hidden bg-slate-900", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(GalleryThumbnail, { source, fallback, alt: `Capture ${capture.baseFilename}` }),
+              (source || fallback) && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "span",
+                {
+                  role: "button",
+                  tabIndex: 0,
+                  title: "Quick Look",
+                  "aria-label": `Quick Look ${capture.baseFilename}`,
+                  onClick: (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onQuickLook(capture);
+                  },
+                  onKeyDown: (event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onQuickLook(capture);
+                  },
+                  className: "absolute bottom-2 right-2 rounded-md bg-black/70 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/90 group-hover:opacity-100 group-focus-within:opacity-100",
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx(Maximize2, { className: "size-3.5" })
+                }
+              ),
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: cn("absolute left-2 top-2 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-white", isNewest ? "bg-red-600" : "bg-black/60"), children: isNewest ? "Newest" : `Frame ${capture.sequence ?? ""}` }),
               capture.favorite && /* @__PURE__ */ jsxRuntimeExports.jsx(Star, { className: "absolute right-2 top-2 size-3.5 text-amber-300", fill: "currentColor" })
             ] }),

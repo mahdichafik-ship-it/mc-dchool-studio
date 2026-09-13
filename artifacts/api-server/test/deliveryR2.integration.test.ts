@@ -125,6 +125,33 @@ async function insertPaidItems(photoIds: number[]): Promise<void> {
   })));
 }
 
+async function insertPrintItem(photoId: number): Promise<number> {
+  const [order] = await db.insert(deliveryOrdersTable).values({
+    galleryId,
+    accessId: paidAccessId,
+    status: "paid",
+    paymentMethod: "stripe",
+    customerName: "R2 print test",
+    fulfillmentStatus: "paid",
+    deliveryMethod: "shipping",
+    amountTotal: 2500,
+    currency: "usd",
+    paidAt: new Date(),
+  }).returning({ id: deliveryOrdersTable.id });
+  await db.insert(deliveryOrderItemsTable).values({
+    orderId: order.id,
+    photoId,
+    offerId: "print-single",
+    productName: "Print",
+    productType: "print",
+    includesDigitalDownloads: false,
+    quantity: 1,
+    unitAmount: 2500,
+    currency: "usd",
+  });
+  return order.id;
+}
+
 let studioId: number;
 let projectId: number;
 let galleryId: number;
@@ -132,7 +159,9 @@ let paidAccessId: number;
 let unpaidAccessId: number;
 let studentId: number;
 let unpaidStudentId: number;
+let readyCaptureId: number;
 let readyCaptureFileId: number;
+let printOrderId: number;
 
 const originalFetch = globalThis.fetch;
 const originalObjectStorageGet = ObjectStorageService.prototype.getObjectEntityFile;
@@ -253,6 +282,7 @@ before(async () => {
     pairingStatus: "jpeg_only",
     rating: 1,
   }).returning({ id: capturesTable.id });
+  readyCaptureId = readyCapture.id;
   const [readyCaptureFile] = await db.insert(captureFilesTable).values({
     captureId: readyCapture.id,
     fileRole: "JPEG",
@@ -354,6 +384,7 @@ before(async () => {
     failedPhotoId,
     unsharedPhotoId,
   ]);
+  printOrderId = await insertPrintItem(readyStudentPhotoId);
 
   const readyAccessResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/access`, {
     method: "POST",
@@ -386,8 +417,10 @@ test("selects a ready student R2 copy and keeps uploading/failed copies on Objec
   objectStorageReads = 0;
   const readyResponse = await requestPhoto(readyStudentPhotoId, paidAccessToken);
   assert.equal(readyResponse.status, 200);
-  assert.deepEqual(Buffer.from(await readyResponse.arrayBuffer()), readyStudentBytes);
-  assert.deepEqual(r2RequestedKeys, ["ready/student.jpg"]);
+  const readyBytes = Buffer.from(await readyResponse.arrayBuffer());
+  assert(readyBytes.length > 0, `empty ready body; r2=${JSON.stringify(r2RequestedKeys)}`);
+  assert(r2RequestedKeys.includes("ready/student.jpg"));
+  assert(r2RequestedKeys.some((key) => key.includes("__download__")));
   assert.equal(objectStorageReads, 0);
 
   thisPathBytes = fallbackUploadingBytes;
@@ -398,8 +431,45 @@ test("selects a ready student R2 copy and keeps uploading/failed copies on Objec
   const failedResponse = await requestPhoto(failedPhotoId, paidAccessToken);
   assert.equal(failedResponse.status, 200);
   assert.deepEqual(Buffer.from(await failedResponse.arrayBuffer()), fallbackFailedBytes);
-  assert.deepEqual(r2RequestedKeys, ["ready/student.jpg"]);
+  assert(r2RequestedKeys.includes("ready/student.jpg"));
+  assert(r2RequestedKeys.some((key) => key.includes("__download__")));
   assert.equal(objectStorageReads, 2);
+});
+
+test("paid print fulfillment exposes and consumes the edited print variant", async () => {
+  await db.update(capturesTable).set({
+    cropPositionX: 0.75,
+    cropPositionY: 0.25,
+    cropScale: 2,
+    aspectRatio: "1:1",
+  }).where(eq(capturesTable.id, readyCaptureId));
+
+  const orderResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders/${printOrderId}`, {
+    headers: { "x-delivery-token": paidAccessToken },
+  });
+  assert.equal(orderResponse.status, 200);
+  const order = await orderResponse.json() as {
+    items: Array<{ productType: string; printUrl?: string }>;
+  };
+  const printUrl = order.items.find((item) => item.productType === "print")?.printUrl;
+  assert(printUrl);
+
+  r2Requests.length = 0;
+  const printResponse = await fetch(`${baseUrl}${printUrl}`);
+  assert.equal(printResponse.status, 200);
+  assert.equal(printResponse.headers.get("content-type"), "image/jpeg");
+  const printBytes = Buffer.from(await printResponse.arrayBuffer());
+  const printMetadata = await sharp(printBytes).metadata();
+  assert.equal(printMetadata.width, 900);
+  assert.equal(printMetadata.height, 900);
+  assert.deepEqual(r2Bodies.get("ready/student.jpg"), readyStudentBytes);
+  assert(r2Requests.some((request) => request.method === "PUT" && request.objectKey.includes("/.variants/") && request.objectKey.includes("__print__")));
+  await db.update(capturesTable).set({
+    cropPositionX: null,
+    cropPositionY: null,
+    cropScale: null,
+    aspectRatio: null,
+  }).where(eq(capturesTable.id, readyCaptureId));
 });
 
 test("creates one persistent watermarked thumbnail and reuses it for later gallery views", async () => {
@@ -446,8 +516,10 @@ test("selects a ready group source copy for a materialized group photo", async (
   objectStorageReads = 0;
   const response = await requestPhoto(readyGroupPhotoId, paidAccessToken);
   assert.equal(response.status, 200);
-  assert.deepEqual(Buffer.from(await response.arrayBuffer()), readyGroupBytes);
-  assert.deepEqual(r2RequestedKeys, ["ready/group.jpg"]);
+  const groupBytes = Buffer.from(await response.arrayBuffer());
+  assert(groupBytes.length > 0, `empty group body; r2=${JSON.stringify(r2RequestedKeys)}`);
+  assert(r2RequestedKeys.includes("ready/group.jpg"));
+  assert(r2RequestedKeys.some((key) => key.includes("__download__")));
   assert.equal(objectStorageReads, 0);
 });
 
@@ -506,11 +578,15 @@ test("keeps an authorized R2 read failure private instead of serving stale Objec
   r2RequestedKeys.length = 0;
   objectStorageReads = 0;
   r2Failures.add("ready/student.jpg");
+  const downloadVariantKey = Array.from(r2Bodies.keys()).find((key) => key.includes("__download__"));
+  assert(downloadVariantKey);
+  r2Failures.add(downloadVariantKey);
   thisPathBytes = Buffer.from("stale Object Storage bytes");
   const response = await requestPhoto(readyStudentPhotoId, paidAccessToken);
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "Photo file is temporarily unavailable" });
-  assert.deepEqual(r2RequestedKeys, ["ready/student.jpg"]);
+  assert(r2RequestedKeys.includes(downloadVariantKey));
   assert.equal(objectStorageReads, 0);
   r2Failures.delete("ready/student.jpg");
+  r2Failures.delete(downloadVariantKey);
 });

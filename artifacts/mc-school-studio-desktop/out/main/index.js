@@ -142,6 +142,13 @@ const capturesTable = sqliteCore.sqliteTable("captures", {
   cameraSerial: sqliteCore.text("camera_serial"),
   assignmentLocked: sqliteCore.integer("assignment_locked", { mode: "boolean" }).notNull().default(false),
   pairingStatus: sqliteCore.text("pairing_status").$type().notNull().default("pending"),
+  cropX: sqliteCore.integer("crop_x").notNull().default(0),
+  cropY: sqliteCore.integer("crop_y").notNull().default(0),
+  cropScale: sqliteCore.integer("crop_scale").notNull().default(100),
+  aspectRatio: sqliteCore.text("aspect_ratio").notNull().default("original"),
+  straightenAngle: sqliteCore.integer("straighten_angle").notNull().default(0),
+  rotation: sqliteCore.integer("rotation").notNull().default(0),
+  reframePending: sqliteCore.integer("reframe_pending", { mode: "boolean" }).notNull().default(false),
   legacyPhotoId: sqliteCore.integer("legacy_photo_id").references(() => photosTable.id, { onDelete: "set null" }),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
   updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
@@ -276,6 +283,13 @@ function ensureCaptureTables(sqlite) {
       camera_serial TEXT,
       assignment_locked INTEGER NOT NULL DEFAULT 0,
       pairing_status TEXT NOT NULL DEFAULT 'pending',
+      crop_x INTEGER NOT NULL DEFAULT 0,
+      crop_y INTEGER NOT NULL DEFAULT 0,
+      crop_scale INTEGER NOT NULL DEFAULT 100,
+      aspect_ratio TEXT NOT NULL DEFAULT 'original',
+      straighten_angle INTEGER NOT NULL DEFAULT 0,
+      rotation INTEGER NOT NULL DEFAULT 0,
+      reframe_pending INTEGER NOT NULL DEFAULT 0,
       legacy_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -329,6 +343,13 @@ function ensureCaptureTables(sqlite) {
   ensureColumn(sqlite, "captures", "rating", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "captures", "color_label", "TEXT NOT NULL DEFAULT 'none'");
   ensureColumn(sqlite, "captures", "review_sync_pending", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "captures", "crop_x", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "captures", "crop_y", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "captures", "crop_scale", "INTEGER NOT NULL DEFAULT 100");
+  ensureColumn(sqlite, "captures", "aspect_ratio", "TEXT NOT NULL DEFAULT 'original'");
+  ensureColumn(sqlite, "captures", "straighten_angle", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "captures", "rotation", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(sqlite, "captures", "reframe_pending", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "group_capture_files", "gallery_ready", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "group_captures", "rating", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(sqlite, "group_captures", "review_sync_pending", "INTEGER NOT NULL DEFAULT 0");
@@ -869,6 +890,8 @@ const activeUploads = /* @__PURE__ */ new Set();
 const activePhotoUploads = /* @__PURE__ */ new Map();
 const activeCaptureFileUploads = /* @__PURE__ */ new Map();
 const activeGroupCaptureFileUploads = /* @__PURE__ */ new Map();
+const activeCaptureReviewSyncs = /* @__PURE__ */ new Map();
+const activeGroupCaptureReviewSyncs = /* @__PURE__ */ new Map();
 const cloudIdentityRepairs = /* @__PURE__ */ new Map();
 const MAX_CONCURRENT_UPLOADS = 3;
 const uploadLimiter = new AsyncTaskLimiter(MAX_CONCURRENT_UPLOADS);
@@ -1394,7 +1417,7 @@ async function performUploadGroupCaptureFile(captureId, fileId, captureBatchKey)
     throw error;
   }
 }
-async function syncGroupCaptureReview(captureId) {
+async function performSyncGroupCaptureReview(captureId) {
   if (!isCloudSessionVerified()) return;
   const db = getDb();
   const capture = db.select().from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).get();
@@ -1415,14 +1438,30 @@ async function syncGroupCaptureReview(captureId) {
     );
     if (response.status === 401) invalidateDesktopCredentials(true);
     if (response.ok) {
-      db.update(groupCapturesTable).set({ reviewSyncPending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).run();
+      const latest = db.select({ rating: groupCapturesTable.rating }).from(groupCapturesTable).where(drizzleOrm.eq(groupCapturesTable.id, captureId)).get();
+      if (latest?.rating !== capture.rating) return;
+      db.update(groupCapturesTable).set({ reviewSyncPending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.and(drizzleOrm.eq(groupCapturesTable.id, captureId), drizzleOrm.eq(groupCapturesTable.rating, capture.rating))).run();
       return;
     }
     const body = await response.text().catch(() => "");
     console.warn(`[Review] Group review sync failed with HTTP ${response.status}${body ? `: ${body}` : ""}`);
   } catch (error) {
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable();
     console.warn("[Review] Group review sync deferred:", error);
   }
+}
+function syncGroupCaptureReview(captureId) {
+  const previous = activeGroupCaptureReviewSyncs.get(captureId) ?? Promise.resolve();
+  const task = previous.catch(() => {
+  }).then(() => performSyncGroupCaptureReview(captureId));
+  activeGroupCaptureReviewSyncs.set(captureId, task);
+  void task.finally(() => {
+    if (activeGroupCaptureReviewSyncs.get(captureId) === task) {
+      activeGroupCaptureReviewSyncs.delete(captureId);
+    }
+  }).catch(() => {
+  });
+  return task;
 }
 function uploadCaptureFile(captureId, fileId, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
@@ -1438,7 +1477,7 @@ function uploadCaptureFile(captureId, fileId, captureBatchKey) {
   });
   return task;
 }
-async function syncCaptureReview(captureId) {
+async function performSyncCaptureReview(captureId) {
   if (!isCloudSessionVerified()) return;
   const db = getDb();
   const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
@@ -1461,7 +1500,20 @@ async function syncCaptureReview(captureId) {
           rejected: capture.rejected,
           selected: capture.selected,
           rating: capture.rating,
-          colorLabel: capture.colorLabel
+          colorLabel: capture.colorLabel,
+          editSettings: {
+            // Desktop stores crop position as a centered percentage (-100..100);
+            // the cloud contract stores the normalized focal point (0..1).
+            cropPositionX: Math.max(0, Math.min(1, ((capture.cropX ?? 0) + 100) / 200)),
+            cropPositionY: Math.max(0, Math.min(1, ((capture.cropY ?? 0) + 100) / 200)),
+            // Desktop stores scale as a percentage (100..300); cloud uses 1..3.
+            cropScale: Math.max(1, Math.min(3, (capture.cropScale ?? 100) / 100)),
+            aspectRatio: capture.aspectRatio && capture.aspectRatio !== "original" ? capture.aspectRatio : null,
+            // Defaults from legacy captures are 0/0/100/original, which is
+            // an identity edit in this normalized representation.
+            straightenAngle: capture.straightenAngle ?? 0,
+            rotation: capture.rotation ?? 0
+          }
         }),
         signal: AbortSignal.timeout(1e4)
       }
@@ -1471,14 +1523,32 @@ async function syncCaptureReview(captureId) {
       return;
     }
     if (response.ok) {
-      db.update(capturesTable).set({ reviewSyncPending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.eq(capturesTable.id, captureId)).run();
+      const latest = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+      if (!latest || latest.updatedAt !== capture.updatedAt || latest.favorite !== capture.favorite || latest.rejected !== capture.rejected || latest.selected !== capture.selected || latest.rating !== capture.rating || latest.colorLabel !== capture.colorLabel || latest.cropX !== capture.cropX || latest.cropY !== capture.cropY || latest.cropScale !== capture.cropScale || latest.aspectRatio !== capture.aspectRatio || latest.straightenAngle !== capture.straightenAngle || latest.rotation !== capture.rotation) {
+        return;
+      }
+      db.update(capturesTable).set({ reviewSyncPending: false, reframePending: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.id, captureId), drizzleOrm.eq(capturesTable.updatedAt, capture.updatedAt))).run();
       return;
     }
     const body = await response.text().catch(() => "");
     console.warn(`[Review] Portrait review sync failed with HTTP ${response.status}${body ? `: ${body}` : ""}`);
   } catch (error) {
+    if (isConnectivityFailure(error)) markCloudSessionUnavailable();
     console.warn("[Review] Cloud review sync deferred:", error);
   }
+}
+function syncCaptureReview(captureId) {
+  const previous = activeCaptureReviewSyncs.get(captureId) ?? Promise.resolve();
+  const task = previous.catch(() => {
+  }).then(() => performSyncCaptureReview(captureId));
+  activeCaptureReviewSyncs.set(captureId, task);
+  void task.finally(() => {
+    if (activeCaptureReviewSyncs.get(captureId) === task) {
+      activeCaptureReviewSyncs.delete(captureId);
+    }
+  }).catch(() => {
+  });
+  return task;
 }
 async function syncPendingCaptureReviews(projectId) {
   if (!isCloudSessionVerified()) return;
@@ -1497,6 +1567,15 @@ async function syncPendingGroupCaptureReviews(projectId) {
     if (!isCloudSessionVerified()) return;
     await syncGroupCaptureReview(capture.id);
   }
+}
+async function flushPendingCaptureReviews(projectId) {
+  await syncPendingCaptureReviews(projectId);
+  await syncPendingGroupCaptureReviews(projectId);
+  const db = getDb();
+  return {
+    portrait: db.select({ id: capturesTable.id }).from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, projectId), drizzleOrm.eq(capturesTable.reviewSyncPending, true))).all().length,
+    group: db.select({ id: groupCapturesTable.id }).from(groupCapturesTable).where(drizzleOrm.and(drizzleOrm.eq(groupCapturesTable.projectId, projectId), drizzleOrm.eq(groupCapturesTable.reviewSyncPending, true))).all().length
+  };
 }
 function uploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
   if (!isCloudSessionVerified()) return Promise.resolve();
@@ -1896,7 +1975,7 @@ async function beginProjectCaptureBatch(projectId, expectedFileCount) {
   if (!response.ok) throw new Error(`Could not start capture batch: HTTP ${response.status}: ${await response.text()}`);
   return batchKey;
 }
-async function finishProjectCaptureBatch(projectId, batchKey, status, failedFileCount) {
+async function finishProjectCaptureBatch(projectId, batchKey, status, failedFileCount, photographerComment) {
   const db = getDb();
   const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
   const { apiUrl, connectionToken } = getUploadConfig$1();
@@ -1907,7 +1986,11 @@ async function finishProjectCaptureBatch(projectId, batchKey, status, failedFile
       Authorization: `Bearer ${connectionToken}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ status, failedFileCount }),
+    body: JSON.stringify({
+      status,
+      failedFileCount,
+      ...photographerComment?.trim() ? { handoffComment: photographerComment.trim() } : {}
+    }),
     signal: AbortSignal.timeout(3e4)
   });
   if (!response.ok) throw new Error(`Could not update capture batch: HTTP ${response.status}: ${await response.text()}`);
@@ -2849,6 +2932,19 @@ function getMainWindow$1() {
 function now$2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+const captureAspectRatios = ["original", "1:1", "4:5", "3:2", "16:9"];
+const captureRotations = [0, 90, 180, 270];
+function captureFraming(row) {
+  return {
+    cropX: row.cropX,
+    cropY: row.cropY,
+    cropScale: row.cropScale,
+    aspectRatio: captureAspectRatios.includes(row.aspectRatio) ? row.aspectRatio : "original",
+    straightenAngle: row.straightenAngle,
+    rotation: captureRotations.includes(row.rotation) ? row.rotation : 0,
+    pending: row.reframePending
+  };
+}
 function rowToPhoto(row, thumbnailData = null, previewUrl) {
   return {
     id: row.id,
@@ -2863,7 +2959,7 @@ function rowToPhoto(row, thumbnailData = null, previewUrl) {
     previewUrl
   };
 }
-function rowToCaptureFile(row) {
+function rowToCaptureFile(row, previewUrl) {
   return {
     id: row.id,
     fileRole: row.fileRole,
@@ -2872,7 +2968,8 @@ function rowToCaptureFile(row) {
     storedPath: row.storedPath,
     fileSize: row.fileSize,
     uploadStatus: row.uploadStatus,
-    fileUrl: row.fileUrl
+    fileUrl: row.fileUrl,
+    ...previewUrl ? { previewUrl } : {}
   };
 }
 function rowToGroupCaptureFile(row) {
@@ -3000,9 +3097,13 @@ function registerPhotoHandlers() {
           colorLabel: capture.colorLabel,
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
-          files: files.map(rowToCaptureFile),
+          files: files.map((file) => rowToCaptureFile(
+            file,
+            file.fileRole === "JPEG" ? previewUrl : void 0
+          )),
           thumbnailData: null,
-          legacyPhoto: photo ? rowToPhoto(photo, null, previewUrl) : null
+          legacyPhoto: photo ? rowToPhoto(photo, null, previewUrl) : null,
+          framing: captureFraming(capture)
         });
       }
       const markerRows = db.select().from(qrMarkersTable).where(drizzleOrm.eq(qrMarkersTable.studentId, studentId)).orderBy(qrMarkersTable.capturedAt).all();
@@ -3058,6 +3159,34 @@ function registerPhotoHandlers() {
       }).where(drizzleOrm.eq(capturesTable.id, captureId)).run();
       const updated = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get() ?? null;
       if (updated) void syncCaptureReview(updated.id);
+      return updated;
+    }
+  );
+  electron.ipcMain.handle(
+    "captures:updateFraming",
+    (_e, {
+      captureId,
+      framing
+    }) => {
+      const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
+      if (!capture) return null;
+      const aspectRatio = captureAspectRatios.includes(framing.aspectRatio) ? framing.aspectRatio : "original";
+      const rotation = captureRotations.includes(framing.rotation) ? framing.rotation : 0;
+      db.update(capturesTable).set({
+        cropX: Math.max(-100, Math.min(100, Math.round(framing.cropX))),
+        cropY: Math.max(-100, Math.min(100, Math.round(framing.cropY))),
+        cropScale: Math.max(100, Math.min(300, Math.round(framing.cropScale))),
+        aspectRatio,
+        straightenAngle: Math.max(-15, Math.min(15, framing.straightenAngle)),
+        rotation,
+        reframePending: true,
+        reviewSyncPending: true,
+        updatedAt: now$2()
+      }).where(drizzleOrm.eq(capturesTable.id, captureId)).run();
+      const updated = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get() ?? null;
+      if (updated) {
+        void syncCaptureReview(updated.id);
+      }
       return updated;
     }
   );
@@ -45193,6 +45322,9 @@ function registerCaptureExportHandlers() {
     }
   );
 }
+function hasPendingReviewSync(counts) {
+  return counts.portrait > 0 || counts.group > 0;
+}
 const activeSyncs = /* @__PURE__ */ new Map();
 function emitProgress(event) {
   const win = electron.BrowserWindow.getAllWindows()[0];
@@ -45201,11 +45333,15 @@ function emitProgress(event) {
 function registerProjectSyncHandlers() {
   electron.ipcMain.handle(
     "project:uploadAndFinish",
-    async (_event, { projectId }) => {
+    async (_event, {
+      projectId,
+      photographerComment
+    }) => {
       const existing = activeSyncs.get(projectId);
       if (existing) return existing;
       const task = (async () => {
         const db = getDb();
+        const normalizedComment = photographerComment?.trim().slice(0, 2e3) || void 0;
         const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
         if (!project) {
           return { ok: false, completed: 0, total: 0, failed: 0, error: "Project not found." };
@@ -45260,7 +45396,7 @@ function registerProjectSyncHandlers() {
         if (progress.failed > 0) {
           let batchStatusError;
           try {
-            await finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed);
+            await finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed, normalizedComment);
           } catch (error) {
             batchStatusError = ` Batch status could not be updated: ${String(error)}`;
           }
@@ -45276,8 +45412,29 @@ function registerProjectSyncHandlers() {
           });
           return result2;
         }
+        const pendingReviews = await flushPendingCaptureReviews(projectId);
+        const pendingReviewCount = pendingReviews.portrait + pendingReviews.group;
+        if (hasPendingReviewSync(pendingReviews)) {
+          let batchStatusError;
+          try {
+            await finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed, normalizedComment);
+          } catch (error) {
+            batchStatusError = ` Batch status could not be updated: ${String(error)}`;
+          }
+          const result2 = {
+            ok: false,
+            ...progress,
+            error: `${pendingReviewCount} capture review or framing change${pendingReviewCount === 1 ? " remains" : "s remain"} unsynced. Retry Upload & Finish when the connection is available.${batchStatusError ?? ""}`
+          };
+          emitProgress({
+            projectId,
+            phase: "error",
+            ...result2
+          });
+          return result2;
+        }
         try {
-          await finishProjectCaptureBatch(projectId, captureBatchKey, "complete", 0);
+          await finishProjectCaptureBatch(projectId, captureBatchKey, "complete", 0, normalizedComment);
         } catch (error) {
           const result2 = {
             ok: false,

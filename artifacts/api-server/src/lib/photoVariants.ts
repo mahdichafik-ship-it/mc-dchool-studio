@@ -4,12 +4,20 @@ import sharp from "sharp";
 import { captureFilesTable, capturesTable, db, photoStorageCopiesTable, studentPhotosTable, type PhotoStorageCopy } from "@workspace/db";
 import { and, eq, or } from "drizzle-orm";
 import { getR2Object, headR2Object, putR2Buffer } from "./r2Storage";
+import {
+  applyCaptureEdits,
+  captureEditSettingsFromRow,
+  normalizedCaptureEditSettings,
+  type CaptureEditSettings,
+} from "./captureEdits";
 
-export type PhotoVariantKind = "thumbnail" | "preview";
+export type PhotoVariantKind = "thumbnail" | "preview" | "download" | "print";
 
 const VARIANT_SETTINGS: Record<PhotoVariantKind, { width: number; quality: number }> = {
   thumbnail: { width: 480, quality: 72 },
   preview: { width: 1600, quality: 82 },
+  download: { width: 10000, quality: 94 },
+  print: { width: 10000, quality: 95 },
 };
 
 function watermarkTile(text: string): Buffer {
@@ -32,11 +40,13 @@ export function r2PhotoVariantKey(
   original: Pick<PhotoStorageCopy, "objectKey" | "sha256">,
   kind: PhotoVariantKind,
   watermarkText?: string,
+  editSettings?: Partial<CaptureEditSettings> | null,
 ): string {
   if (!original.sha256) throw new Error("Verified R2 source hash is missing");
   const watermark = watermarkText?.trim() || "";
+  const edits = normalizedCaptureEditSettings(editSettings);
   const signature = createHash("sha256")
-    .update(`${original.sha256.toLowerCase()}:${kind}:${watermark}:variant-v1`)
+    .update(`${original.sha256.toLowerCase()}:${kind}:${watermark}:${JSON.stringify(edits)}:variant-v2`)
     .digest("hex")
     .slice(0, 16);
   const extension = extname(original.objectKey);
@@ -90,19 +100,65 @@ export async function ensureR2PhotoVariant(
   original: PhotoStorageCopy,
   kind: PhotoVariantKind,
   watermarkText?: string,
+  editSettings?: Partial<CaptureEditSettings> | null,
 ): Promise<string> {
   if (original.destination !== "r2" || original.state !== "ready" || !original.sha256) {
     throw new Error("A verified R2 original is required to create a photo variant");
   }
-  const objectKey = r2PhotoVariantKey(original, kind, watermarkText);
+  let resolvedEditSettings = editSettings;
+  if (resolvedEditSettings === undefined) {
+    if (original.captureFileId !== null) {
+      const [capture] = await db.select({
+        cropPositionX: capturesTable.cropPositionX,
+        cropPositionY: capturesTable.cropPositionY,
+        cropScale: capturesTable.cropScale,
+        aspectRatio: capturesTable.aspectRatio,
+        straightenAngle: capturesTable.straightenAngle,
+        rotation: capturesTable.rotation,
+      }).from(captureFilesTable)
+        .innerJoin(capturesTable, eq(captureFilesTable.captureId, capturesTable.id))
+        .where(eq(captureFilesTable.id, original.captureFileId))
+        .limit(1);
+      resolvedEditSettings = capture ? captureEditSettingsFromRow(capture) : null;
+    } else if (original.studentPhotoId !== null) {
+      const [photo] = await db.select().from(studentPhotosTable)
+        .where(eq(studentPhotosTable.id, original.studentPhotoId))
+        .limit(1);
+      if (photo) {
+        const captureIdentity = photo.clientUploadId
+          ? and(
+            eq(captureFilesTable.desktopConnectionId, photo.desktopConnectionId!),
+            eq(captureFilesTable.clientUploadId, photo.clientUploadId),
+          )
+          : eq(captureFilesTable.originalFilename, photo.fileName);
+        const [capture] = await db.select({
+          cropPositionX: capturesTable.cropPositionX,
+          cropPositionY: capturesTable.cropPositionY,
+          cropScale: capturesTable.cropScale,
+          aspectRatio: capturesTable.aspectRatio,
+          straightenAngle: capturesTable.straightenAngle,
+          rotation: capturesTable.rotation,
+        }).from(captureFilesTable)
+          .innerJoin(capturesTable, eq(captureFilesTable.captureId, capturesTable.id))
+          .where(and(
+            eq(capturesTable.projectId, photo.projectId),
+            eq(capturesTable.studentId, photo.studentId),
+            eq(captureFilesTable.fileRole, "JPEG"),
+            captureIdentity,
+          ))
+          .limit(1);
+        resolvedEditSettings = capture ? captureEditSettingsFromRow(capture) : null;
+      }
+    }
+  }
+  const objectKey = r2PhotoVariantKey(original, kind, watermarkText, resolvedEditSettings);
   if (await headR2Object(objectKey)) return objectKey;
 
   const source = await getR2Object(original.objectKey);
   const sourceBytes = Buffer.from(await source.arrayBuffer());
   const settings = VARIANT_SETTINGS[kind];
-  let pipeline = sharp(sourceBytes)
-    .rotate()
-    .resize({ width: settings.width, withoutEnlargement: true });
+  let pipeline = await applyCaptureEdits(sourceBytes, normalizedCaptureEditSettings(resolvedEditSettings));
+  pipeline = pipeline.resize({ width: settings.width, withoutEnlargement: true });
   if (watermarkText?.trim()) {
     pipeline = pipeline.composite([{
       input: watermarkTile(watermarkText.trim()),

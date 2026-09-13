@@ -34,6 +34,7 @@ type CollaborationData = {
     expectedFileCount: number;
     uploadedFileCount: number;
     failedFileCount: number;
+    handoffComment: string | null;
     lastSyncAt: string;
   }>;
   completionGate: {
@@ -130,7 +131,11 @@ export function CollaborationTab({ projectId }: { projectId: number }) {
         {data.batches.length === 0 ? <p className="p-5 text-sm text-slate-500">Batches appear here after a photographer chooses Upload &amp; Finish in the Mac app.</p> : (
           <div className="divide-y divide-slate-100">
             {data.batches.map((batch) => <div key={batch.id} className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_auto_auto] md:items-center">
-              <div><p className="font-medium text-slate-900">{batch.displayName || batch.email}</p><p className="text-sm text-slate-500">{batch.deviceName} · synced {new Date(batch.lastSyncAt).toLocaleString()}</p></div>
+              <div>
+                <p className="font-medium text-slate-900">{batch.displayName || batch.email}</p>
+                <p className="text-sm text-slate-500">{batch.deviceName} · synced {new Date(batch.lastSyncAt).toLocaleString()}</p>
+                {batch.handoffComment ? <p className="mt-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-sm text-teal-900"><span className="font-semibold">Photographer handoff:</span> {batch.handoffComment}</p> : null}
+              </div>
               <p className="text-sm text-slate-600">{batch.uploadedFileCount} / {batch.expectedFileCount} files{batch.failedFileCount ? ` · ${batch.failedFileCount} failed` : ''}</p>
               <StatusBadge status={batch.status} />
             </div>)}

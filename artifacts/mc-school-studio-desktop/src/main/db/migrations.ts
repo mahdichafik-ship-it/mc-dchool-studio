@@ -103,6 +103,13 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       camera_serial TEXT,
       assignment_locked INTEGER NOT NULL DEFAULT 0,
       pairing_status TEXT NOT NULL DEFAULT 'pending',
+      crop_x INTEGER NOT NULL DEFAULT 0,
+      crop_y INTEGER NOT NULL DEFAULT 0,
+      crop_scale INTEGER NOT NULL DEFAULT 100,
+      aspect_ratio TEXT NOT NULL DEFAULT 'original',
+      straighten_angle INTEGER NOT NULL DEFAULT 0,
+      rotation INTEGER NOT NULL DEFAULT 0,
+      reframe_pending INTEGER NOT NULL DEFAULT 0,
       legacy_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -158,6 +165,13 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   ensureColumn(sqlite, 'captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(sqlite, 'captures', 'color_label', "TEXT NOT NULL DEFAULT 'none'")
   ensureColumn(sqlite, 'captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'crop_x', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'crop_y', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'crop_scale', 'INTEGER NOT NULL DEFAULT 100')
+  ensureColumn(sqlite, 'captures', 'aspect_ratio', "TEXT NOT NULL DEFAULT 'original'")
+  ensureColumn(sqlite, 'captures', 'straighten_angle', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'rotation', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'reframe_pending', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(sqlite, 'group_capture_files', 'gallery_ready', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(sqlite, 'group_captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(sqlite, 'group_captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')

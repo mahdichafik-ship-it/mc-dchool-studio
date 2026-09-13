@@ -10,6 +10,8 @@ import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
 import { syncCaptureReview, syncGroupCaptureReview } from './upload'
 import type {
   CaptureCompletenessSummary,
+  CaptureAspectRatio,
+  CaptureFraming,
   CaptureReview,
   StudentCaptureReview,
   Photo,
@@ -22,6 +24,25 @@ function getMainWindow(): BrowserWindow | null {
 
 function now() {
   return new Date().toISOString()
+}
+
+const captureAspectRatios: CaptureAspectRatio[] = ['original', '1:1', '4:5', '3:2', '16:9']
+const captureRotations = [0, 90, 180, 270] as const
+
+function captureFraming(row: typeof capturesTable.$inferSelect): CaptureFraming {
+  return {
+    cropX: row.cropX,
+    cropY: row.cropY,
+    cropScale: row.cropScale,
+    aspectRatio: captureAspectRatios.includes(row.aspectRatio as CaptureAspectRatio)
+      ? row.aspectRatio as CaptureAspectRatio
+      : 'original',
+    straightenAngle: row.straightenAngle,
+    rotation: captureRotations.includes(row.rotation as typeof captureRotations[number])
+      ? row.rotation as typeof captureRotations[number]
+      : 0,
+    pending: row.reframePending,
+  }
 }
 
 function rowToPhoto(
@@ -43,7 +64,7 @@ function rowToPhoto(
   }
 }
 
-function rowToCaptureFile(row: typeof imageFilesTable.$inferSelect) {
+function rowToCaptureFile(row: typeof imageFilesTable.$inferSelect, previewUrl?: string) {
   return {
     id: row.id,
     fileRole: row.fileRole,
@@ -53,6 +74,7 @@ function rowToCaptureFile(row: typeof imageFilesTable.$inferSelect) {
     fileSize: row.fileSize,
     uploadStatus: row.uploadStatus,
     fileUrl: row.fileUrl,
+    ...(previewUrl ? { previewUrl } : {}),
   }
 }
 
@@ -230,9 +252,13 @@ export function registerPhotoHandlers() {
           colorLabel: capture.colorLabel,
           pairingStatus: capture.pairingStatus,
           assignmentLocked: capture.assignmentLocked,
-          files: files.map(rowToCaptureFile),
+          files: files.map((file) => rowToCaptureFile(
+            file,
+            file.fileRole === 'JPEG' ? previewUrl : undefined,
+          )),
           thumbnailData: null,
           legacyPhoto: photo ? rowToPhoto(photo, null, previewUrl) : null,
+          framing: captureFraming(capture),
         })
       }
       const markerRows = db
@@ -322,6 +348,44 @@ export function registerPhotoHandlers() {
         .run()
       const updated = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null
       if (updated) void syncCaptureReview(updated.id)
+      return updated
+    },
+  )
+
+  ipcMain.handle(
+    'captures:updateFraming',
+    (
+      _e,
+      {
+        captureId,
+        framing,
+      }: {
+        captureId: number
+        framing: Omit<CaptureFraming, 'pending'>
+      },
+    ) => {
+      const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
+      if (!capture) return null
+      const aspectRatio = captureAspectRatios.includes(framing.aspectRatio) ? framing.aspectRatio : 'original'
+      const rotation = captureRotations.includes(framing.rotation) ? framing.rotation : 0
+      db.update(capturesTable)
+        .set({
+          cropX: Math.max(-100, Math.min(100, Math.round(framing.cropX))),
+          cropY: Math.max(-100, Math.min(100, Math.round(framing.cropY))),
+          cropScale: Math.max(100, Math.min(300, Math.round(framing.cropScale))),
+          aspectRatio,
+          straightenAngle: Math.max(-15, Math.min(15, framing.straightenAngle)),
+          rotation,
+          reframePending: true,
+          reviewSyncPending: true,
+          updatedAt: now(),
+        })
+        .where(eq(capturesTable.id, captureId))
+        .run()
+      const updated = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null
+      if (updated) {
+        void syncCaptureReview(updated.id)
+      }
       return updated
     },
   )

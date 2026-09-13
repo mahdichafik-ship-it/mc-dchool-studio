@@ -182,6 +182,7 @@ router.get("/:projectId/collaboration", requireAuth, async (req, res): Promise<v
         expectedFileCount: captureBatchesTable.expectedFileCount,
         uploadedFileCount: captureBatchesTable.uploadedFileCount,
         failedFileCount: captureBatchesTable.failedFileCount,
+        handoffComment: captureBatchesTable.handoffComment,
         startedAt: captureBatchesTable.startedAt,
         lastSyncAt: captureBatchesTable.lastSyncAt,
         completedAt: captureBatchesTable.completedAt,

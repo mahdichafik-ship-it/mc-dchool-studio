@@ -3,7 +3,7 @@ import {
   ArrowLeft, Folder, Play, Square, Search, Image, User,
   ChevronRight, ArrowRight, Camera, AlertCircle, ExternalLink, Download,
   Upload, CloudUpload, CheckCircle, XCircle, Loader,
-  RefreshCw, Star, Check, Plus, Pencil, Trash2, QrCode
+  RefreshCw, Star, Check, Plus, Pencil, Trash2, QrCode, RotateCw, Maximize2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +30,7 @@ import {
   previewScheduler,
   waitForPaintFrames,
 } from '@/lib/previewScheduler'
+import { CaptureFramingPreview } from '@/lib/CaptureFramingPreview'
 import type {
   Student,
   Class,
@@ -47,6 +48,8 @@ import type {
   GroupCaptureReview,
 } from '@/hooks/useApi'
 import type {
+  CaptureAspectRatio,
+  CaptureFraming,
   DroppedCaptureFileResult,
   DroppedCaptureProgressEvent,
 } from '@shared/types'
@@ -133,6 +136,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [uploadQueue, setUploadQueue] = useState<LiveUploadQueueItem[]>([])
   const [deletingQueueItem, setDeletingQueueItem] = useState<string | null>(null)
   const [finishDialogOpen, setFinishDialogOpen] = useState(false)
+  const [photographerComment, setPhotographerComment] = useState('')
   const [uploadActionRunning, setUploadActionRunning] = useState(false)
   const [reviewSummary, setReviewSummary] = useState<{
     unratedPortraits: number
@@ -664,7 +668,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       failed: 0,
     })
     try {
-      const result = await window.api.invoke('project:uploadAndFinish', { projectId })
+      const result = await window.api.invoke('project:uploadAndFinish', {
+        projectId,
+        photographerComment: photographerComment.trim() || undefined,
+      })
       await reloadProject()
       await reloadUploadStatus()
       if (result.ok) {
@@ -1267,6 +1274,22 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               Connect to Volume Capture before finishing. Your local captures remain safe.
             </p>
           )}
+          <div>
+            <label htmlFor="photographer-comment" className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+              Photographer comment <span className="font-medium normal-case tracking-normal text-slate-400">(optional)</span>
+            </label>
+            <textarea
+              id="photographer-comment"
+              value={photographerComment}
+              onChange={(event) => setPhotographerComment(event.target.value)}
+              disabled={finishing}
+              maxLength={2000}
+              rows={3}
+              placeholder="Anything the studio should know about this shoot?"
+              className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+            />
+            <p className="mt-1 text-right text-[10px] text-slate-400">{photographerComment.length}/2000</p>
+          </div>
           <div className="flex gap-3 justify-end">
             <Button variant="outline" disabled={finishing} onClick={() => setFinishDialogOpen(false)}>
               Keep Shooting
@@ -1894,6 +1917,8 @@ function StudentDetail({
   const [pairingFilter, setPairingFilter] = useState<CaptureFilter>('all')
   const [reviewCaptureKey, setReviewCaptureKey] = useState<string | null>(null)
   const [showQrOpen, setShowQrOpen] = useState(false)
+  const [framingCapture, setFramingCapture] = useState<CaptureReview | null>(null)
+  const [quickLookCapture, setQuickLookCapture] = useState<CaptureReview | null>(null)
 
   const captureCounts = captures.reduce(
     (counts, capture) => {
@@ -1943,6 +1968,8 @@ function StudentDetail({
         isInput ||
         showQrOpen ||
         reassignOpen ||
+        framingCapture !== null ||
+        quickLookCapture !== null ||
         document.querySelector('[role="dialog"], [aria-modal="true"]')
       ) return
       if (event.key.toLowerCase() === 'l' && latestCapture) {
@@ -1965,7 +1992,7 @@ function StudentDetail({
     }
     window.addEventListener('keydown', handleReviewShortcut)
     return () => window.removeEventListener('keydown', handleReviewShortcut)
-  }, [captures, isFollowingLatest, latestCapture, reassignOpen, selectedCapture?.id, showQrOpen])
+  }, [captures, framingCapture, isFollowingLatest, latestCapture, quickLookCapture, reassignOpen, selectedCapture?.id, showQrOpen])
 
   async function handleDeletePhoto(photoId: number) {
     await window.api.invoke('photos:delete', { photoId })
@@ -2038,6 +2065,20 @@ function StudentDetail({
       await reloadCaptures()
     } catch (error) {
       addToast({ type: 'error', title: 'Could not update capture review', description: String(error) })
+    }
+  }
+
+  async function handleSaveFraming(
+    captureId: number,
+    framing: Omit<CaptureFraming, 'pending'>,
+  ) {
+    try {
+      await window.api.invoke('captures:updateFraming', { captureId, framing })
+      setFramingCapture(null)
+      await reloadCaptures()
+      addToast({ type: 'success', title: 'Framing saved', description: 'The original capture remains unchanged.' })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not save framing', description: String(error) })
     }
   }
 
@@ -2135,6 +2176,7 @@ function StudentDetail({
                 capture={selectedCapture}
                 uploadStatus={selectedCapture.legacyPhoto ? photoStatusMap.get(selectedCapture.legacyPhoto.id) : undefined}
                 onUpdateReview={handleUpdateCaptureReview}
+                onEditFraming={() => setFramingCapture(selectedCapture)}
               />
             )}
 
@@ -2161,6 +2203,7 @@ function StudentDetail({
                 setReviewCaptureKey(captureId === latestCapture?.id || !capture ? null : captureReviewKey(capture))
               }}
               onLatest={() => setReviewCaptureKey(null)}
+              onQuickLook={(capture) => setQuickLookCapture(capture)}
               onPrevious={() => {
                 const index = isFollowingLatest
                   ? captures.length - 1
@@ -2320,6 +2363,20 @@ function StudentDetail({
           </p>
         </div>
       </Dialog>
+      {framingCapture && (
+        <ReframeEditor
+          capture={framingCapture}
+          onCancel={() => setFramingCapture(null)}
+          onSave={handleSaveFraming}
+        />
+      )}
+      {quickLookCapture && (
+        <QuickLookDialog
+          capture={quickLookCapture}
+          latestCapture={latestCapture}
+          onClose={() => setQuickLookCapture(null)}
+        />
+      )}
     </div>
   )
 }
@@ -2403,15 +2460,22 @@ function PersistentQrCard({
 }
 
 function CaptureStage({ capture }: { capture: CaptureReview }) {
-  const imageSource = capture.legacyPhoto?.previewUrl ?? capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData
+  const imageSource = capture.legacyPhoto?.previewUrl
+    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? capture.thumbnailData
+    ?? capture.legacyPhoto?.thumbnailData
+  const framing = capture.framing
   return (
-    <div className="relative flex aspect-[16/7] min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg">
+    <div
+      className="relative flex min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg"
+    >
       {imageSource ? (
-        <img
-          src={imageSource}
+        <CaptureFramingPreview
+          source={imageSource}
           alt={`Capture ${capture.baseFilename}`}
-          className="block h-full w-full object-contain"
-          draggable={false}
+          framing={framing ?? defaultCaptureFraming}
+          maxBlockSize="430px"
+          className="max-w-full"
         />
       ) : (
         <div className="flex flex-col items-center justify-center text-center text-slate-500">
@@ -2440,6 +2504,7 @@ function CaptureStageMeta({
   capture,
   uploadStatus,
   onUpdateReview,
+  onEditFraming,
 }: {
   capture: CaptureReview
   uploadStatus?: ProjectUploadStatusRow
@@ -2453,10 +2518,11 @@ function CaptureStageMeta({
       colorLabel?: CaptureReview['colorLabel']
     },
   ) => void
+  onEditFraming: () => void
 }) {
   const upload = captureUploadSummary(capture, uploadStatus)
   return (
-    <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5">
       <div className="min-w-0">
         <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Rating</p>
         <div className="mt-1.5 flex items-center gap-0.5" aria-label={`${capture.rating} out of 5 stars`}>
@@ -2489,6 +2555,13 @@ function CaptureStageMeta({
       <div className="flex items-end gap-2 sm:justify-end">
         <button
           type="button"
+          onClick={onEditFraming}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-500 hover:bg-slate-50"
+        >
+          <Pencil className="mr-1 inline size-3" /> Edit framing
+        </button>
+        <button
+          type="button"
           onClick={() => onUpdateReview(capture.id, { selected: !capture.selected })}
           className={cn('rounded-lg border px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider', capture.selected ? 'border-teal-200 bg-teal-50 text-teal-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}
         >
@@ -2506,11 +2579,253 @@ function CaptureStageMeta({
   )
 }
 
+function QuickLookDialog({
+  capture,
+  latestCapture,
+  onClose,
+}: {
+  capture: CaptureReview
+  latestCapture: CaptureReview | null
+  onClose: () => void
+}) {
+  const [zoom, setZoom] = useState(1)
+  const [compareLatest, setCompareLatest] = useState(false)
+  const captureSource = capture.legacyPhoto?.previewUrl
+    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? capture.thumbnailData
+    ?? capture.legacyPhoto?.thumbnailData
+  const latestSource = latestCapture?.legacyPhoto?.previewUrl
+    ?? latestCapture?.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? latestCapture?.thumbnailData
+    ?? latestCapture?.legacyPhoto?.thumbnailData
+  const displayedSource = compareLatest && latestSource ? latestSource : captureSource
+  const displayedName = compareLatest && latestCapture ? latestCapture.baseFilename : capture.baseFilename
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Quick Look ${capture.baseFilename}`}
+      className="fixed inset-0 z-[100] flex flex-col bg-slate-950/95"
+      onClick={onClose}
+    >
+      <div
+        className="flex flex-wrap items-center justify-between gap-3 border-b border-white/15 px-5 py-3 text-white"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-bold">Quick Look</p>
+          <p className="truncate text-xs text-white/60">{displayedName}</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {latestCapture && latestCapture.id !== capture.id && latestSource && (
+            <button
+              type="button"
+              onClick={() => setCompareLatest((value) => !value)}
+              className={cn(
+                'rounded-lg px-3 py-2 text-xs font-bold transition-colors',
+                compareLatest ? 'bg-teal-500 text-white' : 'bg-white/10 text-white hover:bg-white/20',
+              )}
+            >
+              {compareLatest ? 'Showing latest' : 'Compare with latest'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
+            className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20"
+          >
+            −
+          </button>
+          <span className="w-14 text-center text-xs font-bold">{Math.round(zoom * 100)}%</span>
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
+            className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20"
+          >
+            +
+          </button>
+          <button type="button" onClick={onClose} className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-900">
+            Close
+          </button>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6" onClick={(event) => event.stopPropagation()}>
+        {displayedSource ? (
+          <img
+            src={displayedSource}
+            alt={displayedName}
+            draggable={false}
+            style={{ transform: `scale(${zoom})` }}
+            className="max-h-[82vh] max-w-[92vw] origin-center object-contain transition-transform"
+          />
+        ) : (
+          <p className="text-sm font-semibold text-slate-400">Preview unavailable for this capture.</p>
+        )}
+      </div>
+      <p className="border-t border-white/10 px-5 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-white/45">
+        Escape or click outside to close · Original file is unchanged
+      </p>
+    </div>
+  )
+}
+
+const defaultCaptureFraming: Omit<CaptureFraming, 'pending'> = {
+  cropX: 0,
+  cropY: 0,
+  cropScale: 100,
+  aspectRatio: 'original',
+  straightenAngle: 0,
+  rotation: 0,
+}
+
+function ReframeEditor({
+  capture,
+  onCancel,
+  onSave,
+}: {
+  capture: CaptureReview
+  onCancel: () => void
+  onSave: (captureId: number, framing: Omit<CaptureFraming, 'pending'>) => Promise<void>
+}) {
+  const [framing, setFraming] = useState<Omit<CaptureFraming, 'pending'>>({
+    ...defaultCaptureFraming,
+    ...capture.framing,
+  })
+  const source = capture.legacyPhoto?.previewUrl
+    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? capture.thumbnailData
+    ?? capture.legacyPhoto?.thumbnailData
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onCancel()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onCancel])
+
+  const update = <K extends keyof Omit<CaptureFraming, 'pending'>>(key: K, value: Omit<CaptureFraming, 'pending'>[K]) => {
+    setFraming((current) => ({ ...current, [key]: value }))
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={`Edit framing ${capture.baseFilename}`} className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/70 p-4">
+      <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="text-sm font-extrabold text-slate-900">Edit framing</p>
+            <p className="mt-1 text-xs text-slate-500">{capture.baseFilename} · non-destructive</p>
+          </div>
+          <button type="button" onClick={onCancel} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close framing editor">
+            <XCircle className="size-5" />
+          </button>
+        </div>
+        <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="flex min-h-[280px] items-center justify-center overflow-hidden rounded-xl bg-slate-950 p-5">
+            <div className="flex max-h-[62vh] w-full items-center justify-center overflow-hidden bg-black">
+              {source ? (
+                <CaptureFramingPreview
+                  source={source}
+                  alt={`Framing preview ${capture.baseFilename}`}
+                  framing={framing}
+                  maxBlockSize="62vh"
+                  className="max-w-full"
+                />
+              ) : (
+                <p className="text-sm font-semibold text-slate-400">Preview unavailable</p>
+              )}
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="reframe-aspect" className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Aspect ratio</label>
+              <select
+                id="reframe-aspect"
+                value={framing.aspectRatio}
+                onChange={(event) => update('aspectRatio', event.target.value as CaptureAspectRatio)}
+                className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              >
+                <option value="original">Original</option>
+                <option value="1:1">Square · 1:1</option>
+                <option value="4:5">Portrait · 4:5</option>
+                <option value="3:2">Classic · 3:2</option>
+                <option value="16:9">Widescreen · 16:9</option>
+              </select>
+            </div>
+            {([
+              ['cropX', 'Horizontal position', -100, 100, 1],
+              ['cropY', 'Vertical position', -100, 100, 1],
+              ['cropScale', 'Crop scale', 100, 300, 1],
+              ['straightenAngle', 'Straighten angle', -15, 15, 1],
+            ] as const).map(([key, label, min, max, step]) => (
+              <label key={key} className="block">
+                <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                  <span>{label}</span>
+                  <span className="font-mono text-slate-700">{framing[key]}{key === 'cropScale' ? '%' : key === 'straightenAngle' ? '°' : ''}</span>
+                </div>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={framing[key]}
+                  onChange={(event) => update(key, Number(event.target.value) as never)}
+                  className="mt-2 w-full accent-teal-600"
+                />
+              </label>
+            ))}
+            <div>
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Rotate</p>
+              <button
+                type="button"
+                onClick={() => update('rotation', ((framing.rotation + 90) % 360) as CaptureFraming['rotation'])}
+                className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50"
+              >
+                <RotateCw className="size-3.5" /> 90° clockwise · {framing.rotation}°
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFraming(defaultCaptureFraming)}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50"
+            >
+              Reset adjustments
+            </button>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" onClick={() => void onSave(capture.id, framing)} className="rounded-lg bg-teal-600 px-4 py-2 text-xs font-extrabold uppercase tracking-wider text-white hover:bg-teal-700">
+            Save framing
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CaptureFilmstrip({
   captures,
   selectedCaptureId,
   isFollowingLatest,
   onSelect,
+  onQuickLook,
   onLatest,
   onPrevious,
   onNext,
@@ -2519,6 +2834,7 @@ function CaptureFilmstrip({
   selectedCaptureId: number | null
   isFollowingLatest: boolean
   onSelect: (captureId: number) => void
+  onQuickLook: (capture: CaptureReview) => void
   onLatest: () => void
   onPrevious: () => void
   onNext: () => void
@@ -2580,7 +2896,8 @@ function CaptureFilmstrip({
         {captures.map((capture) => {
           const isCurrent = selectedCaptureId === capture.id
           const isNewest = capture.id === latestCaptureId
-          const source = capture.legacyPhoto?.previewUrl
+           const source = capture.legacyPhoto?.previewUrl
+             ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
           const fallback = capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData
           return (
             <button
@@ -2597,6 +2914,28 @@ function CaptureFilmstrip({
             >
               <div className="relative aspect-[1.45] overflow-hidden bg-slate-900">
                 <GalleryThumbnail source={source} fallback={fallback} alt={`Capture ${capture.baseFilename}`} />
+                {(source || fallback) && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Quick Look"
+                    aria-label={`Quick Look ${capture.baseFilename}`}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onQuickLook(capture)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onQuickLook(capture)
+                    }}
+                    className="absolute bottom-2 right-2 rounded-md bg-black/70 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/90 group-hover:opacity-100 group-focus-within:opacity-100"
+                  >
+                    <Maximize2 className="size-3.5" />
+                  </span>
+                )}
                 <span className={cn('absolute left-2 top-2 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-white', isNewest ? 'bg-red-600' : 'bg-black/60')}>
                   {isNewest ? 'Newest' : `Frame ${capture.sequence ?? ''}`}
                 </span>

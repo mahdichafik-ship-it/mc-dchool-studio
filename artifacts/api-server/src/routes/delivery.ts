@@ -335,7 +335,10 @@ function watermarkSvg(text: string): Buffer {
   </svg>`);
 }
 
-async function photoHasBeenPaid(accessId: number, photoId: number): Promise<boolean> {
+async function photoHasBeenPaid(accessId: number, photoId: number, print = false): Promise<boolean> {
+  const paidProduct = print
+    ? eq(deliveryOrderItemsTable.productType, "print")
+    : eq(deliveryOrderItemsTable.includesDigitalDownloads, true);
   const [item] = await db
     .select({ id: deliveryOrderItemsTable.id })
     .from(deliveryOrderItemsTable)
@@ -344,7 +347,7 @@ async function photoHasBeenPaid(accessId: number, photoId: number): Promise<bool
       eq(deliveryOrdersTable.accessId, accessId),
       eq(deliveryOrdersTable.status, "paid"),
       eq(deliveryOrderItemsTable.photoId, photoId),
-      eq(deliveryOrderItemsTable.includesDigitalDownloads, true),
+      paidProduct,
     ))
     .limit(1);
   return Boolean(item);
@@ -729,9 +732,27 @@ router.get("/delivery/:slug/orders/:orderId", async (req, res): Promise<void> =>
     return;
   }
   const items = await db
-    .select({ photoId: deliveryOrderItemsTable.photoId, includesDigitalDownloads: deliveryOrderItemsTable.includesDigitalDownloads })
+    .select({
+      photoId: deliveryOrderItemsTable.photoId,
+      includesDigitalDownloads: deliveryOrderItemsTable.includesDigitalDownloads,
+      productType: deliveryOrderItemsTable.productType,
+      quantity: deliveryOrderItemsTable.quantity,
+    })
     .from(deliveryOrderItemsTable)
     .where(eq(deliveryOrderItemsTable.orderId, order.id));
+  const responseItems = items.map((item) => ({
+    ...item,
+    ...(item.productType === "print" && item.photoId !== null
+      ? {
+        printUrl: `/api/delivery/${row.gallery.slug}/photos/${item.photoId}/file?print=1&mediaToken=${encodeURIComponent(signMediaToken({
+          galleryId: row.gallery.id,
+          accessId: verified.accessId,
+          photoId: item.photoId,
+          expiresAt: Math.floor(Date.now() / 1000) + 15 * 60,
+        }))}`,
+      }
+      : {}),
+  }));
   res.json({
     orderId: order.id,
     status: order.status,
@@ -743,6 +764,7 @@ router.get("/delivery/:slug/orders/:orderId", async (req, res): Promise<void> =>
     downloadablePhotoIds: order.status === "paid"
       ? items.filter((item) => item.includesDigitalDownloads && item.photoId !== null).map((item) => item.photoId)
       : [],
+    items: responseItems,
   });
 });
 
@@ -791,7 +813,8 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     return;
   }
   const isPreview = req.query.preview === "1";
-  if (!isPreview && !(await photoHasBeenPaid(verified.accessId, photoId))) {
+  const isPrint = req.query.print === "1";
+  if (!isPreview && !(await photoHasBeenPaid(verified.accessId, photoId, isPrint))) {
     res.status(402).json({ error: "Complete payment before downloading this photo" });
     return;
   }
@@ -825,7 +848,13 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
         );
         r2Response = await getR2Object(variantKey);
       } else {
-        r2Response = await getR2Object(verifiedR2Copy.objectKey);
+        // Paid downloads are derivatives too: apply the saved non-destructive
+        // capture edit while keeping the verified camera original immutable.
+        const variantKey = await ensureR2PhotoVariant(
+          verifiedR2Copy,
+          isPrint ? "print" : "download",
+        );
+        r2Response = await getR2Object(variantKey);
       }
     } catch {
       res.status(503).json({ error: "Photo file is temporarily unavailable" });
@@ -836,7 +865,7 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
       return;
     }
     const input = Readable.fromWeb(r2Response.body as globalThis.ReadableStream<Uint8Array>);
-    if (isPreview) res.setHeader("Content-Type", "image/jpeg");
+    if (isPreview || isPrint) res.setHeader("Content-Type", "image/jpeg");
     input.pipe(res);
     return;
   }

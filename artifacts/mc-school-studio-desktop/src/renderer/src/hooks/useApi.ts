@@ -476,6 +476,15 @@ export function useCaptures(studentId: number | null) {
           files: [jpegFile],
           thumbnailData: null,
           legacyPhoto: galleryPhoto,
+          framing: {
+            cropX: 0,
+            cropY: 0,
+            cropScale: 100,
+            aspectRatio: 'original',
+            straightenAngle: 0,
+            rotation: 0,
+            pending: false,
+          },
           previewPipeline: event.pipeline,
         }
         return {

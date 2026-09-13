@@ -39,6 +39,7 @@ import {
   ensureR2PhotoVariant,
   getVerifiedR2CopyForPhoto,
 } from "../lib/photoVariants";
+import { parseCaptureEditSettings } from "../lib/captureEdits";
 
 const router = Router({ mergeParams: true });
 
@@ -1259,6 +1260,7 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
   const studentId = Number(req.params.studentId);
   const captureKey = String(req.params.captureKey);
   const connection = getDesktopConnection(req);
+  const scopedCaptureKey = `desktop:${connection.connectionId}:${captureKey}`;
   if (
     !Number.isInteger(projectId)
     || !Number.isInteger(studentId)
@@ -1273,17 +1275,35 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
     res.status(400).json({ error: "Invalid rating or color label" });
     return;
   }
-  const [capture] = await db.update(capturesTable).set({
+  const parsedEdits = parseCaptureEditSettings(req.body);
+  if (parsedEdits.error) {
+    res.status(400).json({ error: parsedEdits.error });
+    return;
+  }
+  const captureUpdate = {
     favorite: Boolean(req.body?.favorite),
     rejected: Boolean(req.body?.rejected),
     selected: rating > 0,
     rating,
     colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
     updatedAt: new Date(),
-  }).where(and(
+    ...(parsedEdits.provided && parsedEdits.settings
+      ? parsedEdits.settings
+      : parsedEdits.provided
+        ? {
+          cropPositionX: null,
+          cropPositionY: null,
+          cropScale: null,
+          aspectRatio: null,
+          straightenAngle: null,
+          rotation: null,
+        }
+        : {}),
+  };
+  const [capture] = await db.update(capturesTable).set(captureUpdate).where(and(
     eq(capturesTable.projectId, projectId),
     eq(capturesTable.studentId, studentId),
-    eq(capturesTable.captureKey, captureKey),
+    eq(capturesTable.captureKey, scopedCaptureKey),
   )).returning();
   if (!capture) {
     res.status(404).json({ error: "Capture not found" });

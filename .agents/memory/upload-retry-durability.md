@@ -15,6 +15,18 @@ Files in an error state must re-enter live upload automatically with exponential
 
 **How to apply:** Reset retry history after a confirmed success. Keep group reconciliation failures inside the group queue so portraits continue. Reconcile persisted batch manifests against files that still exist before calculating the expected count.
 
+File-transfer deadlines must scale with byte size and a conservative minimum
+upload speed; short fixed deadlines belong only to control-plane requests.
+
+**Why:** A connected desktop aborted legitimate slow JPEG/RAW transfers after a
+fixed 120 seconds, returning them to the queue even though the network was still
+usable.
+
+**How to apply:** Include connection setup allowance, retain a reasonable minimum
+deadline for small files, cap below signed-URL expiry with a safety margin, and
+request a fresh upload session when the remaining URL lifetime is insufficient.
+Present timeout failures as retrying conditions rather than raw runtime errors.
+
 Retry deadlines apply to every retryable job even when its persisted status is “pending,” and a newly persisted capture must wake the live-upload scheduler.
 
 **Why:** Retryable HTTP and network failures are intentionally returned to the queued state. Filtering delays only for the error state caused old timed-out jobs to be selected repeatedly while fresh captures accumulated behind them.

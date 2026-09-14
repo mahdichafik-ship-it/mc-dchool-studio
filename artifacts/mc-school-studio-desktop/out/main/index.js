@@ -62,6 +62,11 @@ const studentsTable = sqliteCore.sqliteTable("students", {
   generatedStudentId: sqliteCore.text("generated_student_id").notNull(),
   email: sqliteCore.text("email"),
   phone: sqliteCore.text("phone"),
+  secondaryEmail: sqliteCore.text("secondary_email"),
+  jobTitle: sqliteCore.text("job_title"),
+  officeLocation: sqliteCore.text("office_location"),
+  photoSession: sqliteCore.text("photo_session"),
+  captureNotes: sqliteCore.text("capture_notes"),
   simpleQr: sqliteCore.text("simple_qr"),
   jsonQr: sqliteCore.text("json_qr"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
@@ -208,7 +213,7 @@ function ensureColumn(sqlite, table, column, definition) {
   sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 function ensureLegacyColumns(sqlite) {
-  for (const migration of [
+  const migrations = [
     ["photos", "upload_status", "TEXT"],
     ["photos", "file_url", "TEXT"],
     ["projects", "cloud_id", "INTEGER"],
@@ -216,6 +221,11 @@ function ensureLegacyColumns(sqlite) {
     ["students", "cloud_id", "INTEGER"],
     ["students", "email", "TEXT"],
     ["students", "phone", "TEXT"],
+    ["students", "secondary_email", "TEXT"],
+    ["students", "job_title", "TEXT"],
+    ["students", "office_location", "TEXT"],
+    ["students", "photo_session", "TEXT"],
+    ["students", "capture_notes", "TEXT"],
     ["projects", "finished_at", "TEXT"],
     ["projects", "sync_status", "TEXT NOT NULL DEFAULT 'active'"],
     ["projects", "sync_completed_files", "INTEGER NOT NULL DEFAULT 0"],
@@ -223,8 +233,9 @@ function ensureLegacyColumns(sqlite) {
     ["projects", "sync_failed_files", "INTEGER NOT NULL DEFAULT 0"],
     ["projects", "sync_error", "TEXT"],
     ["projects", "project_type", "TEXT NOT NULL DEFAULT 'school'"]
-  ]) {
-    ensureColumn(sqlite, ...migration);
+  ];
+  for (const [table, column, definition] of migrations) {
+    ensureColumn(sqlite, table, column, definition);
   }
   sqlite.exec(`UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate');
     UPDATE projects
@@ -666,6 +677,11 @@ function initializeSchema(sqlite) {
       generated_student_id TEXT NOT NULL,
       email TEXT,
       phone TEXT,
+      secondary_email TEXT,
+      job_title TEXT,
+      office_location TEXT,
+      photo_session TEXT,
+      capture_notes TEXT,
       simple_qr TEXT,
       json_qr TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -2682,6 +2698,13 @@ function toStudent(student, className, photoCount = 0) {
     firstName: student.firstName,
     lastName: student.lastName,
     generatedStudentId: student.generatedStudentId,
+    email: student.email,
+    phone: student.phone,
+    secondaryEmail: student.secondaryEmail,
+    jobTitle: student.jobTitle,
+    officeLocation: student.officeLocation,
+    photoSession: student.photoSession,
+    captureNotes: student.captureNotes,
     simpleQr: student.simpleQr,
     jsonQr: student.jsonQr,
     photoCount,
@@ -2794,12 +2817,14 @@ function registerProjectHandlers() {
     const raw = require$$0.readFileSync(filePath, "utf-8");
     const bundle = JSON.parse(raw);
     const { project: p, classes, students, groups = [], groupMembers = [] } = bundle;
-    const existing = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.schoolName, p.schoolName)).get();
+    const projectType = normalizeProjectType(p.projectType);
+    const localProjects = db.select().from(projectsTable).all();
+    const existing = localProjects.find((project) => Number.isInteger(p.id) && project.cloudId === p.id) ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName && normalizeProjectType(project.projectType) === projectType);
     let projectId;
     if (existing) {
       db.update(projectsTable).set({
         cloudId: Number.isInteger(p.id) ? p.id : existing.cloudId,
-        projectType: normalizeProjectType(p.projectType),
+        projectType,
         schoolName: p.schoolName,
         photoDate: p.photoDate ?? null,
         address: p.address ?? null,
@@ -2814,7 +2839,7 @@ function registerProjectHandlers() {
     } else {
       const result = db.insert(projectsTable).values({
         cloudId: Number.isInteger(p.id) ? p.id : null,
-        projectType: normalizeProjectType(p.projectType),
+        projectType,
         schoolName: p.schoolName,
         photoDate: p.photoDate ?? null,
         address: p.address ?? null,
@@ -2849,6 +2874,13 @@ function registerProjectHandlers() {
         firstName: stu.firstName,
         lastName: stu.lastName,
         generatedStudentId: stu.generatedStudentId,
+        email: stu.email ?? null,
+        phone: stu.phone ?? null,
+        secondaryEmail: stu.secondaryEmail ?? null,
+        jobTitle: stu.jobTitle ?? null,
+        officeLocation: stu.officeLocation ?? null,
+        photoSession: stu.photoSession ?? null,
+        captureNotes: stu.captureNotes ?? null,
         simpleQr: stu.simpleQr ?? null,
         jsonQr: stu.jsonQr ?? null,
         createdAt: stu.createdAt ?? now$3(),
@@ -45927,15 +45959,19 @@ function safeFileSegment(value, fallback) {
 }
 function buildLightroomFilename(input) {
   const extension = node_path.extname(input.originalFilename) || (input.fileRole === "JPEG" ? ".jpg" : `.${input.fileFormat.toLowerCase()}`);
+  const corporate = input.projectType === "corporate";
   const student = input.student ? [
-    safeFileSegment(input.student.lastName, "Student"),
+    safeFileSegment(input.student.lastName, corporate ? "Employee" : "Student"),
     safeFileSegment(input.student.firstName, "Unknown"),
     safeFileSegment(input.student.generatedStudentId, "No-ID")
-  ].join("_") : "Unmatched";
+  ].join("_") : corporate ? "Employee" : "Unmatched";
   const sequence2 = String(input.sequence ?? input.captureId).padStart(6, "0");
   return [
-    safeFileSegment(input.schoolName, "School"),
-    safeFileSegment(input.className ?? "Unassigned", "Unassigned"),
+    safeFileSegment(input.schoolName, corporate ? "Company" : "School"),
+    safeFileSegment(
+      input.className ?? (corporate ? "Department" : "Unassigned"),
+      corporate ? "Department" : "Unassigned"
+    ),
     student,
     sequence2,
     `capture-${input.captureId}`
@@ -45994,6 +46030,7 @@ function exportCaptureRecords({
       }
       const destinationPath = layout === "lightroom_watch_folder" ? path.join(outputDir, buildLightroomFilename({
         schoolName: project.schoolName,
+        projectType: project.projectType,
         className,
         student,
         captureId: capture.id,
@@ -46468,10 +46505,11 @@ function registerCloudHandlers() {
           const { project: p, classes, students } = bundle;
           const imported = db.transaction((tx) => {
             const localProjects = tx.select().from(projectsTable).all();
-            const existingProject = localProjects.find((project) => project.cloudId === p.id) ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName);
+            const projectType = normalizeProjectType(p.projectType);
+            const existingProject = localProjects.find((project) => project.cloudId === p.id) ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName && normalizeProjectType(project.projectType) === projectType);
             const projectValues = {
               cloudId: p.id,
-              projectType: normalizeProjectType(p.projectType),
+              projectType,
               schoolName: p.schoolName,
               photoDate: p.photoDate ?? null,
               address: p.address ?? null,
@@ -46504,6 +46542,11 @@ function registerCloudHandlers() {
                 generatedStudentId: student.generatedStudentId,
                 email: student.email ?? null,
                 phone: student.phone ?? null,
+                secondaryEmail: student.secondaryEmail ?? null,
+                jobTitle: student.jobTitle ?? null,
+                officeLocation: student.officeLocation ?? null,
+                photoSession: student.photoSession ?? null,
+                captureNotes: student.captureNotes ?? null,
                 simpleQr: student.simpleQr ?? null,
                 jsonQr: student.jsonQr ?? null,
                 updatedAt: now()

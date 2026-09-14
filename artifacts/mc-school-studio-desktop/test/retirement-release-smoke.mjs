@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import sharp from 'sharp'
 
 let appExecutable = process.env.MC_SCHOOL_STUDIO_APP_PATH
 if (!appExecutable) throw new Error('MC_SCHOOL_STUDIO_APP_PATH must point to the packaged app executable')
@@ -101,6 +102,7 @@ const jpegFixture = Buffer.from(
   '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
   'base64',
 )
+const releasePreviewFixture = await createReleasePreviewFixture()
 const debugPort = await reservePort()
 let online = true
 let retired = false
@@ -330,16 +332,19 @@ function wait(ms) {
 async function waitFor(description, check, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
   let lastError
+  let lastValue
   while (Date.now() < deadline) {
     try {
       const value = await check()
+      lastValue = value
       if (value) return value
     } catch (error) {
       lastError = error
     }
     await wait(250)
   }
-  throw new Error(`Timed out waiting for ${description}${lastError ? `: ${lastError}` : ''}`)
+  const lastObservation = lastValue === undefined ? '' : `; last observation: ${JSON.stringify(lastValue)}`
+  throw new Error(`Timed out waiting for ${description}${lastError ? `: ${lastError}` : ''}${lastObservation}`)
 }
 
 class CdpClient {
@@ -512,6 +517,99 @@ function required(name) {
   const value = process.env[name]?.trim()
   if (!value) throw new Error(`${name} is required`)
   return value
+}
+
+async function waitForLivePreview(cdp) {
+  return waitFor('live mc-preview JPEG to paint visible pixels', async () => {
+    const state = await cdp.evaluate(`(async () => {
+    const canvas = document.querySelector('canvas[role="img"][aria-label^="Latest capture"]')
+    const image = document.querySelector('img[alt^="Latest capture"]')
+    const url = canvas?.dataset.previewUrl || image?.currentSrc || image?.src || null
+    const state = {
+      url,
+      protocolStatus: null,
+      contentType: null,
+      responseBytes: null,
+      decodedWidth: null,
+      decodedHeight: null,
+      decodeError: null,
+      canvasWidth: canvas?.width ?? null,
+      canvasHeight: canvas?.height ?? null,
+      canvasVisiblePixels: null,
+      canvasDisplay: canvas ? getComputedStyle(canvas).display : null,
+      canvasError: null,
+    }
+    if (!url) return state
+
+    const response = await fetch(url)
+    state.protocolStatus = response.status
+    state.contentType = response.headers.get('content-type')
+    const bytes = await response.arrayBuffer()
+    state.responseBytes = bytes.byteLength
+    if (!response.ok || !/^image\\/jpeg(?:;|$)/i.test(state.contentType ?? '')) return state
+
+    try {
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: state.contentType ?? '' }))
+      state.decodedWidth = bitmap.width
+      state.decodedHeight = bitmap.height
+      bitmap.close()
+    } catch (error) {
+      state.decodeError = String(error)
+      return state
+    }
+
+    if (canvas && canvas.width > 0 && canvas.height > 0) {
+      try {
+        const pixels = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data
+        if (pixels) {
+          let visible = 0
+          for (let index = 0; index < pixels.length; index += 4) {
+            if (pixels[index + 3] > 0 && pixels[index] + pixels[index + 1] + pixels[index + 2] > 30) {
+              visible++
+            }
+          }
+          state.canvasVisiblePixels = visible
+        }
+      } catch (error) {
+        state.canvasError = String(error)
+      }
+    }
+    return state
+  })()`)
+    const ready = state.url?.startsWith('mc-preview://')
+      && state.protocolStatus === 200
+      && /^image\/jpeg(?:;|$)/i.test(state.contentType ?? '')
+      && state.responseBytes > 0
+      && state.decodedWidth > 0
+      && state.decodedHeight > 0
+      && state.canvasWidth > 0
+      && state.canvasHeight > 0
+      && state.canvasDisplay !== 'none'
+      && state.canvasVisiblePixels > 0
+    if (ready) return state
+    throw new Error(`live preview not ready: ${JSON.stringify(state)}`)
+  }, 40_000)
+}
+
+async function createReleasePreviewFixture() {
+  const width = 1_600
+  const height = 1_200
+  const pixels = Buffer.alloc(width * height * 3)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 3
+      const portrait = x > 420 && x < 1_180 && y > 120 && y < 1_100
+      const stripe = (Math.floor(x / 60) + Math.floor(y / 60)) % 2 === 0
+      pixels[offset] = portrait ? (stripe ? 220 : 170) : 20 + Math.round((x / width) * 55)
+      pixels[offset + 1] = portrait ? (stripe ? 75 : 42) : 50 + Math.round((y / height) * 60)
+      pixels[offset + 2] = portrait
+        ? (stripe ? 40 : 18)
+        : 120 + Math.round(((x + y) / (width + height)) * 60)
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } })
+    .jpeg({ quality: 88 })
+    .toBuffer()
 }
 
 async function reservePort() {
@@ -703,11 +801,49 @@ try {
     enabled: false
   })`)
 
+  // Return to the pulled project after the restart above so the live preview
+  // reaches the real selected-student renderer rather than only the main process.
+  await waitFor('pulled project card for portrait preview', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-project-card="${localProjectId}"]'))`,
+  ))
+  await cdp.evaluate(`(() => {
+    const card = document.querySelector('[data-project-card="${localProjectId}"]')
+    if (!(card instanceof HTMLButtonElement)) {
+      throw new Error('Pulled project card is not an interactive button')
+    }
+    card.click()
+  })()`)
+  await waitFor('first student row for portrait preview', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-student-row="${localStudentOneId}"]'))`,
+  ))
+  await cdp.evaluate(`document.querySelector('[data-student-row="${localStudentOneId}"]').click()`)
+  await waitFor('first student selected for portrait preview', () => cdp.evaluate(
+    `document.querySelector('[data-student-row="${localStudentOneId}"]')?.getAttribute('aria-pressed') === 'true'`,
+  ))
+
   // Capture while disconnected. This exercises cached authorization, local
   // matching, durable pending state, and remote-ID mapping. Reconnecting must
   // not silently upload; the photographer explicitly retries the pending file.
   online = false
-  writeFileSync(sourcePhoto, jpegFixture)
+  writeFileSync(sourcePhoto, releasePreviewFixture)
+
+  const livePreview = await waitForLivePreview(cdp)
+  assert.equal(livePreview.protocolStatus, 200, `mc-preview protocol failed: ${JSON.stringify(livePreview)}`)
+  assert.match(
+    livePreview.contentType,
+    /^image\/jpeg(?:;|$)/i,
+    `mc-preview returned the wrong MIME type: ${JSON.stringify(livePreview)}`,
+  )
+  assert(
+    livePreview.decodedWidth <= 1_440
+      && livePreview.decodedHeight <= 1_440
+      && (livePreview.decodedWidth < 1_600 || livePreview.decodedHeight < 1_200),
+    `live preview dimensions were not reduced from 1600x1200: ${JSON.stringify(livePreview)}`,
+  )
+  assert(
+    livePreview.canvasVisiblePixels > 0,
+    `live preview canvas remained blank: ${JSON.stringify(livePreview)}`,
+  )
 
   await waitFor('managed photo copy and SQLite photo row', async () => {
     const project = await cdp.evaluate(`window.api.invoke('projects:get', { projectId: ${localProjectId} })`)

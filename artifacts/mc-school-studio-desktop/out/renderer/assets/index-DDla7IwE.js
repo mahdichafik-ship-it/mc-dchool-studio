@@ -17183,6 +17183,17 @@ function captureUploadLabel(files) {
   if (files.some((file) => file.fileRole === "JPEG" && !file.galleryReady)) return "Preparing gallery";
   return "Uploaded";
 }
+function getEmployeeCaptureContext(student, isCorporate) {
+  if (!isCorporate) return [];
+  const items = [];
+  if (student.photoSession) items.push({ label: "Appointment time", value: student.photoSession });
+  if (student.jobTitle) items.push({ label: "Job title", value: student.jobTitle });
+  if (student.officeLocation) items.push({ label: "Office / location", value: student.officeLocation });
+  if (student.captureNotes) {
+    items.push({ label: "Capture notes", value: student.captureNotes, emphasized: true });
+  }
+  return items;
+}
 const captureFilterOptions = [
   { value: "all", label: "All" },
   { value: "complete", label: "JPEG + RAW" },
@@ -18511,6 +18522,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
             StudentDetail,
             {
               student: selectedStudent,
+              isCorporate,
               projectId,
               photoStatusMap,
               onReassign: () => reloadStudents(),
@@ -18819,6 +18831,7 @@ function StudentRow({
 }
 function StudentDetail({
   student,
+  isCorporate,
   projectId,
   photoStatusMap,
   onReassign,
@@ -18832,6 +18845,7 @@ function StudentDetail({
   onDragLeave,
   onDrop
 }) {
+  const employeeContext = getEmployeeCaptureContext(student, isCorporate);
   const {
     data: review,
     loading: capturesLoading,
@@ -18997,7 +19011,21 @@ function StudentDetail({
               student.firstName,
               " ",
               student.lastName
-            ] })
+            ] }),
+            employeeContext.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("dl", { className: "mt-3 flex max-w-4xl flex-wrap gap-x-5 gap-y-2 text-sm", children: employeeContext.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "div",
+              {
+                className: cn(
+                  "min-w-0",
+                  item.emphasized && "basis-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950"
+                ),
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { className: "text-[10px] font-extrabold uppercase tracking-widest text-slate-500", children: item.label }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { className: cn("break-words font-semibold text-slate-800", item.emphasized && "text-amber-950"), children: item.value })
+                ]
+              },
+              item.label
+            )) })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-end gap-2 justify-center shrink-0", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-end gap-2", children: [
@@ -20042,6 +20070,7 @@ function LivePreview({
           ref: canvasRef,
           role: "img",
           "aria-label": `Latest capture ${photo.fileName}`,
+          "data-preview-url": photo.previewUrl,
           className: cn(
             "block max-h-full max-w-full object-contain",
             (!canvasPainted || showImageFallback) && "hidden"

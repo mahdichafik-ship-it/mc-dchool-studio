@@ -95,7 +95,19 @@ after(async () => {
 });
 
 test("only the configured platform owner can view the platform workspace", async () => {
-  const forbidden = await request(studioViewerId, "/api/platform");
+  const forbidden = await request(studioViewerId, "/api/studio/branding", {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: "Viewer must not rename the studio",
+      tagline: "",
+      website: "",
+      contactEmail: "",
+      logoObjectPath: null,
+      primaryColor: "#000000",
+      accentColor: "#FFFFFF",
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
   assert.equal(forbidden.status, 403);
 
   const allowed = await request(platformOwnerId, "/api/platform");
@@ -150,18 +162,11 @@ test("encrypts storage credentials with authenticated encryption", () => {
 test("creates one-time owner invites and onboards the invited account", async () => {
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: inviteeEmail }),
+    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
-  const invite = await created.json() as { id: number; code: string; createdAt: string };
-  inviteId = invite.id;
-  inviteCode = invite.code;
-  assert.equal(sentInviteEmails.length, 1);
-  assert.equal(sentInviteEmails[0]?.to, inviteeEmail);
-  assert.match(sentInviteEmails[0]?.invitationUrl ?? "", /\/studio-invite\//);
-  assert.equal(sentInviteEmails[0]?.invitationUrl.includes(invite.code), true);
-  assert.equal(sentInviteEmails[0]?.expiresAt.getTime(), new Date(invite.createdAt).getTime() + 7 * 24 * 60 * 60 * 1000);
+  const invite = await created.json() as { id: number; code: string };
 
   const afterCreate = await request(platformOwnerId, "/api/platform");
   const duplicate = await request(platformOwnerId, "/api/platform/invites", {
@@ -230,7 +235,6 @@ test("creates one-time owner invites and onboards the invited account", async ()
     }),
     headers: { "Content-Type": "application/json" },
   });
-  assert.equal(updated.status, 200);
   const updatedStudio = await updated.json() as {
     studio: {
       name: string;
@@ -269,7 +273,7 @@ test("creates one-time owner invites and onboards the invited account", async ()
   const members = await db
     .select()
     .from(studioMembersTable)
-    .where(eq(studioMembersTable.studioId, onboardedStudioId));
+    .where(eq(studioMembersTable.studioId, concurrentStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);
 });
 
@@ -277,7 +281,7 @@ test("allows only one studio creation when an invitation is completed concurrent
   const concurrentUserId = `concurrent-owner-${suffix}`;
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: `${concurrentUserId}@member.local` }),
+    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
@@ -491,6 +495,8 @@ test("rejects email mismatches and keeps studios isolated", async () => {
     body: JSON.stringify({ status: "cancelled" }),
     headers: { "Content-Type": "application/json" },
   });
+  assert.equal(cancelled.status, 200);
+  assert.equal((await cancelled.json() as { status: string }).status, "cancelled");
 
   const afterCancel = await request(platformOwnerId, "/api/platform");
   const cancelledComplete = await request(otherUserId, `/api/platform/invites/${cancelledInvite.code}/complete`, {

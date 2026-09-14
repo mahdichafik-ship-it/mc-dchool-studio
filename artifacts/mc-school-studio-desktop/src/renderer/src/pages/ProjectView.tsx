@@ -3383,6 +3383,7 @@ function LivePreview({
           ref={canvasRef}
           role="img"
           aria-label={`Latest capture ${photo.fileName}`}
+          data-preview-url={photo.previewUrl}
           className={cn(
             'block max-h-full max-w-full object-contain',
             (!canvasPainted || showImageFallback) && 'hidden',

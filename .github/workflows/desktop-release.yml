@@ -419,6 +419,9 @@ jobs:
         with:
           version: 10
 
+      - name: Install smoke harness dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Verify native runner architecture
         env:
           EXPECTED_RUNNER_ARCHITECTURE: ${{ matrix.runner_architecture }}

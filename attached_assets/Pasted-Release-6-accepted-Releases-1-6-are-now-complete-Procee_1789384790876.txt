@@ -1,0 +1,67 @@
+Release 6 accepted. Releases 1–6 are now complete.
+
+Proceed with the previously specified FULL READ-ONLY FINAL LAUNCH AUDIT.
+
+Use the complete 23-item original audit baseline already provided and classify every original finding individually as:
+
+CLOSED
+OPEN — LAUNCH BLOCKER
+OPEN — SAFE TO DEFER
+INTENTIONAL LIMITATION
+
+Include Release 6 in the combined regression analysis.
+
+In addition to the original findings, actively search for new defects and cross-release regressions created by interactions between Releases 1–6.
+
+The final real-world school workflow now explicitly includes:
+
+Create project → import roster → prepare Capture QR identities → prepare Delivery credentials/access cards → print cards before photo day → photographer assignment → desktop synchronization → QR/student selection → JPEG/RAW capture → offline operation where applicable → reconnect/upload → web review → selection → gallery publication → transactional invitation → ORIGINAL PRE-PHOTO-DAY CARD/QR → parent gallery → basket/order → Stripe/manual payment → paid download → order recovery.
+
+Verify corporate workflow separately where terminology or behavior differs.
+
+For Release 6 specifically verify that the combined application still maintains:
+
+* Capture QR and Delivery QR separation;
+* credential stability until explicit revoke/regenerate;
+* no draft-gallery information leakage;
+* no invitation before publication;
+* publication reuse of prepared credentials;
+* canonical PUBLIC_APP_URL behavior;
+* legacy query-link compatibility;
+* fragment-based new Delivery QR behavior.
+
+The previously agreed read-only definition remains in force: isolated temporary test fixtures and generated build output are permitted, but do not modify tracked source, persistent schema/configuration, environment variables, production data, external-service configuration, GitHub releases or tags.
+
+Do not execute real production email, Stripe/payment, customer invitation, production gallery, installer publication or upgrade operations during this audit.
+
+Dependency advisories must be classified according to actual reachability and risk. Do not treat the raw advisory count as a launch blocker.
+
+Windows remains intentionally out of scope for this launch and is planned for implementation in a few months. Its absence must not affect the launch verdict.
+
+In addition to the finding-by-finding audit, provide:
+
+A. Code ready but not deployed
+B. Production configuration required
+C. Database/schema changes waiting for deployment
+D. Actual remaining software defects
+E. Safe post-launch improvements
+F. Dependency/security classification
+G. Mandatory controlled-production-deployment checklist
+
+The deployment checklist must specifically include a real cross-application school rehearsal using a card generated before the shoot:
+
+Prepare/print card → packaged Electron app → capture real JPEG/RAW → upload/sync → web review → publish → use that ORIGINAL card/QR on a separate parent device → access only the correct student’s published photographs.
+
+The production deployment checklist must also cover real Resend transactional email, Stripe/webhook/payment/recovery, Apple Silicon and Intel signed/notarized packages, installer/update testing, CORS/origin configuration, PUBLIC_APP_URL, and all pending production schema migrations.
+
+End with exactly one pre-deployment verdict:
+
+READY FOR CONTROLLED PRODUCTION DEPLOYMENT
+
+or
+
+NOT READY FOR PRODUCTION DEPLOYMENT
+
+Remember that READY means the code/configuration readiness is sufficient to begin controlled deployment. It does not mean the production deployment checklist has already passed.
+
+Do not fix anything. Do not publish anything. Stop after the final audit.

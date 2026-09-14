@@ -1381,6 +1381,19 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
           ))
           .limit(1);
         if (existingByClientId) {
+          if (
+            existingByClientId.capture.projectId !== projectId
+            || existingByClientId.capture.studentId !== studentId
+          ) {
+            return {
+              conflict: "Desktop upload identifier was reused for a different capture target",
+            } as const;
+          }
+          if (existingByClientId.file.fileRole !== role) {
+            return {
+              conflict: "Desktop upload identifier was reused for a different capture file role",
+            } as const;
+          }
           return { capture: existingByClientId.capture, file: existingByClientId.file, backupFilePath: uploadedFile.path, reused: true };
         }
       }
@@ -1488,6 +1501,12 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         .returning();
       return { capture, file, backupFilePath: uploadedFile.path, reused: false };
     });
+
+    if ("conflict" in result) {
+      discardUploadedFile(req);
+      res.status(409).json({ error: result.conflict });
+      return;
+    }
 
     const fileRole = result.file.fileRole === "RAW"
       ? "RAW"

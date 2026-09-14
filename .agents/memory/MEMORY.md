@@ -12,6 +12,7 @@
 - [GitHub desktop release publishing](github-desktop-release-publishing.md) — this workspace’s Git remote lacks credentials; publish Mac tags through the installed GitHub integration.
 - [Capture review compatibility](capture-review-compatibility.md) — legacy JPEG actions must synchronize capture/file records or completeness becomes stale.
 - [Desktop cloud upload identity](desktop-cloud-upload-identity.md) — imported rosters must retain cloud IDs; legacy local projects need a safe identity repair before upload.
+- [Desktop upload idempotency](desktop-upload-idempotency.md) — replay keys must remain bound to their original project, student, and file role.
 - [Upload retry durability](upload-retry-durability.md) — retries use current bytes, bounded auto-recovery, isolated queues, and explicit batch accounting.
 - [Explicit project sync boundary](explicit-project-sync-boundary.md) — capture-time ingestion is local-only; cloud upload begins only from an explicit finish or retry action.
 - [Offline finish lifecycle](offline-finish-lifecycle.md) — finishing locally is durable and distinct from successful cloud synchronization.

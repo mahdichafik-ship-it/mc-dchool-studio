@@ -748,6 +748,7 @@ test("keeps identical local capture keys isolated between photographer desktops"
     token: string,
     uploadId: string,
     filename: string,
+    expectedStatus = 201,
   ) => {
     const form = new (globalThis as any).FormData();
     form.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), filename);
@@ -764,15 +765,23 @@ test("keeps identical local capture keys isolated between photographer desktops"
         body: form,
       },
     );
-    assert.equal(response.status, 201);
+    assert.equal(response.status, expectedStatus);
     return response.json() as Promise<{ captureId: number; file: { fileUrl: string } }>;
   };
 
+  const firstUploadId = `shared-key-first-${Date.now()}`;
   const first = await upload(
     studentId,
     desktopCredentials.token,
-    `shared-key-first-${Date.now()}`,
+    firstUploadId,
     "first-photographer.jpg",
+  );
+  await upload(
+    otherStudent.id,
+    desktopCredentials.token,
+    firstUploadId,
+    "wrong-target.jpg",
+    409,
   );
   const second = await upload(
     otherStudent.id,

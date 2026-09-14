@@ -1,0 +1,120 @@
+Release 7 approved. We are continuing development before production deployment.
+
+Do not publish production yet.
+
+Start an architecture review for:
+
+Release 8 — Transactional Reliability & Operational Visibility
+
+Do not implement anything yet.
+
+The objective is to eliminate the remaining reliability gap around transactional order notifications and give studio administrators sufficient visibility to understand and safely recover delivery/email problems.
+
+1. Durable order-confirmation delivery
+
+Inspect the complete current order lifecycle for:
+
+* Stripe orders;
+* manual-payment orders;
+* payment confirmation;
+* order recovery;
+* confirmation/transactional email;
+* application restart/crash;
+* Resend definitive failure;
+* Resend uncertain outcome.
+
+Determine whether an order can currently reach a valid committed/paid state while its confirmation notification is permanently lost because the process terminates between database commit and email dispatch.
+
+If so, propose a durable transactional-outbox design comparable in reliability to the gallery invitation system.
+
+Payment/order state must never depend on email success.
+
+2. Delivery/invitation operational visibility
+
+Inspect what Owner/Admin users can currently see regarding:
+
+* gallery invitations;
+* pending sends;
+* successful provider acceptance;
+* definitive failures;
+* needs_review;
+* retry attempts;
+* order confirmation notification state;
+* provider identifiers where appropriate;
+* timestamps.
+
+Propose the smallest useful operational interface so a studio can identify problems without reading server logs or querying the database.
+
+Do not expose unnecessary customer secrets, access codes, recovery tokens or provider-sensitive information.
+
+3. Safe retry/recovery
+
+Review the existing invitation retry semantics and determine what should be reused for order notifications.
+
+Required principle:
+
+Definitive failure may be explicitly retried by an authorized user. An uncertain provider outcome must not automatically resend and risk duplicate customer communication.
+
+Determine how stale sending claims, API restart, provider timeout and process termination should behave.
+
+4. Tenant and role boundaries
+
+Explicitly define which roles may:
+
+* view operational status;
+* retry a failed notification;
+* inspect order notification status;
+* inspect gallery invitation status.
+
+Studio A must never see or operate Studio B’s records.
+
+Platform-owner behavior must remain explicit and audited.
+
+5. Do not change product semantics
+
+Release 8 must not change:
+
+* gallery access rules;
+* Release 6 credentials/cards;
+* publication semantics;
+* marketing consent;
+* Stripe payment authorization;
+* paid entitlement;
+* order recovery credentials;
+* Capture QR;
+* desktop capture/upload;
+* Apple desktop distribution;
+* Windows support.
+
+Transactional email and marketing email remain completely separate.
+
+6. Architecture questions
+
+Before implementation, report:
+
+1. What exactly is the current order-notification lifecycle?
+2. What failure/crash windows currently exist?
+3. Is another table required, or can the existing durable order notification fields safely support an outbox?
+4. How should claiming/idempotency/retry work?
+5. How will uncertain Resend outcomes be handled?
+6. What operational UI/API already exists and what is missing?
+7. What roles should have access?
+8. What database migration would be required?
+9. What interaction does this have with Releases 1–7?
+10. What tests would prove crash/restart/concurrency safety?
+
+Scope discipline
+
+Do not build a generic job queue.
+
+Do not redesign the entire administration application.
+
+Do not redesign email templates unless technically necessary.
+
+Do not change dependencies unless required and justified.
+
+Do not work on Windows.
+
+Do not publish production.
+
+Give me the Release 8 architecture review only and stop for approval before implementation.

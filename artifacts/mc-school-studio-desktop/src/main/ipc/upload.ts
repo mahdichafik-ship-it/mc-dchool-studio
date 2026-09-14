@@ -212,6 +212,7 @@ export function enableCloudSyncAfterSignIn(): void {
   cloudSyncDisabledForRetirement = false
   cloudSessionVerified = true
   kickEnabledLiveUploads()
+  retryPendingReviewsAfterConnectionRestore()
 }
 
 export function markCloudSessionUnavailable(): void {
@@ -222,12 +223,21 @@ export function markCloudSessionVerified(): void {
   if (cloudSyncDisabledForRetirement) return
   cloudSessionVerified = true
   kickEnabledLiveUploads()
+  retryPendingReviewsAfterConnectionRestore()
 }
 
 export function isCloudSessionVerified(): boolean {
   return cloudSessionVerified && !cloudSyncDisabledForRetirement
 }
 
+function retryPendingReviewsAfterConnectionRestore(): void {
+  void Promise.all([
+    syncPendingCaptureReviews(),
+    syncPendingGroupCaptureReviews(),
+  ]).catch((error) => {
+    console.warn('[Review] Could not retry pending cloud review changes:', error)
+  })
+}
 async function repairCloudIdentity(
   projectId: number,
   studentId: number,

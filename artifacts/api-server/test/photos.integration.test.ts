@@ -397,6 +397,8 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
         rating: 4,
         colorLabel: "green",
         favorite: true,
+        selected: true,
+        rejected: false,
         cropPosition: { x: 0.25, y: 0.75 },
         cropScale: 1.5,
         aspectRatio: "4:5",
@@ -414,6 +416,9 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
       aspectRatio: string;
       straightenAngle: number;
       rotation: number;
+      favorite: boolean;
+      selected: boolean;
+      rejected: boolean;
     };
   };
   assert.equal(reviewedCapture.capture.cropPositionX, 0.25);
@@ -422,6 +427,57 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(reviewedCapture.capture.aspectRatio, "4:5");
   assert.equal(reviewedCapture.capture.straightenAngle, 2);
   assert.equal(reviewedCapture.capture.rotation, 90);
+  assert.equal(reviewedCapture.capture.favorite, true);
+  assert.equal(reviewedCapture.capture.selected, true);
+  assert.equal(reviewedCapture.capture.rejected, false);
+
+  const rejectedReviewResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures/${captureKey}/review`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        rating: 0,
+        favorite: true,
+        selected: true,
+        rejected: true,
+      }),
+    },
+  );
+  assert.equal(rejectedReviewResponse.status, 200);
+  const rejectedReview = await rejectedReviewResponse.json() as {
+    capture: { favorite: boolean; selected: boolean; rejected: boolean };
+  };
+  assert.equal(rejectedReview.capture.favorite, true);
+  assert.equal(rejectedReview.capture.selected, false);
+  assert.equal(rejectedReview.capture.rejected, true);
+
+  const selectedReviewResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures/${captureKey}/review`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        rating: 4,
+        favorite: true,
+        selected: true,
+        rejected: false,
+      }),
+    },
+  );
+  assert.equal(selectedReviewResponse.status, 200);
+  const selectedReview = await selectedReviewResponse.json() as {
+    capture: { favorite: boolean; selected: boolean; rejected: boolean };
+  };
+  assert.equal(selectedReview.capture.favorite, true);
+  assert.equal(selectedReview.capture.selected, true);
+  assert.equal(selectedReview.capture.rejected, false);
 
   const webCaptureList = await fetch(`${baseUrl}/api/projects/${projectId}/captures`);
   assert.equal(webCaptureList.status, 200);
@@ -546,6 +602,38 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(rawFileResponse.status, 200);
   assert.equal(rawFileResponse.headers.get("content-type"), "application/octet-stream");
   assert.deepEqual(Buffer.from(await rawFileResponse.arrayBuffer()), rawBytes);
+
+  const [desktopConnection] = await db.select({ id: desktopConnectionsTable.id })
+    .from(desktopConnectionsTable)
+    .where(eq(desktopConnectionsTable.tokenHash, desktopCredentials.tokenHash));
+  assert(desktopConnection);
+  try {
+    for (const status of ["retired", "revoked"] as const) {
+      await db.update(desktopConnectionsTable).set({
+        status,
+        retiredAt: status === "retired" ? new Date() : null,
+        revokedAt: status === "revoked" ? new Date() : null,
+      }).where(eq(desktopConnectionsTable.id, desktopConnection.id));
+      const blockedReview = await fetch(
+        `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures/${captureKey}/review`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${desktopCredentials.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ selected: true, rejected: false, rating: 5 }),
+        },
+      );
+      assert.equal(blockedReview.status, 401, `${status} desktops cannot update review flags`);
+    }
+  } finally {
+    await db.update(desktopConnectionsTable).set({
+      status: "active",
+      retiredAt: null,
+      revokedAt: null,
+    }).where(eq(desktopConnectionsTable.id, desktopConnection.id));
+  }
   await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, projectedDeliveryPhoto.id));
 });
 

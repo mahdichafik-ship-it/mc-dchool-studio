@@ -26,6 +26,30 @@ function now() {
   return new Date().toISOString()
 }
 
+function normalizeReviewFlags(
+  capture: typeof capturesTable.$inferSelect,
+  values: {
+    favorite?: boolean
+    rejected?: boolean
+    selected?: boolean
+    rating?: number
+  },
+) {
+  const rating = values.rating === undefined
+    ? capture.rating
+    : Math.max(0, Math.min(5, Math.round(values.rating)))
+  const rejected = values.rejected
+    ?? (values.selected === true || (values.rating !== undefined && rating > 0) ? false : capture.rejected)
+  const selected = values.selected
+    ?? (values.rating !== undefined ? rating > 0 : capture.selected)
+  return {
+    favorite: values.favorite ?? capture.favorite,
+    rejected,
+    selected: rejected ? false : selected,
+    rating,
+  }
+}
+
 const captureAspectRatios: CaptureAspectRatio[] = ['original', '1:1', '4:5', '3:2', '16:9']
 const captureRotations = [0, 90, 180, 270] as const
 
@@ -332,14 +356,13 @@ export function registerPhotoHandlers() {
     ) => {
       const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
       if (!capture) return null
+    const review = normalizeReviewFlags(capture, { favorite, rejected, selected, rating })
       db.update(capturesTable)
         .set({
-          ...(favorite === undefined ? {} : { favorite }),
-          ...(rejected === undefined ? {} : { rejected }),
-          ...(rating === undefined
-            ? (selected === undefined ? {} : { selected })
-            : { selected: rating > 0 }),
-          ...(rating === undefined ? {} : { rating: Math.max(0, Math.min(5, Math.round(rating))) }),
+        favorite: review.favorite,
+        rejected: review.rejected,
+        selected: review.selected,
+        rating: review.rating,
           ...(colorLabel === undefined ? {} : { colorLabel }),
           reviewSyncPending: true,
           updatedAt: now(),

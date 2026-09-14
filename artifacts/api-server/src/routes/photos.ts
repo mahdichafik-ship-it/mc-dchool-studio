@@ -200,6 +200,20 @@ function connectionAccessMember(connection: ReturnType<typeof getDesktopConnecti
   };
 }
 
+function normalizeCaptureReviewFlags(flags: {
+  favorite: boolean;
+  rejected: boolean;
+  selected: boolean;
+}): Pick<typeof flags, "favorite" | "rejected" | "selected"> {
+  // A rejected capture cannot also be selected. Rejection wins when a stale
+  // client sends both values in one request.
+  return {
+    favorite: flags.favorite,
+    rejected: flags.rejected,
+    selected: flags.rejected ? false : flags.selected,
+  };
+}
+
 async function authorizeDesktopUploadTarget(req: Request, res: Response, next: NextFunction): Promise<void> {
   const projectId = Number(req.params.projectId);
   const studentId = Number(req.params.studentId);
@@ -1054,22 +1068,30 @@ router.patch("/projects/:projectId/groups/:groupId/captures/:captureKey/review",
   const groupId = Number(req.params.groupId);
   const rating = Number(req.body?.rating);
   const connection = getDesktopConnection(req);
+  const refreshedConnection = await refreshDesktopConnection(connection.connectionId);
+  if (!refreshedConnection) {
+    res.status(401).json({ error: "Desktop connection was revoked or retired" });
+    return;
+  }
   if (
     !Number.isInteger(projectId)
     || !Number.isInteger(groupId)
     || !Number.isInteger(rating)
     || rating < 0
     || rating > 5
-    || !(await canAccessDesktopProject(connectionAccessMember(connection), projectId))
+    || !(await canAccessDesktopProject(connectionAccessMember(refreshedConnection), projectId))
   ) {
     res.status(400).json({ error: "Invalid group capture review" });
     return;
   }
+  const flags = normalizeCaptureReviewFlags({
+    favorite: typeof req.body?.favorite === "boolean" ? req.body.favorite : rating >= 4,
+    rejected: typeof req.body?.rejected === "boolean" ? req.body.rejected : false,
+    selected: typeof req.body?.selected === "boolean" ? req.body.selected : rating > 0,
+  });
   const [capture] = await db.update(groupCapturesTable).set({
     rating,
-    favorite: rating >= 4,
-    selected: rating > 0,
-    rejected: false,
+    ...flags,
     updatedAt: new Date(),
   }).where(and(
     eq(groupCapturesTable.projectId, projectId),
@@ -1341,6 +1363,11 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     const colorLabel = ["none", "red", "yellow", "green", "blue", "purple"].includes(body.colorLabel ?? "")
       ? body.colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple"
       : "none";
+    const reviewFlags = normalizeCaptureReviewFlags({
+      favorite: body.favorite === "true",
+      rejected: body.rejected === "true",
+      selected: body.selected === "true",
+    });
 
     const result = await db.transaction(async (tx) => {
       if (clientUploadId) {
@@ -1408,9 +1435,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
             capturedAt,
             sequence: parsedSequence,
             pairingStatus: role === "JPEG" ? "jpeg_only" : "raw_only",
-            favorite: body.favorite === "true",
-            rejected: body.rejected === "true",
-            selected: body.selected === "true",
+            ...reviewFlags,
             rating,
             colorLabel,
           })
@@ -1427,9 +1452,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         .limit(1);
       if (existingByRole) {
         [capture] = await tx.update(capturesTable).set({
-          favorite: body.favorite === "true",
-          rejected: body.rejected === "true",
-          selected: body.selected === "true",
+          ...reviewFlags,
           rating,
           colorLabel,
           updatedAt: new Date(),
@@ -1539,11 +1562,16 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
   const studentId = Number(req.params.studentId);
   const captureKey = String(req.params.captureKey);
   const connection = getDesktopConnection(req);
+  const refreshedConnection = await refreshDesktopConnection(connection.connectionId);
+  if (!refreshedConnection) {
+    res.status(401).json({ error: "Desktop connection was revoked or retired" });
+    return;
+  }
   const scopedCaptureKey = `desktop:${connection.connectionId}:${captureKey}`;
   if (
     !Number.isInteger(projectId)
     || !Number.isInteger(studentId)
-    || !(await canAccessDesktopProject(connectionAccessMember(connection), projectId))
+    || !(await canAccessDesktopProject(connectionAccessMember(refreshedConnection), projectId))
   ) {
     res.status(404).json({ error: "Capture not found" });
     return;
@@ -1559,10 +1587,13 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
     res.status(400).json({ error: parsedEdits.error });
     return;
   }
+  const flags = normalizeCaptureReviewFlags({
+    favorite: typeof req.body?.favorite === "boolean" ? req.body.favorite : rating >= 4,
+    rejected: typeof req.body?.rejected === "boolean" ? req.body.rejected : false,
+    selected: typeof req.body?.selected === "boolean" ? req.body.selected : rating > 0,
+  });
   const captureUpdate = {
-    favorite: Boolean(req.body?.favorite),
-    rejected: Boolean(req.body?.rejected),
-    selected: rating > 0,
+    ...flags,
     rating,
     colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
     updatedAt: new Date(),

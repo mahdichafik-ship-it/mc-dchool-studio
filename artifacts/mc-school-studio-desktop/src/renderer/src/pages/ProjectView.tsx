@@ -502,10 +502,20 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         })
         return
       }
+      const conflictDetails = preview.students
+        .filter((student) => student.conflictFiles.length > 0)
+        .map((student) => [
+          student.studentName,
+          ...student.conflictFiles.map((fileName) => `  • ${fileName}`),
+        ].join('\n'))
+        .join('\n\n')
       const confirmed = window.confirm([
         `Found ${preview.legacyFolderCount} legacy student folder${preview.legacyFolderCount === 1 ? '' : 's'} containing ${preview.fileCount} file${preview.fileCount === 1 ? '' : 's'}.`,
         preview.conflictCount > 0
-          ? `${preview.conflictCount} existing destination file${preview.conflictCount === 1 ? '' : 's'} will be kept; conflicting copies get a -legacy suffix.`
+          ? [
+              `${preview.conflictCount} existing destination file${preview.conflictCount === 1 ? '' : 's'} will remain unchanged. The legacy copies will be added with a -legacy suffix:`,
+              conflictDetails,
+            ].join('\n\n')
           : 'Photos, RAW files, and QR markers will be copied into the new FirstName_LastName_ID folders.',
         'Original folders will not be deleted. Continue?',
       ].join('\n\n'))

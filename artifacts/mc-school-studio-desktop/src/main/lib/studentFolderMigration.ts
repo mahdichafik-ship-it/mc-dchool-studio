@@ -114,9 +114,11 @@ async function inspectStudentFolder(
   const canonicalFolderPath = (await findDirectory(classDir, names.canonical))
     ?? join(classDir, names.canonical)
   const files = legacyFolderPath ? await listFiles(legacyFolderPath) : []
-  let conflicts = 0
+  const conflictFiles: string[] = []
   for (const file of files) {
-    if (await pathExists(join(canonicalFolderPath, file.relativePath))) conflicts++
+    if (await pathExists(join(canonicalFolderPath, file.relativePath))) {
+      conflictFiles.push(file.relativePath)
+    }
   }
 
   return {
@@ -129,7 +131,8 @@ async function inspectStudentFolder(
     canonicalFolderFound: Boolean(await pathExists(canonicalFolderPath)),
     fileCount: files.length,
     totalBytes: files.reduce((sum, file) => sum + file.size, 0),
-    conflicts,
+    conflicts: conflictFiles.length,
+    conflictFiles,
   }
 }
 

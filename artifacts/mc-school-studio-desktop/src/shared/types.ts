@@ -73,6 +73,7 @@ export interface FolderMigrationStudent {
   fileCount: number
   totalBytes: number
   conflicts: number
+  conflictFiles: string[]
 }
 
 export interface FolderMigrationPreview {

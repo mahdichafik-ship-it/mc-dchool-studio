@@ -23,6 +23,7 @@ test('prunes incompatible Sharp packages from the pnpm virtual-store layout', (t
   )
   const sharpDirectory = path.join(virtualNodeModules, 'sharp')
   const imgDirectory = path.join(virtualNodeModules, '@img')
+  const nestedSharpImgDirectory = path.join(sharpDirectory, 'node_modules', '@img')
   const packageNames = [
     'sharp-darwin-x64',
     'sharp-libvips-darwin-x64',
@@ -33,6 +34,14 @@ test('prunes incompatible Sharp packages from the pnpm virtual-store layout', (t
 
   mkdirSync(sharpDirectory, { recursive: true })
   mkdirSync(imgDirectory, { recursive: true })
+  // This decoy mirrors the path that previously caused the release gate to
+  // stop both architectures. The real optional packages are beside sharp.
+  mkdirSync(path.join(nestedSharpImgDirectory, 'sharp-darwin-x64'), {
+    recursive: true,
+  })
+  mkdirSync(path.join(nestedSharpImgDirectory, 'sharp-libvips-darwin-x64'), {
+    recursive: true,
+  })
   for (const packageName of packageNames) {
     const storeEntry = path.join(
       packageRoot,
@@ -60,6 +69,7 @@ test('prunes incompatible Sharp packages from the pnpm virtual-store layout', (t
   })
 
   assert.match(output, /Prepared Sharp native dependencies for macOS x64/)
+  assert.match(output, new RegExp(`checked ${imgDirectory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
   assert.equal(existsSync(path.join(imgDirectory, 'sharp-darwin-x64')), true)
   assert.equal(existsSync(path.join(imgDirectory, 'sharp-libvips-darwin-x64')), true)
   assert.equal(existsSync(path.join(imgDirectory, 'sharp-darwin-arm64')), false)
@@ -92,5 +102,10 @@ test('prunes incompatible Sharp packages from the pnpm virtual-store layout', (t
   assert.equal(
     existsSync(path.join(packageRoot, 'node_modules', '.pnpm', '@img+sharp-linux-x64@fixture')),
     false,
+  )
+  assert.equal(existsSync(path.join(nestedSharpImgDirectory, 'sharp-darwin-x64')), true)
+  assert.equal(
+    existsSync(path.join(nestedSharpImgDirectory, 'sharp-libvips-darwin-x64')),
+    true,
   )
 })

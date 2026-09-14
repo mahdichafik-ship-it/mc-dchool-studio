@@ -9,16 +9,19 @@ if (architecture !== 'x64' && architecture !== 'arm64') {
 }
 
 const packageRoot = process.cwd()
-const packageImgDirectory = path.join(packageRoot, 'node_modules', '@img')
 const sharpDirectory = await realpath(path.join(packageRoot, 'node_modules', 'sharp')).catch(
   () => null,
 )
-const sharpImgDirectory = sharpDirectory
-  ? path.join(path.dirname(sharpDirectory), '@img')
-  : null
-let virtualStoreDirectory = sharpDirectory
-  ? path.dirname(sharpDirectory)
-  : null
+if (!sharpDirectory) {
+  throw new Error('Unable to resolve the real Sharp package from node_modules/sharp')
+}
+
+// pnpm links Sharp's optional dependencies beside the real Sharp package:
+//   .pnpm/sharp@.../node_modules/sharp
+//   .pnpm/sharp@.../node_modules/@img
+// They are not under sharp/node_modules/@img.
+const sharpImgDirectory = path.join(path.dirname(sharpDirectory), '@img')
+let virtualStoreDirectory = path.dirname(sharpDirectory)
 while (virtualStoreDirectory && path.basename(virtualStoreDirectory) !== '.pnpm') {
   const parentDirectory = path.dirname(virtualStoreDirectory)
   virtualStoreDirectory =
@@ -32,30 +35,17 @@ const expectedStorePrefixes = [...expectedPackages].map(
   (packageName) => `@img+${packageName}@`,
 )
 
-const candidateDirectories = [...new Set([packageImgDirectory, sharpImgDirectory].filter(Boolean))]
-const imgDirectories = []
-
-for (const directory of candidateDirectories) {
-  const directoryStats = await stat(directory).catch(() => null)
-  if (directoryStats?.isDirectory()) {
-    imgDirectories.push(directory)
-  }
-}
-
-if (imgDirectories.length === 0) {
-  throw new Error(
-    `Sharp optional dependency directories are missing: ${candidateDirectories.join(', ')}`,
-  )
+const sharpImgStats = await stat(sharpImgDirectory).catch(() => null)
+if (!sharpImgStats?.isDirectory()) {
+  throw new Error(`Sharp optional dependency directory is missing: ${sharpImgDirectory}`)
 }
 if (!virtualStoreDirectory) {
   throw new Error(`Unable to locate the pnpm virtual store from ${sharpDirectory}`)
 }
 
 const installedPackages = new Set()
-for (const directory of imgDirectories) {
-  for (const packageName of await readdir(directory)) {
-    installedPackages.add(packageName)
-  }
+for (const packageName of await readdir(sharpImgDirectory)) {
+  installedPackages.add(packageName)
 }
 
 for (const packageName of expectedPackages) {
@@ -66,27 +56,25 @@ for (const packageName of expectedPackages) {
 
 let removedCount = 0
 
-for (const directory of imgDirectories) {
-  const removablePackages = (await readdir(directory)).filter(
-    (packageName) => packageName.startsWith('sharp-') && !expectedPackages.has(packageName),
-  )
+const removablePackages = (await readdir(sharpImgDirectory)).filter(
+  (packageName) => packageName.startsWith('sharp-') && !expectedPackages.has(packageName),
+)
 
-  await Promise.all(
-    removablePackages.map((packageName) =>
-      rm(path.join(directory, packageName), { force: true, recursive: true }),
-    ),
-  )
-  removedCount += removablePackages.length
+await Promise.all(
+  removablePackages.map((packageName) =>
+    rm(path.join(sharpImgDirectory, packageName), { force: true, recursive: true }),
+  ),
+)
+removedCount += removablePackages.length
 
-  const unexpectedPackages = (await readdir(directory)).filter(
-    (packageName) => packageName.startsWith('sharp-') && !expectedPackages.has(packageName),
-  )
+const unexpectedPackages = (await readdir(sharpImgDirectory)).filter(
+  (packageName) => packageName.startsWith('sharp-') && !expectedPackages.has(packageName),
+)
 
-  if (unexpectedPackages.length > 0) {
-    throw new Error(
-      `Unexpected Sharp native packages remain for ${architecture} in ${directory}: ${unexpectedPackages.join(', ')}`,
-    )
-  }
+if (unexpectedPackages.length > 0) {
+  throw new Error(
+    `Unexpected Sharp native packages remain for ${architecture} in ${sharpImgDirectory}: ${unexpectedPackages.join(', ')}`,
+  )
 }
 
 const storeEntries = await readdir(virtualStoreDirectory)
@@ -118,5 +106,5 @@ if (unexpectedStoreEntries.length > 0) {
 }
 
 console.log(
-  `Prepared Sharp native dependencies for macOS ${architecture}; checked ${imgDirectories.length} link director${imgDirectories.length === 1 ? 'y' : 'ies'}, removed ${removedCount} incompatible link(s), and removed ${removableStoreEntries.length} incompatible virtual-store package(s)`,
+  `Prepared Sharp native dependencies for macOS ${architecture}; checked ${sharpImgDirectory}, removed ${removedCount} incompatible link(s), and removed ${removableStoreEntries.length} incompatible virtual-store package(s)`,
 )

@@ -232,6 +232,31 @@ jobs:
         # the lockfile was generated on Linux and does not include darwin entries.
         run: pnpm install --no-frozen-lockfile
 
+      - name: Diagnose pnpm Sharp virtual-store layout
+        run: |
+          set -euo pipefail
+          sharp_path="$(realpath artifacts/mc-school-studio-desktop/node_modules/sharp)"
+          sharp_img_directory="$(dirname "$sharp_path")/@img"
+          virtual_store_directory="$(dirname "$(dirname "$(dirname "$sharp_path")")")"
+          test -d "$sharp_img_directory"
+          test "$(basename "$virtual_store_directory")" = ".pnpm"
+          echo "Resolved Sharp: $sharp_path"
+          echo "Resolved Sharp optional dependencies: $sharp_img_directory"
+          echo "Resolved pnpm virtual store: $virtual_store_directory"
+          SHARP_IMG_DIRECTORY="$sharp_img_directory" node <<'NODE'
+          const fs = require('fs')
+          const path = require('path')
+          const directory = process.env.SHARP_IMG_DIRECTORY
+          for (const name of fs.readdirSync(directory).sort()) {
+            const entry = path.join(directory, name)
+            let target = ''
+            try {
+              target = fs.readlinkSync(entry)
+            } catch {}
+            console.log(`${name} -> ${target}`)
+          }
+          NODE
+
       - name: Prune incompatible Sharp native packages
         env:
           PACKAGE_ARCHITECTURE: ${{ matrix.architecture }}

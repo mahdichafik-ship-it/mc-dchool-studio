@@ -51,6 +51,21 @@ assert.deepEqual(
 
 const appBundle = resolve(dirname(appExecutable), '..', '..')
 const unpackedModules = join(appBundle, 'Contents', 'Resources', 'app.asar.unpacked', 'node_modules')
+const sharpPackagesDirectory = join(unpackedModules, '@img')
+const expectedSharpPackages = [
+  `sharp-darwin-${expectedArchitecture === 'arm64' ? 'arm64' : 'x64'}`,
+  `sharp-libvips-darwin-${expectedArchitecture === 'arm64' ? 'arm64' : 'x64'}`,
+].sort()
+const packagedSharpPackages = existsSync(sharpPackagesDirectory)
+  ? readdirSync(sharpPackagesDirectory)
+    .filter((name) => name.startsWith('sharp-'))
+    .sort()
+  : []
+assert.deepEqual(
+  packagedSharpPackages,
+  expectedSharpPackages,
+  `packaged Sharp optional dependencies must contain only ${expectedSharpPackages.join(', ')}, found ${packagedSharpPackages.join(', ')}`,
+)
 const nativeBinaries = findFiles(unpackedModules).filter(
   (path) => path.endsWith('.node') || path.endsWith('.dylib'),
 )

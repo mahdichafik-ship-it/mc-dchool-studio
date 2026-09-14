@@ -47,6 +47,11 @@ function initializeSchema(sqlite: Database.Database) {
       notes TEXT,
       watch_folder TEXT,
       finished_at TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'active',
+      sync_completed_files INTEGER NOT NULL DEFAULT 0,
+      sync_total_files INTEGER NOT NULL DEFAULT 0,
+      sync_failed_files INTEGER NOT NULL DEFAULT 0,
+      sync_error TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

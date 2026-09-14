@@ -1148,7 +1148,7 @@ export interface ProjectSyncProgress {
   error?: string
 }
 
-type ProjectSyncJob =
+export type ProjectSyncJob =
   | { kind: 'capture-file'; captureId: number; fileId: number }
   | {
     kind: 'legacy-photo'
@@ -1160,6 +1160,16 @@ type ProjectSyncJob =
     capturedAt: string
   }
   | { kind: 'group-capture-file'; captureId: number; fileId: number }
+
+function uniqueProjectSyncJobs(jobs: ProjectSyncJob[]): ProjectSyncJob[] {
+  const seen = new Set<string>()
+  return jobs.filter((job) => {
+    const key = projectSyncJobKey(job)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 
 function getProjectSyncJobs(projectId: number, includeDone = false): ProjectSyncJob[] {
   const db = getDb()
@@ -1217,7 +1227,7 @@ function getProjectSyncJobs(projectId: number, includeDone = false): ProjectSync
     })
   }
 
-  return jobs
+  return uniqueProjectSyncJobs(jobs)
 }
 
 const LIVE_UPLOAD_SETTING_PREFIX = 'live_upload:'
@@ -1280,6 +1290,10 @@ function registerProjectBatchJobs(projectId: number, jobs: ProjectSyncJob[]): nu
   }
   const validKeys = new Set(getProjectSyncJobs(projectId, true).map(projectSyncJobKey))
   const keys = new Set(existing.filter((key) => validKeys.has(key)))
+  // Include completed files too. Older releases may have durable done rows
+  // without a local batch-key setting, and those files still belong in the
+  // expected total/progress accounting for explicit Finish.
+  for (const key of validKeys) keys.add(key)
   for (const job of jobs) keys.add(projectSyncJobKey(job))
   setSetting(settingKey, JSON.stringify([...keys]))
   return keys.size
@@ -1287,6 +1301,20 @@ function registerProjectBatchJobs(projectId: number, jobs: ProjectSyncJob[]): nu
 
 export function getProjectCaptureBatchExpectedCount(projectId: number): number {
   return registerProjectBatchJobs(projectId, getProjectSyncJobs(projectId))
+}
+
+/** Files that are durable locally but cannot be sent until a student match exists. */
+export function getProjectUploadBlockerCount(projectId: number): number {
+  const db = getDb()
+  return db.select({ id: capturesTable.id })
+    .from(capturesTable)
+    .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.studentId)))
+    .all()
+    .reduce((count, capture) => count + db.select({ status: imageFilesTable.uploadStatus })
+      .from(imageFilesTable)
+      .where(eq(imageFilesTable.captureId, capture.id))
+      .all()
+      .filter((file) => file.status !== 'done').length, 0)
 }
 
 function isLiveUploadEnabled(projectId: number): boolean {
@@ -1588,34 +1616,63 @@ export async function pauseLiveUploadForFinish(projectId: number): Promise<void>
  * completion remains explicit and an offline transition cannot silently count
  * skipped work as complete.
  */
+export interface ProjectSyncUploadDependencies {
+  getJobs: (projectId: number, includeDone?: boolean) => ProjectSyncJob[]
+  isCloudSessionVerified: () => boolean
+  uploadProjectJob: (job: ProjectSyncJob, captureBatchKey?: string) => Promise<void>
+}
+
 export async function syncProjectUploads(
   projectId: number,
   onProgress?: (progress: ProjectSyncProgress) => void,
   captureBatchKey?: string,
+  dependencies: ProjectSyncUploadDependencies = {
+    getJobs: getProjectSyncJobs,
+    isCloudSessionVerified,
+    uploadProjectJob,
+  },
 ): Promise<ProjectSyncProgress> {
-  const jobs = getProjectSyncJobs(projectId)
-  let completed = 0
+  const allJobs = uniqueProjectSyncJobs(dependencies.getJobs(projectId, true))
+  const allJobKeys = new Set(allJobs.map(projectSyncJobKey))
+  const jobs = uniqueProjectSyncJobs(dependencies.getJobs(projectId))
+    .filter((job) => allJobKeys.has(projectSyncJobKey(job)))
+  // Count already-done JPEG, RAW, legacy, and gallery-preparation work so a
+  // retry reports durable whole-project progress rather than restarting at 0.
+  let completed = Math.min(allJobs.length, Math.max(0, allJobs.length - jobs.length))
   let failed = 0
   let firstError: string | undefined
-  const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError })
+  const report = () => onProgress?.({
+    completed,
+    total: allJobs.length,
+    failed,
+    error: firstError,
+  })
   report()
 
   await runWithConcurrency(jobs, MAX_CONCURRENT_UPLOADS, async (job) => {
+    let uploaded = false
     try {
-      if (!isCloudSessionVerified()) {
+      if (!dependencies.isCloudSessionVerified()) {
         throw new Error('Cloud sync is unavailable. Local captures are safe; reconnect and try again.')
       }
-      await uploadProjectJob(job, captureBatchKey)
+      await dependencies.uploadProjectJob(job, captureBatchKey)
+      uploaded = true
     } catch (error) {
       failed++
       firstError ??= getUploadErrorMessage(error)
-    } finally {
-      completed++
-      report()
     }
+    // A failed job remains pending/retryable. Only durable upload success
+    // may advance completed, which keeps completed + remaining coherent.
+    if (uploaded) completed = Math.min(allJobs.length, completed + 1)
+    report()
   })
 
-  return { completed, total: jobs.length, failed, error: firstError }
+  return {
+    completed,
+    total: allJobs.length,
+    failed,
+    ...(firstError ? { error: firstError } : {}),
+  }
 }
 
 export async function beginProjectCaptureBatch(projectId: number, expectedFileCount: number): Promise<string> {

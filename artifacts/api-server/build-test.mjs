@@ -20,6 +20,7 @@ await build({
     path.resolve(artifactDir, "test/marketing.integration.test.ts"),
     path.resolve(artifactDir, "test/deliveryInvitations.integration.test.ts"),
     path.resolve(artifactDir, "test/students.integration.test.ts"),
+    path.resolve(artifactDir, "test/roster.integration.test.ts"),
     path.resolve(artifactDir, "test/securityMiddleware.test.ts"),
     path.resolve(artifactDir, "test/desktopRelease.test.ts"),
   ],

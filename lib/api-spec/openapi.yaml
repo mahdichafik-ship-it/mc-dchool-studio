@@ -589,7 +589,7 @@ paths:
     post:
       operationId: confirmImport
       tags: [import]
-      summary: Confirm an import with column mapping and create students
+      summary: Confirm a project-scoped roster reconciliation
       parameters:
         - name: projectId
           in: path
@@ -989,6 +989,17 @@ paths:
         - { name: orderId, in: path, required: true, schema: { type: integer } }
         - { name: x-delivery-token, in: header, required: true, schema: { type: string } }
       responses: { "200": { description: Order status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderResponse" } } } } }
+  /delivery/{slug}/orders/recovery/{reference}:
+    get:
+      operationId: getDeliveryOrderRecovery
+      tags: [delivery]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: reference, in: path, required: true, schema: { type: string } }
+        - { name: x-order-recovery-token, in: header, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Safe customer order status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderRecoveryResponse" } } } }
+        "404": { description: "Recovery link is invalid, expired, or revoked" }
   /projects/{projectId}/delivery:
     get:
       operationId: getDeliverySettings
@@ -1527,12 +1538,26 @@ components:
 
     ImportResult:
       type: object
-      required: [classesCreated, studentsCreated]
+      required: [classesCreated, studentsCreated, studentsUpdated, studentsMoved, studentsSkipped, conflicts]
       properties:
         classesCreated:
           type: integer
+          description: Classes created; existing classes are reused case-insensitively.
         studentsCreated:
           type: integer
+          description: Students or employees created.
+        studentsUpdated:
+          type: integer
+          description: Existing students or employees whose roster details changed.
+        studentsMoved:
+          type: integer
+          description: Existing students or employees moved to another class or department.
+        studentsSkipped:
+          type: integer
+          description: Unchanged rows skipped because they were already reconciled.
+        conflicts:
+          type: integer
+          description: Ambiguous rows that were not merged.
 
     ImportFileForm:
       type: object
@@ -1870,8 +1895,9 @@ components:
         sentCount: { type: integer }
     DeliveryOrderInput:
       type: object
-      required: [paymentMethod]
+      required: [paymentMethod, idempotencyKey, customerName, customerEmail]
       properties:
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
         token: { type: string }
         items: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/DeliveryBasketItem" } }
         offerId: { type: string }
@@ -1996,7 +2022,7 @@ components:
             expiresAt: { type: ["string", "null"] }
     DeliveryPhotosResponse:
       type: object
-      required: [gallery, student, subject, photos, offers, orderingAvailable, stripeAvailable]
+      required: [gallery, student, subject, photos, offers, orderingAvailable, stripeAvailable, mediaExpiresAt]
       properties:
         gallery:
           type: object
@@ -2037,6 +2063,7 @@ components:
           type: boolean
           description: Whether Stripe checkout is currently available as an optional payment method.
         photos: { type: array, items: { $ref: "#/components/schemas/DeliveryGalleryPhotosItem" } }
+        mediaExpiresAt: { type: string, format: date-time }
     DeliveryGalleryPhotosItem:
       type: object
       required: [id, fileName, fileUrl, downloadUrl]
@@ -2063,13 +2090,17 @@ components:
         currency: { type: string }
     DeliveryCheckoutResponse:
       type: object
-      required: [checkoutUrl, orderId, status, paymentMethod]
+      required: [checkoutUrl, orderId, status, paymentMethod, publicReference, checkoutAttemptStatus]
       properties:
         checkoutUrl: { type: ["string", "null"] }
         orderId: { type: integer }
         status: { type: string }
         paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
         paymentInstructions: { type: ["string", "null"] }
+        publicReference: { type: string }
+        recoveryUrl: { type: ["string", "null"] }
+        recoveryToken: { type: ["string", "null"], description: Returned only when the order is first created; never persisted in plaintext }
+        checkoutAttemptStatus: { type: string, enum: [not_started, created, uncertain, failed] }
     DeliveryOrderResponse:
       type: object
       required: [orderId, status, amountTotal, currency, paymentMethod, photoIds]
@@ -2082,6 +2113,31 @@ components:
         paidAt: { type: ["string", "null"] }
         photoIds: { type: array, items: { type: integer } }
         downloadablePhotoIds: { type: array, items: { type: integer } }
+    DeliveryOrderRecoveryResponse:
+      type: object
+      additionalProperties: false
+      required: [reference, status, paymentMethod, amountTotal, currency, createdAt, paidAt, fulfillmentStatus, deliveryMethod, manualInstructions, items]
+      properties:
+        reference: { type: string }
+        status: { type: string, enum: [pending, paid, expired, refunded, cancelled] }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
+        amountTotal: { type: integer }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: ["string", "null"], format: date-time }
+        fulfillmentStatus: { type: string }
+        deliveryMethod: { type: string }
+        manualInstructions: { type: ["string", "null"] }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [productName, productType, quantity]
+            properties:
+              productName: { type: string }
+              productType: { type: string }
+              quantity: { type: integer }
     DeliverySettingsResponse:
       type: object
       required: [gallery]

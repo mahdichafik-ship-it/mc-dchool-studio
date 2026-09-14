@@ -40,6 +40,7 @@ import type {
   DeliveryOrderDetailResponse,
   DeliveryOrderInput,
   DeliveryOrderMutationResponse,
+  DeliveryOrderRecoveryResponse,
   DeliveryOrderResponse,
   DeliveryOrdersResponse,
   DeliveryPhotosResponse,
@@ -2029,7 +2030,7 @@ export const getConfirmImportUrl = (projectId: number,) => {
 }
 
 /**
- * @summary Confirm an import with column mapping and create students
+ * @summary Confirm a project-scoped roster reconciliation
  */
 export const confirmImport = async (projectId: number,
     importConfirmation: ImportConfirmation, options?: RequestInit): Promise<ImportResult> => {
@@ -2079,7 +2080,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConfirmImportMutationError = ErrorType<void>
 
     /**
- * @summary Confirm an import with column mapping and create students
+ * @summary Confirm a project-scoped roster reconciliation
  */
 export const useConfirmImport = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmImport>>, TError,{projectId: number;data: BodyType<ImportConfirmation>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -3990,6 +3991,82 @@ export function useGetDeliveryOrder<TData = Awaited<ReturnType<typeof getDeliver
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetDeliveryOrderQueryOptions(slug,orderId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetDeliveryOrderRecoveryUrl = (slug: string,
+    reference: string,) => {
+
+
+
+
+  return `/api/delivery/${slug}/orders/recovery/${reference}`
+}
+
+export const getDeliveryOrderRecovery = async (slug: string,
+    reference: string, options?: RequestInit): Promise<DeliveryOrderRecoveryResponse> => {
+
+  return customFetch<DeliveryOrderRecoveryResponse>(getGetDeliveryOrderRecoveryUrl(slug,reference),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDeliveryOrderRecoveryQueryKey = (slug: string,
+    reference: string,) => {
+    return [
+    `/api/delivery/${slug}/orders/recovery/${reference}`
+    ] as const;
+    }
+
+
+export const getGetDeliveryOrderRecoveryQueryOptions = <TData = Awaited<ReturnType<typeof getDeliveryOrderRecovery>>, TError = ErrorType<void>>(slug: string,
+    reference: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDeliveryOrderRecovery>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDeliveryOrderRecoveryQueryKey(slug,reference);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDeliveryOrderRecovery>>> = ({ signal }) => getDeliveryOrderRecovery(slug,reference, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: slug !== null && slug !== undefined && reference !== null && reference !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDeliveryOrderRecovery>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDeliveryOrderRecoveryQueryResult = NonNullable<Awaited<ReturnType<typeof getDeliveryOrderRecovery>>>
+export type GetDeliveryOrderRecoveryQueryError = ErrorType<void>
+
+
+
+export function useGetDeliveryOrderRecovery<TData = Awaited<ReturnType<typeof getDeliveryOrderRecovery>>, TError = ErrorType<void>>(
+ slug: string,
+    reference: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDeliveryOrderRecovery>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDeliveryOrderRecoveryQueryOptions(slug,reference,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

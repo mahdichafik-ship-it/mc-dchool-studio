@@ -79,6 +79,7 @@ interface DropProgressState {
 
 export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
+  const projectSynced = project?.syncStatus === 'synced'
   const isCorporate = project?.projectType === 'corporate'
   const departmentLabel = isCorporate ? 'Department' : 'Class'
   const employeeLabel = isCorporate ? 'Employee' : 'Student'
@@ -334,6 +335,27 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       if (event.projectId === projectId) setSyncProgress(event)
     })
   }, [projectId])
+
+  // The lifecycle and file counters are persisted in SQLite, so restore the
+  // banner/progress after switching projects or restarting the desktop.
+  useEffect(() => {
+    if (!project || project.syncStatus === 'active') {
+      setSyncProgress(null)
+      return
+    }
+    setSyncProgress({
+      projectId,
+      phase: project.syncStatus === 'synced'
+        ? 'finished'
+        : project.syncStatus === 'finished_local'
+          ? 'finished-locally'
+          : project.syncStatus === 'syncing' ? 'syncing' : 'error',
+      completed: project.syncCompletedFiles,
+      total: project.syncTotalFiles,
+      failed: project.syncFailedFiles,
+      ...(project.syncError ? { error: project.syncError } : {}),
+    })
+  }, [project, projectId])
 
   useEffect(() => {
     return window.api.on('watcher:dropProgress', (event: DroppedCaptureProgressEvent) => {
@@ -658,7 +680,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   }
 
   async function handleUploadAndFinish() {
-    if (!project || project.finishedAt || finishing) return
+    if (!project || projectSynced || finishing) return
     setFinishing(true)
     setSyncProgress({
       projectId,
@@ -684,8 +706,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         })
       } else {
         addToast({
-          type: 'error',
-          title: 'Project remains unfinished',
+          type: result.localFinished ? 'info' : 'error',
+          title: result.localFinished ? 'Project finished locally' : 'Project remains unfinished',
           description: result.error ?? 'Some local files could not be synchronized.',
         })
       }
@@ -1003,7 +1025,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 size="sm"
                 variant="outline"
                 onClick={() => void openUploadDialog()}
-                disabled={uploadActionRunning || Boolean(project?.finishedAt) || (captureSummary.total === 0 && groupCaptureCount === 0)}
+                disabled={uploadActionRunning || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
                 className="h-8 px-3 border-blue-500/50 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 hover:text-white text-[10px] font-bold uppercase tracking-wider"
               >
                 {liveUpload?.running || uploadActionRunning
@@ -1018,24 +1040,67 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
              <Button
                size="sm"
                 onClick={() => void openFinishDialog()}
-               disabled={finishing || Boolean(project?.finishedAt) || (captureSummary.total === 0 && groupCaptureCount === 0)}
+                disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
                className={cn(
                  "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
-                 project?.finishedAt ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+                  projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
                )}
              >
                {finishing ? (
                  <Loader className="size-3.5 mr-1.5 animate-spin" />
-               ) : project?.finishedAt ? (
+                ) : projectSynced ? (
                  <CheckCircle className="size-3.5 mr-1.5" />
                ) : (
                  <CloudUpload className="size-3.5 mr-1.5" />
                )}
-               {finishing ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…') : project?.finishedAt ? 'Finished' : 'Finish My Shoot'}
+                {finishing
+                  ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
+                  : projectSynced
+                    ? 'Finished'
+                    : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
+                      ? 'Retry Upload & Finish'
+                      : 'Finish My Shoot'}
              </Button>
           </div>
         </div>
       </header>
+      {project && project.syncStatus !== 'active' && (
+        <div className={cn(
+          "flex items-center justify-between gap-4 border-b px-6 py-2.5 text-xs",
+          projectSynced
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : project.syncStatus === 'finished_local'
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : project.syncStatus === 'syncing'
+                ? "border-blue-200 bg-blue-50 text-blue-900"
+                : "border-red-200 bg-red-50 text-red-900",
+        )}>
+          <span className="font-semibold">
+            {projectSynced
+              ? 'Fully synced to Volume Capture.'
+              : project.syncStatus === 'finished_local'
+                ? 'Finished locally. Cloud sync is waiting for a connection.'
+                : project.syncStatus === 'syncing'
+                  ? 'Cloud sync in progress.'
+                  : 'Cloud sync needs recovery. Local captures are safe.'}
+          </span>
+          {syncProgress && syncProgress.total > 0 && (
+            <span className="shrink-0 font-medium">
+              {Math.min(syncProgress.completed, syncProgress.total)}/{syncProgress.total} files
+              {syncProgress.failed > 0 ? ` · ${syncProgress.failed} failed` : ''}
+            </span>
+          )}
+          {!projectSynced && (
+            <button
+              type="button"
+              onClick={() => void openFinishDialog()}
+              className="shrink-0 font-bold underline underline-offset-2 hover:no-underline"
+            >
+              Retry when connected
+            </button>
+          )}
+        </div>
+      )}
 
       <Dialog
         open={uploadDialogOpen}
@@ -1232,8 +1297,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               <div>
                 <p className="font-bold text-amber-900">This stops capture intake on this computer.</p>
                 <p className="text-sm text-amber-800 mt-1">
-                  Volume Capture will drain the watch folder, upload every remaining file,
-                  and finish this photographer’s batch. It does not close the studio’s entire project.
+                  Volume Capture will drain the watch folder and save local completion first.
+                  When connected, it will then upload every remaining file and finish this photographer’s batch.
+                  It does not close the studio’s entire project.
                 </p>
               </div>
             </div>
@@ -1270,8 +1336,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             </div>
           )}
           {!liveUpload?.cloudReady && (
-            <p className="text-sm font-medium text-red-600">
-              Connect to Volume Capture before finishing. Your local captures remain safe.
+            <p className="text-sm font-medium text-amber-700">
+              You are offline. Finish locally now; reconnect later and use Retry Upload &amp; Finish.
+              Your local captures remain safe.
             </p>
           )}
           <div>
@@ -1297,7 +1364,6 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             <Button
               disabled={
                 finishing
-                || !liveUpload?.cloudReady
                 || reviewSummary.unratedPortraits > 0
                 || reviewSummary.unratedGroups > 0
               }
@@ -1307,7 +1373,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               {finishing && <Loader className="size-4 mr-2 animate-spin" />}
               {finishing && syncProgress?.total
                 ? `Uploading ${syncProgress.completed}/${syncProgress.total}`
-                : 'Upload Remaining & Finish'}
+                : !liveUpload?.cloudReady && project?.syncStatus === 'active'
+                  ? 'Finish Locally & Sync Later'
+                  : 'Upload Remaining & Finish'}
             </Button>
           </div>
         </div>

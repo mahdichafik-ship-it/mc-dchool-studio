@@ -24,11 +24,33 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
     ['students', 'email', 'TEXT'],
     ['students', 'phone', 'TEXT'],
     ['projects', 'finished_at', 'TEXT'],
+    ['projects', 'sync_status', "TEXT NOT NULL DEFAULT 'active'"],
+    ['projects', 'sync_completed_files', 'INTEGER NOT NULL DEFAULT 0'],
+    ['projects', 'sync_total_files', 'INTEGER NOT NULL DEFAULT 0'],
+    ['projects', 'sync_failed_files', 'INTEGER NOT NULL DEFAULT 0'],
+    ['projects', 'sync_error', 'TEXT'],
     ['projects', 'project_type', "TEXT NOT NULL DEFAULT 'school'"],
   ] as const) {
     ensureColumn(sqlite, ...migration)
   }
-  sqlite.exec("UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate')")
+  // Releases before the durable sync lifecycle only wrote finished_at after a
+  // successful cloud handoff. Treat those rows as fully synced, while an
+  // interrupted sync is made explicitly retryable. The guards make this safe
+  // to run on every start.
+  sqlite.exec(`UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate');
+    UPDATE projects
+    SET sync_status = 'synced'
+    WHERE finished_at IS NOT NULL AND sync_status = 'active';
+    UPDATE projects
+    SET sync_status = 'active'
+    WHERE sync_status IS NULL OR sync_status NOT IN ('active', 'finished_local', 'syncing', 'sync_failed', 'synced')
+    ;
+    UPDATE projects
+    SET
+      sync_status = 'sync_failed',
+      sync_error = COALESCE(sync_error, 'Cloud sync was interrupted. Reconnect and retry Upload & Finish.')
+    WHERE sync_status = 'syncing'
+  `)
 }
 
 /**
@@ -226,5 +248,32 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       SELECT 1 FROM image_files f
       WHERE f.capture_id = c.id AND f.file_role = 'JPEG'
     );
+  `)
+
+  // Legacy finished projects predate durable progress counters. Reconstruct
+  // their completed file total from the compatibility capture/file tables so
+  // their synced state remains useful after an upgrade or restart.
+  sqlite.exec(`
+    UPDATE projects
+    SET
+      sync_total_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      ),
+      sync_completed_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      )
+    WHERE sync_status = 'synced' AND sync_total_files = 0
   `)
 }

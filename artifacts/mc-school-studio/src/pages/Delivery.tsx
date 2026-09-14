@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRoute } from "wouter";
 import { Check, Download, Image as ImageIcon, Loader2, LockKeyhole, RefreshCw, ShoppingBag, X } from "lucide-react";
 import { 
@@ -17,40 +17,41 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { deliveryLocales, formatDeliveryPrice, getStoredDeliveryLocale, translate, type DeliveryLocale, type DeliveryMessageKey } from "../lib/deliveryLocale";
+import {
+  getCommonMethods,
+  checkoutTransition,
+  mediaRefreshDelay,
+  parseRecoveryCredentials,
+  recoveryStatusLabel,
+  scheduleMediaRefresh,
+  shouldClearDeliveryAccess,
+  type LocalBasketItem,
+} from "../lib/deliveryOperational";
 
 // Local Basket Item representation
-type LocalBasketItem = {
-  id: string; // unique local ID
-  offerId: string;
-  photoIds: number[];
-  quantity: number;
-};
-
 type DeliveryNotice =
   | { kind: "message"; key: DeliveryMessageKey }
   | { kind: "added"; offerName: string }
+  | { kind: "review"; orderId: number }
   | { kind: "order"; orderId: number; paymentInstructions?: string };
 
-function getCommonMethods(basketItems: LocalBasketItem[], contentOffers: DeliveryOffer[]) {
-  if (basketItems.length === 0) return { delivery: [] as string[], payment: [] as string[], currency: null as string | null };
+type RecoveryStatus = {
+  reference: string;
+  status: string;
+  paymentMethod: string;
+  amountTotal: number;
+  currency: string;
+  createdAt: string;
+  paidAt: string | null;
+  fulfillmentStatus: string;
+  deliveryMethod: string;
+  manualInstructions: string | null;
+  items: Array<{ productName: string; productType: string; quantity: number }>;
+};
 
-  const firstOffer = contentOffers.find(o => o.id === basketItems[0].offerId);
-  if (!firstOffer) return { delivery: [] as string[], payment: [] as string[], currency: null as string | null };
+const EMPTY_OFFERS: DeliveryOffer[] = [];
 
-  let commonDelivery = [...firstOffer.deliveryMethods] as string[];
-  let commonPayment = [...firstOffer.paymentMethods] as string[];
-  const currency = firstOffer.currency;
-
-  for (const item of basketItems) {
-    const offer = contentOffers.find(o => o.id === item.offerId);
-    if (offer) {
-      commonDelivery = commonDelivery.filter(m => offer.deliveryMethods.includes(m as any));
-      commonPayment = commonPayment.filter(m => offer.paymentMethods.includes(m as any));
-    }
-  }
-
-  return { delivery: commonDelivery, payment: commonPayment, currency };
-}
+export { getCommonMethods, mediaRefreshDelay };
 
 export default function Delivery() {
   const [match, params] = useRoute("/delivery/:slug");
@@ -65,6 +66,9 @@ export default function Delivery() {
   const [notice, setNotice] = useState<DeliveryNotice | null>(null);
   const [paidPhotoIds, setPaidPhotoIds] = useState<Set<number>>(new Set());
   const [orderIdToCheck, setOrderIdToCheck] = useState<number | null>(null);
+  const [recoveryReference, setRecoveryReference] = useState<string | null>(null);
+  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string>("");
   const [quantity, setQuantity] = useState(1);
 
@@ -85,9 +89,11 @@ export default function Delivery() {
     ? t(notice.key)
     : notice?.kind === "added"
       ? `${notice.offerName} ${t("added")}`
-      : notice?.kind === "order"
-        ? `${t("orderReceived")} #${notice.orderId}. ${notice.paymentInstructions || t("paymentFallback")}`
-        : null;
+      : notice?.kind === "review"
+        ? `Payment status for order #${notice.orderId} is under review. Do not resubmit this order; we will keep checking its status.`
+        : notice?.kind === "order"
+          ? `${t("orderReceived")} #${notice.orderId}. ${notice.paymentInstructions || t("paymentFallback")}`
+          : null;
 
   function LanguageSelector() {
     return <label className="flex items-center gap-2 text-sm text-slate-500">
@@ -117,6 +123,9 @@ export default function Delivery() {
     setViewingBasket(false);
     setPaidPhotoIds(new Set());
     setOrderIdToCheck(null);
+    setRecoveryReference(null);
+    setRecoveryToken(null);
+    setRecoveryStatus(null);
     setSelectedOfferId("");
     setQuantity(1);
     setCustomerName("");
@@ -138,6 +147,21 @@ export default function Delivery() {
     if (orderParam) {
       setOrderIdToCheck(Number(orderParam));
     }
+    const storedRecovery = (() => {
+      try {
+        const raw = localStorage.getItem(`delivery-recovery:${slug}`);
+        return raw ? JSON.parse(raw) as { reference?: unknown; token?: unknown } : null;
+      } catch {
+        return null;
+      }
+    })();
+    const credentials = parseRecoveryCredentials(window.location.href);
+    const reference = credentials?.reference || (typeof storedRecovery?.reference === "string" ? storedRecovery.reference : null);
+    const recoverySecret = credentials?.token || (typeof storedRecovery?.token === "string" ? storedRecovery.token : null);
+    if (reference && recoverySecret) {
+      setRecoveryReference(reference);
+      setRecoveryToken(recoverySecret);
+    }
   }, [slug]);
 
   const { data: gallery, isLoading: galleryLoading, error: galleryError } = useGetDeliveryGallery(slug as string, {
@@ -155,13 +179,51 @@ export default function Delivery() {
   const { data: content, isLoading: contentLoading, isError: contentIsError, error: contentError, refetch: refetchContent } = useGetDeliveryPhotos(slug as string, {
     query: { 
       enabled: !!slug && !!token,
-      queryKey: [...getGetDeliveryPhotosQueryKey(slug as string), token] as any
+      queryKey: [...getGetDeliveryPhotosQueryKey(slug as string), token] as any,
+      retry: 2,
+      retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 5_000),
     },
     request: { headers: { 'x-delivery-token': token as string } }
   });
 
   useEffect(() => {
-    if (!contentIsError) return;
+    if (!slug || !recoveryReference || !recoveryToken) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loadRecovery = async () => {
+      try {
+        const response = await fetch(`/api/delivery/${encodeURIComponent(slug)}/orders/recovery/${encodeURIComponent(recoveryReference)}`, {
+          headers: { "x-order-recovery-token": recoveryToken },
+        });
+        if (!response.ok) {
+          if (response.status === 404 || response.status === 410) {
+            localStorage.removeItem(`delivery-recovery:${slug}`);
+            if (!cancelled) {
+              setRecoveryReference(null);
+              setRecoveryToken(null);
+              setRecoveryStatus(null);
+            }
+          }
+          return;
+        }
+        const next = await response.json() as RecoveryStatus;
+        if (cancelled) return;
+        setRecoveryStatus(next);
+        if (["paid", "refunded", "cancelled", "expired"].includes(next.status)) return;
+        timer = setTimeout(loadRecovery, 2500);
+      } catch {
+        if (!cancelled) timer = setTimeout(loadRecovery, 5000);
+      }
+    };
+    void loadRecovery();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [slug, recoveryReference, recoveryToken]);
+
+  useEffect(() => {
+    if (!contentIsError || !shouldClearDeliveryAccess(contentError)) return;
     setToken(null);
     setSelected(new Set());
     setBasket([]);
@@ -169,7 +231,7 @@ export default function Delivery() {
     setPaidPhotoIds(new Set());
     setOrderIdToCheck(null);
     setSelectedOfferId("");
-  }, [contentIsError]);
+  }, [contentIsError, contentError]);
 
   useEffect(() => {
     if (content?.offers && content.offers.length > 0 && !selectedOfferId) {
@@ -245,7 +307,12 @@ export default function Delivery() {
     });
   }
 
-  const { delivery: commonDelivery, payment: commonPayment, currency: basketCurrency } = getCommonMethods(basket, content?.offers || []);
+  const { delivery: commonDelivery, payment: commonPayment, currency: basketCurrency } = useMemo(
+    () => getCommonMethods(basket, content?.offers ?? EMPTY_OFFERS),
+    [basket, content?.offers],
+  );
+  const commonDeliveryKey = commonDelivery.join("|");
+  const commonPaymentKey = commonPayment.join("|");
 
   useEffect(() => {
     if (viewingBasket && basket.length > 0 && content) {
@@ -257,7 +324,21 @@ export default function Delivery() {
         setPaymentMethod((availablePayments[0] || commonPayment[0]) as any);
       }
     }
-  }, [viewingBasket, basket, commonDelivery, commonPayment, content?.stripeAvailable]);
+  }, [viewingBasket, basket.length, commonDeliveryKey, commonPaymentKey, content?.stripeAvailable, deliveryMethod, paymentMethod]);
+
+  useEffect(() => {
+    if (!token || !content?.mediaExpiresAt) return;
+    return scheduleMediaRefresh(
+      content.mediaExpiresAt,
+      Date.now(),
+      (callback, delay) => window.setTimeout(callback, delay),
+      (handle) => window.clearTimeout(handle as number),
+      () => void queryClient.refetchQueries({
+        queryKey: [...getGetDeliveryPhotosQueryKey(slug as string), token],
+        exact: true,
+      }),
+    );
+  }, [slug, token, content?.mediaExpiresAt, queryClient]);
 
   function canAddOffer(offer: DeliveryOffer) {
     if (basket.length === 0) return true;
@@ -330,25 +411,45 @@ export default function Delivery() {
       photoIds: item.photoIds,
       quantity: item.quantity
     }));
+     const checkoutKeyStorage = `delivery-checkout-key:${slug}`;
+     const idempotencyKey = localStorage.getItem(checkoutKeyStorage) || crypto.randomUUID();
+     localStorage.setItem(checkoutKeyStorage, idempotencyKey);
 
     createOrder.mutate({ 
       slug, 
       data: { 
         token, 
+         idempotencyKey,
         items,
         customerName: customerName.trim(),
-        customerEmail: customerEmail.trim() || undefined,
+        customerEmail: customerEmail.trim(),
         paymentMethod,
         deliveryMethod,
         deliveryAddress: deliveryAddress.trim() || undefined
       } 
     }, {
-      onSuccess: (res) => {
-        if (res.checkoutUrl) {
+       onSuccess: (res) => {
+         const transition = checkoutTransition(res);
+         if (!transition.retainCheckoutKey) {
+           localStorage.removeItem(checkoutKeyStorage);
+         }
+        if (res.recoveryUrl && res.recoveryToken && res.publicReference) {
+          localStorage.setItem(`delivery-recovery:${slug}`, JSON.stringify({
+            reference: res.publicReference,
+            token: res.recoveryToken,
+          }));
+          setRecoveryReference(res.publicReference);
+          setRecoveryToken(res.recoveryToken);
+        }
+         if (transition.redirectToCheckout && res.checkoutUrl) {
           window.location.assign(res.checkoutUrl);
           return;
         }
         setOrderIdToCheck(res.orderId);
+         if (transition.uncertain || transition.retainBasket) {
+           setNotice({ kind: "review", orderId: res.orderId });
+           return;
+         }
         setViewingBasket(false);
         setBasket([]);
         setNotice({ kind: "order", orderId: res.orderId, paymentInstructions: res.paymentInstructions || undefined });
@@ -394,6 +495,17 @@ export default function Delivery() {
           <div className="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
              <h1 className="text-2xl font-bold tracking-tight">{t("privateGallery")}</h1>
              <p className="mt-2 text-sm leading-6 text-slate-500">{t("accessText")}</p>
+             {recoveryStatus && (
+               <section data-testid="order-recovery-status" className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                 <p className="font-semibold text-slate-900">Order {recoveryStatus.reference}</p>
+                 <p className="mt-1">Status: <span className="font-medium">{recoveryStatusLabel(recoveryStatus.status)}</span></p>
+                 <p className="mt-1">{formatPrice(recoveryStatus.amountTotal, recoveryStatus.currency)} · {recoveryStatus.paymentMethod}</p>
+                 {recoveryStatus.manualInstructions && <p className="mt-2 text-slate-600">{recoveryStatus.manualInstructions}</p>}
+                 <ul className="mt-2 list-inside list-disc text-xs text-slate-500">
+                   {recoveryStatus.items.map((item, index) => <li key={`${item.productName}-${index}`}>{item.productName} × {item.quantity}</li>)}
+                 </ul>
+               </section>
+             )}
              {noticeText && (
                <div role="status" className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
                  {noticeText}
@@ -567,11 +679,11 @@ export default function Delivery() {
 
                     <div className="space-y-1.5">
                         <label className="text-sm font-medium text-slate-700">
-                           {t("email")} {paymentMethod === "stripe" ? "*" : ""}
+                            {t("email")} *
                         </label>
                       <input
                         type="email"
-                          required={paymentMethod === "stripe"}
+                          required
                         value={customerEmail}
                         onChange={e => setCustomerEmail(e.target.value)}
                         className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -645,7 +757,7 @@ export default function Delivery() {
 
                     <button 
                       type="submit"
-                      disabled={createOrder.isPending || checkoutUnavailable || (paymentMethod === "stripe" && !customerEmail.trim()) || (deliveryMethod === 'shipping' && !deliveryAddress.trim())} 
+                       disabled={createOrder.isPending || checkoutUnavailable || !customerEmail.trim() || (deliveryMethod === 'shipping' && !deliveryAddress.trim())}
                       className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
                       style={{ backgroundColor: "var(--delivery-primary)" }}
                     >
@@ -679,6 +791,7 @@ export default function Delivery() {
           <LanguageSelector />
           <button 
             onClick={() => {
+               if (slug) localStorage.removeItem(`delivery-recovery:${slug}`);
               setToken(null);
               setCode("");
               setEmail("");
@@ -688,6 +801,9 @@ export default function Delivery() {
               setViewingBasket(false);
               setPaidPhotoIds(new Set());
               setOrderIdToCheck(null);
+               setRecoveryReference(null);
+               setRecoveryToken(null);
+               setRecoveryStatus(null);
               setSelectedOfferId("");
               setQuantity(1);
               setCustomerName("");

@@ -588,7 +588,7 @@ export const ParseImportFileResponse = zod.object({
 
 
 /**
- * @summary Confirm an import with column mapping and create students
+ * @summary Confirm a project-scoped roster reconciliation
  */
 export const ConfirmImportParams = zod.object({
   "projectId": zod.coerce.number()
@@ -613,8 +613,12 @@ export const ConfirmImportBody = zod.object({
 })
 
 export const ConfirmImportResponse = zod.object({
-  "classesCreated": zod.number(),
-  "studentsCreated": zod.number()
+  "classesCreated": zod.number().describe('Classes created; existing classes are reused case-insensitively.'),
+  "studentsCreated": zod.number().describe('Students or employees created.'),
+  "studentsUpdated": zod.number().describe('Existing students or employees whose roster details changed.'),
+  "studentsMoved": zod.number().describe('Existing students or employees moved to another class or department.'),
+  "studentsSkipped": zod.number().describe('Unchanged rows skipped because they were already reconciled.'),
+  "conflicts": zod.number().describe('Ambiguous rows that were not merged.')
 })
 
 
@@ -1328,7 +1332,8 @@ export const GetDeliveryPhotosResponse = zod.object({
   "mimeType": zod.string().optional(),
   "fileUrl": zod.string(),
   "downloadUrl": zod.string()
-}))
+})),
+  "mediaExpiresAt": zod.coerce.date()
 })
 
 
@@ -1379,6 +1384,9 @@ export const CreateDeliveryOrderParams = zod.object({
   "slug": zod.coerce.string()
 })
 
+export const createDeliveryOrderBodyIdempotencyKeyMin = 16;
+export const createDeliveryOrderBodyIdempotencyKeyMax = 128;
+
 export const createDeliveryOrderBodyItemsItemPhotoIdsMax = 100;
 
 export const createDeliveryOrderBodyItemsItemQuantityMax = 100;
@@ -1390,6 +1398,7 @@ export const createDeliveryOrderBodyItemsMax = 20;
 
 
 export const CreateDeliveryOrderBody = zod.object({
+  "idempotencyKey": zod.string().min(createDeliveryOrderBodyIdempotencyKeyMin).max(createDeliveryOrderBodyIdempotencyKeyMax),
   "token": zod.string().optional(),
   "items": zod.array(zod.object({
   "offerId": zod.string(),
@@ -1399,8 +1408,8 @@ export const CreateDeliveryOrderBody = zod.object({
   "offerId": zod.string().optional(),
   "photoIds": zod.array(zod.number()).min(1).optional(),
   "quantity": zod.number().min(1).optional(),
-  "customerName": zod.string().optional(),
-  "customerEmail": zod.string().optional(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
   "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
   "deliveryMethod": zod.enum(['digital', 'school', 'collection', 'shipping']).optional(),
   "deliveryAddress": zod.string().optional()
@@ -1411,7 +1420,11 @@ export const CreateDeliveryOrderResponse = zod.object({
   "orderId": zod.number(),
   "status": zod.string(),
   "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
-  "paymentInstructions": zod.string().nullish()
+  "paymentInstructions": zod.string().nullish(),
+  "publicReference": zod.string(),
+  "recoveryUrl": zod.string().nullish(),
+  "recoveryToken": zod.string().nullish().describe('Returned only when the order is first created; never persisted in plaintext'),
+  "checkoutAttemptStatus": zod.enum(['not_started', 'created', 'uncertain', 'failed'])
 })
 
 
@@ -1433,6 +1446,34 @@ export const GetDeliveryOrderResponse = zod.object({
   "paidAt": zod.string().nullish(),
   "photoIds": zod.array(zod.number()),
   "downloadablePhotoIds": zod.array(zod.number()).optional()
+})
+
+
+export const GetDeliveryOrderRecoveryParams = zod.object({
+  "slug": zod.coerce.string(),
+  "reference": zod.coerce.string()
+})
+
+export const GetDeliveryOrderRecoveryHeader = zod.object({
+  "x-order-recovery-token": zod.string()
+})
+
+export const GetDeliveryOrderRecoveryResponse = zod.object({
+  "reference": zod.string(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "manualInstructions": zod.string().nullable(),
+  "items": zod.array(zod.object({
+  "productName": zod.string(),
+  "productType": zod.string(),
+  "quantity": zod.number()
+}))
 })
 
 

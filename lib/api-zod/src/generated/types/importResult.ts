@@ -7,6 +7,16 @@
  */
 
 export interface ImportResult {
+  /** Classes created; existing classes are reused case-insensitively. */
   classesCreated: number;
+  /** Students or employees created. */
   studentsCreated: number;
+  /** Existing students or employees whose roster details changed. */
+  studentsUpdated: number;
+  /** Existing students or employees moved to another class or department. */
+  studentsMoved: number;
+  /** Unchanged rows skipped because they were already reconciled. */
+  studentsSkipped: number;
+  /** Ambiguous rows that were not merged. */
+  conflicts: number;
 }

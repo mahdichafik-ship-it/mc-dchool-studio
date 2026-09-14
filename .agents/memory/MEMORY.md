@@ -13,6 +13,7 @@
 - [Desktop cloud upload identity](desktop-cloud-upload-identity.md) — imported rosters must retain cloud IDs; legacy local projects need a safe identity repair before upload.
 - [Upload retry durability](upload-retry-durability.md) — retries use current bytes, bounded auto-recovery, isolated queues, and explicit batch accounting.
 - [Explicit project sync boundary](explicit-project-sync-boundary.md) — capture-time ingestion is local-only; cloud upload begins only from an explicit finish or retry action.
+- [Offline finish lifecycle](offline-finish-lifecycle.md) — finishing locally is durable and distinct from successful cloud synchronization.
 - [Local preview pipeline](local-preview-pipeline.md) — emit a source-local JPEG preview before managed copy and persistence, then reconcile it by a stable preview key.
 - [Lightweight preview artifacts](lightweight-preview-artifacts.md) — renderer preview URLs must resolve to reduced JPEGs, never full originals or full RAW decodes.
 - [Newest live preview scheduling](newest-live-preview-scheduling.md) — coalesce preview work before generation; persistence must remain FIFO and independent of dropped live-preview jobs.
@@ -28,6 +29,7 @@
 - [Photo group membership](photo-group-membership.md) — default class groups auto-follow roster growth without undoing manual member removals across web/desktop sync.
 - [Volume Capture rebrand compatibility](volume-capture-rebrand.md) — public branding changes without renaming legacy identifiers that protect upgrades and local capture data.
 - [Desktop late-student reconciliation](desktop-late-student-reconciliation.md) — students added during a shoot stay capture-ready offline and must reconcile to cloud identity before upload.
+- [Roster re-import identity](roster-reimport-identity.md) — reconcile within one project by stable IDs first and fail closed on cross-slot email ambiguity.
 - [Project-type compatibility](project-type-compatibility.md) — corporate headshots reuse school data concepts internally; absent or unknown types must remain school-safe.
 - [Volume Capture delivery access](volume-capture-delivery-access.md) — private delivery uses guardian-friendly subject access codes, not child-managed accounts.
 - [Gallery publication boundary](gallery-publication-boundary.md) — publishing is the sole parent-sharing checkpoint; durable uploaded JPEGs need no second visibility flag.
@@ -38,6 +40,8 @@
 - [Google Drive large uploads](google-drive-large-uploads.md) — send file bytes through resumable Google upload sessions, not large connector-proxy multipart bodies.
 - [Cloud backup test isolation](cloud-backup-test-isolation.md) — a development database does not isolate connected cloud accounts; tests must replace external backup requesters.
 - [Delivery commerce entitlements](delivery-commerce-entitlements.md) — Volume Capture owns offers and orders; payment providers only settle them, while paid item snapshots control downloads.
+- [Order recovery idempotency](order-recovery-idempotency.md) — checkout retries reuse one durable order; uncertain Stripe sessions bind only through a complete authenticated event.
+- [Gallery media renewal](gallery-media-renewal.md) — private media URLs stay short-lived while active gallery sessions refresh them before expiry.
 - [Delivery access and payment availability](delivery-access-and-payment-availability.md) — one payment provider’s outage must not block galleries, orders, or other payment methods.
 - [Publish-time schema changes](publish-time-schema-changes.md) — production schema changes are applied by Replit Publish’s development-to-production diff, not custom app migrations or startup DDL.
 - [Updater metadata propagation](updater-metadata-propagation.md) — a just-published Mac release can briefly serve the previous latest-mac.yml; rerun an otherwise healthy update smoke.

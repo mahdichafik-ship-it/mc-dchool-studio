@@ -280,8 +280,18 @@ export interface ImportConfirmation {
 }
 
 export interface ImportResult {
+  /** Classes created; existing classes are reused case-insensitively. */
   classesCreated: number;
+  /** Students or employees created. */
   studentsCreated: number;
+  /** Existing students or employees whose roster details changed. */
+  studentsUpdated: number;
+  /** Existing students or employees moved to another class or department. */
+  studentsMoved: number;
+  /** Unchanged rows skipped because they were already reconciled. */
+  studentsSkipped: number;
+  /** Ambiguous rows that were not merged. */
+  conflicts: number;
 }
 
 export interface ImportFileForm {
@@ -657,6 +667,11 @@ export interface DeliveryBasketItem {
 }
 
 export interface DeliveryOrderInput {
+  /**
+     * @minLength 16
+     * @maxLength 128
+     */
+  idempotencyKey: string;
   token?: string;
   /**
      * @minItems 1
@@ -668,8 +683,8 @@ export interface DeliveryOrderInput {
   photoIds?: number[];
   /** @minimum 1 */
   quantity?: number;
-  customerName?: string;
-  customerEmail?: string;
+  customerName: string;
+  customerEmail: string;
   paymentMethod: DeliveryOrderInputPaymentMethod;
   deliveryMethod?: DeliveryOrderInputDeliveryMethod;
   deliveryAddress?: string;
@@ -915,6 +930,7 @@ export interface DeliveryPhotosResponse {
   /** Whether Stripe checkout is currently available as an optional payment method. */
   stripeAvailable: boolean;
   photos: DeliveryGalleryPhotosItem[];
+  mediaExpiresAt: string;
 }
 
 export interface DeliveryCatalogPrice {
@@ -939,6 +955,16 @@ export const DeliveryCheckoutResponsePaymentMethod = {
   bank_transfer: 'bank_transfer',
 } as const;
 
+export type DeliveryCheckoutResponseCheckoutAttemptStatus = typeof DeliveryCheckoutResponseCheckoutAttemptStatus[keyof typeof DeliveryCheckoutResponseCheckoutAttemptStatus];
+
+
+export const DeliveryCheckoutResponseCheckoutAttemptStatus = {
+  not_started: 'not_started',
+  created: 'created',
+  uncertain: 'uncertain',
+  failed: 'failed',
+} as const;
+
 export interface DeliveryCheckoutResponse {
   /** @nullable */
   checkoutUrl: string | null;
@@ -947,6 +973,15 @@ export interface DeliveryCheckoutResponse {
   paymentMethod: DeliveryCheckoutResponsePaymentMethod;
   /** @nullable */
   paymentInstructions?: string | null;
+  publicReference: string;
+  /** @nullable */
+  recoveryUrl?: string | null;
+  /**
+     * Returned only when the order is first created; never persisted in plaintext
+     * @nullable
+     */
+  recoveryToken?: string | null;
+  checkoutAttemptStatus: DeliveryCheckoutResponseCheckoutAttemptStatus;
 }
 
 export type DeliveryOrderResponsePaymentMethod = typeof DeliveryOrderResponsePaymentMethod[keyof typeof DeliveryOrderResponsePaymentMethod];
@@ -968,6 +1003,48 @@ export interface DeliveryOrderResponse {
   paidAt?: string | null;
   photoIds: number[];
   downloadablePhotoIds?: number[];
+}
+
+export type DeliveryOrderRecoveryResponseStatus = typeof DeliveryOrderRecoveryResponseStatus[keyof typeof DeliveryOrderRecoveryResponseStatus];
+
+
+export const DeliveryOrderRecoveryResponseStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  expired: 'expired',
+  refunded: 'refunded',
+  cancelled: 'cancelled',
+} as const;
+
+export type DeliveryOrderRecoveryResponsePaymentMethod = typeof DeliveryOrderRecoveryResponsePaymentMethod[keyof typeof DeliveryOrderRecoveryResponsePaymentMethod];
+
+
+export const DeliveryOrderRecoveryResponsePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export type DeliveryOrderRecoveryResponseItemsItem = {
+  productName: string;
+  productType: string;
+  quantity: number;
+};
+
+export interface DeliveryOrderRecoveryResponse {
+  reference: string;
+  status: DeliveryOrderRecoveryResponseStatus;
+  paymentMethod: DeliveryOrderRecoveryResponsePaymentMethod;
+  amountTotal: number;
+  currency: string;
+  createdAt: string;
+  /** @nullable */
+  paidAt: string | null;
+  fulfillmentStatus: string;
+  deliveryMethod: string;
+  /** @nullable */
+  manualInstructions: string | null;
+  items: DeliveryOrderRecoveryResponseItemsItem[];
 }
 
 export type DeliverySettingsResponseGallery = {

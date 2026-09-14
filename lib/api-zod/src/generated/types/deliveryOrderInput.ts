@@ -10,6 +10,11 @@ import type { DeliveryOrderInputDeliveryMethod } from './deliveryOrderInputDeliv
 import type { DeliveryOrderInputPaymentMethod } from './deliveryOrderInputPaymentMethod';
 
 export interface DeliveryOrderInput {
+  /**
+     * @minLength 16
+     * @maxLength 128
+     */
+  idempotencyKey: string;
   token?: string;
   /**
      * @minItems 1
@@ -21,8 +26,8 @@ export interface DeliveryOrderInput {
   photoIds?: number[];
   /** @minimum 1 */
   quantity?: number;
-  customerName?: string;
-  customerEmail?: string;
+  customerName: string;
+  customerEmail: string;
   paymentMethod: DeliveryOrderInputPaymentMethod;
   deliveryMethod?: DeliveryOrderInputDeliveryMethod;
   deliveryAddress?: string;

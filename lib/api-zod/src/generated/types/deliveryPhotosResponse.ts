@@ -23,4 +23,5 @@ export interface DeliveryPhotosResponse {
   /** Whether Stripe checkout is currently available as an optional payment method. */
   stripeAvailable: boolean;
   photos: DeliveryGalleryPhotosItem[];
+  mediaExpiresAt: Date;
 }

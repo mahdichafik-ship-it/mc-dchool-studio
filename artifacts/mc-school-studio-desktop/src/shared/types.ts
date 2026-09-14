@@ -12,6 +12,11 @@ export interface Project {
   notes: string | null
   watchFolder: string | null
   finishedAt: string | null
+  syncStatus: ProjectSyncStatus
+  syncCompletedFiles: number
+  syncTotalFiles: number
+  syncFailedFiles: number
+  syncError: string | null
   classCount: number
   studentCount: number
   photoCount: number
@@ -20,6 +25,7 @@ export interface Project {
 }
 
 export type ProjectType = 'school' | 'corporate'
+export type ProjectSyncStatus = 'active' | 'finished_local' | 'syncing' | 'sync_failed' | 'synced'
 
 export function normalizeProjectType(value: unknown): ProjectType {
   return value === 'corporate' ? 'corporate' : 'school'
@@ -309,7 +315,7 @@ export interface CaptureExportResult {
 
 export interface ProjectSyncProgressEvent {
   projectId: number
-  phase: 'syncing' | 'finished' | 'error'
+  phase: 'syncing' | 'finished-locally' | 'finished' | 'error'
   completed: number
   total: number
   failed: number
@@ -323,6 +329,8 @@ export interface ProjectSyncResult {
   failed: number
   error?: string
   finishedAt?: string
+  localFinished?: boolean
+  syncStatus?: ProjectSyncStatus
 }
 
 export interface ProjectFinishOptions {

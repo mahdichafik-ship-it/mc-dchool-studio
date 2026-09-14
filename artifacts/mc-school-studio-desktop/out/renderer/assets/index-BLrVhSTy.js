@@ -17152,6 +17152,7 @@ const captureFilterOptions = [
 ];
 function ProjectView({ projectId, onBack, offline = false }) {
   const { data: project, reload: reloadProject } = useProject(projectId);
+  const projectSynced = project?.syncStatus === "synced";
   const isCorporate = project?.projectType === "corporate";
   const departmentLabel = isCorporate ? "Department" : "Class";
   const employeeLabel = isCorporate ? "Employee" : "Student";
@@ -17354,6 +17355,20 @@ function ProjectView({ projectId, onBack, offline = false }) {
       if (event.projectId === projectId) setSyncProgress(event);
     });
   }, [projectId]);
+  reactExports.useEffect(() => {
+    if (!project || project.syncStatus === "active") {
+      setSyncProgress(null);
+      return;
+    }
+    setSyncProgress({
+      projectId,
+      phase: project.syncStatus === "synced" ? "finished" : project.syncStatus === "finished_local" ? "finished-locally" : project.syncStatus === "syncing" ? "syncing" : "error",
+      completed: project.syncCompletedFiles,
+      total: project.syncTotalFiles,
+      failed: project.syncFailedFiles,
+      ...project.syncError ? { error: project.syncError } : {}
+    });
+  }, [project, projectId]);
   reactExports.useEffect(() => {
     return window.api.on("watcher:dropProgress", (event) => {
       if (event.projectId !== projectId) return;
@@ -17648,7 +17663,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
     }
   }
   async function handleUploadAndFinish() {
-    if (!project || project.finishedAt || finishing) return;
+    if (!project || projectSynced || finishing) return;
     setFinishing(true);
     setSyncProgress({
       projectId,
@@ -17674,8 +17689,8 @@ function ProjectView({ projectId, onBack, offline = false }) {
         });
       } else {
         addToast({
-          type: "error",
-          title: "Project remains unfinished",
+          type: result.localFinished ? "info" : "error",
+          title: result.localFinished ? "Project finished locally" : "Project remains unfinished",
           description: result.error ?? "Some local files could not be synchronized."
         });
       }
@@ -17958,7 +17973,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
                   size: "sm",
                   variant: "outline",
                   onClick: () => void openUploadDialog(),
-                  disabled: uploadActionRunning || Boolean(project?.finishedAt) || captureSummary.total === 0 && groupCaptureCount === 0,
+                  disabled: uploadActionRunning || projectSynced || captureSummary.total === 0 && groupCaptureCount === 0,
                   className: "h-8 px-3 border-blue-500/50 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 hover:text-white text-[10px] font-bold uppercase tracking-wider",
                   children: [
                     liveUpload?.running || uploadActionRunning ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 mr-1.5 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "size-3.5 mr-1.5" }),
@@ -17971,19 +17986,41 @@ function ProjectView({ projectId, onBack, offline = false }) {
                 {
                   size: "sm",
                   onClick: () => void openFinishDialog(),
-                  disabled: finishing || Boolean(project?.finishedAt) || captureSummary.total === 0 && groupCaptureCount === 0,
+                  disabled: finishing || projectSynced || captureSummary.total === 0 && groupCaptureCount === 0,
                   className: cn(
                     "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
-                    project?.finishedAt ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+                    projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
                   ),
                   children: [
-                    finishing ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 mr-1.5 animate-spin" }) : project?.finishedAt ? /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3.5 mr-1.5" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(CloudUpload, { className: "size-3.5 mr-1.5" }),
-                    finishing ? syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : "Preparing…" : project?.finishedAt ? "Finished" : "Finish My Shoot"
+                    finishing ? /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-3.5 mr-1.5 animate-spin" }) : projectSynced ? /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "size-3.5 mr-1.5" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(CloudUpload, { className: "size-3.5 mr-1.5" }),
+                    finishing ? syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : "Preparing…" : projectSynced ? "Finished" : project?.syncStatus === "finished_local" || project?.syncStatus === "sync_failed" ? "Retry Upload & Finish" : "Finish My Shoot"
                   ]
                 }
               )
             ] })
           ] })
+        ] }),
+        project && project.syncStatus !== "active" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn(
+          "flex items-center justify-between gap-4 border-b px-6 py-2.5 text-xs",
+          projectSynced ? "border-emerald-200 bg-emerald-50 text-emerald-800" : project.syncStatus === "finished_local" ? "border-amber-200 bg-amber-50 text-amber-900" : project.syncStatus === "syncing" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-red-200 bg-red-50 text-red-900"
+        ), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold", children: projectSynced ? "Fully synced to Volume Capture." : project.syncStatus === "finished_local" ? "Finished locally. Cloud sync is waiting for a connection." : project.syncStatus === "syncing" ? "Cloud sync in progress." : "Cloud sync needs recovery. Local captures are safe." }),
+          syncProgress && syncProgress.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "shrink-0 font-medium", children: [
+            Math.min(syncProgress.completed, syncProgress.total),
+            "/",
+            syncProgress.total,
+            " files",
+            syncProgress.failed > 0 ? ` · ${syncProgress.failed} failed` : ""
+          ] }),
+          !projectSynced && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              onClick: () => void openFinishDialog(),
+              className: "shrink-0 font-bold underline underline-offset-2 hover:no-underline",
+              children: "Retry when connected"
+            }
+          )
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           Dialog,
@@ -18142,7 +18179,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
                 /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "size-5 text-amber-600 shrink-0 mt-0.5" }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-bold text-amber-900", children: "This stops capture intake on this computer." }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-amber-800 mt-1", children: "Volume Capture will drain the watch folder, upload every remaining file, and finish this photographer’s batch. It does not close the studio’s entire project." })
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-amber-800 mt-1", children: "Volume Capture will drain the watch folder and save local completion first. When connected, it will then upload every remaining file and finish this photographer’s batch. It does not close the studio’s entire project." })
                 ] })
               ] }) }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-3 gap-2 text-center", children: [
@@ -18173,7 +18210,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
                   ] })
                 ] })
               ] }) }),
-              !liveUpload?.cloudReady && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-red-600", children: "Connect to Volume Capture before finishing. Your local captures remain safe." }),
+              !liveUpload?.cloudReady && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-amber-700", children: "You are offline. Finish locally now; reconnect later and use Retry Upload & Finish. Your local captures remain safe." }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { htmlFor: "photographer-comment", className: "text-xs font-extrabold uppercase tracking-wider text-slate-600", children: [
                   "Photographer comment ",
@@ -18202,12 +18239,12 @@ function ProjectView({ projectId, onBack, offline = false }) {
                 /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   Button,
                   {
-                    disabled: finishing || !liveUpload?.cloudReady || reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0,
+                    disabled: finishing || reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0,
                     onClick: () => void handleUploadAndFinish(),
                     className: "bg-blue-600 hover:bg-blue-700 text-white",
                     children: [
                       finishing && /* @__PURE__ */ jsxRuntimeExports.jsx(Loader, { className: "size-4 mr-2 animate-spin" }),
-                      finishing && syncProgress?.total ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : "Upload Remaining & Finish"
+                      finishing && syncProgress?.total ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : !liveUpload?.cloudReady && project?.syncStatus === "active" ? "Finish Locally & Sync Later" : "Upload Remaining & Finish"
                     ]
                   }
                 )

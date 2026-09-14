@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { getListStudentsQueryKey, getListClassesQueryKey, getGetProjectQueryKey } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
+import { isCsvFileName } from '@/lib/importFile';
 
 type Step = 'upload' | 'map' | 'confirm' | 'done';
 
@@ -97,7 +98,14 @@ export default function ProjectImport() {
   }>>({});
 
   // State from Confirm
-  const [importResult, setImportResult] = useState<{ classesCreated: number, studentsCreated: number } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    classesCreated: number;
+    studentsCreated: number;
+    studentsUpdated: number;
+    studentsMoved: number;
+    studentsSkipped: number;
+    conflicts: number;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,7 +118,7 @@ export default function ProjectImport() {
   const handleUploadSubmit = () => {
     if (!file || !projectId) return;
 
-    if (file.name.endsWith('.csv') && !csvClassName) {
+    if (isCsvFileName(file.name) && !csvClassName) {
       toast({ title: 'Class name required for CSV files', variant: 'destructive' });
       return;
     }
@@ -123,7 +131,7 @@ export default function ProjectImport() {
         const initialMappings: typeof mappings = {};
         data.sheets.forEach(sheet => {
           initialMappings[sheet.name] = {
-            className: file.name.endsWith('.csv') ? csvClassName : sheet.name,
+            className: isCsvFileName(file.name) ? csvClassName : sheet.name,
             firstNameColumn: guessColumnByKeywords(sheet.headers, ['first', 'prenom', 'prénom']),
             lastNameColumn: guessColumnByKeywords(sheet.headers, ['last', 'nom', 'surname']),
             studentIdColumn: guessIdColumn(sheet.headers),
@@ -177,7 +185,7 @@ export default function ProjectImport() {
       const sheetsData: SheetMapping[] = [];
 
       for (const sheetPreview of parsedData.sheets) {
-        const workbookSheetName = file.name.toLowerCase().endsWith('.csv')
+        const workbookSheetName = isCsvFileName(file.name)
           ? workbook.SheetNames[0]
           : sheetPreview.name;
         const worksheet = workbook.Sheets[workbookSheetName];
@@ -310,7 +318,7 @@ export default function ProjectImport() {
                     </div>
                   </div>
 
-                  {file?.name.endsWith('.csv') && (
+                  {file && isCsvFileName(file.name) && (
                     <div className="space-y-2">
                       <Label>Class Name for this CSV</Label>
                       <Input 
@@ -494,8 +502,8 @@ export default function ProjectImport() {
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Ready to Import</h3>
                 <p className="text-slate-600 mb-8">
-                  You are about to create <strong className="text-slate-900">{parsedData.sheets.length}</strong> classes from this file. 
-                  Existing students with matching details may be skipped or duplicated depending on exact matches.
+                   You are about to reconcile <strong className="text-slate-900">{parsedData.sheets.length}</strong> classes or departments from this file.
+                   Existing {isCorporate ? 'employees' : 'students'} are matched conservatively and are never duplicated by a repeat import.
                 </p>
 
                 <div className="bg-slate-50 rounded-lg p-4 text-left mb-8 space-y-2 border border-slate-100">
@@ -528,18 +536,34 @@ export default function ProjectImport() {
                   <CheckCircle2 className="w-10 h-10" />
                 </div>
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">Import Complete!</h3>
-                <p className="text-slate-600 mb-8 text-lg">
-                  Successfully imported data into the project.
-                </p>
+                 <p className="text-slate-600 mb-8 text-lg">
+                   Roster reconciliation completed successfully.
+                 </p>
 
-                <div className="grid grid-cols-2 gap-4 mb-8">
+                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <div className="text-3xl font-bold text-slate-900 mb-1">{importResult.classesCreated}</div>
-                    <div className="text-sm font-medium text-slate-500">Classes Created</div>
+                       <div className="text-sm font-medium text-slate-500">{isCorporate ? 'Departments Created' : 'Classes Created'}</div>
                   </div>
                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <div className="text-3xl font-bold text-slate-900 mb-1">{importResult.studentsCreated}</div>
-                    <div className="text-sm font-medium text-slate-500">Students Imported</div>
+                     <div className="text-sm font-medium text-slate-500">{isCorporate ? 'Employees Created' : 'Students Created'}</div>
+                   </div>
+                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                     <div className="text-3xl font-bold text-slate-900 mb-1">{importResult.studentsUpdated}</div>
+                     <div className="text-sm font-medium text-slate-500">{isCorporate ? 'Employees Updated' : 'Students Updated'}</div>
+                   </div>
+                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                     <div className="text-3xl font-bold text-slate-900 mb-1">{importResult.studentsMoved}</div>
+                     <div className="text-sm font-medium text-slate-500">{isCorporate ? 'Employees Moved' : 'Students Moved'}</div>
+                   </div>
+                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                     <div className="text-3xl font-bold text-slate-900 mb-1">{importResult.studentsSkipped}</div>
+                     <div className="text-sm font-medium text-slate-500">Unchanged / Skipped</div>
+                   </div>
+                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                     <div className="text-3xl font-bold text-slate-900 mb-1">{importResult.conflicts}</div>
+                     <div className="text-sm font-medium text-slate-500">Conflicts</div>
                   </div>
                 </div>
 

@@ -1,6 +1,29 @@
 import Stripe from "stripe";
 import { StripeSync } from "stripe-replit-sync";
 
+type StripeClientFactory = () => Promise<Stripe>;
+let testStripeClientFactory: StripeClientFactory | null = null;
+type StripeSyncFactory = () => Promise<{ processWebhook: StripeSync["processWebhook"] }>;
+let testStripeSyncFactory: StripeSyncFactory | null = null;
+
+/**
+ * A process-local seam for integration tests. It is deliberately unavailable
+ * outside NODE_ENV=test, so production always resolves the Replit connector.
+ */
+export function setTestStripeClientFactory(factory: StripeClientFactory | null): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("Test Stripe client factory is only available in NODE_ENV=test");
+  }
+  testStripeClientFactory = factory;
+}
+
+export function setTestStripeSyncFactory(factory: StripeSyncFactory | null): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("Test Stripe sync factory is only available in NODE_ENV=test");
+  }
+  testStripeSyncFactory = factory;
+}
+
 async function getStripeCredentials(): Promise<{ secretKey: string; webhookSecret?: string }> {
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const token = process.env.REPL_IDENTITY
@@ -27,6 +50,9 @@ async function getStripeCredentials(): Promise<{ secretKey: string; webhookSecre
 }
 
 export async function getUncachableStripeClient(): Promise<Stripe> {
+  if (process.env.NODE_ENV === "test" && testStripeClientFactory) {
+    return testStripeClientFactory();
+  }
   const { secretKey } = await getStripeCredentials();
   return new Stripe(secretKey);
 }
@@ -38,6 +64,9 @@ export async function getStripeWebhookSecret(): Promise<string> {
 }
 
 export async function getStripeSync(): Promise<StripeSync> {
+  if (process.env.NODE_ENV === "test" && testStripeSyncFactory) {
+    return testStripeSyncFactory() as Promise<StripeSync>;
+  }
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required for Stripe sync");
   const { secretKey, webhookSecret } = await getStripeCredentials();

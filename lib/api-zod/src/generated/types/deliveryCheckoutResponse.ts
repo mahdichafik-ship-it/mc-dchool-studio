@@ -5,6 +5,7 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeliveryCheckoutResponseCheckoutAttemptStatus } from './deliveryCheckoutResponseCheckoutAttemptStatus';
 import type { DeliveryCheckoutResponsePaymentMethod } from './deliveryCheckoutResponsePaymentMethod';
 
 export interface DeliveryCheckoutResponse {
@@ -15,4 +16,13 @@ export interface DeliveryCheckoutResponse {
   paymentMethod: DeliveryCheckoutResponsePaymentMethod;
   /** @nullable */
   paymentInstructions?: string | null;
+  publicReference: string;
+  /** @nullable */
+  recoveryUrl?: string | null;
+  /**
+     * Returned only when the order is first created; never persisted in plaintext
+     * @nullable
+     */
+  recoveryToken?: string | null;
+  checkoutAttemptStatus: DeliveryCheckoutResponseCheckoutAttemptStatus;
 }

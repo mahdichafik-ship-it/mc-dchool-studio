@@ -36,6 +36,11 @@ const projectsTable = sqliteCore.sqliteTable("projects", {
   notes: sqliteCore.text("notes"),
   watchFolder: sqliteCore.text("watch_folder"),
   finishedAt: sqliteCore.text("finished_at"),
+  syncStatus: sqliteCore.text("sync_status").$type().notNull().default("active"),
+  syncCompletedFiles: sqliteCore.integer("sync_completed_files").notNull().default(0),
+  syncTotalFiles: sqliteCore.integer("sync_total_files").notNull().default(0),
+  syncFailedFiles: sqliteCore.integer("sync_failed_files").notNull().default(0),
+  syncError: sqliteCore.text("sync_error"),
   createdAt: sqliteCore.text("created_at").notNull().default((/* @__PURE__ */ new Date()).toISOString()),
   updatedAt: sqliteCore.text("updated_at").notNull().default((/* @__PURE__ */ new Date()).toISOString())
 });
@@ -212,11 +217,29 @@ function ensureLegacyColumns(sqlite) {
     ["students", "email", "TEXT"],
     ["students", "phone", "TEXT"],
     ["projects", "finished_at", "TEXT"],
+    ["projects", "sync_status", "TEXT NOT NULL DEFAULT 'active'"],
+    ["projects", "sync_completed_files", "INTEGER NOT NULL DEFAULT 0"],
+    ["projects", "sync_total_files", "INTEGER NOT NULL DEFAULT 0"],
+    ["projects", "sync_failed_files", "INTEGER NOT NULL DEFAULT 0"],
+    ["projects", "sync_error", "TEXT"],
     ["projects", "project_type", "TEXT NOT NULL DEFAULT 'school'"]
   ]) {
     ensureColumn(sqlite, ...migration);
   }
-  sqlite.exec("UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate')");
+  sqlite.exec(`UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate');
+    UPDATE projects
+    SET sync_status = 'synced'
+    WHERE finished_at IS NOT NULL AND sync_status = 'active';
+    UPDATE projects
+    SET sync_status = 'active'
+    WHERE sync_status IS NULL OR sync_status NOT IN ('active', 'finished_local', 'syncing', 'sync_failed', 'synced')
+    ;
+    UPDATE projects
+    SET
+      sync_status = 'sync_failed',
+      sync_error = COALESCE(sync_error, 'Cloud sync was interrupted. Reconnect and retry Upload & Finish.')
+    WHERE sync_status = 'syncing'
+  `);
 }
 function ensureCaptureTables(sqlite) {
   sqlite.exec(`
@@ -404,6 +427,29 @@ function ensureCaptureTables(sqlite) {
       WHERE f.capture_id = c.id AND f.file_role = 'JPEG'
     );
   `);
+  sqlite.exec(`
+    UPDATE projects
+    SET
+      sync_total_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      ),
+      sync_completed_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      )
+    WHERE sync_status = 'synced' AND sync_total_files = 0
+  `);
 }
 function safeFolderName$2(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
@@ -495,6 +541,11 @@ function initializeSchema(sqlite) {
       notes TEXT,
       watch_folder TEXT,
       finished_at TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'active',
+      sync_completed_files INTEGER NOT NULL DEFAULT 0,
+      sync_total_files INTEGER NOT NULL DEFAULT 0,
+      sync_failed_files INTEGER NOT NULL DEFAULT 0,
+      sync_error TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -916,6 +967,7 @@ function toServerFileUrl(fileUrl) {
   if (!fileUrl) return null;
   if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
   const { apiUrl } = getUploadConfig$1();
+  if (!apiUrl) return null;
   return `${apiUrl.replace(/\/+$/, "")}/${fileUrl.replace(/^\/+/, "")}`;
 }
 let cloudSyncDisabledForRetirement = false;
@@ -1066,7 +1118,7 @@ async function ensureCloudIdentity(projectId, studentId, apiUrl, connectionToken
 }
 async function syncStudentCloudIdentity(projectId, studentId) {
   const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken || !isCloudSessionVerified()) {
+  if (!apiUrl || !connectionToken || !isCloudSessionVerified()) {
     return { synced: false };
   }
   try {
@@ -1237,7 +1289,7 @@ async function completeR2Upload(session, fileBuffer, apiUrl, connectionToken) {
 async function performUploadPhoto(projectId, studentId, photoId, filePath, fileName, capturedAt, captureBatchKey) {
   const db = getDb();
   const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken) {
+  if (!apiUrl || !connectionToken) {
     throw new Error("Cloud upload is not configured.");
   }
   db.update(photosTable).set({ uploadStatus: "uploading", fileUrl: null }).where(drizzleOrm.eq(photosTable.id, photoId)).run();
@@ -1340,7 +1392,7 @@ async function performUploadCaptureFile(captureId, fileId, captureBatchKey) {
   if (!file || file.captureId !== captureId) throw new Error(`Capture file ${fileId} was not found.`);
   if (capture.studentId === null) throw new Error("Capture is not matched to a student.");
   const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken) throw new Error("Cloud upload is not configured.");
+  if (!apiUrl || !connectionToken) throw new Error("Cloud upload is not configured.");
   setCaptureFileStatus(captureId, fileId, "uploading", null);
   try {
     await ensureCloudIdentity(capture.projectId, capture.studentId, apiUrl, connectionToken);
@@ -1642,6 +1694,15 @@ function uploadGroupCaptureFile(captureId, fileId, captureBatchKey) {
   });
   return task;
 }
+function uniqueProjectSyncJobs(jobs) {
+  const seen = /* @__PURE__ */ new Set();
+  return jobs.filter((job) => {
+    const key = projectSyncJobKey(job);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 function getProjectSyncJobs(projectId, includeDone = false) {
   const db = getDb();
   const captures = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.projectId, projectId)).all();
@@ -1678,7 +1739,7 @@ function getProjectSyncJobs(projectId, includeDone = false) {
       capturedAt: photo.capturedAt
     });
   }
-  return jobs;
+  return uniqueProjectSyncJobs(jobs);
 }
 const LIVE_UPLOAD_SETTING_PREFIX = "live_upload:";
 const CAPTURE_BATCH_FILE_KEYS_PREFIX = "capture_batch_files:";
@@ -1734,12 +1795,17 @@ function registerProjectBatchJobs(projectId, jobs) {
   }
   const validKeys = new Set(getProjectSyncJobs(projectId, true).map(projectSyncJobKey));
   const keys = new Set(existing.filter((key) => validKeys.has(key)));
+  for (const key of validKeys) keys.add(key);
   for (const job of jobs) keys.add(projectSyncJobKey(job));
   setSetting(settingKey, JSON.stringify([...keys]));
   return keys.size;
 }
 function getProjectCaptureBatchExpectedCount(projectId) {
   return registerProjectBatchJobs(projectId, getProjectSyncJobs(projectId));
+}
+function getProjectUploadBlockerCount(projectId) {
+  const db = getDb();
+  return db.select({ id: capturesTable.id }).from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, projectId), drizzleOrm.isNull(capturesTable.studentId))).all().reduce((count, capture) => count + db.select({ status: imageFilesTable.uploadStatus }).from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all().filter((file) => file.status !== "done").length, 0);
 }
 function isLiveUploadEnabled(projectId) {
   return getSetting(liveUploadSettingKey(projectId)) === "1";
@@ -1982,28 +2048,45 @@ async function pauseLiveUploadForFinish(projectId) {
   await activeLiveUploadRuns.get(projectId);
   emitLiveUploadState(projectId);
 }
-async function syncProjectUploads(projectId, onProgress, captureBatchKey) {
-  const jobs = getProjectSyncJobs(projectId);
-  let completed = 0;
+async function syncProjectUploads(projectId, onProgress, captureBatchKey, dependencies = {
+  getJobs: getProjectSyncJobs,
+  isCloudSessionVerified,
+  uploadProjectJob
+}) {
+  const allJobs = uniqueProjectSyncJobs(dependencies.getJobs(projectId, true));
+  const allJobKeys = new Set(allJobs.map(projectSyncJobKey));
+  const jobs = uniqueProjectSyncJobs(dependencies.getJobs(projectId)).filter((job) => allJobKeys.has(projectSyncJobKey(job)));
+  let completed = Math.min(allJobs.length, Math.max(0, allJobs.length - jobs.length));
   let failed = 0;
   let firstError;
-  const report = () => onProgress?.({ completed, total: jobs.length, failed, error: firstError });
+  const report = () => onProgress?.({
+    completed,
+    total: allJobs.length,
+    failed,
+    error: firstError
+  });
   report();
   await runWithConcurrency(jobs, MAX_CONCURRENT_UPLOADS, async (job) => {
+    let uploaded = false;
     try {
-      if (!isCloudSessionVerified()) {
+      if (!dependencies.isCloudSessionVerified()) {
         throw new Error("Cloud sync is unavailable. Local captures are safe; reconnect and try again.");
       }
-      await uploadProjectJob(job, captureBatchKey);
+      await dependencies.uploadProjectJob(job, captureBatchKey);
+      uploaded = true;
     } catch (error) {
       failed++;
       firstError ??= getUploadErrorMessage(error);
-    } finally {
-      completed++;
-      report();
     }
+    if (uploaded) completed = Math.min(allJobs.length, completed + 1);
+    report();
   });
-  return { completed, total: jobs.length, failed, error: firstError };
+  return {
+    completed,
+    total: allJobs.length,
+    failed,
+    ...firstError ? { error: firstError } : {}
+  };
 }
 async function beginProjectCaptureBatch(projectId, expectedFileCount) {
   const db = getDb();
@@ -2013,7 +2096,7 @@ async function beginProjectCaptureBatch(projectId, expectedFileCount) {
   const batchKey = getSetting(settingKey) ?? crypto.randomUUID();
   setSetting(settingKey, batchKey);
   const { apiUrl, connectionToken } = getUploadConfig$1();
-  if (!connectionToken) throw new Error("Cloud upload is not configured.");
+  if (!apiUrl || !connectionToken) throw new Error("Cloud upload is not configured.");
   const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/desktop/projects/${project.cloudId}/capture-batches`, {
     method: "POST",
     headers: {
@@ -2125,7 +2208,7 @@ function registerUploadHandlers() {
   });
   electron.ipcMain.handle("upload:testConnection", async () => {
     const { apiUrl, connectionToken } = getUploadConfig$1();
-    if (!connectionToken) {
+    if (!apiUrl || !connectionToken) {
       return { ok: false, error: "Sign in to Volume Capture before testing the connection" };
     }
     try {
@@ -2318,6 +2401,11 @@ function enrichProject(p, classCount, studentCount, photoCount) {
     notes: p.notes,
     watchFolder: p.watchFolder,
     finishedAt: p.finishedAt,
+    syncStatus: p.syncStatus,
+    syncCompletedFiles: p.syncCompletedFiles,
+    syncTotalFiles: p.syncTotalFiles,
+    syncFailedFiles: p.syncFailedFiles,
+    syncError: p.syncError,
     classCount,
     studentCount,
     photoCount,
@@ -45474,134 +45562,292 @@ function emitProgress(event) {
   const win = electron.BrowserWindow.getAllWindows()[0];
   win?.webContents.send("project:syncProgress", event);
 }
+function updateProjectSync(projectId, values) {
+  getDb().update(projectsTable).set(values).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
+}
+function boundedCompleted(completed, total) {
+  return Math.min(Math.max(0, completed), Math.max(0, total));
+}
+function createProductionDependencies() {
+  return {
+    getProject: (projectId) => getDb().select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get(),
+    updateProject: updateProjectSync,
+    emitProgress,
+    pauseLiveUploadForFinish,
+    stopProjectWatcher,
+    getUploadConfig: getUploadConfig$1,
+    isCloudSessionVerified,
+    getProjectCaptureBatchExpectedCount,
+    getProjectUploadBlockerCount,
+    syncGroupCloudIdentities,
+    beginProjectCaptureBatch,
+    syncProjectUploads,
+    flushPendingCaptureReviews,
+    finishProjectCaptureBatch
+  };
+}
+async function runProjectSync(projectId, { photographerComment }, deps = createProductionDependencies()) {
+  const normalizedComment = photographerComment?.trim().slice(0, 2e3) || void 0;
+  try {
+    const project = deps.getProject(projectId);
+    if (!project) {
+      return { ok: false, completed: 0, total: 0, failed: 0, error: "Project not found." };
+    }
+    if (project.syncStatus === "synced") {
+      const total = Math.max(0, project.syncTotalFiles);
+      return {
+        ok: true,
+        completed: boundedCompleted(project.syncCompletedFiles, total),
+        total,
+        failed: project.syncFailedFiles,
+        finishedAt: project.finishedAt,
+        syncStatus: "synced"
+      };
+    }
+    if (project.syncStatus === "active") {
+      await deps.pauseLiveUploadForFinish(projectId);
+      await deps.stopProjectWatcher(projectId, { drain: true, clearTarget: true });
+      const finishedAt2 = project.finishedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+      const total = deps.getProjectCaptureBatchExpectedCount(projectId);
+      deps.updateProject(projectId, {
+        finishedAt: finishedAt2,
+        syncStatus: "finished_local",
+        syncCompletedFiles: 0,
+        syncTotalFiles: total,
+        syncFailedFiles: 0,
+        syncError: null,
+        updatedAt: finishedAt2
+      });
+    }
+    const locallyFinished = deps.getProject(projectId);
+    if (!locallyFinished) {
+      return { ok: false, completed: 0, total: 0, failed: 0, error: "Project not found." };
+    }
+    const { apiUrl, connectionToken } = deps.getUploadConfig();
+    if (!apiUrl || !connectionToken || !deps.isCloudSessionVerified()) {
+      const offlineStatus = locallyFinished.syncStatus === "sync_failed" ? "sync_failed" : "finished_local";
+      const total = Math.max(0, locallyFinished.syncTotalFiles || deps.getProjectCaptureBatchExpectedCount(projectId));
+      const completed = boundedCompleted(locallyFinished.syncCompletedFiles, total);
+      deps.updateProject(projectId, {
+        syncStatus: offlineStatus,
+        syncCompletedFiles: completed,
+        syncError: "Local completion saved. Reconnect to Volume Capture and retry Upload & Finish to sync the cloud.",
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      deps.emitProgress({
+        projectId,
+        phase: offlineStatus === "sync_failed" ? "error" : "finished-locally",
+        completed,
+        total,
+        failed: locallyFinished.syncFailedFiles,
+        error: "Local completion saved. Reconnect to Volume Capture and retry Upload & Finish to sync the cloud."
+      });
+      return {
+        ok: false,
+        completed,
+        total,
+        failed: locallyFinished.syncFailedFiles,
+        localFinished: true,
+        syncStatus: offlineStatus,
+        finishedAt: locallyFinished.finishedAt ?? void 0,
+        error: "Local completion saved. Reconnect to Volume Capture and retry Upload & Finish to sync the cloud."
+      };
+    }
+    deps.updateProject(projectId, {
+      syncStatus: "syncing",
+      syncError: null,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    const blockedFileCount = deps.getProjectUploadBlockerCount(projectId);
+    if (blockedFileCount > 0) {
+      const message = `${blockedFileCount} local capture file${blockedFileCount === 1 ? "" : "s"} still need a student match before cloud sync can complete.`;
+      deps.updateProject(projectId, {
+        syncStatus: "sync_failed",
+        syncCompletedFiles: boundedCompleted(locallyFinished.syncCompletedFiles, locallyFinished.syncTotalFiles),
+        syncFailedFiles: blockedFileCount,
+        syncError: message,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      const result2 = {
+        ok: false,
+        completed: boundedCompleted(locallyFinished.syncCompletedFiles, locallyFinished.syncTotalFiles),
+        total: Math.max(0, locallyFinished.syncTotalFiles),
+        failed: blockedFileCount,
+        localFinished: true,
+        syncStatus: "sync_failed",
+        finishedAt: locallyFinished.finishedAt ?? void 0,
+        error: message
+      };
+      deps.emitProgress({ projectId, phase: "error", ...result2 });
+      return result2;
+    }
+    await deps.syncGroupCloudIdentities(projectId);
+    const expectedFileCount = locallyFinished.syncTotalFiles || deps.getProjectCaptureBatchExpectedCount(projectId);
+    const startingCompleted = boundedCompleted(locallyFinished.syncCompletedFiles, expectedFileCount);
+    deps.updateProject(projectId, {
+      syncTotalFiles: expectedFileCount,
+      syncCompletedFiles: startingCompleted
+    });
+    deps.emitProgress({
+      projectId,
+      phase: "syncing",
+      completed: startingCompleted,
+      total: expectedFileCount,
+      failed: locallyFinished.syncFailedFiles
+    });
+    const captureBatchKey = await deps.beginProjectCaptureBatch(projectId, expectedFileCount);
+    const progress = await deps.syncProjectUploads(projectId, (current) => {
+      deps.updateProject(projectId, {
+        syncStatus: "syncing",
+        syncCompletedFiles: current.completed,
+        syncTotalFiles: current.total,
+        syncFailedFiles: current.failed,
+        syncError: current.error ?? null,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      deps.emitProgress({
+        projectId,
+        phase: "syncing",
+        ...current
+      });
+    }, captureBatchKey);
+    if (progress.failed > 0) {
+      let batchStatusError;
+      try {
+        await deps.finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed, normalizedComment);
+      } catch (error) {
+        batchStatusError = ` Batch status could not be updated: ${String(error)}`;
+      }
+      deps.updateProject(projectId, {
+        syncStatus: "sync_failed",
+        syncCompletedFiles: progress.completed,
+        syncTotalFiles: progress.total,
+        syncFailedFiles: progress.failed,
+        syncError: progress.error ?? "One or more local files could not be uploaded.",
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      const result2 = {
+        ok: false,
+        ...progress,
+        localFinished: true,
+        syncStatus: "sync_failed",
+        finishedAt: locallyFinished.finishedAt ?? void 0,
+        error: `${progress.error ?? "One or more local files could not be uploaded."}${batchStatusError ?? ""}`
+      };
+      deps.emitProgress({
+        projectId,
+        phase: "error",
+        ...result2
+      });
+      return result2;
+    }
+    const pendingReviews = await deps.flushPendingCaptureReviews(projectId);
+    const pendingReviewCount = pendingReviews.portrait + pendingReviews.group;
+    if (hasPendingReviewSync(pendingReviews)) {
+      let batchStatusError;
+      try {
+        await deps.finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed, normalizedComment);
+      } catch (error) {
+        batchStatusError = ` Batch status could not be updated: ${String(error)}`;
+      }
+      deps.updateProject(projectId, {
+        syncStatus: "sync_failed",
+        syncCompletedFiles: progress.completed,
+        syncTotalFiles: progress.total,
+        syncFailedFiles: progress.failed,
+        syncError: `${pendingReviewCount} capture review or framing change${pendingReviewCount === 1 ? "" : "s"} remains unsynced.`,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      const result2 = {
+        ok: false,
+        ...progress,
+        localFinished: true,
+        syncStatus: "sync_failed",
+        finishedAt: locallyFinished.finishedAt ?? void 0,
+        error: `${pendingReviewCount} capture review or framing change${pendingReviewCount === 1 ? " remains" : "s remain"} unsynced. Retry Upload & Finish when the connection is available.${batchStatusError ?? ""}`
+      };
+      deps.emitProgress({
+        projectId,
+        phase: "error",
+        ...result2
+      });
+      return result2;
+    }
+    try {
+      await deps.finishProjectCaptureBatch(projectId, captureBatchKey, "complete", 0, normalizedComment);
+    } catch (error) {
+      deps.updateProject(projectId, {
+        syncStatus: "sync_failed",
+        syncCompletedFiles: progress.completed,
+        syncTotalFiles: progress.total,
+        syncFailedFiles: 0,
+        syncError: `Files uploaded, but the photographer batch could not be confirmed. ${String(error)}`,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      const result2 = {
+        ok: false,
+        ...progress,
+        localFinished: true,
+        syncStatus: "sync_failed",
+        finishedAt: locallyFinished.finishedAt ?? void 0,
+        error: `Files uploaded, but the photographer batch could not be confirmed. Retry Upload & Finish. ${String(error)}`
+      };
+      deps.emitProgress({
+        projectId,
+        phase: "error",
+        ...result2
+      });
+      return result2;
+    }
+    const finishedAt = locallyFinished.finishedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+    deps.updateProject(projectId, {
+      finishedAt,
+      syncStatus: "synced",
+      syncCompletedFiles: progress.total,
+      syncTotalFiles: progress.total,
+      syncFailedFiles: 0,
+      syncError: null,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    const result = { ok: true, ...progress, completed: progress.total, finishedAt, syncStatus: "synced" };
+    deps.emitProgress({
+      projectId,
+      phase: "finished",
+      ...progress
+    });
+    return result;
+  } catch (error) {
+    const current = deps.getProject(projectId);
+    const message = String(error instanceof Error ? error.message : error);
+    const result = {
+      ok: false,
+      completed: boundedCompleted(current?.syncCompletedFiles ?? 0, current?.syncTotalFiles ?? 0),
+      total: Math.max(0, current?.syncTotalFiles ?? 0),
+      failed: current?.syncFailedFiles ?? 0,
+      localFinished: Boolean(current?.finishedAt),
+      syncStatus: current?.finishedAt ? "sync_failed" : "active",
+      finishedAt: current?.finishedAt ?? void 0,
+      error: `Cloud sync could not continue. Local captures are safe; reconnect and retry Upload & Finish. ${message}`
+    };
+    if (current?.finishedAt) {
+      deps.updateProject(projectId, {
+        syncStatus: "sync_failed",
+        syncCompletedFiles: result.completed,
+        syncError: result.error,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+    deps.emitProgress({ projectId, phase: "error", ...result });
+    return result;
+  }
+}
 function registerProjectSyncHandlers() {
   electron.ipcMain.handle(
     "project:uploadAndFinish",
-    async (_event, {
-      projectId,
-      photographerComment
-    }) => {
+    async (_event, { projectId, photographerComment }) => {
       const existing = activeSyncs.get(projectId);
       if (existing) return existing;
-      const task = (async () => {
-        const db = getDb();
-        const normalizedComment = photographerComment?.trim().slice(0, 2e3) || void 0;
-        const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
-        if (!project) {
-          return { ok: false, completed: 0, total: 0, failed: 0, error: "Project not found." };
-        }
-        if (project.finishedAt) {
-          return {
-            ok: true,
-            completed: 0,
-            total: 0,
-            failed: 0,
-            finishedAt: project.finishedAt
-          };
-        }
-        const { connectionToken } = getUploadConfig$1();
-        if (!connectionToken || !isCloudSessionVerified()) {
-          return {
-            ok: false,
-            completed: 0,
-            total: 0,
-            failed: 0,
-            error: "Connect to Volume Capture before finishing this project. Local captures remain safe."
-          };
-        }
-        await pauseLiveUploadForFinish(projectId);
-        if (!isCloudSessionVerified()) {
-          return {
-            ok: false,
-            completed: 0,
-            total: getProjectCaptureBatchExpectedCount(projectId),
-            failed: 0,
-            error: "The connection was lost while waiting for background uploads. Capturing has not been stopped; reconnect and try again."
-          };
-        }
-        await stopProjectWatcher(projectId, { drain: true, clearTarget: true });
-        await syncGroupCloudIdentities(projectId);
-        emitProgress({
-          projectId,
-          phase: "syncing",
-          completed: 0,
-          total: 0,
-          failed: 0
-        });
-        const expectedFileCount = getProjectCaptureBatchExpectedCount(projectId);
-        const captureBatchKey = await beginProjectCaptureBatch(projectId, expectedFileCount);
-        const progress = await syncProjectUploads(projectId, (current) => {
-          emitProgress({
-            projectId,
-            phase: "syncing",
-            ...current
-          });
-        }, captureBatchKey);
-        if (progress.failed > 0) {
-          let batchStatusError;
-          try {
-            await finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed, normalizedComment);
-          } catch (error) {
-            batchStatusError = ` Batch status could not be updated: ${String(error)}`;
-          }
-          const result2 = {
-            ok: false,
-            ...progress,
-            error: `${progress.error ?? "One or more local files could not be uploaded."}${batchStatusError ?? ""}`
-          };
-          emitProgress({
-            projectId,
-            phase: "error",
-            ...result2
-          });
-          return result2;
-        }
-        const pendingReviews = await flushPendingCaptureReviews(projectId);
-        const pendingReviewCount = pendingReviews.portrait + pendingReviews.group;
-        if (hasPendingReviewSync(pendingReviews)) {
-          let batchStatusError;
-          try {
-            await finishProjectCaptureBatch(projectId, captureBatchKey, "failed", progress.failed, normalizedComment);
-          } catch (error) {
-            batchStatusError = ` Batch status could not be updated: ${String(error)}`;
-          }
-          const result2 = {
-            ok: false,
-            ...progress,
-            error: `${pendingReviewCount} capture review or framing change${pendingReviewCount === 1 ? " remains" : "s remain"} unsynced. Retry Upload & Finish when the connection is available.${batchStatusError ?? ""}`
-          };
-          emitProgress({
-            projectId,
-            phase: "error",
-            ...result2
-          });
-          return result2;
-        }
-        try {
-          await finishProjectCaptureBatch(projectId, captureBatchKey, "complete", 0, normalizedComment);
-        } catch (error) {
-          const result2 = {
-            ok: false,
-            ...progress,
-            error: `Files uploaded, but the photographer batch could not be confirmed. Retry Upload & Finish. ${String(error)}`
-          };
-          emitProgress({
-            projectId,
-            phase: "error",
-            ...result2
-          });
-          return result2;
-        }
-        const finishedAt = (/* @__PURE__ */ new Date()).toISOString();
-        db.update(projectsTable).set({ finishedAt, updatedAt: finishedAt }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
-        const result = { ok: true, ...progress, finishedAt };
-        emitProgress({
-          projectId,
-          phase: "finished",
-          ...progress
-        });
-        return result;
-      })();
+      const task = runProjectSync(projectId, { photographerComment });
       activeSyncs.set(projectId, task);
       try {
         return await task;
@@ -45646,7 +45892,7 @@ function enableCloudImportsAfterSignIn() {
 function registerCloudHandlers() {
   electron.ipcMain.handle("cloud:listProjects", async () => {
     const { apiUrl, connectionToken } = getUploadConfig$1();
-    if (!connectionToken) {
+    if (!apiUrl || !connectionToken) {
       return { ok: false, error: "Sign in to Volume Capture before syncing projects." };
     }
     if (!isCloudSessionVerified()) {
@@ -45682,7 +45928,7 @@ function registerCloudHandlers() {
         return { ok: false, error: "Cloud sync is disabled because this desktop was retired." };
       }
       const { apiUrl, connectionToken } = getUploadConfig$1();
-      if (!connectionToken) {
+      if (!apiUrl || !connectionToken) {
         return { ok: false, error: "Sign in to Volume Capture before pulling projects." };
       }
       if (!isCloudSessionVerified()) {

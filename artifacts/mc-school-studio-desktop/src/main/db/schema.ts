@@ -13,6 +13,14 @@ export const projectsTable = sqliteTable('projects', {
   notes: text('notes'),
   watchFolder: text('watch_folder'),
   finishedAt: text('finished_at'),
+  syncStatus: text('sync_status')
+    .$type<'active' | 'finished_local' | 'syncing' | 'sync_failed' | 'synced'>()
+    .notNull()
+    .default('active'),
+  syncCompletedFiles: integer('sync_completed_files').notNull().default(0),
+  syncTotalFiles: integer('sync_total_files').notNull().default(0),
+  syncFailedFiles: integer('sync_failed_files').notNull().default(0),
+  syncError: text('sync_error'),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })

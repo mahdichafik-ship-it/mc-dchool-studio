@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import QRCode from "qrcode";
 import { Readable } from "node:stream";
 import sharp from "sharp";
@@ -45,6 +45,7 @@ import {
   retryFailedDeliveryInvitations,
 } from "../lib/deliveryInvitations";
 import { logger } from "../lib/logger";
+import { ResendSendError, sendResendEmailBatch } from "../lib/resendEmail";
 import {
   deliveryTerminology,
   normalizeDeliveryProjectType,
@@ -59,6 +60,9 @@ const ACCESS_LOCK_SECONDS = 15 * 60;
 const PUBLIC_ACCESS_WINDOW_MS = 15 * 60 * 1000;
 const publicAccessByIp = new FailureRateLimiter(20, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
 const publicAccessByGallery = new FailureRateLimiter(200, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
+const recoveryByIp = new FailureRateLimiter(60, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
+const recoveryByReference = new FailureRateLimiter(30, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
+const RECOVERY_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 function deliveryPhotoEligibility() {
   return [
@@ -89,6 +93,39 @@ function makeCode(length = 8): string {
 
 function hashCode(code: string): string {
   return createHash("sha256").update(code.trim().toUpperCase()).digest("hex");
+}
+
+function hashRecoveryToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+function newPublicOrderReference(): string {
+  return `order_${randomBytes(12).toString("base64url")}`;
+}
+
+function recoveryTokenMatches(token: string, storedHash: string | null): boolean {
+  if (!storedHash || !/^[a-f0-9]{64}$/i.test(storedHash)) return false;
+  const actual = Buffer.from(hashRecoveryToken(token), "hex");
+  const expected = Buffer.from(storedHash, "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function escapeEmailHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[character] ?? character));
+}
+
+function isUniqueConstraintViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; cause?: unknown };
+  return candidate.code === "23505" || isUniqueConstraintViolation(candidate.cause);
+}
+
+function deliveryOrigin(req: Request): string {
+  const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = req.get("x-forwarded-host")?.split(",")[0]?.trim();
+  return `${forwardedProto || req.protocol}://${forwardedHost || req.get("host")}`;
 }
 
 function tokenSecret(): string {
@@ -385,6 +422,60 @@ function manualPaymentInstructions(
     || "Pay at the establishment and provide the order number so the photography studio can confirm payment.";
 }
 
+async function dispatchOrderNotification(
+  order: typeof deliveryOrdersTable.$inferSelect,
+  gallery: typeof deliveryGalleriesTable.$inferSelect,
+  itemSummary: string[],
+  recoveryUrl: string,
+): Promise<void> {
+  if (!order.customerEmail) return;
+  const status = order.status === "pending" && order.checkoutAttemptStatus === "uncertain"
+    ? "payment needs review"
+    : order.status;
+  const instructions = order.paymentMethod === "stripe"
+    ? order.checkoutAttemptStatus === "uncertain"
+      ? "We could not confirm the online payment attempt yet. Please do not submit the order again; the studio will review it."
+      : "Complete payment using the secure checkout page. Your order status will update after payment is confirmed."
+    : manualPaymentInstructions(gallery, order.paymentMethod);
+  const summary = itemSummary.length > 0 ? itemSummary.map((item) => `- ${item}`).join("\n") : "- Order items";
+  const text = [
+    `Your photo order ${order.publicReference ?? "reference"} was received.`,
+    `Status: ${status}`,
+    `Amount: ${(order.amountTotal / 100).toFixed(2)} ${order.currency.toUpperCase()}`,
+    "",
+    "Items:",
+    summary,
+    "",
+    instructions,
+    "",
+    `View order status: ${recoveryUrl}`,
+  ].join("\n");
+  const htmlSummary = itemSummary.map((item) => `<li>${escapeEmailHtml(item)}</li>`).join("");
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a"><p>Your photo order <strong>${escapeEmailHtml(order.publicReference ?? "reference")}</strong> was received.</p><p><strong>Status:</strong> ${escapeEmailHtml(status)}<br><strong>Amount:</strong> ${escapeEmailHtml((order.amountTotal / 100).toFixed(2))} ${escapeEmailHtml(order.currency.toUpperCase())}</p><p><strong>Items</strong></p><ul>${htmlSummary || "<li>Order items</li>"}</ul><p>${escapeEmailHtml(instructions)}</p><p><a href="${escapeEmailHtml(recoveryUrl)}">View order status</a></p></div>`;
+  try {
+    const [providerId] = await sendResendEmailBatch([{
+      to: [order.customerEmail],
+      subject: `Photo order ${order.publicReference ?? "received"}`,
+      text,
+      html,
+      headers: {},
+    }], `volume-capture-order-${order.id}-v1`);
+    await db.update(deliveryOrdersTable).set({
+      notificationStatus: "sent",
+      notificationProviderId: providerId,
+      notificationError: null,
+    }).where(eq(deliveryOrdersTable.id, order.id));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Order email failed";
+    await db.update(deliveryOrdersTable).set({
+      notificationStatus: error instanceof ResendSendError && error.outcome === "unknown" ? "uncertain" : "failed",
+      notificationError: message.slice(0, 1_000),
+    }).where(eq(deliveryOrdersTable.id, order.id));
+    // A notification failure is operational state, not an order failure.
+    logger.warn({ err: error, orderId: order.id }, "Transactional order notification was not sent");
+  }
+}
+
 async function getAccessForToken(galleryId: number, accessId: number) {
   const [access] = await db
     .select({ access: deliveryAccessesTable, student: studentsTable, className: classesTable.className })
@@ -585,6 +676,8 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
   const priced = pricedOffers(offers);
   const stripeOffered = priced.some((offer) => offer.paymentMethods.includes("stripe"));
   const stripeAvailable = stripeOffered ? await stripeIsAvailable() : false;
+  const mediaExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+  const mediaExpiryUnix = Math.floor(mediaExpiresAt.getTime() / 1000);
 
   res.json({
     gallery: publicGallery(row.gallery, row.studio, normalizeDeliveryProjectType(row.project.projectType)),
@@ -614,9 +707,10 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       id: photo.id,
       fileName: photo.fileName,
       mimeType: photo.mimeType,
-      fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?preview=1&size=thumbnail&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, accessVersion: verified.accessVersion, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
-      downloadUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?download=1&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, accessVersion: verified.accessVersion, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
+       fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?preview=1&size=thumbnail&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, accessVersion: verified.accessVersion, photoId: photo.id, expiresAt: mediaExpiryUnix }))}`,
+       downloadUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?download=1&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, accessVersion: verified.accessVersion, photoId: photo.id, expiresAt: mediaExpiryUnix }))}`,
     })),
+    mediaExpiresAt: mediaExpiresAt.toISOString(),
   });
 });
 
@@ -634,6 +728,13 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
   const access = await getAccessForToken(row.gallery.id, verified.accessId);
   if (!access || !accessIsUsable(access.access) || access.access.tokenVersion !== verified.accessVersion) {
     res.status(401).json({ error: "Delivery access has been revoked" });
+    return;
+  }
+  const idempotencyKey = typeof req.body?.idempotencyKey === "string"
+    ? req.body.idempotencyKey.trim()
+    : String(req.header("Idempotency-Key") ?? "").trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+    res.status(400).json({ error: "A checkout idempotency key is required" });
     return;
   }
   await projectAvailableGroupJpegsToStudent(row.gallery.projectId, access.student.id);
@@ -717,11 +818,11 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       res.status(400).json({ error: "A shipping address is required" }); return;
     }
     const customerName = typeof req.body?.customerName === "string" ? req.body.customerName.trim() : "";
-    const customerEmail = req.body?.customerEmail ? normalizeMarketingEmail(req.body.customerEmail) : null;
+    const customerEmail = normalizeMarketingEmail(req.body?.customerEmail);
     if (!customerName) {
       res.status(400).json({ error: "Customer name is required" }); return;
     }
-    if (req.body?.customerEmail && !customerEmail) {
+    if (!customerEmail) {
       res.status(400).json({ error: "Enter a valid customer email" }); return;
     }
     const pricedLines = validLines.map((line) => {
@@ -732,54 +833,159 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     });
     const amountTotal = pricedLines.reduce((total, line) => total + line.lineTotal, 0);
     const currency = pricedLines[0].offer.currency;
+    const requestFingerprint = createHash("sha256").update(JSON.stringify({
+      items: basket,
+      customerName,
+      customerEmail,
+      paymentMethod,
+      deliveryMethod,
+      deliveryAddress: deliveryMethod === "shipping" ? req.body.deliveryAddress.trim() : null,
+      amountTotal,
+      currency,
+    })).digest("hex");
+    const [replayedOrder] = await db.select().from(deliveryOrdersTable).where(and(
+      eq(deliveryOrdersTable.galleryId, row.gallery.id),
+      eq(deliveryOrdersTable.accessId, access.access.id),
+      eq(deliveryOrdersTable.idempotencyKey, idempotencyKey),
+    )).limit(1);
+    if (replayedOrder) {
+      if (replayedOrder.requestFingerprint !== requestFingerprint) {
+        res.status(409).json({ error: "This checkout key was already used for a different order" });
+        return;
+      }
+      let checkoutUrl: string | null = null;
+      if (replayedOrder.stripeCheckoutSessionId) {
+        try {
+          const stripe = await getUncachableStripeClient();
+          const session = await stripe.checkout.sessions.retrieve(replayedOrder.stripeCheckoutSessionId);
+          checkoutUrl = session.url;
+        } catch {
+          // The durable attempt state remains authoritative; do not create
+          // another Checkout session when lookup is unavailable.
+        }
+      }
+      res.json({
+        checkoutUrl,
+        orderId: replayedOrder.id,
+        publicReference: replayedOrder.publicReference,
+        status: replayedOrder.status,
+        paymentMethod: replayedOrder.paymentMethod,
+        paymentInstructions: replayedOrder.paymentMethod === "stripe"
+          ? null
+          : manualPaymentInstructions(row.gallery, replayedOrder.paymentMethod),
+        checkoutAttemptStatus: replayedOrder.checkoutAttemptStatus,
+        recoveryUrl: null,
+      });
+      return;
+    }
     const studioId = row.gallery.studioId ?? row.project.studioId;
     const contact = customerEmail && studioId
       ? await markContactOrder(studioId, customerEmail)
       : null;
-    const order = await db.transaction(async (tx) => {
-      const [created] = await tx.insert(deliveryOrdersTable).values({
-        galleryId: row.gallery.id,
-        accessId: access.access.id,
-        contactId: contact?.id ?? null,
-        status: "pending",
-        paymentMethod: paymentMethod as "stripe" | "establishment" | "bank_transfer",
-        stripeCheckoutSessionId: null,
-        customerName,
-        customerEmail: customerEmail || null,
-        deliveryMethod: deliveryMethod as "digital" | "school" | "collection" | "shipping",
-        deliveryAddress: deliveryMethod === "shipping" ? req.body.deliveryAddress.trim() : null,
-        fulfillmentStatus: "not_required",
-        amountTotal,
-        currency,
-      }).returning();
-      const orderItems = pricedLines.flatMap(({ offer, photos: linePhotos, item }) => {
-        const rows = offer.productType === "print"
-          ? [{ photoId: linePhotos[0].id, quantity: item.quantity }]
-          : linePhotos.map((photo) => ({ photoId: photo.id, quantity: 1 }));
-        return rows.map(({ photoId, quantity }) => ({
-          orderId: created.id, photoId, offerId: offer.id, productName: offer.name,
-          productType: offer.productType, includesDigitalDownloads: offer.includesDigitalDownloads,
-          printSize: offer.printSize ?? null, quantity, unitAmount: offer.unitAmount, currency: offer.currency,
-        }));
+    const recoveryToken = randomBytes(32).toString("base64url");
+    const publicReference = newPublicOrderReference();
+    const recoveryExpiresAt = new Date(Date.now() + RECOVERY_TTL_MS);
+    let order: typeof deliveryOrdersTable.$inferSelect;
+    try {
+      order = await db.transaction(async (tx) => {
+        const [created] = await tx.insert(deliveryOrdersTable).values({
+          galleryId: row.gallery.id,
+          accessId: access.access.id,
+          contactId: contact?.id ?? null,
+          status: "pending",
+          paymentMethod: paymentMethod as "stripe" | "establishment" | "bank_transfer",
+          stripeCheckoutSessionId: null,
+          customerName,
+          customerEmail: customerEmail || null,
+          deliveryMethod: deliveryMethod as "digital" | "school" | "collection" | "shipping",
+          deliveryAddress: deliveryMethod === "shipping" ? req.body.deliveryAddress.trim() : null,
+          fulfillmentStatus: "not_required",
+          amountTotal,
+          currency,
+          publicReference,
+          recoveryTokenHash: hashRecoveryToken(recoveryToken),
+          recoveryExpiresAt,
+          recoveryRevokedAt: null,
+          idempotencyKey,
+          requestFingerprint,
+          checkoutAttemptStatus: "not_started",
+          checkoutAttemptError: null,
+          notificationStatus: "not_sent",
+          notificationProviderId: null,
+          notificationError: null,
+        }).returning();
+        const orderItems = pricedLines.flatMap(({ offer, photos: linePhotos, item }) => {
+          const rows = offer.productType === "print"
+            ? [{ photoId: linePhotos[0].id, quantity: item.quantity }]
+            : linePhotos.map((photo) => ({ photoId: photo.id, quantity: 1 }));
+          return rows.map(({ photoId, quantity }) => ({
+            orderId: created.id, photoId, offerId: offer.id, productName: offer.name,
+            productType: offer.productType, includesDigitalDownloads: offer.includesDigitalDownloads,
+            printSize: offer.printSize ?? null, quantity, unitAmount: offer.unitAmount, currency: offer.currency,
+          }));
+        });
+        await tx.insert(deliveryOrderItemsTable).values(orderItems);
+        return created;
       });
-      await tx.insert(deliveryOrderItemsTable).values(orderItems);
-      return created;
-    });
+    } catch (error) {
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const [winner] = await db.select().from(deliveryOrdersTable).where(and(
+        eq(deliveryOrdersTable.galleryId, row.gallery.id),
+        eq(deliveryOrdersTable.accessId, access.access.id),
+        eq(deliveryOrdersTable.idempotencyKey, idempotencyKey),
+      )).limit(1);
+      if (!winner) throw error;
+      if (winner.requestFingerprint !== requestFingerprint) {
+        res.status(409).json({ error: "This checkout key was already used for a different order" });
+        return;
+      }
+      let checkoutUrl: string | null = null;
+      if (winner.stripeCheckoutSessionId) {
+        try {
+          const stripe = await getUncachableStripeClient();
+          checkoutUrl = (await stripe.checkout.sessions.retrieve(winner.stripeCheckoutSessionId)).url;
+        } catch {
+          // Do not create another provider session while the winner is authoritative.
+        }
+      }
+      res.json({
+        checkoutUrl,
+        orderId: winner.id,
+        publicReference: winner.publicReference,
+        status: winner.status,
+        paymentMethod: winner.paymentMethod,
+        paymentInstructions: winner.paymentMethod === "stripe"
+          ? null
+          : manualPaymentInstructions(row.gallery, winner.paymentMethod),
+        checkoutAttemptStatus: winner.checkoutAttemptStatus,
+        recoveryUrl: null,
+      });
+      return;
+    }
 
+    const itemSummary = pricedLines.map(({ offer, photos: linePhotos, orderQuantity }) =>
+      `${offer.name} (${linePhotos.length} photo${linePhotos.length === 1 ? "" : "s"}${orderQuantity > 1 ? ` × ${orderQuantity}` : ""})`,
+    );
+    const recoveryOrigin = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "") || deliveryOrigin(req);
+    const recoveryUrl = `${recoveryOrigin}/delivery/${encodeURIComponent(row.gallery.slug)}?orderRef=${encodeURIComponent(publicReference)}#recoveryToken=${encodeURIComponent(recoveryToken)}`;
     if (paymentMethod !== "stripe") {
+      await dispatchOrderNotification(order, row.gallery, itemSummary, recoveryUrl);
       res.json({
         checkoutUrl: null,
         orderId: order.id,
+        publicReference,
+        recoveryUrl,
+        recoveryToken,
         status: order.status,
         paymentMethod,
         paymentInstructions: manualPaymentInstructions(row.gallery, paymentMethod as "establishment" | "bank_transfer"),
+        checkoutAttemptStatus: order.checkoutAttemptStatus,
       });
       return;
     }
 
     const stripe = await getUncachableStripeClient();
-    const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
-    const origin = `${forwardedProto || req.protocol}://${req.get("host")}`;
+    const origin = deliveryOrigin(req);
     let session;
     try {
       session = await stripe.checkout.sessions.create({
@@ -800,28 +1006,122 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
         ...(deliveryMethod === "shipping" ? {
           shipping_address_collection: { allowed_countries: ["MA", "US", "CA", "GB", "AU", "NZ"] },
         } : {}),
-        metadata: { orderId: String(order.id), gallerySlug: row.gallery.slug },
+        metadata: {
+          orderId: String(order.id),
+          gallerySlug: row.gallery.slug,
+          projectId: String(row.gallery.projectId),
+        },
         success_url: `${origin}/delivery/${row.gallery.slug}?paid=1&order=${order.id}`,
         cancel_url: `${origin}/delivery/${row.gallery.slug}?cancelled=1&order=${order.id}`,
+      }, {
+        idempotencyKey: `delivery-order-${order.id}-${idempotencyKey}`,
       });
+      if (!session?.id || !session.url) {
+        throw new Error("Stripe checkout response was incomplete");
+      }
     } catch (error) {
-      await db.update(deliveryOrdersTable).set({ status: "cancelled" })
+      await db.update(deliveryOrdersTable).set({
+        checkoutAttemptStatus: "uncertain",
+        checkoutAttemptError: (error instanceof Error ? error.message : "Stripe checkout attempt was inconclusive").slice(0, 1_000),
+      })
         .where(eq(deliveryOrdersTable.id, order.id));
-      throw error;
+      await dispatchOrderNotification({
+        ...order,
+        checkoutAttemptStatus: "uncertain",
+      }, row.gallery, itemSummary, recoveryUrl);
+      res.status(202).json({
+        checkoutUrl: null,
+        orderId: order.id,
+        publicReference,
+        recoveryUrl,
+        recoveryToken,
+        status: order.status,
+        paymentMethod,
+        paymentInstructions: null,
+        checkoutAttemptStatus: "uncertain",
+      });
+      return;
     }
-    await db.update(deliveryOrdersTable).set({
+    const [readyOrder] = await db.update(deliveryOrdersTable).set({
       stripeCheckoutSessionId: session.id,
-    }).where(eq(deliveryOrdersTable.id, order.id));
+      checkoutAttemptStatus: "created",
+      checkoutAttemptError: null,
+    }).where(eq(deliveryOrdersTable.id, order.id)).returning();
+    await dispatchOrderNotification(readyOrder ?? {
+      ...order,
+      stripeCheckoutSessionId: session.id,
+      checkoutAttemptStatus: "created",
+    }, row.gallery, itemSummary, recoveryUrl);
     res.json({
       checkoutUrl: session.url,
       orderId: order.id,
+      publicReference,
+      recoveryUrl,
+      recoveryToken,
       status: order.status,
       paymentMethod,
       paymentInstructions: null,
+      checkoutAttemptStatus: "created",
     });
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : "Checkout is not available yet" });
   }
+});
+
+router.get("/delivery/:slug/orders/recovery/:reference", async (req, res): Promise<void> => {
+  const slug = String(req.params.slug);
+  const reference = String(req.params.reference);
+  const token = String(req.header("x-order-recovery-token") ?? "");
+  const ipKey = `ip:${req.ip ?? req.socket.remoteAddress ?? "unknown"}`;
+  const referenceKey = `reference:${reference}`;
+  if (recoveryByIp.isBlocked(ipKey) || recoveryByReference.isBlocked(referenceKey)) {
+    res.setHeader("Retry-After", String(Math.ceil(PUBLIC_ACCESS_WINDOW_MS / 1000)));
+    res.status(429).json({ error: "Too many recovery attempts. Try again later." });
+    return;
+  }
+  const row = await getGalleryBySlug(slug);
+  const [order] = row && row.gallery.status !== "revoked"
+    ? await db.select().from(deliveryOrdersTable).where(and(
+      eq(deliveryOrdersTable.galleryId, row.gallery.id),
+      eq(deliveryOrdersTable.publicReference, reference),
+    )).limit(1)
+    : [];
+  const valid = Boolean(order
+    && token.length >= 32
+    && recoveryTokenMatches(token, order.recoveryTokenHash)
+    && order.recoveryRevokedAt === null
+    && order.recoveryExpiresAt !== null
+    && order.recoveryExpiresAt > new Date());
+  if (!valid || !row || !order) {
+    recoveryByIp.recordFailure(ipKey);
+    recoveryByReference.recordFailure(referenceKey);
+    res.status(404).json({ error: "Order recovery link is invalid or expired" });
+    return;
+  }
+  const items = await db.select({
+    productName: deliveryOrderItemsTable.productName,
+    productType: deliveryOrderItemsTable.productType,
+    quantity: deliveryOrderItemsTable.quantity,
+  }).from(deliveryOrderItemsTable).where(eq(deliveryOrderItemsTable.orderId, order.id));
+  res.json({
+    reference: order.publicReference,
+    status: order.status,
+    paymentMethod: order.paymentMethod,
+    amountTotal: order.amountTotal,
+    currency: order.currency,
+    createdAt: order.createdAt.toISOString(),
+    paidAt: order.paidAt?.toISOString() ?? null,
+    fulfillmentStatus: order.fulfillmentStatus,
+    deliveryMethod: order.deliveryMethod,
+    manualInstructions: order.paymentMethod === "stripe"
+      ? null
+      : manualPaymentInstructions(row.gallery, order.paymentMethod),
+    items: items.map((item) => ({
+      productName: item.productName,
+      productType: item.productType,
+      quantity: item.quantity,
+    })),
+  });
 });
 
 router.get("/delivery/:slug/orders/:orderId", async (req, res): Promise<void> => {

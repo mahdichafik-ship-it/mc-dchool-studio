@@ -271,6 +271,7 @@ function ProjectCard({ project: p, onClick }: { project: Project; onClick: () =>
   const isCorporate = p.projectType === 'corporate'
   return (
     <button
+      data-project-card={p.id}
       onClick={onClick}
       className="group bg-white border border-slate-200 rounded-xl p-5 text-left hover:border-teal-300 hover:shadow-md transition-all"
     >

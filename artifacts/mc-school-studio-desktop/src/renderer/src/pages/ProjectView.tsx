@@ -37,6 +37,8 @@ import {
   isRosterShortcutEditingTarget,
   resolveRosterShortcut,
 } from '@/lib/rosterShortcuts'
+import { filterRosterStudents } from '@/lib/rosterFilter'
+import { createGroupMemberStudentIdSet } from '@/lib/groupMembership'
 import type {
   Student,
   Class,
@@ -122,15 +124,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     retryFailed: retryProjectFailed,
   } = useLiveUpload(projectId)
   const [search, setSearch] = useState('')
-  const filteredStudents = students.filter((s) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      s.firstName.toLowerCase().includes(q) ||
-      s.lastName.toLowerCase().includes(q) ||
-      s.generatedStudentId.toLowerCase().includes(q)
-    )
-  })
+  const filteredStudents = filterRosterStudents(students, search)
   const [addStudentOpen, setAddStudentOpen] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
@@ -3090,6 +3084,8 @@ function GroupDetail({
   onClearCaptureTarget: () => void
   onRefreshCaptures: () => void
 }) {
+  const memberStudentIds = createGroupMemberStudentIdSet(group.memberStudentIds)
+
   function captureUploadState(capture: GroupCaptureReview) {
     const label = captureUploadLabel(capture.files)
     if (label === 'Upload failed') return { label, className: 'bg-red-50 text-red-700 border-red-200' }
@@ -3169,7 +3165,7 @@ function GroupDetail({
               </div>
               <div className="flex-1 overflow-y-auto p-3">
                 {students.map(student => {
-                  const isSelected = group.memberStudentIds.includes(student.id);
+                  const isSelected = memberStudentIds.has(student.id)
                   return (
                     <label key={student.id} className={cn("flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border", isSelected ? "bg-teal-50/50 border-teal-200 shadow-sm" : "border-transparent hover:bg-slate-50")}>
                       <input type="checkbox" className="rounded border-slate-300 text-teal-600 focus:ring-teal-600 size-4" checked={isSelected} onChange={e => onMembershipChange(group, student.id, e.target.checked)} />
@@ -3178,7 +3174,7 @@ function GroupDetail({
                         <p className="text-[10px] font-mono font-medium text-slate-500 truncate mt-0.5">{student.generatedStudentId}</p>
                       </div>
                     </label>
-                  );
+                  )
                 })}
               </div>
             </div>

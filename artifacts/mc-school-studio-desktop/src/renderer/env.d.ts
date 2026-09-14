@@ -136,7 +136,7 @@ interface ElectronAPI {
   invoke(channel: 'watcher:isRunning', args: { projectId: number }): Promise<boolean>
   invoke(channel: 'watcher:getActiveStudent', args: { projectId: number }): Promise<number | null>
   invoke(channel: 'watcher:setActiveStudent', args: { projectId: number; studentId: number | null }): Promise<number | null>
-  invoke(channel: 'watcher:getActiveTarget', args: { projectId: number }): Promise<{ studentId: number | null; groupId: number | null; targetType: 'student' | 'group' | 'none' }>
+  invoke(channel: 'watcher:getActiveTarget', args: { projectId: number }): Promise<{ studentId: number | null; groupId: number | null; targetType: 'student' | 'group' | 'none'; source: 'manual' | 'qr' | 'none' }>
   invoke(channel: 'watcher:setActiveGroup', args: { projectId: number; groupId: number | null }): Promise<number | null>
   ingestDroppedFiles(
     projectId: number,

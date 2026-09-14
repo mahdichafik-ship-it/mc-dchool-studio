@@ -22,7 +22,7 @@ import {
   formatStudentPhotoName,
 } from '../lib/photoFileNaming'
 import { copyManagedCaptureFile } from '../lib/managedCaptureCopy'
-import { readQrFromImage } from '../lib/qrReader'
+import { readQrFromImage, type QrResult } from '../lib/qrReader'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
 import { readStableFile, waitForStableFile } from '../lib/fileStability'
@@ -41,9 +41,13 @@ import {
   clearManualStudent,
   createSequenceState,
   registerCapturePath,
+  resolveQueuedPortraitTarget,
+  snapshotCaptureTarget,
   setManualStudent,
   sortCaptureFiles,
+  OrderedCaptureQueue,
   type CaptureFile,
+  type CaptureAssignmentSource,
   type SequenceState,
 } from '../lib/photoSequence'
 import type {
@@ -66,6 +70,7 @@ import {
   recordQrMarker,
   recordRawCapture,
   recordGroupCapture,
+  findCapturePairAssignment,
 } from '../lib/captureRepository'
 import { getCaptureFileRole } from '../lib/capturePairing'
 import {
@@ -88,6 +93,8 @@ interface WatchSession {
   previewScheduler: NewestLivePreviewScheduler
   seenPaths: Set<string>
   sequenceState: SequenceState
+  nextArrivalOrder: number
+  orderedCaptures: OrderedCaptureQueue<CaptureFile>
   awaitDurability: boolean
 }
 
@@ -96,6 +103,8 @@ type CaptureProcessingStatus = 'imported' | 'duplicate' | 'unmatched'
 interface EnqueueCaptureOptions {
   session?: WatchSession
   selectedStudentId?: number | null
+  assignmentSource?: CaptureAssignmentSource
+  arrivalOrder?: number
   selectedGroupId?: number | null
   strictStudentOwnership?: boolean
   processImmediately?: boolean
@@ -126,6 +135,8 @@ function createWatchSession(
     previewScheduler: new NewestLivePreviewScheduler(),
     seenPaths: new Set(),
     sequenceState,
+    nextArrivalOrder: 0,
+    orderedCaptures: new OrderedCaptureQueue<CaptureFile>(),
     awaitDurability,
   }
 }
@@ -423,6 +434,56 @@ function enqueueLocalPreview(
 
 type PendingMatchedPhoto = Extract<WatchedPhotoResult, { kind: 'matched-pending' }>
 
+async function handleQrMarker(
+  projectId: number,
+  capture: CaptureFile,
+  session: WatchSession,
+  db: ReturnType<typeof getDb>,
+  win: BrowserWindow | null,
+  qrResult: QrResult,
+): Promise<CaptureProcessingStatus> {
+  const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
+  const student = db
+    .select()
+    .from(studentsTable)
+    .where(eq(studentsTable.projectId, projectId))
+    .all()
+    .find((candidate) =>
+      candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
+
+  const decision = advanceSequence(session.sequenceState, {
+    kind: 'marker',
+    studentId: student?.id ?? null,
+    reference: qrResult.studentId,
+  })
+  if (decision.kind === 'review') {
+    recordUnmatched(db, win, projectId, capture, decision.reason)
+    emitActiveStudentChanged(projectId, null, 'none')
+    return 'unmatched'
+  }
+  if (!student) {
+    recordUnmatched(
+      db,
+      win,
+      projectId,
+      capture,
+      `QR marker "${qrResult.studentId}" does not match a student in this project`,
+    )
+    return 'unmatched'
+  }
+
+  const marker = await persistQrMarker(db, projectId, student, capture)
+  win?.webContents.send('photo:marker', {
+    markerId: marker.id,
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+    student: toStudentEvent(db, student),
+  })
+  emitActiveStudentChanged(projectId, student.id, 'qr')
+  console.log(`[Watcher] QR marker ${capture.fileName} → ${student.firstName} ${student.lastName}`)
+  return 'imported'
+}
+
 function createCaptureStore(
   db: ReturnType<typeof getDb>,
   capture: CaptureFile,
@@ -528,13 +589,32 @@ export function registerWatcherHandlers() {
 
     watcher.on('add', (filePath) => {
       const diagnosticId = startImagePipelineTrace(filePath)
-      const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId)
-      session.pendingEnqueues.add(enqueueTask)
-      void enqueueTask
+      // Capture identity synchronously with the filesystem event. Waiting for
+      // file stability before taking this snapshot lets a fast roster click
+      // move a JPEG/RAW into the next student's folder.
+      const target = snapshotCaptureTarget(session.sequenceState)
+      const arrivalOrder = session.nextArrivalOrder++
+      session.orderedCaptures.register(arrivalOrder)
+      const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId, {
+        selectedStudentId: target.studentId,
+        assignmentSource: target.source,
+        arrivalOrder,
+        selectedGroupId: pendingGroupTargets.get(projectId) ?? null,
+      })
+      const completion = enqueueTask
+        .then((status) => {
+          if (status !== 'imported') {
+            session.orderedCaptures.fail(arrivalOrder)
+            void scheduleOrderedCaptureDrain(projectId, session)
+          }
+        })
         .catch((error) => {
+          session.orderedCaptures.fail(arrivalOrder)
+          void scheduleOrderedCaptureDrain(projectId, session)
           console.error(`[Watcher] Could not enqueue ${filePath}`, error)
         })
-        .finally(() => session.pendingEnqueues.delete(enqueueTask))
+        .finally(() => session.pendingEnqueues.delete(completion))
+      session.pendingEnqueues.add(completion)
     })
     watcher.on('error', (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error)
@@ -602,15 +682,40 @@ export function registerWatcherHandlers() {
 
   ipcMain.handle(
     'watcher:getActiveTarget',
-    (_e, { projectId }: { projectId: number }) => ({
-      studentId: pendingGroupTargets.has(projectId)
-        ? null
-        : watchers.get(projectId)?.sequenceState.activeStudentId ?? pendingManualTargets.get(projectId) ?? null,
-      groupId: pendingGroupTargets.get(projectId) ?? null,
-      targetType: pendingGroupTargets.has(projectId)
-        ? 'group'
-        : (pendingManualTargets.has(projectId) ? 'student' : 'none'),
-    }),
+    (_e, { projectId }: { projectId: number }) => {
+      const session = watchers.get(projectId)
+      const manualStudentId = pendingManualTargets.get(projectId)
+        ?? session?.sequenceState.manualStudentId
+        ?? null
+      const qrStudentId = session?.sequenceState.manualStudentId === null
+        ? session.sequenceState.activeStudentId
+        : null
+      if (pendingGroupTargets.has(projectId)) {
+        return {
+          studentId: null,
+          groupId: pendingGroupTargets.get(projectId) ?? null,
+          targetType: 'group' as const,
+          source: 'manual' as const,
+        }
+      }
+      if (manualStudentId !== null) {
+        return {
+          studentId: manualStudentId,
+          groupId: null,
+          targetType: 'student' as const,
+          source: 'manual' as const,
+        }
+      }
+      if (qrStudentId !== null && qrStudentId !== undefined) {
+        return {
+          studentId: qrStudentId,
+          groupId: null,
+          targetType: 'student' as const,
+          source: 'qr' as const,
+        }
+      }
+      return { studentId: null, groupId: null, targetType: 'none' as const, source: 'none' as const }
+    },
   )
 
   ipcMain.handle(
@@ -687,6 +792,7 @@ export async function stopProjectWatcher(
   session.flushTimer = null
   if (session.watcher) await session.watcher.close()
   await Promise.allSettled([...session.pendingEnqueues])
+  await scheduleOrderedCaptureDrain(projectId, session)
   const pending = sortCaptureFiles(session.pendingFiles.splice(0))
 
   if (drain && pending.length > 0) {
@@ -758,7 +864,7 @@ async function enqueueCapture(
       sourceBuffer ? `bytes=${sourceBuffer.length} decoder-input=buffer` : 'decoder-input=managed-source',
     )
     if (!registerCapturePath(session.seenPaths, filePath)) return 'duplicate'
-    session.pendingFiles.push({
+    const capture: CaptureFile = {
       filePath,
       fileName: basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
@@ -771,11 +877,19 @@ async function enqueueCapture(
       selectedStudentId: options.selectedStudentId !== undefined
         ? options.selectedStudentId
         : session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId,
+      assignmentSource: options.assignmentSource ?? snapshotCaptureTarget(session.sequenceState).source,
+      arrivalOrder: options.arrivalOrder ?? session.nextArrivalOrder++,
       selectedGroupId: options.selectedGroupId !== undefined
         ? options.selectedGroupId
         : pendingGroupTargets.get(projectId) ?? null,
       strictStudentOwnership: options.strictStudentOwnership,
-    })
+    }
+    if (options.arrivalOrder !== undefined) {
+      session.orderedCaptures.ready(options.arrivalOrder, capture)
+      void scheduleOrderedCaptureDrain(projectId, session)
+    } else {
+      session.pendingFiles.push(capture)
+    }
     if (options.processImmediately) {
       const [capture] = session.pendingFiles.splice(0)
       if (!capture) throw new Error('Capture could not be queued')
@@ -797,6 +911,28 @@ async function enqueueCapture(
     finishImagePipelineTrace(diagnosticId)
     throw error
   }
+}
+
+async function scheduleOrderedCaptureDrain(
+  projectId: number,
+  session: WatchSession,
+): Promise<void> {
+  session.processing = session.processing.then(async () => {
+    await session.orderedCaptures.drain(async (capture) => {
+      try {
+        await handleNewPhoto(projectId, capture, session)
+      } catch (error) {
+        session.seenPaths.delete(capture.filePath)
+        console.error(
+          `[Watcher] Could not process ordered capture ${capture.filePath}; it will be retried`,
+          error,
+        )
+      } finally {
+        finishImagePipelineTrace(capture.diagnosticId)
+      }
+    })
+  })
+  await session.processing
 }
 
 function scheduleFlush(projectId: number): void {
@@ -908,6 +1044,7 @@ async function ingestDroppedFiles(
         const status = await enqueueCapture(projectId, filePath, diagnosticId, {
           session,
           selectedStudentId: studentId,
+          assignmentSource: 'manual',
           selectedGroupId: null,
           strictStudentOwnership: true,
           processImmediately: true,
@@ -1026,9 +1163,15 @@ async function handleNewPhoto(
   }
 
   const win = getMainWindow()
-  const manualStudentId = capture.selectedStudentId !== undefined
-    ? capture.selectedStudentId
-    : session.sequenceState.manualStudentId
+  const capturedStudentId = capture.selectedStudentId ?? null
+  // Older queued records did not carry a source. Treat a target that was
+  // manual at processing time as manual for compatibility; new records always
+  // use the immutable source captured with the filesystem event.
+  const assignmentSource = capture.assignmentSource
+    ?? (session.sequenceState.manualStudentId !== null
+      ? 'manual'
+      : capturedStudentId !== null ? 'qr' : 'none')
+  const manualStudentId = assignmentSource === 'manual' ? capturedStudentId : null
   const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
   let qrResult = manualStudentId !== null
     ? await readQrFromImage(capture.filePath, capture.sourceBuffer)
@@ -1057,15 +1200,50 @@ async function handleNewPhoto(
     return 'unmatched'
   }
 
+  // A QR-sequenced target is also authoritative for this capture, but unlike
+  // a manual target it may be advanced by a later marker. Keep marker
+  // handling separate from manual handling so a normal QR sequence can move
+  // from A to B instead of being mistaken for a manual mismatch.
+  if (assignmentSource === 'qr') {
+    qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
+    if (qrResult) {
+      if (session.sequenceState.manualStudentId !== null) {
+        recordUnmatched(
+          db,
+          win,
+          projectId,
+          capture,
+          `QR marker "${qrResult.studentId}" was not accepted while a student is manually selected`,
+        )
+        return 'unmatched'
+      }
+      return handleQrMarker(projectId, capture, session, db, win, qrResult)
+    }
+  }
+
   const filenameReference = extractStudentReference(
     capture.fileName,
     knownStudents.map((student) => student.generatedStudentId),
   )
+  const queuedPortraitTarget = resolveQueuedPortraitTarget(
+    session.sequenceState,
+    capturedStudentId,
+    assignmentSource,
+  )
+
+  // With no target snapshot, inspect the pixels before trusting a basename.
+  // A delayed QR marker can have a Smart Shooter-looking filename; treating
+  // that filename as a portrait would silently select the wrong student.
+  if (assignmentSource === 'none') {
+    qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
+    if (qrResult) {
+      return handleQrMarker(projectId, capture, session, db, win, qrResult)
+    }
+  }
 
   // Smart Shooter's roster ID is the most reliable portrait signal. Resolve
-  // it before pixel QR detection so a portrait that happens to contain a
-  // barcode/QR-like pattern is not swallowed as a marker.
-  if (filenameReference) {
+  // it after the explicit QR check above.
+  if (assignmentSource === 'none' && queuedPortraitTarget === null && filenameReference) {
     const result = await processWatchedPhoto(projectId, capture.filePath, {
       store: createCaptureStore(db, capture),
       photosDir: getPhotosDir(),
@@ -1099,14 +1277,15 @@ async function handleNewPhoto(
     return 'imported'
   }
 
-  if (manualStudentId !== null) {
+  if (manualStudentId !== null || queuedPortraitTarget !== null) {
+    const targetStudentId = manualStudentId ?? queuedPortraitTarget
     const result = await processWatchedPhoto(projectId, capture.filePath, {
       store: createCaptureStore(db, capture),
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
       sourceBuffer: capture.sourceBuffer,
-      targetStudentId: manualStudentId,
+      targetStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
       deferPersistence: true,
@@ -1133,62 +1312,17 @@ async function handleNewPhoto(
     return 'imported'
   }
 
-  // A QR marker can select the next student when the photographer has not
-  // explicitly selected one in the roster.
-  qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
+  // A QR marker can select the next student only when no target was active
+  // when this filesystem event arrived.
+  qrResult = qrResult ?? await readQrFromImage(capture.filePath, capture.sourceBuffer)
   if (qrResult) {
-    const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
-    const student = db
-      .select()
-      .from(studentsTable)
-      .where(eq(studentsTable.projectId, projectId))
-      .all()
-      .find((candidate) =>
-        candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
-
-    const decision = advanceSequence(session.sequenceState, {
-      kind: 'marker',
-      studentId: student?.id ?? null,
-      reference: qrResult.studentId,
-    })
-
-    if (decision.kind === 'review') {
-      recordUnmatched(db, win, projectId, capture, decision.reason)
-      emitActiveStudentChanged(projectId, null, 'none')
-      return 'unmatched'
-    }
-
-    if (!student) {
-      recordUnmatched(
-        db,
-        win,
-        projectId,
-        capture,
-        `QR marker "${qrResult.studentId}" does not match a student in this project`,
-      )
-      return 'unmatched'
-    }
-
-    const marker = await persistQrMarker(db, projectId, student, capture)
-    win?.webContents.send('photo:marker', {
-      markerId: marker.id,
-      fileName: capture.fileName,
-      capturedAt: new Date(capture.capturedAtMs).toISOString(),
-      student: toStudentEvent(db, student!),
-    })
-    emitActiveStudentChanged(
-      projectId,
-      student.id,
-      'qr',
-    )
-    console.log(`[Watcher] QR marker ${capture.fileName} → ${student!.firstName} ${student!.lastName}`)
-    return 'imported'
+    return handleQrMarker(projectId, capture, session, db, win, qrResult)
   }
 
   // Once a QR marker is active, its sequence owns every following portrait.
   // Filename matching remains available only for older Smart Shooter setups
   // that do not use marker images.
-  if (session.sequenceState.activeStudentId === null) {
+  if (assignmentSource === 'none' && queuedPortraitTarget === null) {
     if (looksLikeSmartShooterName(capture.fileName)) {
       const result = await processWatchedPhoto(projectId, capture.filePath, {
         store: createCaptureStore(db, capture),
@@ -1223,57 +1357,11 @@ async function handleNewPhoto(
     }
   }
 
-  const decision = advanceSequence(session.sequenceState, { kind: 'portrait' })
-  if (decision.kind === 'review') {
-    recordUnmatched(db, win, projectId, capture, decision.reason)
-    return 'unmatched'
-  }
-
-  const student = db
-    .select()
-    .from(studentsTable)
-    .where(
-      and(
-        eq(studentsTable.projectId, projectId),
-        eq(studentsTable.id, decision.studentId),
-      ),
-    )
-    .get()
-
-  if (!student) {
-    session.sequenceState.activeStudentId = null
-    recordUnmatched(db, win, projectId, capture, 'The active student is no longer in this project roster')
-    return 'unmatched'
-  }
-
-  const result = await processWatchedPhoto(projectId, capture.filePath, {
-    store: createCaptureStore(db, capture),
-    photosDir: getPhotosDir(),
-    projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
-    readQr: async () => null,
-    sourceBuffer: capture.sourceBuffer,
-    targetStudentId: student.id,
-    capturedAt: new Date(capture.capturedAtMs).toISOString(),
-    diagnosticId: capture.diagnosticId,
-    deferPersistence: true,
-    onPreviewReady: (context) => enqueueLocalPreview(
-      session.previewScheduler,
-      win,
-      projectId,
-      capture,
-      context.student,
-      context,
-    ),
-  })
-  if (result.kind === 'unmatched') {
-    sendUnmatchedResult(win, projectId, result)
-    return 'unmatched'
-  }
-  if (result.kind === 'matched-pending') {
-    const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
-    if (session.awaitDurability) await persistence
-  }
-  return 'imported'
+  // No target was active at arrival and no filename/QR identity was found.
+  // Never consult the mutable sequence state here: a later QR/manual event
+  // must not claim an older ambiguous file.
+  recordUnmatched(db, win, projectId, capture, 'Capture had no identity at filesystem arrival')
+  return 'unmatched'
 }
 
 async function copyToProjectFolder(
@@ -1357,20 +1445,43 @@ async function handleNewRaw(
     knownStudents.map((student) => student.generatedStudentId),
   )
   const filenameStudent = findStudentByFilename(db, projectId, capture.fileName)
-  const manualStudentId = capture.selectedStudentId !== undefined
-    ? capture.selectedStudentId
-    : session.sequenceState.manualStudentId
+  const capturedStudentId = capture.selectedStudentId ?? null
+  const assignmentSource = capture.assignmentSource
+    ?? (session.sequenceState.manualStudentId !== null
+      ? 'manual'
+      : capturedStudentId !== null ? 'qr' : 'none')
+  const manualStudentId = assignmentSource === 'manual' ? capturedStudentId : null
   const manualStudent = manualStudentId === null
     ? undefined
     : findProjectStudent(db, projectId, manualStudentId)
-  const sequenceStudentId = session.sequenceState.activeStudentId
-  const sequenceStudent = sequenceStudentId === null
+  const capturedTargetStudent = capturedStudentId === null
     ? undefined
-    : findProjectStudent(db, projectId, sequenceStudentId)
-  // The in-app target is authoritative when one was captured with the file.
-  const student = manualStudentId !== null
-    ? manualStudent
-    : filenameStudent ?? sequenceStudent
+    : findProjectStudent(db, projectId, capturedStudentId)
+  // Pairing is an immutable shutter identity. Resolve an existing JPEG pair
+  // before constructing any destination path; the active target at delayed
+  // RAW arrival is only a fallback when no same-shutter capture exists.
+  const pairAssignment = findCapturePairAssignment(db, {
+    projectId,
+    studentId: manualStudentId ?? capturedStudentId ?? filenameStudent?.id ?? null,
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+    groupId: capture.selectedGroupId === null || capture.selectedGroupId === undefined
+      ? undefined
+      : String(capture.selectedGroupId),
+    strictStudentOwnership: capture.strictStudentOwnership,
+  })
+  const pairedStudent = pairAssignment?.studentId === null || pairAssignment === undefined
+    ? undefined
+    : findProjectStudent(db, projectId, pairAssignment.studentId)
+  // The target source captured with the filesystem event is authoritative.
+  // Filename matching is only a fallback for an event that had no active
+  // manual/QR target. Never consult the mutable target again for a delayed
+  // RAW file.
+  const student = pairAssignment
+    ? pairedStudent
+    : assignmentSource !== 'none'
+    ? (manualStudent ?? capturedTargetStudent)
+    : filenameStudent
   markImagePipeline(
     capture.diagnosticId,
     'student lookup complete',

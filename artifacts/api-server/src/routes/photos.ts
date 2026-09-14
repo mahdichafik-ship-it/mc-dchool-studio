@@ -97,6 +97,22 @@ function captureFileFormat(fileName: string): string {
   return path.extname(fileName).replace(/^\./, "").toUpperCase() || "UNKNOWN";
 }
 
+/**
+ * A superseded batch is uploaded by a new desktop connection, so its scoped
+ * capture key has a different connection prefix. Compare the logical client
+ * capture key as well as the fully scoped key; never accept an unrelated
+ * capture key merely because its upload identifier matches.
+ */
+function sameCaptureIdentity(
+  storedCaptureKey: string,
+  scopedCaptureKey: string,
+  rawCaptureKey: string,
+): boolean {
+  if (storedCaptureKey === scopedCaptureKey || storedCaptureKey === rawCaptureKey) return true;
+  const legacyScopedKey = storedCaptureKey.match(/^desktop:[^:]+:(.*)$/s)?.[1];
+  return legacyScopedKey === rawCaptureKey;
+}
+
 const captureUpload = multer({
   storage,
   limits: { fileSize: 500 * 1024 * 1024 },
@@ -1444,6 +1460,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
           if (
             existingByClientId.capture.projectId !== projectId
             || existingByClientId.capture.studentId !== studentId
+            || !sameCaptureIdentity(existingByClientId.capture.captureKey, scopedCaptureKey, captureKey)
           ) {
             return {
               conflict: "Desktop upload identifier was reused for a different capture target",
@@ -1471,7 +1488,8 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
             )).limit(1);
           if (superseded) {
             if (superseded.capture.projectId !== projectId || superseded.capture.studentId !== studentId
-              || superseded.file.fileRole !== role) {
+              || superseded.file.fileRole !== role
+              || !sameCaptureIdentity(superseded.capture.captureKey, scopedCaptureKey, captureKey)) {
               return { conflict: "Desktop upload identifier was reused for a different capture target" } as const;
             }
             return {
@@ -1521,7 +1539,9 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
       }
 
       if (capture && capture.studentId !== studentId) {
-        throw new Error("Scoped capture key was already assigned to a different student");
+        return {
+          conflict: "Scoped capture key was already assigned to a different student",
+        } as const;
       }
       if (!capture) {
         [capture] = await tx

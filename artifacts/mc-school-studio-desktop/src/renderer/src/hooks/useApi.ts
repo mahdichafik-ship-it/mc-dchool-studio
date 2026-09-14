@@ -600,7 +600,7 @@ export function useActiveCaptureTarget(projectId: number | null) {
     const result = await api.invoke('watcher:getActiveTarget', { projectId })
     setStudentId(result.studentId)
     setGroupId(result.groupId)
-    setSource(result.targetType === 'none' ? 'none' : 'manual')
+    setSource(result.source)
   }, [projectId])
 
   useEffect(() => { void load() }, [load])

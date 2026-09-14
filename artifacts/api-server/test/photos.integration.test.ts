@@ -273,6 +273,16 @@ after(async () => {
 test("uploads paired JPEG and RAW members idempotently and serves the RAW member", async () => {
   const captureKey = `capture-integration-${process.pid}-${Date.now()}`;
   const batchKey = `batch-integration-${process.pid}-${Date.now()}`;
+  const [wrongTarget] = await db
+    .insert(studentsTable)
+    .values({
+      projectId,
+      classId,
+      firstName: "Wrong",
+      lastName: "Target",
+      generatedStudentId: `WRONG${String(process.pid).slice(-4)}${Date.now().toString().slice(-4)}`,
+    })
+    .returning({ id: studentsTable.id });
   const batchStart = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
     method: "POST",
     headers: {
@@ -315,6 +325,55 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(jpegUploaded.pairingStatus, "jpeg_only");
   assert.equal(jpegUploaded.file.fileRole, "JPEG");
   captureFilePaths.push(path.resolve(process.cwd(), jpegUploaded.file.fileUrl.replace(/^\//, "")));
+
+  // A delayed RAW from the same shutter event must not be able to move the
+  // already-committed capture to a different student. The API rejects the
+  // identity conflict instead of pairing by basename alone.
+  const wrongStudentRawForm = new (globalThis as any).FormData();
+  wrongStudentRawForm.append(
+    "file",
+    new (globalThis as any).Blob([rawBytes], { type: "application/octet-stream" }),
+    "portrait-original.nef",
+  );
+  wrongStudentRawForm.append("captureKey", captureKey);
+  wrongStudentRawForm.append("fileRole", "RAW");
+  const wrongStudentRawResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${wrongTarget.id}/captures`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": `${captureKey}-wrong-student-raw`,
+        "X-MC-Capture-Batch": batchKey,
+      },
+      body: wrongStudentRawForm,
+    },
+  );
+  assert.equal(wrongStudentRawResponse.status, 409);
+  await db.delete(studentsTable).where(eq(studentsTable.id, wrongTarget.id));
+
+  const wrongCaptureIdentityForm = new (globalThis as any).FormData();
+  wrongCaptureIdentityForm.append(
+    "file",
+    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
+    "portrait-original.jpg",
+  );
+  wrongCaptureIdentityForm.append("captureKey", `${captureKey}-different-event`);
+  wrongCaptureIdentityForm.append("fileRole", "JPEG");
+  const wrongCaptureIdentityResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": `${captureKey}-jpeg`,
+        "X-MC-Capture-Batch": batchKey,
+      },
+      body: wrongCaptureIdentityForm,
+    },
+  );
+  assert.equal(wrongCaptureIdentityResponse.status, 409);
+
   const [projectedDeliveryPhoto] = await db
     .select()
     .from(studentPhotosTable)

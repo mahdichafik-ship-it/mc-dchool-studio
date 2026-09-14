@@ -81,6 +81,30 @@ function findPairCandidate(db: DesktopDb, input: CaptureFileInput) {
     .sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0]
 }
 
+/**
+ * Resolve the immutable assignment of a JPEG/RAW pair before the incoming
+ * file is copied to a destination. This matters when a delayed RAW arrives
+ * after the photographer changes the active roster target: basename/timestamp
+ * pairing may identify an earlier JPEG whose student must own both files.
+ */
+export function findCapturePairAssignment(
+  db: DesktopDb,
+  input: Pick<CaptureFileInput, 'projectId' | 'studentId' | 'fileName' | 'capturedAt' | 'groupId' | 'strictStudentOwnership'>,
+): { captureId: number; studentId: number | null; classId: number | null } | undefined {
+  const candidate = findPairCandidate(db, {
+    ...input,
+    classId: null,
+    filePath: '',
+    storedPath: '',
+  })
+  if (!candidate) return undefined
+  return {
+    captureId: candidate.capture.id,
+    studentId: candidate.capture.studentId,
+    classId: candidate.capture.classId,
+  }
+}
+
 /** Persist a group JPEG/RAW without creating a legacy student photo row. */
 export function recordGroupCapture(db: DesktopDb, input: CaptureFileInput & { groupId: string }): {
   kind: 'created' | 'paired' | 'duplicate'; captureId: number

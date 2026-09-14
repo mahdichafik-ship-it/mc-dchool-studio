@@ -4,10 +4,50 @@ import {
   advanceSequence,
   clearManualStudent,
   createSequenceState,
+  OrderedCaptureQueue,
   registerCapturePath,
+  snapshotCaptureTarget,
   setManualStudent,
   sortCaptureFiles,
 } from '../src/main/lib/photoSequence.ts'
+
+test('ordered capture drain waits for a slow marker before a fast portrait', async () => {
+  const queue = new OrderedCaptureQueue<string>()
+  queue.register(0)
+  queue.register(1)
+  const processed: string[] = []
+  let releaseMarker: () => void = () => undefined
+  const markerStability = new Promise<void>((resolve) => { releaseMarker = resolve })
+  const markerReady = markerStability.then(() => queue.ready(0, 'marker-0'))
+
+  queue.ready(1, 'portrait-1')
+  await queue.drain(async (capture) => { processed.push(capture) })
+  assert.deepEqual(processed, [])
+
+  releaseMarker()
+  await markerReady
+  await queue.drain(async (capture) => { processed.push(capture) })
+  assert.deepEqual(processed, ['marker-0', 'portrait-1'])
+})
+
+test('ordered capture drain processes an older portrait before a later marker', async () => {
+  const queue = new OrderedCaptureQueue<string>()
+  queue.register(0)
+  queue.register(1)
+  const processed: string[] = []
+  let releasePortrait: () => void = () => undefined
+  const portraitStability = new Promise<void>((resolve) => { releasePortrait = resolve })
+  const portraitReady = portraitStability.then(() => queue.ready(0, 'portrait-0'))
+
+  queue.ready(1, 'marker-1')
+  const blockedDrain = queue.drain(async (capture) => { processed.push(capture) })
+  await blockedDrain
+  releasePortrait()
+  await portraitReady
+  await queue.drain(async (capture) => { processed.push(capture) })
+
+  assert.deepEqual(processed, ['portrait-0', 'marker-1'])
+})
 
 test('assigns multiple portraits to the active student until the next marker', () => {
   const state = createSequenceState()
@@ -136,6 +176,46 @@ test('rapid manual switching affects only later captures', () => {
     kind: 'review',
     reason: 'Portrait was captured before a valid student QR marker',
   })
+})
+
+test('snapshots manual authority before delayed file stability and never reassigns it', () => {
+  const state = createSequenceState()
+  setManualStudent(state, 101)
+  const first = snapshotCaptureTarget(state)
+
+  setManualStudent(state, 202)
+  const second = snapshotCaptureTarget(state)
+
+  assert.deepEqual(first, { studentId: 101, source: 'manual' })
+  assert.deepEqual(second, { studentId: 202, source: 'manual' })
+})
+
+test('distinguishes QR authority from manual authority for delayed processing', () => {
+  const state = createSequenceState()
+  state.activeStudentId = 303
+  const qrTarget = snapshotCaptureTarget(state)
+
+  setManualStudent(state, 404)
+  const manualTarget = snapshotCaptureTarget(state)
+
+  assert.deepEqual(qrTarget, { studentId: 303, source: 'qr' })
+  assert.deepEqual(manualTarget, { studentId: 404, source: 'manual' })
+})
+
+test('keeps a QR portrait target immutable while a later marker advances the sequence', () => {
+  const state = createSequenceState()
+  state.activeStudentId = 505
+  const portraitTarget = snapshotCaptureTarget(state)
+
+  const markerDecision = advanceSequence(state, {
+    kind: 'marker',
+    studentId: 606,
+    reference: 'QR-606',
+  })
+
+  assert.deepEqual(portraitTarget, { studentId: 505, source: 'qr' })
+  assert.deepEqual(markerDecision, { kind: 'marker', studentId: 606 })
+  assert.equal(state.activeStudentId, 606)
 })
 
 test('keeps the exact offline A/B/QR-C capture sequence assigned without auto-advancing', () => {

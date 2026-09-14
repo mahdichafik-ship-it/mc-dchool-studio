@@ -76,7 +76,7 @@ test('rejects metadata whose checksum does not match the release ZIP', () => {
 
   assert.throws(
     () => validateLatestMacMetadata(withStaleChecksum, fixtureVersion, fixtureAssets),
-    /checksum for mc-school-studio-1\.0\.11-arm64\.zip does not match the release asset/,
+    /malformed updater metadata|checksum for mc-school-studio-1\.0\.11-arm64\.zip does not match the release asset/,
   )
 })
 
@@ -126,7 +126,7 @@ test('rejects metadata with duplicate top-level fields', () => {
 
   assert.throws(
     () => validateLatestMacMetadata(withDuplicateVersion, fixtureVersion, fixtureAssets),
-    /duplicate or malformed top-level metadata fields/,
+    /malformed updater metadata|duplicate or malformed top-level metadata fields/,
   )
 })
 
@@ -139,6 +139,47 @@ test('rejects metadata without a preferred update path', () => {
   assert.throws(
     () => validateLatestMacMetadata(withoutPath, fixtureVersion, fixtureAssets),
     /latest-mac\.yml path <missing> is not a release ZIP/,
+  )
+})
+
+test('rejects metadata without the files section', () => {
+  const withoutFilesSection = fixture.replace(/^files:\n/m, '')
+
+  assert.throws(
+    () =>
+      validateLatestMacMetadata(
+        withoutFilesSection,
+        fixtureVersion,
+        fixtureAssets,
+      ),
+    /malformed updater metadata|missing required updater metadata fields/,
+  )
+})
+
+test('rejects metadata with unknown top-level fields', () => {
+  const withUnknownField = fixture.replace(
+    'version: 1.0.11\n',
+    'version: 1.0.11\npublisher: untrusted\n',
+  )
+
+  assert.throws(
+    () => validateLatestMacMetadata(withUnknownField, fixtureVersion, fixtureAssets),
+    /missing required updater metadata fields|malformed/,
+  )
+})
+
+test('rejects extra files in the staged release directory', () => {
+  const withUnexpectedAsset = new Map(fixtureAssets)
+  withUnexpectedAsset.set('unexpected-installer.zip', null)
+
+  assert.throws(
+    () =>
+      validateLatestMacMetadata(
+        fixture,
+        fixtureVersion,
+        withUnexpectedAsset,
+      ),
+    /unexpected release assets: unexpected-installer\.zip/,
   )
 })
 

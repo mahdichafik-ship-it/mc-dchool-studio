@@ -1,10 +1,31 @@
 import { createHash } from 'node:crypto'
+import { Buffer } from 'node:buffer'
 import { createReadStream } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const architectures = ['arm64', 'x64']
+
+function scalar(value) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    const unquoted = trimmed.slice(1, -1)
+    return unquoted || null
+  }
+  if (trimmed.startsWith("'") || trimmed.startsWith('"')) return null
+  return trimmed
+}
+
+function validSha512(value) {
+  if (/^[a-f\d]{128}$/i.test(value)) return true
+  if (!/^[A-Za-z\d+/]{86}==$/.test(value)) return false
+  return Buffer.from(value, 'base64').toString('base64') === value
+}
 
 function expectedPayloads(version) {
   return architectures.map(
@@ -20,38 +41,90 @@ function expectedInstallerAssets(version) {
 }
 
 function parseMetadata(metadata) {
-  const versionMatches = [...metadata.matchAll(/^version:\s*([^\s#]+)\s*$/gm)]
-  const pathMatches = [...metadata.matchAll(/^path:\s*([^\s#]+)\s*$/gm)]
-  const topLevelChecksumMatches = [
-    ...metadata.matchAll(/^sha512:\s*([^\s#]+)\s*$/gm),
-  ]
-  const checksumMatches = [
-    ...metadata.matchAll(/^[ \t]*sha512:\s*([^\s#]+)\s*$/gm),
-  ]
-  const version = versionMatches[0]?.[1]
-  const path = pathMatches[0]?.[1]
-  const topLevelSha512 = topLevelChecksumMatches[0]?.[1]
+  const lines = metadata
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+  let version
+  let path
+  let topLevelSha512
+  let filesStarted = false
   const files = []
-  const lines = metadata.split(/\r?\n/)
+  const topKeys = new Set()
+  let current = null
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const url = lines[index].match(/^\s*-\s+url:\s*([^\s#]+)\s*$/)?.[1]
-    if (!url) continue
-
-    const sha512 = lines[index + 1]?.match(/^\s+sha512:\s*([^\s#]+)\s*$/)?.[1]
-    files.push({ url, sha512 })
+  const finishFile = () => {
+    if (
+      !current ||
+      !current.url ||
+      !validSha512(current.sha512) ||
+      files.some((file) => file.url === current.url)
+    ) {
+      return false
+    }
+    files.push(current)
+    current = null
+    return true
   }
+
+  for (const line of lines) {
+    if (!line.trim()) continue
+    if (line.includes('\t')) return null
+
+    const itemMatch = /^  - url:\s*(.*)$/.exec(line)
+    if (itemMatch) {
+      if (!filesStarted || (current && !finishFile())) return null
+      const url = scalar(itemMatch[1])
+      if (!url) return null
+      current = { url, sha512: '' }
+      continue
+    }
+
+    const filePropertyMatch =
+      /^    ([A-Za-z][A-Za-z0-9]*):(?:\s*(.*))?$/.exec(line)
+    if (filePropertyMatch && current) {
+      const key = filePropertyMatch[1]
+      const value = scalar(filePropertyMatch[2] ?? '')
+      if (!value || (key !== 'sha512' && key !== 'size')) return null
+      if (key === 'sha512') {
+        if (current.sha512) return null
+        current.sha512 = value
+      } else {
+        if (current.size !== undefined || !/^[1-9]\d*$/.test(value)) return null
+        current.size = Number(value)
+        if (!Number.isSafeInteger(current.size)) return null
+      }
+      continue
+    }
+
+    const topMatch = /^([A-Za-z][A-Za-z0-9]*):(?:\s*(.*))?$/.exec(line)
+    if (!topMatch) return null
+    const key = topMatch[1]
+    if (topKeys.has(key)) return null
+    topKeys.add(key)
+    if (key === 'files') {
+      if (topMatch[2]?.trim()) return null
+      filesStarted = true
+    } else if (key === 'version' || key === 'path' || key === 'sha512') {
+      const value = scalar(topMatch[2] ?? '')
+      if (!value) return null
+      if (key === 'version') version = value
+      else if (key === 'path') path = value
+      else topLevelSha512 = value
+    } else if (key !== 'releaseDate') {
+      return null
+    }
+  }
+  if (current && !finishFile()) return null
 
   return {
     files,
     path,
     topLevelSha512,
     version,
-    hasDuplicateTopLevelFields:
-      versionMatches.length > 1 ||
-      pathMatches.length > 1 ||
-      topLevelChecksumMatches.length > 1 ||
-      checksumMatches.length > files.length + 1,
+    hasDuplicateTopLevelFields: false,
+    hasRequiredFields:
+      Boolean(version && filesStarted && topLevelSha512 && files.length > 0),
   }
 }
 
@@ -85,11 +158,17 @@ export function validateLatestMacMetadata(
   releaseAssets,
 ) {
   const parsed = parseMetadata(metadata)
+  if (!parsed) {
+    throw new Error('latest-mac.yml has malformed updater metadata')
+  }
   if (!/^\d+\.\d+\.\d+$/.test(expectedVersion)) {
     throw new Error(`expected desktop version must be stable semver: ${expectedVersion}`)
   }
   if (parsed.hasDuplicateTopLevelFields) {
     throw new Error('latest-mac.yml has duplicate or malformed top-level metadata fields')
+  }
+  if (!parsed.hasRequiredFields) {
+    throw new Error('latest-mac.yml is missing required updater metadata fields')
   }
   if (parsed.version !== expectedVersion) {
     throw new Error(
@@ -151,6 +230,17 @@ export function validateLatestMacMetadata(
   )
   if (missingAssets.length > 0) {
     throw new Error(`missing release assets: ${missingAssets.join(', ')}`)
+  }
+
+  const allowedAssets = new Set([
+    'latest-mac.yml',
+    ...expectedInstallerAssets(expectedVersion),
+  ])
+  const unexpectedAssets = [...releaseAssets.keys()].filter(
+    (asset) => !allowedAssets.has(asset),
+  )
+  if (unexpectedAssets.length > 0) {
+    throw new Error(`unexpected release assets: ${unexpectedAssets.join(', ')}`)
   }
 }
 

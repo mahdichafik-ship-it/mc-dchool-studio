@@ -21,7 +21,7 @@ test('normalizes the shared base filename for pairing', () => {
   assert.equal(normalizeBaseFilename('DSC_8291.NEF'), 'dsc_8291')
 })
 
-test('creates one capture and pairs a delayed RAW file', () => {
+test('pairs delayed RAW with JPEG assignment after active target changes', () => {
   const engine = new CapturePairingEngine()
   const first = engine.ingest({
     projectId: 2,
@@ -54,6 +54,7 @@ test('creates one capture and pairs a delayed RAW file', () => {
   assert.equal(second.capture.classId, 7)
   assert.equal(second.capture.assignmentLocked, true)
   assert.deepEqual(second.capture.files.map((file) => file.role), ['JPEG', 'RAW'])
+  assert.equal(second.capture.files[1]?.filePath, '/spool/raw/DSC_8291.NEF')
 })
 
 test('keeps a RAW-only capture visible while the JPEG is missing', () => {

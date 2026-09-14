@@ -98,7 +98,10 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch main
-        run: git fetch --no-tags origin main:refs/remotes/origin/main
+        # Fetch the fully qualified branch and replace any tracking ref left by
+        # checkout. A stale local origin/main must never become the ancestry
+        # authority for a tagged release.
+        run: git fetch --no-tags --force origin refs/heads/main:refs/remotes/origin/main
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -524,16 +527,37 @@ jobs:
         run: |
           set -euo pipefail
           expected="$(find release -maxdepth 1 -type f -printf '%f\n' | sort)"
-          uploaded="$(gh release view "$RELEASE_TAG" \
+          gh release view "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets[].name' | sort)"
+            --json assets > "$RUNNER_TEMP/uploaded-release-assets.json"
+          uploaded="$(node -e "const fs=require('fs'); const value=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(value.assets.map(asset=>asset.name).sort().join('\\n'))" "$RUNNER_TEMP/uploaded-release-assets.json")"
 
           if [ "$uploaded" != "$expected" ]; then
             echo "::error::Uploaded release assets do not match the verified staging directory"
             diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$uploaded") || true
             exit 1
           fi
+
+          VERSION="${RELEASE_TAG#v}" UPLOADED_ASSETS="$RUNNER_TEMP/uploaded-release-assets.json" node <<'NODE'
+          const { createHash } = require('crypto')
+          const fs = require('fs')
+          const path = require('path')
+
+          const uploaded = JSON.parse(fs.readFileSync(process.env.UPLOADED_ASSETS, 'utf8')).assets
+          const byName = new Map(uploaded.map((asset) => [asset.name, asset]))
+          const stagedNames = fs.readdirSync('release')
+          for (const name of stagedNames) {
+            const filePath = path.join('release', name)
+            const stat = fs.statSync(filePath)
+            if (!stat.isFile()) throw new Error(`staging directory contains a non-file: ${name}`)
+            const digest = `sha256:${createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')}`
+            const asset = byName.get(name)
+            if (!asset || asset.size !== stat.size || asset.digest !== digest) {
+              throw new Error(`uploaded asset ${name} does not match the verified staged bytes`)
+            }
+          }
+          console.log(`Verified uploaded SHA-256 digests for ${stagedNames.length} assets.`)
+          NODE
 
           gh release edit "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \

@@ -841,16 +841,40 @@ export type DeliveryPhotosResponseGallery = {
   expiresAt?: string | null;
 };
 
-export type DeliveryPhotosResponseStudent = { [key: string]: unknown };
+export type DeliveryPhotosResponseStudentProjectType = typeof DeliveryPhotosResponseStudentProjectType[keyof typeof DeliveryPhotosResponseStudentProjectType];
 
-export type DeliveryPhotosResponseSubject = { [key: string]: unknown };
+
+export const DeliveryPhotosResponseStudentProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export type DeliveryPhotosResponseStudent = {
+  firstName: string;
+  lastName: string;
+  label: string;
+  departmentName?: string;
+  projectType: DeliveryPhotosResponseStudentProjectType;
+};
+
+export type DeliveryPhotosResponseSubject = {
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  label: string;
+  /** @nullable */
+  organizationName: string | null;
+  groupLabel: string;
+  /** @nullable */
+  groupName: string | null;
+};
 
 export type DeliveryPhotosResponsePrice = { [key: string]: unknown };
 
 export interface DeliveryPhotosResponse {
   gallery: DeliveryPhotosResponseGallery;
   student: DeliveryPhotosResponseStudent;
-  subject?: DeliveryPhotosResponseSubject;
+  subject: DeliveryPhotosResponseSubject;
   price?: DeliveryPhotosResponsePrice;
   offers: DeliveryOffer[];
   /** Whether at least one complete Volume Capture offer is available. */

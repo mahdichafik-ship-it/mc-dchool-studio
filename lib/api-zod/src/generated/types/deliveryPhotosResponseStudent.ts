@@ -5,5 +5,12 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeliveryPhotosResponseStudentProjectType } from './deliveryPhotosResponseStudentProjectType';
 
-export type DeliveryPhotosResponseStudent = { [key: string]: unknown };
+export type DeliveryPhotosResponseStudent = {
+  firstName: string;
+  lastName: string;
+  label: string;
+  departmentName?: string;
+  projectType: DeliveryPhotosResponseStudentProjectType;
+};

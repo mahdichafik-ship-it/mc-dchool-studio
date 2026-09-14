@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import sharp from "sharp";
 import test, { after, before } from "node:test";
 import express from "express";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   classesTable,
   captureFilesTable,
@@ -20,6 +20,7 @@ import {
   marketingVisitsTable,
   groupCaptureFilesTable,
   groupCapturesTable,
+  groupMembersTable,
   groupsTable,
   photoStorageCopiesTable,
   pool,
@@ -57,6 +58,8 @@ let uploadingPhotoId: number;
 let failedPhotoId: number;
 let unpaidPhotoId: number;
 let unsharedPhotoId: number;
+let rawPhotoId: number;
+let unratedPhotoId: number;
 let paidAccessToken: string;
 let unpaidAccessToken: string;
 const r2RequestedKeys: string[] = [];
@@ -300,6 +303,12 @@ before(async () => {
   failedPhotoId = await insertPhoto(studentId, "failed.jpg");
   unpaidPhotoId = await insertPhoto(unpaidStudentId, "unpaid.jpg");
   unsharedPhotoId = await insertPhoto(studentId, "unshared.jpg");
+  rawPhotoId = await insertPhoto(studentId, "selected.raw");
+  await db.update(studentPhotosTable).set({ mimeType: "image/x-canon-cr2" })
+    .where(eq(studentPhotosTable.id, rawPhotoId));
+  unratedPhotoId = await insertPhoto(studentId, "unrated.jpg");
+  await db.update(studentPhotosTable).set({ rating: 0 })
+    .where(eq(studentPhotosTable.id, unratedPhotoId));
   await db.update(studentPhotosTable).set({ shareWithParents: false })
     .where(eq(studentPhotosTable.id, unsharedPhotoId));
 
@@ -315,6 +324,7 @@ before(async () => {
     pairingStatus: "complete",
     rating: 1,
   }).returning({ id: groupCapturesTable.id });
+  await db.insert(groupMembersTable).values({ groupId: group.id, studentId });
   const [groupFile] = await db.insert(groupCaptureFilesTable).values({
     captureId: groupCapture.id,
     fileRole: "JPEG",
@@ -501,6 +511,8 @@ test("creates one persistent watermarked thumbnail and reuses it for later galle
   };
   const listed = gallery.photos.find((photo) => photo.id === readyStudentPhotoId);
   assert(listed);
+  assert.equal(gallery.photos.some((photo) => photo.id === rawPhotoId), false);
+  assert.equal(gallery.photos.some((photo) => photo.id === unratedPhotoId), false);
   assert.match(listed.fileUrl, /preview=1&size=thumbnail/);
 
   const first = await fetch(`${baseUrl}${listed.fileUrl}`);
@@ -529,6 +541,31 @@ test("creates one persistent watermarked thumbnail and reuses it for later galle
   );
 });
 
+test("rejects another subject's photo from listing, ordering, preview, and download", async () => {
+  const galleryResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/gallery`, {
+    headers: { "x-delivery-token": paidAccessToken },
+  });
+  assert.equal(galleryResponse.status, 200);
+  assert.equal((await galleryResponse.json() as { photos: Array<{ id: number }> })
+    .photos.some((photo) => photo.id === unpaidPhotoId), false);
+
+  const orderResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: paidAccessToken,
+      offerId: "digital-single",
+      photoIds: [unpaidPhotoId],
+      quantity: 1,
+      customerName: "Wrong subject",
+      paymentMethod: "stripe",
+    }),
+  });
+  assert.equal(orderResponse.status, 400);
+  assert.equal((await requestPhoto(unpaidPhotoId, paidAccessToken, "preview=1")).status, 404);
+  assert.equal((await requestPhoto(unpaidPhotoId, paidAccessToken)).status, 404);
+});
+
 test("selects a ready group source copy for a materialized group photo", async () => {
   r2RequestedKeys.length = 0;
   objectStorageReads = 0;
@@ -539,6 +576,42 @@ test("selects a ready group source copy for a materialized group photo", async (
   assert(r2RequestedKeys.includes("ready/group.jpg"));
   assert(r2RequestedKeys.some((key) => key.includes("__download__")));
   assert.equal(objectStorageReads, 0);
+});
+
+test("enforces current group membership without deleting purchased photo identity", async () => {
+  const [groupPhoto] = await db.select().from(studentPhotosTable)
+    .where(eq(studentPhotosTable.id, readyGroupPhotoId));
+  assert(groupPhoto.sourceGroupCaptureFileId);
+  const [groupFile] = await db.select().from(groupCaptureFilesTable)
+    .where(eq(groupCaptureFilesTable.id, groupPhoto.sourceGroupCaptureFileId));
+  const [capture] = await db.select().from(groupCapturesTable)
+    .where(eq(groupCapturesTable.id, groupFile.captureId));
+
+  await db.delete(groupMembersTable).where(and(
+    eq(groupMembersTable.groupId, capture.groupId),
+    eq(groupMembersTable.studentId, studentId),
+  ));
+  const removedResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/gallery`, {
+    headers: { "x-delivery-token": paidAccessToken },
+  });
+  assert.equal(removedResponse.status, 200);
+  assert.equal((await removedResponse.json() as { photos: Array<{ id: number }> })
+    .photos.some((photo) => photo.id === readyGroupPhotoId), false);
+  assert.equal((await requestPhoto(readyGroupPhotoId, paidAccessToken, "preview=1")).status, 404);
+  const [preservedPhoto] = await db.select().from(studentPhotosTable)
+    .where(eq(studentPhotosTable.id, readyGroupPhotoId));
+  assert.equal(preservedPhoto.id, readyGroupPhotoId);
+  const [preservedItem] = await db.select().from(deliveryOrderItemsTable)
+    .where(eq(deliveryOrderItemsTable.photoId, readyGroupPhotoId)).limit(1);
+  assert.equal(preservedItem.photoId, readyGroupPhotoId);
+
+  await db.insert(groupMembersTable).values({ groupId: capture.groupId, studentId });
+  const restoredResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/gallery`, {
+    headers: { "x-delivery-token": paidAccessToken },
+  });
+  assert.equal(restoredResponse.status, 200);
+  const restored = await restoredResponse.json() as { photos: Array<{ id: number; fileName: string }> };
+  assert(restored.photos.some((photo) => photo.id === readyGroupPhotoId));
 });
 
 test("rejects unauthorized and unpaid requests before either storage backend", async () => {
@@ -590,6 +663,26 @@ test("does not expose a positively-rated unshared photo through listing, orderin
   }
   assert.deepEqual(r2RequestedKeys, []);
   assert.equal(objectStorageReads, 0);
+});
+
+test("does not expose RAW or unrated files through ordering, preview, or download", async () => {
+  for (const photoId of [rawPhotoId, unratedPhotoId]) {
+    const orderResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token: paidAccessToken,
+        offerId: "digital-single",
+        photoIds: [photoId],
+        quantity: 1,
+        customerName: "Ineligible photo",
+        paymentMethod: "stripe",
+      }),
+    });
+    assert.equal(orderResponse.status, 400);
+    assert.equal((await requestPhoto(photoId, paidAccessToken, "preview=1")).status, 404);
+    assert.equal((await requestPhoto(photoId, paidAccessToken)).status, 404);
+  }
 });
 
 test("keeps an authorized R2 read failure private instead of serving stale Object Storage bytes", async () => {

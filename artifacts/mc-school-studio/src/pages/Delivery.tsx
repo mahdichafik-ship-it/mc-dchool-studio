@@ -108,6 +108,24 @@ export default function Delivery() {
   }, [locale]);
 
   useEffect(() => {
+    setToken(null);
+    setEmail("");
+    setMarketingConsent(false);
+    setCode("");
+    setSelected(new Set());
+    setBasket([]);
+    setViewingBasket(false);
+    setPaidPhotoIds(new Set());
+    setOrderIdToCheck(null);
+    setSelectedOfferId("");
+    setQuantity(1);
+    setCustomerName("");
+    setCustomerEmail("");
+    setDeliveryMethod("digital");
+    setPaymentMethod("establishment");
+    setDeliveryAddress("");
+    setNotice(null);
+
     const query = new URLSearchParams(window.location.search);
     const initialCode = query.get("code");
     if (initialCode) setCode(initialCode);
@@ -120,7 +138,7 @@ export default function Delivery() {
     if (orderParam) {
       setOrderIdToCheck(Number(orderParam));
     }
-  }, []);
+  }, [slug]);
 
   const { data: gallery, isLoading: galleryLoading, error: galleryError } = useGetDeliveryGallery(slug as string, {
     query: { enabled: !!slug, queryKey: getGetDeliveryGalleryQueryKey(slug as string) }
@@ -129,6 +147,11 @@ export default function Delivery() {
   const enterAccess = useEnterDeliveryAccess();
   const createOrder = useCreateDeliveryOrder();
 
+  useEffect(() => {
+    enterAccess.reset();
+    createOrder.reset();
+  }, [slug]);
+
   const { data: content, isLoading: contentLoading, isError: contentIsError, error: contentError, refetch: refetchContent } = useGetDeliveryPhotos(slug as string, {
     query: { 
       enabled: !!slug && !!token,
@@ -136,6 +159,17 @@ export default function Delivery() {
     },
     request: { headers: { 'x-delivery-token': token as string } }
   });
+
+  useEffect(() => {
+    if (!contentIsError) return;
+    setToken(null);
+    setSelected(new Set());
+    setBasket([]);
+    setViewingBasket(false);
+    setPaidPhotoIds(new Set());
+    setOrderIdToCheck(null);
+    setSelectedOfferId("");
+  }, [contentIsError]);
 
   useEffect(() => {
     if (content?.offers && content.offers.length > 0 && !selectedOfferId) {
@@ -177,6 +211,9 @@ export default function Delivery() {
         setToken(res.token);
         setSelected(new Set());
         setBasket([]);
+        setViewingBasket(false);
+        setPaidPhotoIds(new Set());
+        setSelectedOfferId("");
       }
     });
   }
@@ -357,6 +394,11 @@ export default function Delivery() {
           <div className="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
              <h1 className="text-2xl font-bold tracking-tight">{t("privateGallery")}</h1>
              <p className="mt-2 text-sm leading-6 text-slate-500">{t("accessText")}</p>
+             {noticeText && (
+               <div role="status" className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
+                 {noticeText}
+               </div>
+             )}
              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
                Your email is used to identify your gallery access and send important updates about this gallery.
              </div>
@@ -621,31 +663,10 @@ export default function Delivery() {
   }
 
   const offers = content.offers || [];
-  const deliveryContent = content as typeof content & {
-    gallery?: { projectType?: string; subjectLabel?: string; groupLabel?: string };
-    subject?: { displayName?: string; label?: string; departmentName?: string | null };
-  };
-  const subject: {
-    displayName?: string;
-    label?: string;
-    departmentName?: string | null;
-    companyName?: string | null;
-    firstName?: string;
-    lastName?: string;
-  } = (deliveryContent.subject as {
-    displayName?: string;
-    label?: string;
-    departmentName?: string | null;
-    companyName?: string | null;
-    firstName?: string;
-    lastName?: string;
-  } | undefined) ?? (content.student as { firstName?: string; lastName?: string });
-  const subjectLabel = subject.label
-    ?? deliveryContent.gallery?.subjectLabel
-    ?? "Student";
-  const subjectName = deliveryContent.subject?.displayName
-    ?? `${subject?.firstName ?? ""} ${subject?.lastName ?? ""}`.trim();
-  const isCorporate = deliveryContent.gallery?.projectType === "corporate";
+  const subject = content.subject;
+  const subjectLabel = subject.label;
+  const subjectName = subject.displayName;
+  const isCorporate = content.gallery.projectType === "corporate";
 
   return (
     <div style={brandStyle} className="min-h-[100dvh] bg-slate-50 text-slate-900">
@@ -657,7 +678,27 @@ export default function Delivery() {
           </div>
           <LanguageSelector />
           <button 
-            onClick={() => { setToken(null); setCode(""); setBasket([]); setSelected(new Set()); }} 
+            onClick={() => {
+              setToken(null);
+              setCode("");
+              setEmail("");
+              setMarketingConsent(false);
+              setBasket([]);
+              setSelected(new Set());
+              setViewingBasket(false);
+              setPaidPhotoIds(new Set());
+              setOrderIdToCheck(null);
+              setSelectedOfferId("");
+              setQuantity(1);
+              setCustomerName("");
+              setCustomerEmail("");
+              setDeliveryMethod("digital");
+              setPaymentMethod("establishment");
+              setDeliveryAddress("");
+              setNotice(null);
+              enterAccess.reset();
+              createOrder.reset();
+            }}
             className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-900"
           >
             {t("anotherCode")}
@@ -672,12 +713,12 @@ export default function Delivery() {
             <h1 className="mt-1 text-3xl font-bold tracking-tight">
               {subjectName}
             </h1>
-            {isCorporate && subject?.companyName && (
-              <p className="mt-1 text-sm text-slate-500">{subject.companyName}</p>
+            {isCorporate && subject.organizationName && (
+              <p className="mt-1 text-sm text-slate-500">{subject.organizationName}</p>
             )}
-            {isCorporate && subject.departmentName && (
+            {subject.groupName && (
               <p className="mt-1 text-sm text-slate-500">
-                {deliveryContent.gallery?.groupLabel ?? "Department"}: {subject.departmentName}
+                {subject.groupLabel}: {subject.groupName}
               </p>
             )}
           </div>

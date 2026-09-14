@@ -7,9 +7,12 @@ import express from "express";
 import { eq } from "drizzle-orm";
 import {
   classesTable,
+  captureFilesTable,
+  capturesTable,
   db,
   deliveryAccessesTable,
   deliveryGalleriesTable,
+  deliveryPriceSheetsTable,
   marketingCampaignRecipientsTable,
   marketingCampaignsTable,
   marketingContactsTable,
@@ -18,6 +21,7 @@ import {
   projectsTable,
   studioMembersTable,
   studiosTable,
+  studentPhotosTable,
   studentsTable,
 } from "@workspace/db";
 import deliveryRouter from "../src/routes/delivery";
@@ -173,6 +177,44 @@ test("requires email and records consent plus append-only repeat visits", async 
     body: JSON.stringify({ code: accessCode, email: "Lead@Example.com", marketingConsent: true }),
   });
   assert.equal(first.status, 200);
+  const firstToken = (await json<{ token: string }>(first)).token;
+  const corporateGallery = await request("public", `/api/delivery/${slug}/gallery`, {
+    headers: { "x-delivery-token": firstToken },
+  });
+  assert.equal(corporateGallery.status, 200);
+  const corporateContent = await json<{
+    gallery: { projectType: string; subjectLabel: string; groupLabel: string };
+    subject: {
+      displayName: string;
+      label: string;
+      organizationName: string;
+      groupLabel: string;
+      groupName: string;
+    };
+  }>(corporateGallery);
+  assert.deepEqual(corporateContent.gallery, {
+    projectType: "corporate",
+    subjectLabel: "Employee",
+    groupLabel: "Department",
+    slug,
+    status: "published",
+    expiresAt: null,
+    studio: {
+      name: `Marketing Studio ${suffix}`,
+      tagline: "Private photo delivery",
+      primaryColor: "#0F766E",
+      accentColor: "#14B8A6",
+    },
+  });
+  assert.deepEqual(corporateContent.subject, {
+    firstName: "Marketing",
+    lastName: "Contact",
+    displayName: "Marketing Contact",
+    label: "Employee",
+    organizationName: `Marketing Project ${suffix}`,
+    groupLabel: "Department",
+    groupName: `Marketing Department ${suffix}`,
+  });
   const repeat = await request("public", `/api/delivery/${slug}/access`, {
     method: "POST",
     body: JSON.stringify({ code: accessCode, email: " lead@example.com ", marketingConsent: true }),
@@ -366,6 +408,91 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   assert.equal(storedUncertainCampaign.sentCount, 0);
   resendResponseMode = "success";
   assert(uncertainContact.id);
+});
+
+test("publishes only delivery-eligible JPEGs and creates access records idempotently", async () => {
+  const offersJson = JSON.stringify({
+    offers: [{
+      id: "digital-single",
+      name: "Digital photo",
+      productType: "digital",
+      unitAmount: 100,
+      currency: "usd",
+      paymentMethods: ["establishment"],
+      photoCount: 1,
+      deliveryMethods: ["digital"],
+      active: true,
+      includesDigitalDownloads: true,
+    }],
+  });
+  const [priceSheet] = await db.insert(deliveryPriceSheetsTable).values({
+    studioId,
+    name: `Release 2 price sheet ${suffix}`,
+    offersJson,
+  }).returning({ id: deliveryPriceSheetsTable.id });
+  await db.update(deliveryGalleriesTable).set({
+    status: "draft",
+    priceSheetId: priceSheet.id,
+  }).where(eq(deliveryGalleriesTable.id, galleryId));
+  await db.insert(studentPhotosTable).values({
+    projectId,
+    studentId,
+    fileName: "selected.raw",
+    fileUrl: "/objects/selected.raw",
+    durableObjectPath: null,
+    mimeType: "image/x-canon-cr2",
+    rating: 1,
+    shareWithParents: true,
+  });
+  const [studentClass] = await db.select().from(classesTable)
+    .where(eq(classesTable.projectId, projectId)).limit(1);
+  const [newSubject] = await db.insert(studentsTable).values({
+    projectId,
+    classId: studentClass.id,
+    firstName: "Concurrent",
+    lastName: "Subject",
+    generatedStudentId: `MKT-CONCURRENT-${suffix}`,
+  }).returning({ id: studentsTable.id });
+
+  const concurrent = await Promise.all([
+    request(ownerUserId, `/api/projects/${projectId}/delivery/publish`, { method: "POST" }),
+    request(ownerUserId, `/api/projects/${projectId}/delivery/publish`, { method: "POST" }),
+  ]);
+  assert.deepEqual(concurrent.map((response) => response.status), [200, 200]);
+  const publicationTimes = (await Promise.all(concurrent.map((response) =>
+    json<{ gallery: { publishedAt: string } }>(response)
+  ))).map((response) => response.gallery.publishedAt);
+  assert.equal(new Set(publicationTimes).size, 1);
+  const accesses = await db.select().from(deliveryAccessesTable)
+    .where(eq(deliveryAccessesTable.studentId, newSubject.id));
+  assert.equal(accesses.length, 1);
+
+  await db.update(deliveryGalleriesTable).set({ status: "draft" })
+    .where(eq(deliveryGalleriesTable.id, galleryId));
+  const [capture] = await db.insert(capturesTable).values({
+    captureKey: `unready-jpeg-${suffix}`,
+    projectId,
+    studentId,
+    baseFilename: "unready-jpeg",
+    rating: 1,
+  }).returning({ id: capturesTable.id });
+  const [file] = await db.insert(captureFilesTable).values({
+    captureId: capture.id,
+    fileRole: "JPEG",
+    fileFormat: "JPG",
+    originalFilename: "unready-jpeg.jpg",
+    fileUrl: "/objects/unready-jpeg.jpg",
+    durableObjectPath: null,
+    mimeType: "image/jpeg",
+  }).returning({ id: captureFilesTable.id });
+  const blocked = await request(ownerUserId, `/api/projects/${projectId}/delivery/publish`, { method: "POST" });
+  assert.equal(blocked.status, 409);
+  assert.equal((await json<{ code: string }>(blocked)).code, "PHOTO_STORAGE_INCOMPLETE");
+
+  await db.update(captureFilesTable).set({ durableObjectPath: "/objects/unready-jpeg.jpg" })
+    .where(eq(captureFilesTable.id, file.id));
+  const published = await request(ownerUserId, `/api/projects/${projectId}/delivery/publish`, { method: "POST" });
+  assert.equal(published.status, 200);
 });
 
 test("regenerating an access code immediately invalidates existing delivery tokens", async () => {

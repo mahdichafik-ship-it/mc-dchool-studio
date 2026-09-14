@@ -1916,7 +1916,7 @@ components:
             expiresAt: { type: ["string", "null"] }
     DeliveryPhotosResponse:
       type: object
-      required: [gallery, student, photos, offers, orderingAvailable, stripeAvailable]
+      required: [gallery, student, subject, photos, offers, orderingAvailable, stripeAvailable]
       properties:
         gallery:
           type: object
@@ -1928,8 +1928,26 @@ components:
             groupLabel: { type: string }
             priceSheetId: { type: ["integer", "null"] }
             expiresAt: { type: ["string", "null"] }
-        student: { type: object, additionalProperties: true }
-        subject: { type: object, additionalProperties: true }
+        student:
+          type: object
+          required: [firstName, lastName, label, projectType]
+          properties:
+            firstName: { type: string }
+            lastName: { type: string }
+            label: { type: string }
+            departmentName: { type: string }
+            projectType: { type: string, enum: [school, corporate] }
+        subject:
+          type: object
+          required: [firstName, lastName, displayName, label, organizationName, groupLabel, groupName]
+          properties:
+            firstName: { type: string }
+            lastName: { type: string }
+            displayName: { type: string }
+            label: { type: string }
+            organizationName: { type: ["string", "null"] }
+            groupLabel: { type: string }
+            groupName: { type: ["string", "null"] }
         price: { type: object, additionalProperties: true }
         offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
         orderingAvailable:

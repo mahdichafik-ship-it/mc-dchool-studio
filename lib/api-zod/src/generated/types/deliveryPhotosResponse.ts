@@ -15,7 +15,7 @@ import type { DeliveryPhotosResponseSubject } from './deliveryPhotosResponseSubj
 export interface DeliveryPhotosResponse {
   gallery: DeliveryPhotosResponseGallery;
   student: DeliveryPhotosResponseStudent;
-  subject?: DeliveryPhotosResponseSubject;
+  subject: DeliveryPhotosResponseSubject;
   price?: DeliveryPhotosResponsePrice;
   offers: DeliveryOffer[];
   /** Whether at least one complete Volume Capture offer is available. */

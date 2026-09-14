@@ -53,6 +53,7 @@ export * from './deliveryPhotosResponseGallery';
 export * from './deliveryPhotosResponseGalleryProjectType';
 export * from './deliveryPhotosResponsePrice';
 export * from './deliveryPhotosResponseStudent';
+export * from './deliveryPhotosResponseStudentProjectType';
 export * from './deliveryPhotosResponseSubject';
 export * from './deliveryPriceSheet';
 export * from './deliveryPriceSheetInput';

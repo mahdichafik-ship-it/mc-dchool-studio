@@ -6,4 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type DeliveryPhotosResponseSubject = { [key: string]: unknown };
+export type DeliveryPhotosResponseSubject = {
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  label: string;
+  /** @nullable */
+  organizationName: string | null;
+  groupLabel: string;
+  /** @nullable */
+  groupName: string | null;
+};

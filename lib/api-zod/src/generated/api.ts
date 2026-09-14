@@ -1250,8 +1250,22 @@ export const GetDeliveryPhotosResponse = zod.object({
   "priceSheetId": zod.number().nullish(),
   "expiresAt": zod.string().nullish()
 }),
-  "student": zod.record(zod.string(), zod.unknown()),
-  "subject": zod.record(zod.string(), zod.unknown()).optional(),
+  "student": zod.object({
+  "firstName": zod.string(),
+  "lastName": zod.string(),
+  "label": zod.string(),
+  "departmentName": zod.string().optional(),
+  "projectType": zod.enum(['school', 'corporate'])
+}),
+  "subject": zod.object({
+  "firstName": zod.string(),
+  "lastName": zod.string(),
+  "displayName": zod.string(),
+  "label": zod.string(),
+  "organizationName": zod.string().nullable(),
+  "groupLabel": zod.string(),
+  "groupName": zod.string().nullable()
+}),
   "price": zod.record(zod.string(), zod.unknown()).optional(),
   "offers": zod.array(zod.object({
   "id": zod.string(),

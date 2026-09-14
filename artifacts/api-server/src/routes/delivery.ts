@@ -13,13 +13,16 @@ import {
   classesTable,
   captureFilesTable,
   capturesTable,
+  groupCaptureFilesTable,
+  groupCapturesTable,
+  groupMembersTable,
   projectsTable,
   studentPhotosTable,
   studentsTable,
   studiosTable,
 } from "@workspace/db";
 import { photoStorageCopiesTable } from "@workspace/db/schema";
-import { and, eq, gt, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, gt, ilike, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject, getStudioMember } from "../lib/studioAccess";
@@ -33,7 +36,7 @@ import {
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { normalizeMarketingEmail, recordSuccessfulGalleryAccess, markContactOrder } from "../lib/marketing";
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
-import { materializeGroupJpegsForDelivery } from "../lib/groupDeliveryPhotos";
+import { materializeGroupJpegsForDelivery, projectAvailableGroupJpegsToStudent } from "../lib/groupDeliveryPhotos";
 import { FailureRateLimiter } from "../lib/failureRateLimiter";
 import {
   deliveryTerminology,
@@ -49,6 +52,28 @@ const ACCESS_LOCK_SECONDS = 15 * 60;
 const PUBLIC_ACCESS_WINDOW_MS = 15 * 60 * 1000;
 const publicAccessByIp = new FailureRateLimiter(20, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
 const publicAccessByGallery = new FailureRateLimiter(200, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
+
+function deliveryPhotoEligibility() {
+  return [
+    isNotNull(studentPhotosTable.durableObjectPath),
+    gt(studentPhotosTable.rating, 0),
+    eq(studentPhotosTable.shareWithParents, true),
+    ilike(studentPhotosTable.mimeType, "image/jpeg%"),
+    or(
+      isNull(studentPhotosTable.sourceGroupCaptureFileId),
+      exists(
+        db.select({ one: sql`1` })
+          .from(groupCaptureFilesTable)
+          .innerJoin(groupCapturesTable, eq(groupCapturesTable.id, groupCaptureFilesTable.captureId))
+          .innerJoin(groupMembersTable, and(
+            eq(groupMembersTable.groupId, groupCapturesTable.groupId),
+            eq(groupMembersTable.studentId, studentPhotosTable.studentId),
+          ))
+          .where(eq(groupCaptureFilesTable.id, studentPhotosTable.sourceGroupCaptureFileId)),
+      ),
+    ),
+  ] as const;
+}
 
 function makeCode(length = 8): string {
   const bytes = randomBytes(length);
@@ -537,6 +562,7 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Delivery access has been revoked" });
     return;
   }
+  await projectAvailableGroupJpegsToStudent(row.gallery.projectId, access.student.id);
 
   const photos = await db
     .select()
@@ -544,11 +570,9 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
     .where(and(
       eq(studentPhotosTable.projectId, row.gallery.projectId),
       eq(studentPhotosTable.studentId, access.student.id),
-      isNotNull(studentPhotosTable.durableObjectPath),
-      gt(studentPhotosTable.rating, 0),
-      eq(studentPhotosTable.shareWithParents, true),
+      ...deliveryPhotoEligibility(),
     ))
-    .orderBy(studentPhotosTable.createdAt);
+    .orderBy(asc(studentPhotosTable.createdAt), asc(studentPhotosTable.id));
 
   const offers = parseOffers(row.gallery.priceSheetJson).filter((offer) => offer.active);
   const priced = pricedOffers(offers);
@@ -568,12 +592,12 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       firstName: access.student.firstName,
       lastName: access.student.lastName,
       displayName: `${access.student.firstName} ${access.student.lastName}`.trim(),
-      employeeName: `${access.student.firstName} ${access.student.lastName}`.trim(),
-      companyName: normalizeDeliveryProjectType(row.project.projectType) === "corporate"
+      organizationName: normalizeDeliveryProjectType(row.project.projectType) === "corporate"
         ? row.project.schoolName
         : null,
       label: deliveryTerminology(normalizeDeliveryProjectType(row.project.projectType)).subjectLabel,
-      departmentName: access.className,
+      groupLabel: deliveryTerminology(normalizeDeliveryProjectType(row.project.projectType)).groupLabel,
+      groupName: access.className || null,
     },
     price: priced[0] ? { unitAmount: priced[0].unitAmount, currency: priced[0].currency } : null,
     offers: priced,
@@ -605,6 +629,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Delivery access has been revoked" });
     return;
   }
+  await projectAvailableGroupJpegsToStudent(row.gallery.projectId, access.student.id);
   const submittedItems: unknown[] = Array.isArray(req.body?.items) && req.body.items.length > 0
     ? req.body.items
     : [{
@@ -639,9 +664,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       eq(studentPhotosTable.projectId, row.gallery.projectId),
       eq(studentPhotosTable.studentId, access.student.id),
       inArray(studentPhotosTable.id, photoIds),
-      isNotNull(studentPhotosTable.durableObjectPath),
-      gt(studentPhotosTable.rating, 0),
-      eq(studentPhotosTable.shareWithParents, true),
+      ...deliveryPhotoEligibility(),
     ));
   if (photos.length !== photoIds.length) {
     res.status(400).json({ error: "One or more selected photos are not available for ordering" });
@@ -884,6 +907,7 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     res.status(401).json({ error: "Delivery access has expired" });
     return;
   }
+  await projectAvailableGroupJpegsToStudent(row.gallery.projectId, tokenAccess.student.id);
 
   const [photo] = await db
     .select({ photo: studentPhotosTable })
@@ -895,8 +919,7 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
       eq(deliveryAccessesTable.id, verified.accessId),
       eq(deliveryAccessesTable.galleryId, row.gallery.id),
       isNull(deliveryAccessesTable.revokedAt),
-      gt(studentPhotosTable.rating, 0),
-      eq(studentPhotosTable.shareWithParents, true),
+      ...deliveryPhotoEligibility(),
     ))
     .limit(1);
   if (!photo) {
@@ -1049,15 +1072,38 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
   }
   await materializeCaptureJpegsForDelivery(projectId);
   await materializeGroupJpegsForDelivery(projectId);
-  const [undeliverablePhoto] = await db
-    .select({ id: studentPhotosTable.id })
-    .from(studentPhotosTable)
-    .where(and(
-      eq(studentPhotosTable.projectId, projectId),
-      isNull(studentPhotosTable.durableObjectPath),
-    ))
-    .limit(1);
-  if (undeliverablePhoto) {
+  const [undeliverableCapture, undeliverableGroup, undeliverableLegacyPhoto] = await Promise.all([
+    db.select({ id: captureFilesTable.id })
+      .from(capturesTable)
+      .innerJoin(captureFilesTable, and(
+        eq(captureFilesTable.captureId, capturesTable.id),
+        eq(captureFilesTable.fileRole, "JPEG"),
+        isNull(captureFilesTable.durableObjectPath),
+      ))
+      .where(and(eq(capturesTable.projectId, projectId), gt(capturesTable.rating, 0)))
+      .limit(1),
+    db.select({ id: groupCaptureFilesTable.id })
+      .from(groupCapturesTable)
+      .innerJoin(groupCaptureFilesTable, and(
+        eq(groupCaptureFilesTable.captureId, groupCapturesTable.id),
+        eq(groupCaptureFilesTable.fileRole, "JPEG"),
+        isNull(groupCaptureFilesTable.durableObjectPath),
+      ))
+      .innerJoin(groupMembersTable, eq(groupMembersTable.groupId, groupCapturesTable.groupId))
+      .where(and(eq(groupCapturesTable.projectId, projectId), gt(groupCapturesTable.rating, 0)))
+      .limit(1),
+    db.select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(and(
+        eq(studentPhotosTable.projectId, projectId),
+        gt(studentPhotosTable.rating, 0),
+        eq(studentPhotosTable.shareWithParents, true),
+        ilike(studentPhotosTable.mimeType, "image/jpeg%"),
+        isNull(studentPhotosTable.durableObjectPath),
+      ))
+      .limit(1),
+  ]);
+  if (undeliverableCapture[0] || undeliverableGroup[0] || undeliverableLegacyPhoto[0]) {
     res.status(409).json({
       error: "Some photos are not in durable storage yet. Re-upload them before publishing delivery.",
       code: "PHOTO_STORAGE_INCOMPLETE",
@@ -1065,28 +1111,29 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     return;
   }
 
-  const now = new Date();
-  [gallery] = await db.update(deliveryGalleriesTable).set({
-    status: "published",
-    priceSheetJson: selectedPriceSheet.offersJson,
-    publishedAt: gallery.publishedAt ?? now,
-    updatedAt: now,
-  }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
-
   const students = await db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId));
-  const existing = await db.select().from(deliveryAccessesTable).where(eq(deliveryAccessesTable.galleryId, gallery.id));
-  const existingByStudent = new Map(existing.map((access) => [access.studentId, access]));
-  for (const student of students) {
-    if (existingByStudent.has(student.id)) continue;
-    const code = makeCode();
-    await db.insert(deliveryAccessesTable).values({
-      galleryId: gallery.id,
-      studentId: student.id,
-      accessCodeHash: hashCode(code),
-      accessCodeEncrypted: encryptStorageValue(code),
-      accessCodeLast4: code.slice(-4),
-    });
-  }
+  const now = new Date();
+  gallery = await db.transaction(async (tx) => {
+    const [published] = await tx.update(deliveryGalleriesTable).set({
+      status: "published",
+      priceSheetJson: selectedPriceSheet.offersJson,
+      publishedAt: sql`coalesce(${deliveryGalleriesTable.publishedAt}, ${now})`,
+      updatedAt: now,
+    }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
+    if (students.length > 0) {
+      await tx.insert(deliveryAccessesTable).values(students.map((student) => {
+        const code = makeCode();
+        return {
+          galleryId: published.id,
+          studentId: student.id,
+          accessCodeHash: hashCode(code),
+          accessCodeEncrypted: encryptStorageValue(code),
+          accessCodeLast4: code.slice(-4),
+        };
+      })).onConflictDoNothing();
+    }
+    return published;
+  });
 
   res.json({
     gallery: {

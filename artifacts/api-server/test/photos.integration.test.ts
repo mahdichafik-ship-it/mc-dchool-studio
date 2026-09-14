@@ -125,6 +125,7 @@ app.use((req, _res, next) => {
   (req as any).auth = authHandler;
   next();
 });
+app.use("/api/projects/:projectId/captures", photosRouter);
 app.use("/api/projects/:projectId/students", photosRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/desktop", desktopRouter);
@@ -421,6 +422,40 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   assert.equal(reviewedCapture.capture.aspectRatio, "4:5");
   assert.equal(reviewedCapture.capture.straightenAngle, 2);
   assert.equal(reviewedCapture.capture.rotation, 90);
+
+  const webCaptureList = await fetch(`${baseUrl}/api/projects/${projectId}/captures`);
+  assert.equal(webCaptureList.status, 200);
+  const webCaptureReview = await webCaptureList.json() as {
+    students: Array<{ studentId: number; captures: Array<{
+      id: number;
+      pairingStatus: string;
+      files: Array<{ id: number; fileRole: string; url: string; fileUrl?: string }>;
+    }> }>;
+    totals: { captures: number; complete: number };
+  };
+  const listedCapture = webCaptureReview.students
+    .find((student) => student.studentId === studentId)
+    ?.captures.find((candidate) => candidate.id === jpegUploaded.captureId);
+  assert(listedCapture);
+  assert.equal(listedCapture.pairingStatus, "complete");
+  assert.equal(webCaptureReview.totals.complete >= 1, true);
+  assert(listedCapture.files.every((file) => file.url.includes("/captures/")));
+  assert(listedCapture.files.every((file) => !("fileUrl" in file)));
+
+  const webJpeg = listedCapture.files.find((file) => file.fileRole === "JPEG");
+  const webRaw = listedCapture.files.find((file) => file.fileRole === "RAW");
+  assert(webJpeg && webRaw);
+  for (const file of [webJpeg, webRaw]) {
+    const fileResponse = await fetch(`${baseUrl}${file.url}`);
+    assert.equal(fileResponse.status, 200);
+  }
+
+  for (const mode of ["paired", "selected", "favorite", "final-selection"] as const) {
+    const exportResponse = await fetch(`${baseUrl}/api/projects/${projectId}/captures/export?mode=${mode}`);
+    assert.equal(exportResponse.status, 200, `${mode} export should be authorized`);
+    assert.match(exportResponse.headers.get("content-type") ?? "", /application\/zip/);
+    assert((await exportResponse.arrayBuffer()).byteLength > 0);
+  }
 
   const [capture] = await db
     .select()

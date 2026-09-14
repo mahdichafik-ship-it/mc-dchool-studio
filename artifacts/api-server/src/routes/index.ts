@@ -25,6 +25,8 @@ router.use("/projects/:projectId/groups", groupsRouter);
 router.use("/projects/:projectId/students", studentsRouter);
 router.use("/projects/:projectId/import", importRouter);
 router.use("/projects/:projectId/export", exportRouter);
+// Web capture review and export: /api/projects/:projectId/captures
+router.use("/projects/:projectId/captures", photosRouter);
 // Photos: /api/projects/:projectId/students/:studentId/photos
 router.use("/projects/:projectId/students", photosRouter);
 // Desktop app sync and browser-based sign-in

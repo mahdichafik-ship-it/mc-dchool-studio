@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Project } from '@workspace/api-client-react';
 import { Download, FileArchive, QrCode, MonitorDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'wouter';
 
 export function ExportsTab({ project, isCorporate }: { project: Project, isCorporate?: boolean }) {
+  const [captureMode, setCaptureMode] = useState('paired');
   
   const downloadZip = () => {
     window.location.href = `/api/projects/${project.id}/export/zip`;
@@ -73,6 +74,50 @@ export function ExportsTab({ project, isCorporate }: { project: Project, isCorpo
           <Button onClick={downloadDesktopJson} className="shrink-0">
             <MonitorDown className="w-4 h-4" />
             Export for Desktop
+          </Button>
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-slate-200">
+        <div className="border border-slate-200 rounded-xl bg-white p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h4 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
+                <Download className="w-5 h-5 text-teal-600" />
+                Export captures
+              </h4>
+              <p className="text-sm text-slate-600">
+                Download the JPEG and RAW files currently visible to this project account. Files stay grouped by {isCorporate ? 'employee' : 'student'} and capture sequence.
+              </p>
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
+              <label htmlFor="capture-export-mode" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Capture filter
+              </label>
+              <select
+                id="capture-export-mode"
+                value={captureMode}
+                onChange={(event) => setCaptureMode(event.target.value)}
+                className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+              >
+                <option value="paired">Paired JPEG + RAW</option>
+                <option value="jpeg_only">JPEG only</option>
+                <option value="raw_only">RAW only</option>
+                <option value="selected">Selected</option>
+                <option value="favorite">Favorites</option>
+                <option value="final_selection">Final selection</option>
+                <option value="all">All captures</option>
+              </select>
+            </div>
+          </div>
+          <Button
+            onClick={() => {
+              window.location.href = `/api/projects/${project.id}/captures/export?mode=${encodeURIComponent(captureMode)}`;
+            }}
+            className="mt-5 bg-teal-600 text-white hover:bg-teal-700"
+          >
+            <Download className="w-4 h-4" />
+            Download capture ZIP
           </Button>
         </div>
       </div>

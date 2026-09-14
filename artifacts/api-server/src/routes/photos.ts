@@ -1,4 +1,5 @@
 import { Router } from "express";
+import JSZip from "jszip";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -26,6 +27,7 @@ import { logger, logPhotoDeleteRecoveryAlert } from "../lib/logger";
 import { canonicalStudentFolderName, GoogleDriveBackupError } from "../lib/googleDriveBackup";
 import { backupFileForStudio } from "../lib/studioStorageBackup";
 import { storePhotoDurably } from "../lib/durablePhotoStorage";
+import { objectStorageService } from "../lib/objectStorage";
 import {
   projectAvailableGroupJpegsToStudent,
   projectGroupJpegToPhotographedStudents,
@@ -503,6 +505,283 @@ function captureFileToResponse(file: typeof captureFilesTable.$inferSelect) {
     fileSize: file.fileSize,
   };
 }
+
+type WebCaptureExportMode =
+  | "all"
+  | "paired"
+  | "jpeg_only"
+  | "raw_only"
+  | "selected"
+  | "favorite"
+  | "final_selection";
+
+function webCaptureExportMode(value: unknown): WebCaptureExportMode | null {
+  const normalized = String(value ?? "all").trim().toLowerCase().replace(/-/g, "_");
+  return ["all", "paired", "jpeg_only", "raw_only", "selected", "favorite", "final_selection"].includes(normalized)
+    ? normalized as WebCaptureExportMode
+    : null;
+}
+
+function captureMatchesExportMode(capture: typeof capturesTable.$inferSelect, mode: WebCaptureExportMode): boolean {
+  switch (mode) {
+    case "paired":
+      return capture.pairingStatus === "complete";
+    case "jpeg_only":
+      return capture.pairingStatus === "jpeg_only";
+    case "raw_only":
+      return capture.pairingStatus === "raw_only";
+    case "selected":
+      return capture.selected;
+    case "favorite":
+      return capture.favorite;
+    case "final_selection":
+      return capture.selected && !capture.rejected;
+    case "all":
+      return true;
+  }
+}
+
+function safeCaptureExportName(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100) || "capture";
+}
+
+function webCaptureFileUrl(projectId: number, captureId: number, fileId: number): string {
+  return `/api/projects/${projectId}/captures/${captureId}/files/${fileId}/file`;
+}
+
+function webCaptureToResponse(
+  capture: typeof capturesTable.$inferSelect,
+  files: typeof captureFilesTable.$inferSelect[],
+  projectId: number,
+) {
+  return {
+    id: capture.id,
+    captureKey: capture.captureKey,
+    baseFilename: capture.baseFilename,
+    capturedAt: capture.capturedAt,
+    sequence: capture.sequence,
+    pairingStatus: capture.pairingStatus,
+    favorite: capture.favorite,
+    rejected: capture.rejected,
+    selected: capture.selected,
+    rating: capture.rating,
+    colorLabel: capture.colorLabel,
+    createdAt: capture.createdAt.toISOString(),
+    updatedAt: capture.updatedAt.toISOString(),
+    files: files.map((file) => ({
+      id: file.id,
+      fileRole: file.fileRole,
+      fileFormat: file.fileFormat,
+      originalFilename: file.originalFilename,
+      mimeType: file.mimeType,
+      fileSize: file.fileSize,
+      url: webCaptureFileUrl(projectId, capture.id, file.id),
+    })),
+  };
+}
+
+async function captureFileBytes(file: typeof captureFilesTable.$inferSelect): Promise<Buffer> {
+  if (file.durableObjectPath) {
+    const object = await objectStorageService.getObjectEntityFile(file.durableObjectPath);
+    const [bytes] = await object.download();
+    return bytes;
+  }
+  return fs.promises.readFile(resolveFilePath(file.fileUrl));
+}
+
+// GET /api/projects/:projectId/captures
+// Web app: list the complete capture review surface grouped by student.
+router.get("/", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+    res.status(400).json({ error: "Invalid projectId" });
+    return;
+  }
+  if (!(await canAccessProject(getUserId(req), projectId, "view"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const [students, captures] = await Promise.all([
+    db.select({
+      id: studentsTable.id,
+      firstName: studentsTable.firstName,
+      lastName: studentsTable.lastName,
+      generatedStudentId: studentsTable.generatedStudentId,
+      className: classesTable.className,
+    })
+      .from(studentsTable)
+      .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
+      .where(eq(studentsTable.projectId, projectId))
+      .orderBy(classesTable.className, studentsTable.lastName, studentsTable.firstName),
+    db.select()
+      .from(capturesTable)
+      .where(eq(capturesTable.projectId, projectId))
+      .orderBy(capturesTable.sequence, capturesTable.createdAt),
+  ]);
+
+  const files = captures.length
+    ? await db.select().from(captureFilesTable).where(inArray(captureFilesTable.captureId, captures.map((capture) => capture.id)))
+    : [];
+  const filesByCapture = new Map<number, typeof files>();
+  for (const file of files) {
+    const captureFiles = filesByCapture.get(file.captureId) ?? [];
+    captureFiles.push(file);
+    filesByCapture.set(file.captureId, captureFiles);
+  }
+  const capturesByStudent = new Map<number, ReturnType<typeof webCaptureToResponse>[]>();
+  for (const capture of captures) {
+    const studentCaptures = capturesByStudent.get(capture.studentId) ?? [];
+    studentCaptures.push(webCaptureToResponse(capture, filesByCapture.get(capture.id) ?? [], projectId));
+    capturesByStudent.set(capture.studentId, studentCaptures);
+  }
+
+  const groups = students
+    .map((student) => ({
+      studentId: student.id,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      generatedStudentId: student.generatedStudentId,
+      className: student.className,
+      captures: capturesByStudent.get(student.id) ?? [],
+    }))
+    .filter((student) => student.captures.length > 0);
+
+  const totals = captures.reduce(
+    (summary, capture) => {
+      summary.captures += 1;
+      if (capture.pairingStatus === "complete") summary.complete += 1;
+      else if (capture.pairingStatus === "jpeg_only") summary.jpegOnly += 1;
+      else if (capture.pairingStatus === "raw_only") summary.rawOnly += 1;
+      return summary;
+    },
+    { captures: 0, complete: 0, jpegOnly: 0, rawOnly: 0 },
+  );
+
+  res.json({ projectId, students: groups, totals });
+});
+
+// GET /api/projects/:projectId/captures/export?mode=paired
+// Web app: download selected capture members without exposing storage paths.
+router.get("/export", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const mode = webCaptureExportMode(req.query.mode ?? req.query.filter);
+  if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+    res.status(400).json({ error: "Invalid projectId" });
+    return;
+  }
+  if (!mode) {
+    res.status(400).json({ error: "Invalid capture export mode" });
+    return;
+  }
+  if (!(await canAccessProject(getUserId(req), projectId, "view"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const [project] = await db.select({
+    schoolName: projectsTable.schoolName,
+  }).from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const captures = await db.select()
+    .from(capturesTable)
+    .where(eq(capturesTable.projectId, projectId))
+    .orderBy(capturesTable.sequence, capturesTable.createdAt);
+  const matchingCaptures = captures.filter((capture) => captureMatchesExportMode(capture, mode));
+  const files = matchingCaptures.length
+    ? await db.select().from(captureFilesTable).where(inArray(captureFilesTable.captureId, matchingCaptures.map((capture) => capture.id)))
+    : [];
+  const filesByCapture = new Map<number, typeof files>();
+  for (const file of files) {
+    const captureFiles = filesByCapture.get(file.captureId) ?? [];
+    captureFiles.push(file);
+    filesByCapture.set(file.captureId, captureFiles);
+  }
+  const studentIds = [...new Set(matchingCaptures.map((capture) => capture.studentId))];
+  const students = studentIds.length
+    ? await db.select({
+      id: studentsTable.id,
+      firstName: studentsTable.firstName,
+      lastName: studentsTable.lastName,
+    }).from(studentsTable).where(inArray(studentsTable.id, studentIds))
+    : [];
+  const studentById = new Map(students.map((student) => [student.id, student]));
+
+  const zip = new JSZip();
+  for (const capture of matchingCaptures) {
+    const student = studentById.get(capture.studentId);
+    const studentName = safeCaptureExportName(student ? `${student.lastName}_${student.firstName}` : `student-${capture.studentId}`);
+    const sequence = String(capture.sequence ?? capture.id).padStart(6, "0");
+    const folder = `${studentName}/${sequence}_${safeCaptureExportName(capture.baseFilename)}`;
+    for (const file of filesByCapture.get(capture.id) ?? []) {
+      try {
+        zip.file(`${folder}/${safeCaptureExportName(file.originalFilename)}`, await captureFileBytes(file));
+      } catch {
+        // Omit a missing member while preserving other valid capture files.
+      }
+    }
+  }
+
+  const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+  const safeProjectName = safeCaptureExportName(project.schoolName);
+  res.set("Content-Type", "application/zip");
+  res.set("Content-Disposition", `attachment; filename="${safeProjectName}_${mode}_captures.zip"`);
+  res.send(zipBuffer);
+});
+
+// GET /api/projects/:projectId/captures/:captureId/files/:fileId/file
+// Web app: authenticated file proxy for either a JPEG or RAW member.
+router.get("/:captureId/files/:fileId/file", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const captureId = Number(req.params.captureId);
+  const fileId = Number(req.params.fileId);
+  if (![projectId, captureId, fileId].every((value) => Number.isSafeInteger(value) && value > 0)) {
+    res.status(400).json({ error: "Invalid capture file parameters" });
+    return;
+  }
+  if (!(await canAccessProject(getUserId(req), projectId, "view"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [result] = await db.select({ file: captureFilesTable, capture: capturesTable })
+    .from(captureFilesTable)
+    .innerJoin(capturesTable, eq(captureFilesTable.captureId, capturesTable.id))
+    .where(and(
+      eq(captureFilesTable.id, fileId),
+      eq(captureFilesTable.captureId, captureId),
+      eq(capturesTable.id, captureId),
+      eq(capturesTable.projectId, projectId),
+    ))
+    .limit(1);
+  if (!result) {
+    res.status(404).json({ error: "Capture file not found" });
+    return;
+  }
+
+  const fileName = result.file.originalFilename.replace(/["\r\n]/g, "_");
+  res.setHeader("Content-Type", result.file.mimeType || "application/octet-stream");
+  res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (result.file.durableObjectPath) {
+    const object = await objectStorageService.getObjectEntityFile(result.file.durableObjectPath);
+    object.createReadStream().pipe(res);
+    return;
+  }
+  const filePath = resolveFilePath(result.file.fileUrl);
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ error: "Capture file not found on server" });
+    return;
+  }
+  res.sendFile(filePath);
+});
 
 async function backupUploadedFile(
   projectId: number,

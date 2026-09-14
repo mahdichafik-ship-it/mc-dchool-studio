@@ -62,6 +62,10 @@ function photoFileUrl(projectId: number, studentId: number, photoId: number): st
   return `/api/projects/${projectId}/students/${studentId}/photos/${photoId}/file?size=thumbnail`;
 }
 
+function originalPhotoFileUrl(projectId: number, studentId: number, photoId: number): string {
+  return `/api/projects/${projectId}/students/${studentId}/photos/${photoId}/file?download=original`;
+}
+
 export function PhotosTab({ projectId, isCorporate }: { projectId: number, isCorporate?: boolean }) {
   const { data: students = [], isLoading: studentsLoading } = useListStudents(projectId);
   const [loading, setLoading] = useState(false);
@@ -252,6 +256,7 @@ export function PhotosTab({ projectId, isCorporate }: { projectId: number, isCor
 function PhotoCard({ photo, canManage, onReviewed }: { photo: CloudPhoto, canManage: boolean, onReviewed: (photo: CloudPhoto) => void }) {
   // Use the authenticated proxy endpoint — browser sends session cookie automatically
   const fileUrl = photoFileUrl(photo.projectId, photo.studentId, photo.id);
+  const originalFileUrl = originalPhotoFileUrl(photo.projectId, photo.studentId, photo.id);
   const [saving, setSaving] = useState(false);
   const isDoNotShare = photo.rating === 0 && photo.colorLabel === 'red';
   const isSelected = photo.rating > 0 && photo.shareWithParents;
@@ -286,7 +291,7 @@ function PhotoCard({ photo, canManage, onReviewed }: { photo: CloudPhoto, canMan
             {isSelected ? `${photo.rating} star${photo.rating === 1 ? '' : 's'} · Gallery` : isDoNotShare ? 'Do not share' : 'Needs review'}
           </span>
           <a
-            href={fileUrl}
+            href={originalFileUrl}
             download={photo.fileName}
             target="_blank"
             rel="noopener noreferrer"

@@ -18,6 +18,10 @@ import {
   useListStudioPriceSheets,
 } from "@workspace/api-client-react";
 import { format } from "date-fns";
+import {
+  deliveryAccessCardTerminology,
+  printableDeliveryAccessUrl,
+} from "@/lib/deliveryAccessCard";
 
 type StudioBranding = {
   name: string;
@@ -407,8 +411,9 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
   const { data: cards, isLoading } = useListDeliveryAccessCards(projectId);
   const [printLoading, setPrintLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const subjectLabel = isCorporate ? "Employee" : "Student";
-  const groupLabel = isCorporate ? "Department" : "Class";
+  const { subjectLabel, groupLabel } = deliveryAccessCardTerminology(
+    isCorporate ? "corporate" : "school",
+  );
 
   if (isLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading access cards...</div>;
@@ -464,7 +469,11 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
             .details { flex: 1; }
             .subject-name { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 6px 0; }
             .subject-group { font-size: 12px; color: #64748b; margin: 0 0 12px 0; }
-            .instructions { font-size: 13px; color: #475569; margin: 0 0 12px 0; line-height: 1.5; }
+            .instructions { font-size: 12px; color: #475569; margin: 0 0 12px 0; line-height: 1.45; }
+            .delivery-url {
+              display: block; margin-top: 2px; font-size: 10px; line-height: 1.3;
+              overflow-wrap: anywhere; word-break: break-word;
+            }
             .code-box {
               background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
               padding: 12px; text-align: center; margin-top: auto;
@@ -489,7 +498,7 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
                   <div class="details">
                     <h3 class="subject-name">${escapeHtml(card.firstName || "")} ${escapeHtml(card.lastName || "")}</h3>
                     ${card.departmentName ? `<p class="subject-group">${escapeHtml(groupLabel)}: ${escapeHtml(card.departmentName)}</p>` : ""}
-                    <p class="instructions">Scan the QR code or visit:<br/><strong>${window.location.host}/delivery</strong></p>
+                    <p class="instructions">Scan the QR code or visit:<strong class="delivery-url">${escapeHtml(printableDeliveryAccessUrl(window.location.host, card.accessUrl))}</strong></p>
                     <div class="code-box">
                       <div class="code-label">Your Private Access Code</div>
                       <div class="code-value">${escapeHtml(card.accessCode || "")}</div>

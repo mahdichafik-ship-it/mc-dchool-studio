@@ -7,4 +7,4 @@ Published delivery galleries use one random access code per student or employee.
 
 **Why:** School photography includes minors, and parent/guardian access codes are lower-friction and safer than requiring each child to create an account.
 
-**How to apply:** Keep delivery separate from photographer authentication, support revocation and expiry, and move delivered photo bytes to durable object storage before relying on public delivery in production.
+**How to apply:** Keep delivery separate from photographer authentication, support revocation and expiry, and move delivered photo bytes to durable object storage before relying on public delivery in production. Every printed access card must show a complete manual fallback containing its gallery slug; derive that path from the same gallery-specific access URL used for the QR code, while printing the private code separately.

@@ -27,9 +27,11 @@ import {
   projectsTable,
   studentPhotosTable,
   studentsTable,
+  studioMembersTable,
   studiosTable,
 } from "@workspace/db";
 import deliveryRouter from "../src/routes/delivery";
+import photosRouter from "../src/routes/photos";
 import { ObjectStorageService } from "../src/lib/objectStorage";
 import { encryptStorageValue } from "../src/lib/storageCrypto";
 
@@ -48,6 +50,7 @@ const fallbackFailedBytes = Buffer.from("replit fallback for failed copy");
 const accessCode = "READY123";
 const unpaidAccessCode = "UNPAID12";
 const suffix = `${process.pid}-${Date.now()}`;
+const studioAdminUserId = `delivery-r2-admin-${suffix}`;
 
 let server: Server;
 let baseUrl: string;
@@ -70,6 +73,16 @@ let objectStorageReads = 0;
 
 const app = express();
 app.use(express.json());
+app.use((req, _res, next) => {
+  const userId = req.header("x-test-user") ?? studioAdminUserId;
+  const authHandler = Object.assign(
+    () => ({ tokenType: "session_token", userId, sessionClaims: { userId } }),
+    { [Symbol.for("@clerk/express.auth")]: true },
+  );
+  (req as any).auth = authHandler;
+  next();
+});
+app.use("/api/projects/:projectId/students", photosRouter);
 app.use("/api", deliveryRouter);
 
 function hashCode(code: string): string {
@@ -226,6 +239,12 @@ before(async () => {
     createdByUserId: `delivery-r2-test-${suffix}`,
   }).returning({ id: studiosTable.id });
   studioId = studio.id;
+  await db.insert(studioMembersTable).values({
+    studioId,
+    userId: studioAdminUserId,
+    email: `${studioAdminUserId}@member.local`,
+    role: "admin",
+  });
   const [project] = await db.insert(projectsTable).values({
     userId: `delivery-r2-test-${suffix}`,
     studioId,
@@ -462,6 +481,40 @@ test("selects a ready student R2 copy and keeps uploading/failed copies on Objec
   assert(r2RequestedKeys.includes("ready/student.jpg"));
   assert(r2RequestedKeys.some((key) => key.includes("__download__")));
   assert.equal(objectStorageReads, 2);
+});
+
+test("streams the authorized studio original bytes while keeping previews derivative-only", async () => {
+  r2RequestedKeys.length = 0;
+  const originalResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${readyStudentPhotoId}/file?download=original`,
+    { headers: { "x-test-user": studioAdminUserId } },
+  );
+  assert.equal(originalResponse.status, 200);
+  assert.match(originalResponse.headers.get("content-disposition") ?? "", /^attachment;/);
+  assert.deepEqual(Buffer.from(await originalResponse.arrayBuffer()), readyStudentBytes);
+  assert.deepEqual(r2RequestedKeys, ["ready/student.jpg"]);
+
+  r2RequestedKeys.length = 0;
+  const thumbnailResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${readyStudentPhotoId}/file?size=thumbnail`,
+    { headers: { "x-test-user": studioAdminUserId } },
+  );
+  assert.equal(thumbnailResponse.status, 200);
+  const thumbnailBytes = Buffer.from(await thumbnailResponse.arrayBuffer());
+  assert.notDeepEqual(thumbnailBytes, readyStudentBytes);
+  const metadata = await sharp(thumbnailBytes).metadata();
+  assert.equal(metadata.width, 480);
+  assert(r2RequestedKeys.some((key) => key.includes("/.variants/") && key.includes("__thumbnail__")));
+});
+
+test("rejects unauthorized studio original downloads before reading R2", async () => {
+  r2RequestedKeys.length = 0;
+  const response = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${readyStudentPhotoId}/file?download=original`,
+    { headers: { "x-test-user": `delivery-r2-outsider-${suffix}` } },
+  );
+  assert.equal(response.status, 404);
+  assert.equal(r2RequestedKeys.length, 0);
 });
 
 test("paid print fulfillment exposes and consumes the edited print variant", async () => {

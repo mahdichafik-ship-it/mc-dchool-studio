@@ -1530,6 +1530,17 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
   const verifiedR2Copy = await getVerifiedR2CopyForPhoto(photo);
   if (verifiedR2Copy) {
     try {
+      if (req.query.download === "original") {
+        const r2Response = await getR2Object(verifiedR2Copy.objectKey);
+        if (!r2Response.body) throw new Error("R2 original body is missing");
+        res.setHeader("Content-Type", verifiedR2Copy.mimeType || photo.mimeType || "application/octet-stream");
+        res.setHeader("Content-Disposition", `attachment; filename="${photo.fileName.replace(/["\r\n]/g, "_")}"`);
+        res.setHeader("Cache-Control", "private, no-store");
+        Readable.fromWeb(
+          r2Response.body as globalThis.ReadableStream<Uint8Array>,
+        ).pipe(res);
+        return;
+      }
       const variantKey = await ensureR2PhotoVariant(
         verifiedR2Copy,
         req.query.size === "preview" ? "preview" : "thumbnail",
@@ -1556,7 +1567,12 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
   }
 
   res.setHeader("Content-Type", photo.mimeType || "image/jpeg");
-  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (req.query.download === "original") {
+    res.setHeader("Content-Disposition", `attachment; filename="${photo.fileName.replace(/["\r\n]/g, "_")}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+  } else {
+    res.setHeader("Cache-Control", "private, max-age=3600");
+  }
   res.sendFile(filePath);
 });
 

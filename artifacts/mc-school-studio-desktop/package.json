@@ -19,6 +19,7 @@
     "test:upload-concurrency": "node --experimental-strip-types --test test/upload-concurrency.test.ts",
     "test:upload-response-validation": "node --experimental-strip-types --test test/upload-response-validation.test.ts",
     "test:upload-transfer-timeout": "node --experimental-strip-types --test test/upload-transfer-timeout.test.ts",
+    "test:capture-upload-export": "node --experimental-loader ./test/resolve-ts-loader.mjs --experimental-strip-types --test test/capture-upload-export.test.ts",
     "test:project-sync": "node --experimental-loader ./test/resolve-ts-loader.mjs --experimental-strip-types --test test/project-sync.test.ts",
     "test:live-preview": "node --experimental-strip-types --test test/live-preview.test.ts",
     "test:blank-portrait": "node --experimental-strip-types --test test/blank-portrait.test.ts",

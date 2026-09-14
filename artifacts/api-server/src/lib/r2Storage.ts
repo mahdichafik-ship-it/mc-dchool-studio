@@ -178,6 +178,7 @@ function signedHeaders(
   payloadHash: string,
   now = new Date(),
   additionalHeaders: Record<string, string> = {},
+  queryEntries: ReadonlyArray<readonly [string, string]> = [],
 ): { headers: Headers; url: string } {
   const base = new URL(config.endpoint);
   const path = objectKey
@@ -197,6 +198,10 @@ function signedHeaders(
     ),
   };
   const signedHeaderNames = Object.keys(headerValues).sort().join(";");
+  const canonicalQuery = queryEntries
+    .map(([key, value]) => `${awsEncode(key)}=${awsEncode(value)}`)
+    .sort()
+    .join("&");
   const canonicalHeaders = Object.entries(headerValues)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${key}:${value}\n`)
@@ -204,7 +209,7 @@ function signedHeaders(
   const canonicalRequest = [
     method,
     path,
-    "",
+    canonicalQuery,
     canonicalHeaders,
     signedHeaderNames,
     payloadHash,
@@ -231,7 +236,8 @@ function signedHeaders(
     ...additionalHeaders,
   });
 
-  return { headers, url: new URL(path, `${config.endpoint}/`).toString() };
+  const url = new URL(path, `${config.endpoint}/`).toString();
+  return { headers, url: canonicalQuery ? `${url}?${canonicalQuery}` : url };
 }
 
 async function expectR2Response(
@@ -370,6 +376,55 @@ export async function deleteR2Object(
     await fetch(request.url, { method: "DELETE", headers: request.headers }),
     "delete",
   );
+}
+
+function xmlTag(xml: string, tag: string): string | null {
+  const match = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
+  return match?.[1] ?? null;
+}
+
+export async function listR2ObjectKeys(
+  prefix: string,
+  config = getR2Config(),
+): Promise<string[]> {
+  if (!config) throw new Error("R2 is not configured");
+  const keys: string[] = [];
+  let continuationToken: string | null = null;
+
+  do {
+    const query: Array<readonly [string, string]> = [
+      ["list-type", "2"],
+      ["prefix", prefix],
+      ["encoding-type", "url"],
+    ];
+    if (continuationToken) query.push(["continuation-token", continuationToken]);
+    const request = signedHeaders(
+      config,
+      "GET",
+      null,
+      EMPTY_SHA256,
+      new Date(),
+      {},
+      query,
+    );
+    const response = await expectR2Response(
+      await fetch(request.url, { method: "GET", headers: request.headers }),
+      "object list",
+    );
+    const xml = await response.text();
+    for (const match of xml.matchAll(/<Key>([\s\S]*?)<\/Key>/g)) {
+      keys.push(decodeURIComponent(match[1]));
+    }
+    const truncated = xmlTag(xml, "IsTruncated") === "true";
+    continuationToken = truncated
+      ? xmlTag(xml, "NextContinuationToken")
+      : null;
+    if (truncated && !continuationToken) {
+      throw new Error("R2 object list was truncated without a continuation token");
+    }
+  } while (continuationToken);
+
+  return keys;
 }
 
 export async function copyR2Object(

@@ -22,6 +22,7 @@ import {
   pool,
   projectAssignmentsTable,
   projectsTable,
+  photoStorageCopiesTable,
   studentPhotosTable,
   studentsTable,
   studioMembersTable,
@@ -1129,6 +1130,122 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   assert.equal(deletedPhoto, undefined, "DELETE should remove the database row");
   uploadedPhotoId = undefined;
   uploadedFilePath = undefined;
+});
+
+test("deletes a private R2 original and its variants safely and idempotently", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const fileUrl = `/uploads/student-photos/${projectId}/${studentId}/r2-delete-${suffix}.jpg`;
+  const filePath = path.resolve(process.cwd(), fileUrl.replace(/^\//, ""));
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, jpegBytes);
+  const [photo] = await db.insert(studentPhotosTable).values({
+    projectId,
+    studentId,
+    fileName: `r2-delete-${suffix}.jpg`,
+    fileUrl,
+    mimeType: "image/jpeg",
+  }).returning();
+  const originalKey = `Studio/Project/Class/Student/r2-delete-${suffix}.jpg`;
+  const variantPrefix = `Studio/Project/Class/Student/.variants/r2-delete-${suffix}__`;
+  const variantKeys = [`${variantPrefix}preview__one.jpg`, `${variantPrefix}thumbnail__two.jpg`];
+  const otherProjectKey = `Other/Project/Class/Student/r2-delete-${suffix}.jpg`;
+  const objects = new Set([originalKey, ...variantKeys, otherProjectKey]);
+  const deletedKeys: string[] = [];
+  let failOneDelete = true;
+  const r2Server = createServer((req, res) => {
+    const requestUrl = new URL(req.url ?? "/", "http://localhost");
+    if (req.method === "GET" && requestUrl.searchParams.get("list-type") === "2") {
+      const prefix = requestUrl.searchParams.get("prefix") ?? "";
+      const keys = [...objects].filter((key) => key.startsWith(prefix));
+      res.writeHead(200, { "Content-Type": "application/xml" });
+      res.end(`<ListBucketResult><IsTruncated>false</IsTruncated>${keys.map((key) => `<Contents><Key>${encodeURIComponent(key)}</Key></Contents>`).join("")}</ListBucketResult>`);
+      return;
+    }
+    if (req.method === "DELETE") {
+      const key = decodeURIComponent(requestUrl.pathname.split("/").slice(2).join("/"));
+      if (failOneDelete) {
+        failOneDelete = false;
+        res.writeHead(503);
+        res.end("retry");
+        return;
+      }
+      objects.delete(key);
+      deletedKeys.push(key);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    res.writeHead(500);
+    res.end("unexpected R2 request");
+  });
+  await new Promise<void>((resolve) => r2Server.listen(0, "127.0.0.1", resolve));
+  const address = r2Server.address();
+  assert(address && typeof address === "object");
+  const savedR2 = {
+    account: process.env.R2_ACCOUNT_ID,
+    key: process.env.R2_ACCESS_KEY_ID,
+    secret: process.env.R2_SECRET_ACCESS_KEY,
+    bucket: process.env.R2_BUCKET_NAME,
+    endpoint: process.env.R2_ENDPOINT,
+  };
+  Object.assign(process.env, {
+    R2_ACCOUNT_ID: "delete-test",
+    R2_ACCESS_KEY_ID: "delete-test-key",
+    R2_SECRET_ACCESS_KEY: "delete-test-secret",
+    R2_BUCKET_NAME: "delete-test-bucket",
+    R2_ENDPOINT: `http://127.0.0.1:${address.port}`,
+  });
+  const [copy] = await db.insert(photoStorageCopiesTable).values({
+    studentPhotoId: photo.id,
+    destination: "r2",
+    objectKey: originalKey,
+    state: "ready",
+    mimeType: "image/jpeg",
+    fileSize: jpegBytes.length,
+    sha256: "a".repeat(64),
+    verifiedAt: new Date(),
+  }).returning();
+
+  try {
+    const first = await fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}`, { method: "DELETE" });
+    assert.equal(first.status, 500);
+    assert(fs.existsSync(filePath), "uncertain R2 deletion must keep recoverable local bytes");
+    const [failedCopy] = await db.select().from(photoStorageCopiesTable).where(eq(photoStorageCopiesTable.id, copy.id));
+    assert.equal(failedCopy.state, "failed");
+
+    const retry = await fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}`, { method: "DELETE" });
+    assert.equal(retry.status, 204);
+    assert(!fs.existsSync(filePath));
+    assert(!objects.has(originalKey));
+    assert(variantKeys.every((key) => !objects.has(key)));
+    assert(objects.has(otherProjectKey), "deletion must not touch another project's object");
+    assert.deepEqual(new Set(deletedKeys), new Set([originalKey, ...variantKeys]));
+
+    const replay = await fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}`, { method: "DELETE" });
+    assert.equal(replay.status, 204, "a lost successful response must be safely replayable");
+  } finally {
+    await new Promise<void>((resolve) => r2Server.close(() => resolve()));
+    const restore = (key: string, value: string | undefined) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    };
+    restore("R2_ACCOUNT_ID", savedR2.account);
+    restore("R2_ACCESS_KEY_ID", savedR2.key);
+    restore("R2_SECRET_ACCESS_KEY", savedR2.secret);
+    restore("R2_BUCKET_NAME", savedR2.bucket);
+    restore("R2_ENDPOINT", savedR2.endpoint);
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photo.id));
+    await rm(filePath, { force: true });
+    const parent = path.dirname(filePath);
+    for (const entry of await readdir(parent, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith(".photo-delete-")) continue;
+      const directory = path.join(parent, entry.name);
+      const files = await readdir(directory).catch(() => []);
+      if (files.includes(path.basename(filePath))) {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  }
 });
 
 test("preserves the uploaded photo when the database delete fails", async () => {

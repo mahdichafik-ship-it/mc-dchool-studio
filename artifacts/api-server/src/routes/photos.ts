@@ -39,6 +39,7 @@ import {
 import { getR2Object } from "../lib/r2Storage";
 import {
   ensureR2PhotoVariant,
+  deleteDirectR2AssetsForPhoto,
   getVerifiedR2CopyForPhoto,
 } from "../lib/photoVariants";
 import { parseCaptureEditSettings } from "../lib/captureEdits";
@@ -1928,7 +1929,9 @@ router.get("/:studentId/photos/:photoId/file", requireAuth, async (req, res) => 
     );
 
   if (!photo) {
-    res.status(404).json({ error: "Photo not found" });
+    // The caller is already authorized for this project. Treat an absent photo
+    // as an already-completed deletion so retries are safe after lost responses.
+    res.status(204).send();
     return;
   }
 
@@ -2044,7 +2047,9 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
     );
 
   if (!photo) {
-    res.status(404).json({ error: "Photo not found" });
+    // The caller is already authorized for this project. Treat an absent photo
+    // as an already-completed deletion so retries are safe after lost responses.
+    res.status(204).send();
     return;
   }
 
@@ -2052,8 +2057,15 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
   const backup = createPhotoDeleteBackup(filePath);
   let rowDeleted = false;
   let preserveBackup = false;
+  let r2CleanupStarted = false;
+  let r2CleanupComplete = false;
 
   try {
+    r2CleanupStarted = true;
+    const cleanedR2CopyIds = await deleteDirectR2AssetsForPhoto(photoId);
+    r2CleanupStarted = cleanedR2CopyIds.length > 0;
+    r2CleanupComplete = cleanedR2CopyIds.length > 0;
+
     const [deletedPhoto] = await db
       .delete(studentPhotosTable)
       .where(eq(studentPhotosTable.id, photoId))
@@ -2096,6 +2108,28 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
       });
     }
   } catch (error) {
+    if (r2CleanupStarted && !r2CleanupComplete && !rowDeleted) {
+      preserveBackup = true;
+      alertPhotoDeleteRecoveryRequired(
+        "r2_delete_failed",
+        backup.filePath,
+        filePath,
+        error,
+        backup.directory,
+      );
+    } else if (r2CleanupComplete && !rowDeleted) {
+      // R2 deletion completed but the authoritative row could not be removed.
+      // Keep the local recovery bytes and the copy row in `cleaning` so the
+      // operation can be retried idempotently or recovered manually.
+      preserveBackup = true;
+      alertPhotoDeleteRecoveryRequired(
+        "r2_deleted_database_delete_failed",
+        backup.filePath,
+        filePath,
+        error,
+        backup.directory,
+      );
+    }
     // A failed compensation must retain the only durable recovery copy.
     // Otherwise, the row still exists (DB failure) or has been restored, so
     // the backup can be removed safely.

@@ -524,6 +524,9 @@ export function useCaptureSummary(projectId: number | null) {
     jpegOnly: 0,
     rawOnly: 0,
     unpaired: 0,
+    jpegFiles: 0,
+    rawFiles: 0,
+    incompletePairs: 0,
   })
 
   const load = useCallback(async () => {

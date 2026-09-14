@@ -116,17 +116,40 @@ function rowToGroupCaptureFile(row: typeof groupCaptureFilesTable.$inferSelect) 
   }
 }
 
-function getCaptureSummary(rows: Array<typeof capturesTable.$inferSelect>): CaptureCompletenessSummary {
+function getCaptureSummary(
+  rows: Array<typeof capturesTable.$inferSelect>,
+  files: Array<Pick<typeof imageFilesTable.$inferSelect, 'captureId' | 'fileRole'>>,
+): CaptureCompletenessSummary {
+  const filesByCapture = new Map<number, Array<Pick<typeof imageFilesTable.$inferSelect, 'captureId' | 'fileRole'>>>()
+  for (const file of files) {
+    const captureFiles = filesByCapture.get(file.captureId) ?? []
+    captureFiles.push(file)
+    filesByCapture.set(file.captureId, captureFiles)
+  }
+
   return rows.reduce<CaptureCompletenessSummary>(
     (summary, capture) => {
+      const captureFiles = filesByCapture.get(capture.id) ?? []
       summary.total++
+      summary.jpegFiles += captureFiles.filter((file) => file.fileRole === 'JPEG').length
+      summary.rawFiles += captureFiles.filter((file) => file.fileRole === 'RAW').length
       if (capture.pairingStatus === 'complete') summary.complete++
       else if (capture.pairingStatus === 'jpeg_only') summary.jpegOnly++
       else if (capture.pairingStatus === 'raw_only') summary.rawOnly++
       else summary.unpaired++
+      if (capture.pairingStatus !== 'complete') summary.incompletePairs++
       return summary
     },
-    { total: 0, complete: 0, jpegOnly: 0, rawOnly: 0, unpaired: 0 },
+    {
+      total: 0,
+      complete: 0,
+      jpegOnly: 0,
+      rawOnly: 0,
+      unpaired: 0,
+      jpegFiles: 0,
+      rawFiles: 0,
+      incompletePairs: 0,
+    },
   )
 }
 
@@ -330,7 +353,11 @@ export function registerPhotoHandlers() {
         .from(capturesTable)
         .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
         .all()
-      return getCaptureSummary(rows)
+      const files = db
+        .select({ captureId: imageFilesTable.captureId, fileRole: imageFilesTable.fileRole })
+        .from(imageFilesTable)
+        .all()
+      return getCaptureSummary(rows, files)
     },
   )
 

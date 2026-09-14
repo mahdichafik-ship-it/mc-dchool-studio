@@ -2,9 +2,9 @@ import { ipcMain } from 'electron'
 import { readFileSync, mkdirSync } from 'fs'
 import { randomBytes } from 'crypto'
 import { dirname, join } from 'path'
-import { eq, count, and } from 'drizzle-orm'
+import { eq, count, and, isNull } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { projectsTable, classesTable, studentsTable, photosTable, groupsTable, groupMembersTable } from '../db/schema'
+import { projectsTable, classesTable, studentsTable, capturesTable, groupsTable, groupMembersTable } from '../db/schema'
 import { normalizeProjectType, type Project, type Class, type Student, type ImportResult, type CreateStudentResult, type StudentGroup } from '../../shared/types'
 import { safeProjectFolderName } from '../lib/retirement'
 import {
@@ -188,8 +188,8 @@ export function registerProjectHandlers() {
         .all()
       const [{ photoCount }] = db
         .select({ photoCount: count() })
-        .from(photosTable)
-        .where(eq(photosTable.projectId, p.id))
+        .from(capturesTable)
+        .where(and(eq(capturesTable.projectId, p.id), isNull(capturesTable.groupId)))
         .all()
       return enrichProject(p, classCount, studentCount, photoCount)
     })
@@ -200,7 +200,11 @@ export function registerProjectHandlers() {
     if (!p) return null
     const [{ classCount }] = db.select({ classCount: count() }).from(classesTable).where(eq(classesTable.projectId, p.id)).all()
     const [{ studentCount }] = db.select({ studentCount: count() }).from(studentsTable).where(eq(studentsTable.projectId, p.id)).all()
-    const [{ photoCount }] = db.select({ photoCount: count() }).from(photosTable).where(eq(photosTable.projectId, p.id)).all()
+    const [{ photoCount }] = db
+      .select({ photoCount: count() })
+      .from(capturesTable)
+      .where(and(eq(capturesTable.projectId, p.id), isNull(capturesTable.groupId)))
+      .all()
     prepareProjectFolders(db, projectId)
     reconcileDefaultGroups(projectId)
     return enrichProject(p, classCount, studentCount, photoCount)
@@ -499,8 +503,8 @@ export function registerProjectHandlers() {
       return rows.map(({ student: s, className }) => {
         const [{ photoCount }] = db
           .select({ photoCount: count() })
-          .from(photosTable)
-          .where(eq(photosTable.studentId, s.id))
+          .from(capturesTable)
+          .where(and(eq(capturesTable.studentId, s.id), isNull(capturesTable.groupId)))
           .all()
         return toStudent(s, className ?? '', photoCount)
       })

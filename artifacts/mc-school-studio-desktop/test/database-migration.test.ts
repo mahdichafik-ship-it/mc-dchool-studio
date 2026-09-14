@@ -3,7 +3,7 @@ import test from 'node:test'
 import { ensureCaptureTables, ensureLegacyColumns } from '../src/main/db/migrations.ts'
 import { reconcileLegacyPhotosAsCaptures } from '../src/main/lib/captureRepository.ts'
 import { execFileSync } from 'node:child_process'
-import { unlinkSync } from 'node:fs'
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -160,4 +160,144 @@ test('gallery reconciliation retries every legacy photo without deleting or movi
   )
 
   assert.deepEqual(mirrored, photos)
+})
+
+test('a migrated legacy portrait remains in the student review query after restart', () => {
+  const dbPath = join(tmpdir(), `mc-school-review-migration-${process.pid}.sqlite`)
+  const photoPath = join(tmpdir(), `mc-school-review-legacy-${process.pid}.jpg`)
+  writeFileSync(photoPath, Buffer.from('legacy portrait bytes'))
+  execFileSync('sqlite3', [dbPath, `
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE projects (
+      id INTEGER PRIMARY KEY,
+      school_name TEXT NOT NULL,
+      photo_date TEXT,
+      address TEXT,
+      contact_name TEXT,
+      contact_email TEXT,
+      contact_phone TEXT,
+      notes TEXT,
+      watch_folder TEXT,
+      finished_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE classes (
+      id INTEGER PRIMARY KEY,
+      project_id INTEGER NOT NULL,
+      class_name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE students (
+      id INTEGER PRIMARY KEY,
+      project_id INTEGER NOT NULL,
+      class_id INTEGER NOT NULL,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      generated_student_id TEXT NOT NULL,
+      simple_qr TEXT,
+      json_qr TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE photos (
+      id INTEGER PRIMARY KEY,
+      project_id INTEGER NOT NULL,
+      student_id INTEGER,
+      file_path TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      is_matched INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO projects (id, school_name, created_at, updated_at)
+      VALUES (1, 'Legacy review project', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO classes (id, project_id, class_name, created_at, updated_at)
+      VALUES (2, 1, 'Class A', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO students (id, project_id, class_id, first_name, last_name, generated_student_id, created_at, updated_at)
+      VALUES (3, 1, 2, 'Legacy', 'Portrait', 'LEGACY-1', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO photos (id, project_id, student_id, file_path, file_name, captured_at, is_matched, created_at)
+      VALUES (4, 1, 3, '${photoPath.replaceAll("'", "''")}', 'Legacy_Portrait.jpg', '2026-01-01T12:00:00.000Z', 1, '2026-01-01T12:00:00.000Z');
+  `])
+
+  const sqlite = {
+    pragma(source: string) {
+      return JSON.parse(execFileSync('sqlite3', ['-json', dbPath, `PRAGMA ${source}`], { encoding: 'utf8' }))
+    },
+    exec(source: string) {
+      execFileSync('sqlite3', [dbPath, source])
+    },
+  }
+
+  try {
+    ensureLegacyColumns(sqlite)
+    ensureCaptureTables(sqlite)
+    ensureLegacyColumns(sqlite)
+    ensureCaptureTables(sqlite)
+
+    const reviewRows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, `
+      SELECT c.id, c.student_id, c.pairing_status, f.stored_path, p.file_path
+      FROM captures c
+      JOIN image_files f ON f.capture_id = c.id AND f.file_role = 'JPEG'
+      JOIN photos p ON p.id = c.legacy_photo_id
+      WHERE c.project_id = 1 AND c.student_id = 3 AND c.group_id IS NULL
+      ORDER BY c.id;
+    `], { encoding: 'utf8' })) as Array<Record<string, unknown>>
+
+    assert.deepEqual(reviewRows, [{
+      id: 1,
+      student_id: 3,
+      pairing_status: 'jpeg_only',
+      stored_path: photoPath,
+      file_path: photoPath,
+    }])
+    assert.equal(existsSync(photoPath), true, 'migration must not move or delete the legacy file')
+
+    // A newer capture may already exist when a legacy photo row is still
+    // present. Re-running the upgrade must link the JPEG instead of creating
+    // a second capture for the same shutter event.
+    execFileSync('sqlite3', [dbPath, `
+      INSERT INTO captures (
+        capture_key, project_id, student_id, class_id, base_filename, captured_at,
+        assignment_locked, pairing_status, created_at, updated_at
+      ) VALUES (
+        'modern-capture', 1, 3, 2, 'Modern_Portrait', '2026-01-01T13:00:00.000Z',
+        1, 'raw_only', '2026-01-01T13:00:00.000Z', '2026-01-01T13:00:00.000Z'
+      );
+      INSERT INTO image_files (
+        capture_id, file_role, file_format, original_filename, stored_path,
+        source_path, import_time, created_at
+      ) VALUES (
+        last_insert_rowid(), 'RAW', 'CR3', 'Modern_Portrait.cr3',
+        '/legacy/Modern_Portrait.cr3', '/camera/Modern_Portrait.cr3',
+        '2026-01-01T13:00:00.000Z', '2026-01-01T13:00:00.000Z'
+      );
+      INSERT INTO photos (
+        id, project_id, student_id, file_path, file_name, captured_at, is_matched, created_at
+      ) VALUES (
+        5, 1, 3, '${photoPath.replaceAll("'", "''")}', 'Modern_Portrait.jpg',
+        '2026-01-01T13:00:00.000Z', 1, '2026-01-01T13:00:00.000Z'
+      );
+    `])
+    ensureCaptureTables(sqlite)
+
+    const modernRows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, `
+      SELECT c.id, c.legacy_photo_id, c.pairing_status, count(f.id) AS file_count
+      FROM captures c
+      JOIN image_files f ON f.capture_id = c.id
+      WHERE c.base_filename = 'Modern_Portrait'
+      GROUP BY c.id, c.legacy_photo_id, c.pairing_status;
+    `], { encoding: 'utf8' })) as Array<Record<string, unknown>>
+    assert.deepEqual(modernRows, [{
+      id: 2,
+      legacy_photo_id: 5,
+      pairing_status: 'complete',
+      file_count: 2,
+    }])
+  } finally {
+    unlinkSync(dbPath)
+    unlinkSync(photoPath)
+  }
 })

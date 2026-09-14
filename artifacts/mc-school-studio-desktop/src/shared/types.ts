@@ -209,7 +209,6 @@ export interface QrMarkerReview {
   fileName: string
   capturedAt: string
   thumbnailData: string | null
-  previewUrl?: string
   createdAt: string
 }
 
@@ -240,6 +239,9 @@ export interface CaptureCompletenessSummary {
   jpegOnly: number
   rawOnly: number
   unpaired: number
+  jpegFiles: number
+  rawFiles: number
+  incompletePairs: number
 }
 
 export interface CaptureUpdatedEvent {

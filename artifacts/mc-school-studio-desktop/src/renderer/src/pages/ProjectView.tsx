@@ -799,7 +799,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
   if (unmatchedPhotos.length > 0) {
     localColor = "text-rose-400"
-    localText = `${captureSummary.total} safe · ${unmatchedPhotos.length} unmatched`
+    localText = `${captureSummary.total} captures · ${captureSummary.jpegFiles} JPEG · ${captureSummary.rawFiles} RAW`
+      + ` · ${captureSummary.incompletePairs} incomplete · ${unmatchedPhotos.length} unmatched`
     LocalIcon = AlertCircle
   } else if (captureSummary.total === 0) {
     localText = !isRunning && !project?.finishedAt
@@ -808,7 +809,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   } else {
     LocalIcon = CheckCircle
     localColor = !isRunning && !project?.finishedAt ? "text-amber-400" : "text-emerald-400"
-    localText = `${captureSummary.total} safe locally${!isRunning && !project?.finishedAt ? " · watcher paused" : ""}`
+    localText = `${captureSummary.total} captures · ${captureSummary.jpegFiles} JPEG · ${captureSummary.rawFiles} RAW`
+      + (captureSummary.incompletePairs > 0 ? ` · ${captureSummary.incompletePairs} incomplete` : "")
+      + (!isRunning && !project?.finishedAt ? " · watcher paused" : "")
   }
 
   let CloudIcon = CloudUpload
@@ -1990,14 +1993,17 @@ function StudentDetail({
 
   const captureCounts = captures.reduce(
     (counts, capture) => {
-      counts[capture.pairingStatus]++
+      if (capture.pairingStatus === 'pending') counts.unpaired++
+      else counts[capture.pairingStatus]++
       return counts
     },
     { complete: 0, jpeg_only: 0, raw_only: 0, unpaired: 0, pending: 0 } as Record<CaptureReview['pairingStatus'], number>,
   )
   const filteredCaptures = pairingFilter === 'all'
     ? captures
-    : captures.filter((capture) => capture.pairingStatus === pairingFilter)
+    : captures.filter((capture) => pairingFilter === 'unpaired'
+      ? capture.pairingStatus === 'unpaired' || capture.pairingStatus === 'pending'
+      : capture.pairingStatus === pairingFilter)
   const latestCapture = captures[captures.length - 1] ?? null
   const isFollowingLatest = reviewCaptureKey === null
   const selectedCapture = isFollowingLatest

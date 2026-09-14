@@ -331,10 +331,10 @@ react_production.cloneElement = function(element, config, children) {
   if (null != config)
     for (propName in void 0 !== config.ref && (owner = void 0), void 0 !== config.key && (key = "" + config.key), config)
       !hasOwnProperty$1.call(config, propName) || "key" === propName || "__self" === propName || "__source" === propName || "ref" === propName && void 0 === config.ref || (props[propName] = config[propName]);
-  var propName = arguments.length - 2;
+  var propName, props = {}, key = null;
   if (1 === propName) props.children = children;
   else if (1 < propName) {
-    for (var childArray = Array(propName), i = 0; i < propName; i++)
+    for (var childArray = Array(childrenLength), i = 0; i < childrenLength; i++)
       childArray[i] = arguments[i + 2];
     props.children = childArray;
   }
@@ -665,7 +665,7 @@ var scheduler_production = {};
       default:
         priorityLevel = currentPriorityLevel;
     }
-    var previousPriorityLevel = currentPriorityLevel;
+      var previousPriorityLevel = currentPriorityLevel;
     currentPriorityLevel = priorityLevel;
     try {
       return eventHandler();
@@ -687,7 +687,7 @@ var scheduler_production = {};
       default:
         priorityLevel = 3;
     }
-    var previousPriorityLevel = currentPriorityLevel;
+      var previousPriorityLevel = currentPriorityLevel;
     currentPriorityLevel = priorityLevel;
     try {
       return eventHandler();
@@ -823,31 +823,24 @@ reactDom_production.prefetchDNS = function(href) {
 };
 reactDom_production.preinit = function(href, options) {
   if ("string" === typeof href && options && "string" === typeof options.as) {
-    var as = options.as, crossOrigin = getCrossOriginStringAs(as, options.crossOrigin), integrity = "string" === typeof options.integrity ? options.integrity : void 0, fetchPriority = "string" === typeof options.fetchPriority ? options.fetchPriority : void 0;
-    "style" === as ? Internals.d.S(
-      href,
-      "string" === typeof options.precedence ? options.precedence : void 0,
-      {
-        crossOrigin,
-        integrity,
-        fetchPriority
-      }
-    ) : "script" === as && Internals.d.X(href, {
+    var as = options.as, crossOrigin = getCrossOriginStringAs(as, options.crossOrigin);
+    Internals.d.L(href, as, {
       crossOrigin,
-      integrity,
-      fetchPriority,
-      nonce: "string" === typeof options.nonce ? options.nonce : void 0
+      integrity: "string" === typeof options.integrity ? options.integrity : void 0,
+      nonce: "string" === typeof options.nonce ? options.nonce : void 0,
+      type: "string" === typeof options.type ? options.type : void 0,
+      fetchPriority: "string" === typeof options.fetchPriority ? options.fetchPriority : void 0,
+      referrerPolicy: "string" === typeof options.referrerPolicy ? options.referrerPolicy : void 0,
+      imageSrcSet: "string" === typeof options.imageSrcSet ? options.imageSrcSet : void 0,
+      imageSizes: "string" === typeof options.imageSizes ? options.imageSizes : void 0,
+      media: "string" === typeof options.media ? options.media : void 0
     });
   }
 };
-reactDom_production.preinitModule = function(href, options) {
+reactDom_production.preloadModule = function(href, options) {
   if ("string" === typeof href)
-    if ("object" === typeof options && null !== options) {
-      if (null == options.as || "script" === options.as) {
-        var crossOrigin = getCrossOriginStringAs(
-          options.as,
-          options.crossOrigin
-        );
+    if (options) {
+      var crossOrigin = getCrossOriginStringAs(options.as, options.crossOrigin);
         Internals.d.M(href, {
           crossOrigin,
           integrity: "string" === typeof options.integrity ? options.integrity : void 0,
@@ -11915,7 +11908,7 @@ if ("undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__) {
 }
 reactDomClient_production.createRoot = function(container, options) {
   if (!isValidContainer(container)) throw Error(formatProdErrorMessage(299));
-  var isStrictMode = false, identifierPrefix = "", onUncaughtError = defaultOnUncaughtError, onCaughtError = defaultOnCaughtError, onRecoverableError = defaultOnRecoverableError, transitionCallbacks = null;
+  var isStrictMode = false, identifierPrefix = "", onUncaughtError = defaultOnUncaughtError, onCaughtError = defaultOnCaughtError, onRecoverableError = defaultOnRecoverableError, transitionCallbacks = null, formState = null;
   null !== options && void 0 !== options && (true === options.unstable_strictMode && (isStrictMode = true), void 0 !== options.identifierPrefix && (identifierPrefix = options.identifierPrefix), void 0 !== options.onUncaughtError && (onUncaughtError = options.onUncaughtError), void 0 !== options.onCaughtError && (onCaughtError = options.onCaughtError), void 0 !== options.onRecoverableError && (onRecoverableError = options.onRecoverableError), void 0 !== options.unstable_transitionCallbacks && (transitionCallbacks = options.unstable_transitionCallbacks));
   options = createFiberRoot(
     container,
@@ -16414,7 +16407,10 @@ function useCaptureSummary(projectId) {
     complete: 0,
     jpegOnly: 0,
     rawOnly: 0,
-    unpaired: 0
+    unpaired: 0,
+    jpegFiles: 0,
+    rawFiles: 0,
+    incompletePairs: 0
   });
   const load = reactExports.useCallback(async () => {
     if (!projectId) return;
@@ -17770,7 +17766,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   } else {
     LocalIcon = CircleCheckBig;
     localColor = !isRunning && !project?.finishedAt ? "text-amber-400" : "text-emerald-400";
-    localText = `${captureSummary.total} safe locally${!isRunning && !project?.finishedAt ? " · watcher paused" : ""}`;
+    localText = `${captureSummary.total} captures · ${captureSummary.jpegFiles} JPEG · ${captureSummary.rawFiles} RAW` + (captureSummary.incompletePairs > 0 ? ` · ${captureSummary.incompletePairs} incomplete` : "") + (!isRunning && !project?.finishedAt ? " · watcher paused" : "");
   }
   let CloudIcon = CloudUpload;
   let cloudColor = "text-slate-400";
@@ -18759,12 +18755,13 @@ function StudentDetail({
   const [quickLookCapture, setQuickLookCapture] = reactExports.useState(null);
   const captureCounts = captures.reduce(
     (counts, capture) => {
-      counts[capture.pairingStatus]++;
+      if (capture.pairingStatus === "pending") counts.unpaired++;
+      else counts[capture.pairingStatus]++;
       return counts;
     },
     { complete: 0, jpeg_only: 0, raw_only: 0, unpaired: 0, pending: 0 }
   );
-  const filteredCaptures = pairingFilter === "all" ? captures : captures.filter((capture) => capture.pairingStatus === pairingFilter);
+  const filteredCaptures = pairingFilter === "all" ? captures : captures.filter((capture) => pairingFilter === "unpaired" ? capture.pairingStatus === "unpaired" || capture.pairingStatus === "pending" : capture.pairingStatus === pairingFilter);
   const latestCapture = captures[captures.length - 1] ?? null;
   const isFollowingLatest = reviewCaptureKey === null;
   const selectedCapture = isFollowingLatest ? latestCapture : captures.find((capture) => captureReviewKey(capture) === reviewCaptureKey) ?? latestCapture;

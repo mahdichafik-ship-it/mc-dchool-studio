@@ -74,6 +74,12 @@ const storageRoot = join(root, 'managed-photos')
 const watchFolder = join(root, 'camera-originals')
 const sourcePhoto = join(watchFolder, `Smith_John_release-${studentReference}.jpg`)
 const managedPhotoName = `John_Smith_${studentReference}.jpg`
+const dbPath = join(userDataDir, 'mc-school-studio.db')
+const legacyPhotoPath = join(root, 'legacy-existing', 'Legacy_Portrait.jpg')
+const jpegFixture = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
+  'base64',
+)
 const debugPort = await reservePort()
 let online = true
 let retired = false
@@ -83,6 +89,65 @@ let uploadCount = 0
 mkdirSync(userDataDir, { recursive: true })
 mkdirSync(storageRoot, { recursive: true })
 mkdirSync(watchFolder, { recursive: true })
+mkdirSync(dirname(legacyPhotoPath), { recursive: true })
+writeFileSync(legacyPhotoPath, jpegFixture)
+
+// Seed a database from before the capture/file model existed. The packaged
+// app must upgrade it in place and keep the legacy portrait in review.
+execFileSync('sqlite3', [dbPath, `
+  CREATE TABLE projects (
+    id INTEGER PRIMARY KEY,
+    school_name TEXT NOT NULL,
+    photo_date TEXT,
+    address TEXT,
+    contact_name TEXT,
+    contact_email TEXT,
+    contact_phone TEXT,
+    notes TEXT,
+    watch_folder TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE classes (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    class_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE students (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    class_id INTEGER NOT NULL,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    generated_student_id TEXT NOT NULL,
+    simple_qr TEXT,
+    json_qr TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE photos (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    student_id INTEGER,
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    is_matched INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  INSERT INTO projects (id, school_name, created_at, updated_at)
+    VALUES (91, 'Existing Legacy Release Project', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  INSERT INTO classes (id, project_id, class_name, created_at, updated_at)
+    VALUES (92, 91, 'Legacy Class', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  INSERT INTO students (id, project_id, class_id, first_name, last_name, generated_student_id, created_at, updated_at)
+    VALUES (93, 91, 92, 'Legacy', 'Portrait', 'LEGACY-RELEASE', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  INSERT INTO photos (id, project_id, student_id, file_path, file_name, captured_at, is_matched, created_at)
+    VALUES (94, 91, 93, '${legacyPhotoPath.replaceAll("'", "''")}', 'Legacy_Portrait.jpg', '2026-01-01T12:00:00.000Z', 1, '2026-01-01T12:00:00.000Z');
+`])
 
 function json(response, status, body) {
   response.writeHead(status, { 'content-type': 'application/json' })
@@ -411,7 +476,6 @@ try {
   const signedIn = await cdp.evaluate(`window.api.invoke('auth:signIn')`)
   assert.equal(signedIn.signedIn, true)
 
-  const dbPath = join(userDataDir, 'mc-school-studio.db')
   await waitFor('desktop SQLite database', () => existsSync(dbPath))
   const storedToken = querySqlite(
     dbPath,
@@ -430,8 +494,25 @@ try {
   )
 
   const localProjects = await cdp.evaluate(`window.api.invoke('projects:list')`)
-  assert.equal(localProjects.length, 1)
-  const localProjectId = localProjects[0].id
+  assert.equal(localProjects.length, 2)
+  const legacyProject = localProjects.find((project) => project.schoolName === 'Existing Legacy Release Project')
+  assert(legacyProject, 'the pre-update project must survive the packaged database upgrade')
+  const legacyStudents = await cdp.evaluate(
+    `window.api.invoke('students:list', { projectId: ${legacyProject.id} })`,
+  )
+  assert.equal(legacyStudents.length, 1)
+  const legacyReview = await cdp.evaluate(
+    `window.api.invoke('captures:list', { studentId: ${legacyStudents[0].id} })`,
+  )
+  assert.equal(legacyReview.captures.length, 1, 'legacy JPEG must render as one review capture')
+  assert.equal(legacyReview.captures[0].legacyPhoto.filePath, legacyPhotoPath)
+  assert.equal(legacyReview.captures[0].files[0].storedPath, legacyPhotoPath)
+  assert.match(legacyReview.captures[0].legacyPhoto.previewUrl, /^mc-preview:\/\//)
+  assert.equal(existsSync(legacyPhotoPath), true, 'upgrade must not move or delete the legacy portrait')
+
+  const localProject = localProjects.find((project) => project.schoolName === projectName)
+  assert(localProject, 'the pulled project must be available after the upgrade')
+  const localProjectId = localProject.id
   await cdp.evaluate(`window.api.invoke('app:setPhotosDir', { dir: ${JSON.stringify(storageRoot)} })`)
   await cdp.evaluate(`window.api.invoke('projects:setWatchFolder', {
     projectId: ${localProjectId},
@@ -443,10 +524,7 @@ try {
   // matching, durable pending state, and remote-ID mapping. Reconnecting must
   // not silently upload; the photographer explicitly retries the pending file.
   online = false
-  writeFileSync(sourcePhoto, Buffer.from(
-    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
-    'base64',
-  ))
+  writeFileSync(sourcePhoto, jpegFixture)
 
   await waitFor('managed photo copy and SQLite photo row', async () => {
     const project = await cdp.evaluate(`window.api.invoke('projects:get', { projectId: ${localProjectId} })`)

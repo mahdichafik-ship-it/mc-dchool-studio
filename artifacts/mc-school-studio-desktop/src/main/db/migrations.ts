@@ -199,6 +199,44 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   ensureColumn(sqlite, 'group_captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
 
   sqlite.exec(`
+    -- If a newer capture row already represents this shutter event, attach the
+    -- legacy photo to it instead of creating a second gallery capture.
+    UPDATE captures
+    SET legacy_photo_id = (
+      SELECT p.id
+      FROM photos p
+      WHERE p.project_id = captures.project_id
+        AND p.student_id = captures.student_id
+        AND p.captured_at = captures.captured_at
+        AND (
+          CASE
+            WHEN instr(p.file_name, '.') > 0
+            THEN substr(p.file_name, 1, instr(p.file_name, '.') - 1)
+            ELSE p.file_name
+          END
+        ) = captures.base_filename
+        AND NOT EXISTS (
+          SELECT 1 FROM captures linked
+          WHERE linked.legacy_photo_id = p.id
+        )
+      LIMIT 1
+    )
+    WHERE captures.legacy_photo_id IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM photos p
+        WHERE p.project_id = captures.project_id
+          AND p.student_id = captures.student_id
+          AND p.captured_at = captures.captured_at
+          AND (
+            CASE
+              WHEN instr(p.file_name, '.') > 0
+              THEN substr(p.file_name, 1, instr(p.file_name, '.') - 1)
+              ELSE p.file_name
+            END
+          ) = captures.base_filename
+      );
+
     INSERT OR IGNORE INTO captures (
       capture_key, project_id, student_id, class_id, base_filename, captured_at,
       assignment_locked, pairing_status, legacy_photo_id, created_at, updated_at
@@ -222,7 +260,22 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       p.id,
       p.created_at,
       p.created_at
-    FROM photos p;
+    FROM photos p
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM captures c
+      WHERE c.legacy_photo_id = p.id
+         OR (
+           c.project_id = p.project_id
+           AND c.student_id = p.student_id
+           AND c.captured_at = p.captured_at
+           AND c.base_filename = CASE
+             WHEN instr(p.file_name, '.') > 0
+             THEN substr(p.file_name, 1, instr(p.file_name, '.') - 1)
+             ELSE p.file_name
+           END
+         )
+    );
 
     INSERT OR IGNORE INTO image_files (
       capture_id, file_role, file_format, original_filename, stored_path,
@@ -248,6 +301,54 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       SELECT 1 FROM image_files f
       WHERE f.capture_id = c.id AND f.file_role = 'JPEG'
     );
+
+    UPDATE captures
+    SET pairing_status = CASE
+      WHEN EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'JPEG'
+      ) AND EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'RAW'
+      ) THEN 'complete'
+      WHEN EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'JPEG'
+      ) THEN 'jpeg_only'
+      WHEN EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'RAW'
+      ) THEN 'raw_only'
+      ELSE 'unpaired'
+    END
+    WHERE legacy_photo_id IS NOT NULL;
+  `)
+
+  // Legacy finished projects predate durable progress counters. Reconstruct
+  // their completed file total from the compatibility capture/file tables so
+  // their synced state remains useful after an upgrade or restart.
+  sqlite.exec(`
+    UPDATE projects
+    SET
+      sync_total_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      ),
+      sync_completed_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      )
+    WHERE sync_status = 'synced' AND sync_total_files = 0
   `)
 
   // Legacy finished projects predate durable progress counters. Reconstruct

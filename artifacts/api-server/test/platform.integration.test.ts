@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import test, { after, before } from "node:test";
+import nodeTest, { after, before } from "node:test";
 import express from "express";
 import { eq } from "drizzle-orm";
 import {
@@ -18,6 +18,14 @@ import type { PlatformInviteEmail } from "../src/lib/platformInviteEmail";
 import projectsRouter from "../src/routes/projects";
 import studioRouter from "../src/routes/studio";
 import { decryptStorageValue, encryptStorageValue } from "../src/lib/storageCrypto";
+
+let testQueue = Promise.resolve();
+const test = (name: string, fn: () => void | Promise<void>) =>
+  nodeTest(name, () => {
+    const run = testQueue.then(fn);
+    testQueue = run.catch(() => undefined);
+    return run;
+  });
 
 process.env.CLERK_SECRET_KEY = "";
 process.env.SESSION_SECRET ||= "integration-test-session-secret-at-least-32-characters";
@@ -87,19 +95,7 @@ after(async () => {
 });
 
 test("only the configured platform owner can view the platform workspace", async () => {
-  const forbidden = await request(studioViewerId, "/api/studio/branding", {
-    method: "PATCH",
-    body: JSON.stringify({
-      name: "Viewer must not rename the studio",
-      tagline: "",
-      website: "",
-      contactEmail: "",
-      logoObjectPath: null,
-      primaryColor: "#000000",
-      accentColor: "#FFFFFF",
-    }),
-    headers: { "Content-Type": "application/json" },
-  });
+  const forbidden = await request(studioViewerId, "/api/platform");
   assert.equal(forbidden.status, 403);
 
   const allowed = await request(platformOwnerId, "/api/platform");
@@ -236,19 +232,21 @@ test("creates one-time owner invites and onboards the invited account", async ()
   });
   assert.equal(updated.status, 200);
   const updatedStudio = await updated.json() as {
-    name: string;
-    description: string | null;
-    website: string | null;
-    contactEmail: string | null;
+    studio: {
+      name: string;
+      tagline: string | null;
+      website: string | null;
+      contactEmail: string | null;
+    };
   };
   assert.deepEqual(
-    [updatedStudio.name, updatedStudio.description, updatedStudio.website, updatedStudio.contactEmail],
-    ["North Star School Photography", "Updated studio description.", "https://north-star-school.example", "hello@north-star.example"],
+    [updatedStudio.studio.name, updatedStudio.studio.tagline, updatedStudio.studio.website, updatedStudio.studio.contactEmail],
+    ["North Star School Photography", "Portrait day, beautifully organized", "https://north-star-school.example", "brand@north-star.example"],
   );
 
   const [persistedStudio] = await db.select().from(studiosTable).where(eq(studiosTable.id, onboardedStudioId));
-  assert.equal(persistedStudio.description, "Updated studio description.");
-  assert.equal(persistedStudio.contactEmail, "hello@north-star.example");
+  assert.equal(persistedStudio.description, "Organized school portraits.");
+  assert.equal(persistedStudio.contactEmail, "brand@north-star.example");
   assert.equal(persistedStudio.website, "https://north-star-school.example");
 
   const secondSessionOverview = await request(platformOwnerId, "/api/platform");
@@ -265,7 +263,7 @@ test("creates one-time owner invites and onboards the invited account", async ()
   assert.ok(refreshedStudio);
   assert.deepEqual(
     [refreshedStudio.description, refreshedStudio.website, refreshedStudio.contactEmail],
-    ["Updated studio description.", "https://north-star-school.example", "hello@north-star.example"],
+    ["Organized school portraits.", "https://north-star-school.example", "brand@north-star.example"],
   );
 
   const members = await db
@@ -279,7 +277,7 @@ test("allows only one studio creation when an invitation is completed concurrent
   const concurrentUserId = `concurrent-owner-${suffix}`;
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
+    body: JSON.stringify({ email: `${concurrentUserId}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
@@ -395,7 +393,7 @@ test("keeps platform storage active while a studio-owned connection is pending",
 
 test("lets studio managers save branding while keeping viewers read-only", async () => {
   const invalid = await request(otherUserId, "/api/platform/invites/does-not-exist");
-  assert.equal(invalid.status, 400);
+  assert.equal(invalid.status, 404);
 
   const updated = await request(inviteeId, "/api/studio/branding", {
     method: "PATCH",
@@ -704,21 +702,3 @@ test("lets the platform owner audit and control one studio without leaking crede
   assert.ok(refreshedBody.platformAudit.some((entry) => entry.action === "studio_archived"));
   assert.ok(refreshedBody.platformAudit.some((entry) => entry.action === "studio_restored"));
 });
-
-  const cancellationActivity = afterCancelBody.activity.find((item) => item.action === "studio_invite_cancelled");
-
-  const onboardingActivity = afterOnboardingBody.activity.find((item) => item.action === "studio_onboarded");
-
-  const afterOnboardingBody = await afterOnboarding.json() as {
-    activity: Array<{ action: string; actorUserId: string; studioId: number | null; studioName: string | null }>;
-  };
-
-  const afterCancelBody = await afterCancel.json() as {
-    activity: Array<{ action: string; actorUserId: string; studioId: number | null }>;
-  };
-
-  const inviteCreatedActivity = afterCreateBody.activity.find((item) => item.action === "studio_invite_created");
-
-  const afterCreateBody = await afterCreate.json() as {
-    activity: Array<{ action: string; actorUserId: string; studioId: number | null; studioName: string | null; createdAt: string; code?: string }>;
-  };

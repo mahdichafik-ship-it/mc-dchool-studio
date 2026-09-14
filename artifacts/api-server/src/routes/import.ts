@@ -5,7 +5,7 @@ import { db } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
-import { generateUniqueStudentId } from "../lib/studentId";
+import { generateUniqueStudentId, isStudentIdUniqueViolation } from "../lib/studentId";
 import { canAccessProject } from "../lib/studioAccess";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
 
@@ -578,6 +578,15 @@ router.post("/confirm", requireAuth, async (req, res) => {
   } catch (error) {
     if (error instanceof ImportValidationError) {
       res.status(400).json({ error: error.message });
+      return;
+    }
+    if (isStudentIdUniqueViolation(error)) {
+      // Do not leak the conflicting row or any roster PII. The unique index is
+      // the authority when another import/create races this transaction.
+      res.status(409).json({
+        error: "A Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
       return;
     }
     throw error;

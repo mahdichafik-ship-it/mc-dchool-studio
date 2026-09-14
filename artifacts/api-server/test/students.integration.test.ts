@@ -7,6 +7,8 @@ import { eq } from "drizzle-orm";
 import {
   classesTable,
   db,
+  desktopConnectionsTable,
+  projectAssignmentsTable,
   pool,
   projectsTable,
   studentsTable,
@@ -15,6 +17,8 @@ import {
 } from "@workspace/db";
 import importRouter from "../src/routes/import";
 import studentsRouter from "../src/routes/students";
+import desktopRouter from "../src/routes/desktop";
+import { createDesktopToken } from "../src/lib/desktopAuth";
 
 process.env.CLERK_SECRET_KEY = "";
 
@@ -26,6 +30,8 @@ let projectId: number;
 let classId: number;
 let importedClassId: number;
 let foreignClassId: number;
+let foreignProjectId: number;
+const desktopCredentials = createDesktopToken();
 
 const app = express();
 app.use(express.json());
@@ -44,6 +50,7 @@ app.use((req, _res, next) => {
 });
 app.use("/api/projects/:projectId/students", studentsRouter);
 app.use("/api/projects/:projectId/import", importRouter);
+app.use("/api/desktop", desktopRouter);
 
 async function request(pathname: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -76,6 +83,24 @@ before(async () => {
     .values({ projectId, className: `Class ${suffix}` })
     .returning({ id: classesTable.id });
   classId = cls.id;
+  await db.insert(projectAssignmentsTable).values({
+    projectId,
+    memberId: (await db
+      .select({ id: studioMembersTable.id })
+      .from(studioMembersTable)
+      .where(eq(studioMembersTable.userId, userId)))[0].id,
+  });
+  const memberId = (await db
+    .select({ id: studioMembersTable.id })
+    .from(studioMembersTable)
+    .where(eq(studioMembersTable.userId, userId)))[0].id;
+  await db.insert(desktopConnectionsTable).values({
+    studioId: studio.id,
+    memberId,
+    deviceName: "Identity test desktop",
+    tokenHash: desktopCredentials.tokenHash,
+    tokenPrefix: desktopCredentials.tokenPrefix,
+  });
   const [foreignProject] = await db
     .insert(projectsTable)
     .values({
@@ -88,6 +113,7 @@ before(async () => {
     .insert(classesTable)
     .values({ projectId: foreignProject.id, className: `Foreign class ${suffix}` })
     .returning({ id: classesTable.id });
+  foreignProjectId = foreignProject.id;
   foreignClassId = foreignClass.id;
 
   server = createServer(app);
@@ -308,4 +334,141 @@ test("rolls back an import when a later row has an invalid email", async () => {
     .from(studentsTable)
     .where(eq(studentsTable.projectId, projectId));
   assert(!importedStudents.some((student) => student.firstName === "Earlier" || student.lastName === "Invalid"));
+});
+
+test("enforces case-insensitive project-scoped IDs for create, edit, and concurrent create", async () => {
+  const generatedStudentId = `CASE-${suffix}`;
+  const firstResponse = await request(`/api/projects/${projectId}/students`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId, firstName: "Identity", lastName: "Canonical", generatedStudentId }),
+  });
+  assert.equal(firstResponse.status, 201);
+
+  const duplicateResponse = await request(`/api/projects/${projectId}/students`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId, firstName: "Identity", lastName: "Duplicate", generatedStudentId: generatedStudentId.toLowerCase() }),
+  });
+  assert.equal(duplicateResponse.status, 409);
+  assert.equal((await duplicateResponse.json() as { code: string }).code, "STUDENT_ID_CONFLICT");
+
+  const editableResponse = await request(`/api/projects/${projectId}/students`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId, firstName: "Identity", lastName: "Editable", generatedStudentId: `EDIT-${suffix}` }),
+  });
+  assert.equal(editableResponse.status, 201);
+  const editable = await editableResponse.json() as { id: number };
+  const editConflict = await request(`/api/projects/${projectId}/students/${editable.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ generatedStudentId: generatedStudentId.toLowerCase() }),
+  });
+  assert.equal(editConflict.status, 409);
+  assert.equal((await editConflict.json() as { code: string }).code, "STUDENT_ID_CONFLICT");
+
+  // PostgreSQL's unique index, not the preflight query, decides the winner.
+  const concurrent = await Promise.all([
+    request(`/api/projects/${projectId}/students`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ classId, firstName: "Concurrent", lastName: "One", generatedStudentId: `RACE-${suffix}` }),
+    }),
+    request(`/api/projects/${projectId}/students`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ classId, firstName: "Concurrent", lastName: "Two", generatedStudentId: `race-${suffix}` }),
+    }),
+  ]);
+  assert.deepEqual(concurrent.map((response) => response.status).sort(), [201, 409]);
+});
+
+test("allows the same case-insensitive ID in a different project", async () => {
+  const generatedStudentId = `CROSS-${suffix}`;
+  const firstResponse = await request(`/api/projects/${projectId}/students`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId, firstName: "Cross", lastName: "School", generatedStudentId }),
+  });
+  assert.equal(firstResponse.status, 201);
+  const secondResponse = await request(`/api/projects/${foreignProjectId}/students`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId: foreignClassId, firstName: "Cross", lastName: "Corporate", generatedStudentId: generatedStudentId.toLowerCase() }),
+  });
+  assert.equal(secondResponse.status, 201);
+});
+
+test("returns a safe conflict when concurrent imports allocate the same ID", async () => {
+  const generatedStudentId = `IMPORT-${suffix}`;
+  const body = (firstName: string) => ({
+    sheets: [{
+      sheetName: `Import race ${firstName}`,
+      className: `Import race ${suffix}`,
+      firstNameColumn: "First",
+      lastNameColumn: "Last",
+      studentIdColumn: "Roster ID",
+      headers: ["First", "Last", "Roster ID"],
+      rows: [[firstName, "Import", generatedStudentId]],
+    }],
+  });
+  const [first, second] = await Promise.all([
+    request(`/api/projects/${projectId}/import/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body("One")),
+    }),
+    request(`/api/projects/${projectId}/import/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body("Two")),
+    }),
+  ]);
+  assert.deepEqual([first.status, second.status].sort(), [200, 409]);
+  const conflict = first.status === 409 ? first : second;
+  assert.equal((await conflict.json() as { code: string }).code, "STUDENT_ID_CONFLICT");
+});
+
+test("returns a safe conflict for a desktop late-student ID collision", async () => {
+  const generatedStudentId = `DESKTOP-${suffix}`.slice(0, 7);
+  const first = await request(`/api/projects/${projectId}/students`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId, firstName: "Desktop", lastName: "Existing", generatedStudentId }),
+  });
+  assert.equal(first.status, 201);
+  const response = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/students`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${desktopCredentials.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      classId,
+      firstName: "Desktop",
+      lastName: "Late",
+      generatedStudentId: generatedStudentId.toLowerCase(),
+    }),
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json() as { code: string }).code, "STUDENT_ID_CONFLICT");
+
+  const retryResponse = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/students`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${desktopCredentials.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      classId,
+      firstName: "Desktop",
+      lastName: "Existing",
+      generatedStudentId: generatedStudentId.toLowerCase(),
+    }),
+  });
+  assert.equal(retryResponse.status, 200);
+  // An exact late-student retry is idempotent, including case-only changes.
+  const retry = await retryResponse.json() as { generatedStudentId: string };
+  assert.equal(retry.generatedStudentId, generatedStudentId);
 });

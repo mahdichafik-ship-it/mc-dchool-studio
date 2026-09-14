@@ -82,15 +82,18 @@ export function advanceSequence(
     if (state.manualStudentId !== null && capture.studentId === null) {
       return {
         kind: 'review',
-        reason: `QR marker "${capture.reference}" does not match the selected student`,
+        reason: `QR marker "${capture.reference}" was not accepted while a student is manually selected`,
       }
     }
     if (state.manualStudentId !== null) {
-      // A valid QR is an explicit request to move to another student. It
-      // supersedes the previous manual target for the rest of this sequence.
-      state.manualStudentId = null
-      state.activeStudentId = capture.studentId
-      return { kind: 'marker', studentId: capture.studentId }
+      // Manual authority is sticky. Even a valid QR is only a warning/review
+      // signal until the photographer clears or changes the roster target.
+      return {
+        kind: 'review',
+        reason: capture.studentId === state.manualStudentId
+          ? `QR marker "${capture.reference}" was ignored because the selected student is manual`
+          : `QR marker "${capture.reference}" does not match the selected student`,
+      }
     }
     state.activeStudentId = capture.studentId
     if (capture.studentId === null) {

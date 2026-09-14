@@ -1,9 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, ne, sql } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
-import { generateUniqueStudentId } from "../lib/studentId";
+import {
+  generateUniqueStudentId,
+  isStudentIdUniqueViolation,
+  studentIdKey,
+} from "../lib/studentId";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { canAccessProject } from "../lib/studioAccess";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
@@ -19,7 +23,7 @@ async function getExistingStudentIds(projectId: number): Promise<Set<string>> {
     .select({ generatedStudentId: studentsTable.generatedStudentId })
     .from(studentsTable)
     .where(eq(studentsTable.projectId, projectId));
-  return new Set(students.map((s) => s.generatedStudentId));
+  return new Set(students.map((s) => studentIdKey(s.generatedStudentId)));
 }
 
 function normalizeOptionalString(value: unknown): string | null {
@@ -137,28 +141,48 @@ router.post("/", requireAuth, async (req, res) => {
   }
 
   const existingIds = await getExistingStudentIds(projectId);
-  const studentId =
-    normalizedGeneratedStudentId && !existingIds.has(normalizedGeneratedStudentId)
-      ? normalizedGeneratedStudentId
-      : generateUniqueStudentId(existingIds);
+  if (normalizedGeneratedStudentId && existingIds.has(studentIdKey(normalizedGeneratedStudentId))) {
+    res.status(409).json({
+      error: "That Student ID/Employee ID is already used in this project.",
+      code: "STUDENT_ID_CONFLICT",
+    });
+    return;
+  }
+  const studentId = normalizedGeneratedStudentId ?? generateUniqueStudentId(existingIds);
 
-  const [student] = await db
-    .insert(studentsTable)
-    .values({
-      projectId,
-      classId,
-      firstName: normalizedFirstName,
-      lastName: normalizedLastName,
-      generatedStudentId: studentId,
-      email: normalizedEmail,
-      phone: normalizeOptionalString(phone),
-      secondaryEmail: normalizedSecondaryEmail,
-      jobTitle: normalizeOptionalString(jobTitle),
-      officeLocation: normalizeOptionalString(officeLocation),
-      photoSession: normalizeOptionalString(photoSession),
-      captureNotes: normalizeOptionalString(captureNotes),
-    })
-    .returning();
+  let student: typeof studentsTable.$inferSelect | undefined;
+  try {
+    [student] = await db
+      .insert(studentsTable)
+      .values({
+        projectId,
+        classId,
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+        generatedStudentId: studentId,
+        email: normalizedEmail,
+        phone: normalizeOptionalString(phone),
+        secondaryEmail: normalizedSecondaryEmail,
+        jobTitle: normalizeOptionalString(jobTitle),
+        officeLocation: normalizeOptionalString(officeLocation),
+        photoSession: normalizeOptionalString(photoSession),
+        captureNotes: normalizeOptionalString(captureNotes),
+      })
+      .returning();
+  } catch (error) {
+    // The index, rather than this preflight, is the concurrency authority.
+    if (isStudentIdUniqueViolation(error)) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+    throw error;
+  }
+  if (!student) {
+    throw new Error("Student could not be created");
+  }
 
   res.status(201).json(formatStudent(student, cls.className));
   await reconcileDefaultGroups(projectId);
@@ -226,6 +250,24 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     return;
   }
 
+  if (normalizedGeneratedStudentId) {
+    const [collision] = await db
+      .select({ id: studentsTable.id })
+      .from(studentsTable)
+      .where(and(
+        eq(studentsTable.projectId, projectId),
+        ne(studentsTable.id, studentId),
+        sql`lower(${studentsTable.generatedStudentId}) = lower(${normalizedGeneratedStudentId})`,
+      ));
+    if (collision) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+  }
+
   let destinationClass: typeof classesTable.$inferSelect | undefined;
   if (classId !== undefined) {
     [destinationClass] = await db
@@ -238,31 +280,47 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     }
   }
 
-  const [updated] = await db
-    .update(studentsTable)
-    .set({
-      ...(normalizedFirstName !== undefined && { firstName: normalizedFirstName }),
-      ...(normalizedLastName !== undefined && { lastName: normalizedLastName }),
-      ...(normalizedGeneratedStudentId !== null &&
-        normalizedGeneratedStudentId !== undefined && {
-          generatedStudentId: normalizedGeneratedStudentId,
-        }),
-      ...(classId !== undefined && { classId }),
-      ...(email !== undefined && { email: normalizedEmail }),
-      ...(phone !== undefined && { phone: normalizeOptionalString(phone) }),
-      ...(secondaryEmail !== undefined && { secondaryEmail: normalizedSecondaryEmail }),
-      ...(jobTitle !== undefined && { jobTitle: normalizeOptionalString(jobTitle) }),
-      ...(officeLocation !== undefined && { officeLocation: normalizeOptionalString(officeLocation) }),
-      ...(photoSession !== undefined && { photoSession: normalizeOptionalString(photoSession) }),
-      ...(captureNotes !== undefined && { captureNotes: normalizeOptionalString(captureNotes) }),
-      // Regenerate QR if name or ID changed
-      ...(identityChanged
-        ? { simpleQr: null, jsonQr: null }
-        : {}),
-      updatedAt: new Date(),
-    })
-    .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)))
-    .returning();
+  let updated: typeof studentsTable.$inferSelect | undefined;
+  try {
+    [updated] = await db
+      .update(studentsTable)
+      .set({
+        ...(normalizedFirstName !== undefined && { firstName: normalizedFirstName }),
+        ...(normalizedLastName !== undefined && { lastName: normalizedLastName }),
+        ...(normalizedGeneratedStudentId !== null &&
+          normalizedGeneratedStudentId !== undefined && {
+            generatedStudentId: normalizedGeneratedStudentId,
+          }),
+        ...(classId !== undefined && { classId }),
+        ...(email !== undefined && { email: normalizedEmail }),
+        ...(phone !== undefined && { phone: normalizeOptionalString(phone) }),
+        ...(secondaryEmail !== undefined && { secondaryEmail: normalizedSecondaryEmail }),
+        ...(jobTitle !== undefined && { jobTitle: normalizeOptionalString(jobTitle) }),
+        ...(officeLocation !== undefined && { officeLocation: normalizeOptionalString(officeLocation) }),
+        ...(photoSession !== undefined && { photoSession: normalizeOptionalString(photoSession) }),
+        ...(captureNotes !== undefined && { captureNotes: normalizeOptionalString(captureNotes) }),
+        // Regenerate QR if name or ID changed
+        ...(identityChanged
+          ? { simpleQr: null, jsonQr: null }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)))
+      .returning();
+  } catch (error) {
+    if (isStudentIdUniqueViolation(error)) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+    throw error;
+  }
+  if (!updated) {
+    res.status(404).json({ error: "Student not found" });
+    return;
+  }
 
   const cls = destinationClass ?? (await db
     .select()

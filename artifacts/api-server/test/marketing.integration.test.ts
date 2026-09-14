@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import test, { after, before } from "node:test";
+import nodeTest, { after, before } from "node:test";
 import express from "express";
 import { eq } from "drizzle-orm";
 import {
@@ -28,12 +28,23 @@ import deliveryRouter from "../src/routes/delivery";
 import marketingRouter from "../src/routes/marketing";
 import { encryptStorageValue } from "../src/lib/storageCrypto";
 
+let testQueue = Promise.resolve();
+const test = (name: string, fn: () => void | Promise<void>) =>
+  nodeTest(name, () => {
+    const run = testQueue.then(fn);
+    testQueue = run.catch(() => undefined);
+    return run;
+  });
+
 const suffix = `${process.pid}-${Date.now()}`;
 const ownerUserId = `marketing-owner-${suffix}`;
 const adminUserId = `marketing-admin-${suffix}`;
 const viewerUserId = `marketing-viewer-${suffix}`;
 const otherOwnerUserId = `marketing-other-${suffix}`;
 const accessCode = "MKTTEST1";
+const leadEmail = `lead-${suffix}@example.com`;
+const unconsentedEmail = `unconsented-${suffix}@example.com`;
+const unsubscribedEmail = `unsubscribed-${suffix}@example.com`;
 const app = express();
 let server: Server;
 let resendServer: Server;
@@ -174,7 +185,7 @@ test("requires email and records consent plus append-only repeat visits", async 
   const slug = `marketing-${suffix}`;
   const first = await request("public", `/api/delivery/${slug}/access`, {
     method: "POST",
-    body: JSON.stringify({ code: accessCode, email: "Lead@Example.com", marketingConsent: true }),
+    body: JSON.stringify({ code: accessCode, email: leadEmail, marketingConsent: true }),
   });
   assert.equal(first.status, 200);
   const firstToken = (await json<{ token: string }>(first)).token;
@@ -217,11 +228,11 @@ test("requires email and records consent plus append-only repeat visits", async 
   });
   const repeat = await request("public", `/api/delivery/${slug}/access`, {
     method: "POST",
-    body: JSON.stringify({ code: accessCode, email: " lead@example.com ", marketingConsent: true }),
+    body: JSON.stringify({ code: accessCode, email: ` ${leadEmail} `, marketingConsent: true }),
   });
   assert.equal(repeat.status, 200);
   const [contact] = await db.select().from(marketingContactsTable)
-    .where(eq(marketingContactsTable.email, "lead@example.com"));
+    .where(eq(marketingContactsTable.email, leadEmail));
   assert(contact);
   assert.equal(contact.marketingConsent, true);
   assert(contact.consentAt);
@@ -244,11 +255,11 @@ test("invalid and wrong codes do not create contacts", async () => {
   assert.equal(malformedEmail.status, 400);
   const wrongCode = await request("public", `/api/delivery/${slug}/access`, {
     method: "POST",
-    body: JSON.stringify({ code: "WRONG123", email: "wrong@example.com" }),
+    body: JSON.stringify({ code: "WRONG123", email: `wrong-${suffix}@example.com` }),
   });
   assert.equal(wrongCode.status, 401);
   const [contact] = await db.select().from(marketingContactsTable)
-    .where(eq(marketingContactsTable.email, "wrong@example.com"));
+    .where(eq(marketingContactsTable.email, `wrong-${suffix}@example.com`));
   assert.equal(contact, undefined);
 });
 
@@ -267,7 +278,7 @@ test("owner/admin can read isolated overview and contacts, while viewer and othe
     assert.equal(contactsResponse.status, 200);
     const contacts = await json<{ total: number; contacts: { email: string }[] }>(contactsResponse);
     assert.equal(contacts.total, 1);
-    assert.equal(contacts.contacts[0].email, "lead@example.com");
+    assert.equal(contacts.contacts[0].email, leadEmail);
   }
   assert.equal((await request(viewerUserId, "/api/marketing/overview")).status, 403);
   assert.equal((await request(viewerUserId, "/api/marketing/contacts")).status, 403);
@@ -283,14 +294,14 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   const slug = `marketing-${suffix}`;
   await request("public", `/api/delivery/${slug}/access`, {
     method: "POST",
-    body: JSON.stringify({ code: accessCode, email: "unconsented@example.com" }),
+    body: JSON.stringify({ code: accessCode, email: unconsentedEmail }),
   });
   await request("public", `/api/delivery/${slug}/access`, {
     method: "POST",
-    body: JSON.stringify({ code: accessCode, email: "unsubscribed@example.com", marketingConsent: true }),
+    body: JSON.stringify({ code: accessCode, email: unsubscribedEmail, marketingConsent: true }),
   });
   const contacts = await db.select().from(marketingContactsTable);
-  const unsubscribed = contacts.find((contact) => contact.email === "unsubscribed@example.com");
+  const unsubscribed = contacts.find((contact) => contact.studioId === studioId && contact.email === unsubscribedEmail);
   assert(unsubscribed);
   const unsubscribe = await request(ownerUserId, `/api/marketing/contacts/${unsubscribed.id}/unsubscribe`, { method: "POST" });
   assert.equal(unsubscribe.status, 200);
@@ -352,11 +363,11 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   assert(result.campaign.sentAt);
   assert.equal(resendBatches.length, 1);
   assert.equal(resendBatches[0].length, 1);
-  assert.deepEqual(resendBatches[0][0].to, ["lead@example.com"]);
+  assert.deepEqual(resendBatches[0][0].to, [leadEmail]);
   assert.equal(resendBatches[0][0].from, "Volume Capture <test@volume.example>");
   assert.equal(resendBatches[0][0].subject, "News");
-  assert(!JSON.stringify(resendBatches).includes("unconsented@example.com"));
-  assert(!JSON.stringify(resendBatches).includes("unsubscribed@example.com"));
+  assert(!JSON.stringify(resendBatches).includes(unconsentedEmail));
+  assert(!JSON.stringify(resendBatches).includes(unsubscribedEmail));
   const [ledgerEntry] = await db.select().from(marketingCampaignRecipientsTable)
     .where(eq(marketingCampaignRecipientsTable.campaignId, draft.id));
   assert.equal(ledgerEntry.status, "sent");
@@ -369,12 +380,12 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   const unsubscribeResponse = await fetch(unsubscribeUrl);
   assert.equal(unsubscribeResponse.status, 200);
   const [leadBeforeConfirmation] = await db.select().from(marketingContactsTable)
-    .where(eq(marketingContactsTable.email, "lead@example.com"));
+    .where(eq(marketingContactsTable.email, leadEmail));
   assert.equal(leadBeforeConfirmation.unsubscribedAt, null);
   const confirmedUnsubscribe = await fetch(unsubscribeUrl, { method: "POST" });
   assert.equal(confirmedUnsubscribe.status, 204);
   const [lead] = await db.select().from(marketingContactsTable)
-    .where(eq(marketingContactsTable.email, "lead@example.com"));
+    .where(eq(marketingContactsTable.email, leadEmail));
   assert(lead.unsubscribedAt);
 
   const forbiddenReconsent = await request(ownerUserId, `/api/marketing/contacts/${lead.id}/consent`, {

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   advanceSequence,
+  clearManualStudent,
   createSequenceState,
   setManualStudent,
 } from '../src/main/lib/photoSequence.ts'
@@ -65,6 +66,7 @@ test('captures the full A/B/QR-C workflow locally while cloud connectivity is un
     setManualStudent(state, 202)
     for (let index = 0; index < 2; index++) capturePortrait(202)
 
+    clearManualStudent(state)
     assert.deepEqual(
       advanceSequence(state, { kind: 'marker', studentId: 303, reference: 'STU-303' }),
       { kind: 'marker', studentId: 303 },

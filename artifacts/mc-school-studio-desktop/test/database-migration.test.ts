@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
-import { ensureCaptureTables, ensureLegacyColumns } from '../src/main/db/migrations.ts'
+import { ensureCaptureTables, ensureLegacyColumns, ensureStudentIdentityConstraint } from '../src/main/db/migrations.ts'
 import { reconcileLegacyPhotosAsCaptures } from '../src/main/lib/captureRepository.ts'
 import { execFileSync } from 'node:child_process'
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -53,6 +53,59 @@ test('upgrades an older local database without replacing existing rows', () => {
   assert(columns.get('projects')?.has('sync_total_files'))
   assert(migrationStatements.some((statement) => /SET sync_status = 'synced'/.test(statement)))
   assert.equal(columns.get('students')?.size, 14)
+})
+
+test('repairs case-insensitive roster duplicates without changing row or capture identity', () => {
+  const dbPath = join(tmpdir(), `mc-school-student-id-repair-${process.pid}.sqlite`)
+  execFileSync('sqlite3', [dbPath, `
+    CREATE TABLE students (
+      id INTEGER PRIMARY KEY,
+      project_id INTEGER NOT NULL,
+      generated_student_id TEXT NOT NULL,
+      updated_at TEXT
+    );
+    CREATE TABLE captures (
+      id INTEGER PRIMARY KEY,
+      student_id INTEGER,
+      base_filename TEXT NOT NULL
+    );
+    INSERT INTO students (id, project_id, generated_student_id)
+      VALUES (10, 1, 'AbC1234'), (11, 1, 'abc1234'), (12, 2, 'ABC1234');
+    INSERT INTO captures (id, student_id, base_filename)
+      VALUES (90, 11, 'late-jpeg'), (91, 12, 'other-project');
+  `])
+  const sqlite = {
+    pragma(source: string) {
+      return JSON.parse(execFileSync('sqlite3', ['-json', dbPath, `PRAGMA ${source}`], { encoding: 'utf8' }))
+    },
+    exec(source: string) {
+      execFileSync('sqlite3', [dbPath, source])
+    },
+  }
+  try {
+    const before = JSON.parse(execFileSync('sqlite3', [
+      '-json', dbPath, 'SELECT id, student_id FROM captures ORDER BY id',
+    ], { encoding: 'utf8' }))
+    ensureStudentIdentityConstraint(sqlite)
+    ensureStudentIdentityConstraint(sqlite)
+
+    const students = JSON.parse(execFileSync('sqlite3', [
+      '-json', dbPath,
+      'SELECT id, project_id, generated_student_id FROM students ORDER BY id',
+    ], { encoding: 'utf8' })) as Array<{ id: number; project_id: number; generated_student_id: string }>
+    assert.equal(students[0].generated_student_id, 'AbC1234')
+    assert.notEqual(students[1].generated_student_id.toLocaleLowerCase(), 'abc1234')
+    assert.equal(students[2].generated_student_id, 'ABC1234')
+    assert.deepEqual(JSON.parse(execFileSync('sqlite3', [
+      '-json', dbPath, 'SELECT id, student_id FROM captures ORDER BY id',
+    ], { encoding: 'utf8' })), before)
+    assert.throws(() => execFileSync('sqlite3', [
+      dbPath,
+      "INSERT INTO students (project_id, generated_student_id) VALUES (1, 'ABC1234')",
+    ], { stdio: ['ignore', 'ignore', 'ignore'] }))
+  } finally {
+    unlinkSync(dbPath)
+  }
 })
 
 test('backfills active, finished, and interrupted project lifecycles safely', () => {

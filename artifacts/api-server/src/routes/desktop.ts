@@ -24,6 +24,7 @@ import { getStudioMember } from "../lib/studioAccess";
 import { getUserId, requireAuth } from "../lib/auth";
 import { isPlatformOwner } from "../lib/platformAccess";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
+import { isStudentIdUniqueViolation } from "../lib/studentId";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
 import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable, groupCapturesTable } from "@workspace/db";
 import { verifyR2Copy } from "../lib/r2UploadCopies";
@@ -890,9 +891,20 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
     .from(studentsTable)
     .where(and(
       eq(studentsTable.projectId, projectId),
-      eq(studentsTable.generatedStudentId, generatedStudentId),
+      sql`lower(${studentsTable.generatedStudentId}) = lower(${generatedStudentId})`,
     ));
   if (existing) {
+    if (
+      existing.classId !== classId
+      || existing.firstName.normalize("NFKC").trim().toLocaleLowerCase() !== firstName.normalize("NFKC").trim().toLocaleLowerCase()
+      || existing.lastName.normalize("NFKC").trim().toLocaleLowerCase() !== lastName.normalize("NFKC").trim().toLocaleLowerCase()
+    ) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
     res.json({
       id: existing.id,
       classId: existing.classId,
@@ -910,18 +922,34 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
     generateSimpleQr(firstName, lastName, generatedStudentId),
     generateJsonQr(project.schoolName, cls.className, firstName, lastName, generatedStudentId),
   ]);
-  const [student] = await db
-    .insert(studentsTable)
-    .values({
-      projectId,
-      classId,
-      firstName,
-      lastName,
-      generatedStudentId,
-      simpleQr,
-      jsonQr,
-    })
-    .returning();
+  let student: typeof studentsTable.$inferSelect | undefined;
+  try {
+    [student] = await db
+      .insert(studentsTable)
+      .values({
+        projectId,
+        classId,
+        firstName,
+        lastName,
+        generatedStudentId,
+        simpleQr,
+        jsonQr,
+      })
+      .returning();
+  } catch (error) {
+    if (isStudentIdUniqueViolation(error)) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+    throw error;
+  }
+  if (!student) {
+    res.status(500).json({ error: "The student could not be created." });
+    return;
+  }
   await reconcileDefaultGroups(projectId);
 
   res.status(201).json({

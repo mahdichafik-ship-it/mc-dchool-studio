@@ -69,7 +69,7 @@ function generateUniqueLocalStudentId(projectId: number): string {
       .from(studentsTable)
       .where(eq(studentsTable.projectId, projectId))
       .all()
-      .map((row) => row.id.toUpperCase()),
+      .map((row) => row.id.normalize('NFKC').trim().toLocaleLowerCase()),
   )
   for (let attempt = 0; attempt < 1000; attempt++) {
     const candidate = randomBytes(8)
@@ -77,7 +77,7 @@ function generateUniqueLocalStudentId(projectId: number): string {
       .replace(/[^A-Z0-9]/gi, '')
       .slice(0, 7)
       .toUpperCase()
-    if (candidate.length === 7 && !existing.has(candidate)) return candidate
+    if (candidate.length === 7 && !existing.has(candidate.toLocaleLowerCase())) return candidate
   }
   throw new Error('Could not generate a unique student code.')
 }

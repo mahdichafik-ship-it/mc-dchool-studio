@@ -1,6 +1,12 @@
+import { randomBytes } from 'node:crypto'
+
 export interface SqliteSchemaDatabase {
   pragma(source: string): unknown
   exec(source: string): void
+  prepare?: (source: string) => {
+    all?: () => Array<Record<string, unknown>>
+    run?: (...params: unknown[]) => unknown
+  }
 }
 
 export function ensureColumn(
@@ -57,6 +63,79 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
       sync_error = COALESCE(sync_error, 'Cloud sync was interrupted. Reconnect and retry Upload & Finish.')
     WHERE sync_status = 'syncing'
   `)
+}
+
+/**
+ * Repair old local rosters before installing the SQLite authority index.
+ * Keeping the lowest row id preserves the canonical subject and all foreign
+ * keys/captures; only later duplicate codes are changed.
+ */
+export function ensureStudentIdentityConstraint(sqlite: SqliteSchemaDatabase): void {
+  let reassigned = 0
+  let duplicateGroups = 0
+  const countedGroups = new Set<string>()
+  const statement = sqlite.prepare?.(`
+    SELECT id, project_id, generated_student_id
+    FROM students
+    ORDER BY project_id ASC, id ASC
+  `)
+  const rows = statement?.all?.() ?? []
+  if (rows.length > 0 && statement?.all) {
+    const usedByProject = new Map<number, Set<string>>()
+    for (const row of rows) {
+      const projectId = Number(row.project_id)
+      const id = Number(row.id)
+      const value = String(row.generated_student_id ?? '').normalize('NFKC').trim()
+      const key = value.toLocaleLowerCase()
+      const used = usedByProject.get(projectId) ?? new Set<string>()
+      if (!used.has(key)) {
+        used.add(key)
+        usedByProject.set(projectId, used)
+        continue
+      }
+      const groupKey = `${projectId}\u0000${key}`
+      if (!countedGroups.has(groupKey)) {
+        countedGroups.add(groupKey)
+        duplicateGroups += 1
+      }
+      let replacement = ''
+      do {
+        replacement = randomBytes(16).toString('hex').slice(0, 7).toUpperCase()
+      } while (used.has(replacement.toLocaleLowerCase()))
+      used.add(replacement.toLocaleLowerCase())
+      sqlite.prepare?.(
+        'UPDATE students SET generated_student_id = ?, updated_at = datetime(\'now\') WHERE id = ?',
+      )?.run?.(replacement, id)
+      reassigned += 1
+    }
+  } else {
+    // Test doubles and very old adapters may not expose prepare(). The update
+    // is still idempotent and leaves row/capture identity untouched.
+    sqlite.exec(`
+      UPDATE students
+      SET generated_student_id = 'REPAIRED-' || project_id || '-' || id
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY project_id, lower(trim(generated_student_id))
+            ORDER BY id
+          ) AS duplicate_number
+          FROM students
+        ) WHERE duplicate_number > 1
+      );
+    `)
+  }
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_project_generated_id_ci
+    ON students(project_id, lower(generated_student_id))
+  `)
+  if (duplicateGroups || reassigned) {
+    console.info(JSON.stringify({
+      event: 'desktop_student_id_repair',
+      duplicateGroups,
+      reassigned,
+    }))
+  }
 }
 
 /**

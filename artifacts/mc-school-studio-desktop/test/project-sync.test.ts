@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createServer } from 'node:http'
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,29 +10,160 @@ import type { ProjectSyncDependencies } from '../src/main/ipc/projectSync.ts'
 import {
   beginProjectCaptureBatchWithDependencies,
   syncProjectUploads,
-  setSetting,
-  markCloudSessionVerified,
-  markCloudSessionUnavailable,
 } from '../src/main/ipc/upload.ts'
 import type { ProjectSyncJob, ProjectSyncProgress } from '../src/main/ipc/upload.ts'
-import { closeDbForTests, getDb } from '../src/main/db/index.ts'
-import {
-  capturesTable,
-  classesTable,
-  imageFilesTable,
-  projectsTable,
-  studentsTable,
-} from '../src/main/db/schema.ts'
-import { eq } from 'drizzle-orm'
 
 type TestProject = {
   id: number
+  cloudId?: number | null
   syncStatus: 'active' | 'finished_local' | 'syncing' | 'sync_failed' | 'synced'
   syncCompletedFiles: number
   syncTotalFiles: number
   syncFailedFiles: number
   syncError: string | null
   finishedAt: string | null
+}
+
+type SqliteFile = {
+  id: number
+  captureId: number
+  fileRole: 'JPEG' | 'RAW'
+  originalFilename: string
+  storedPath: string
+  fileSize: number
+  uploadStatus: string | null
+  fileUrl: string | null
+}
+
+function sqliteQuote(value: string | number | null): string {
+  if (value === null) return 'NULL'
+  if (typeof value === 'number') return String(value)
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+/**
+ * The project-sync flow only needs a small durable slice of the local DB.
+ * Keeping this store on the sqlite3 CLI makes restart persistence real while
+ * avoiding a platform-specific better-sqlite3 binary in Linux test runners.
+ */
+class RestartableSqliteStore {
+  readonly path: string
+
+  constructor(path: string) {
+    this.path = path
+  }
+
+  exec(sql: string): void {
+    execFileSync('sqlite3', [this.path, sql], { stdio: ['ignore', 'ignore', 'inherit'] })
+  }
+
+  rows<T extends Record<string, unknown>>(sql: string): T[] {
+    const output = execFileSync('sqlite3', ['-json', this.path, sql], { encoding: 'utf8' })
+    return output.trim() ? JSON.parse(output) as T[] : []
+  }
+
+  seed(jpegPath: string, rawPath: string, now: string): void {
+    this.exec(`
+      CREATE TABLE projects (
+        id INTEGER PRIMARY KEY, cloud_id INTEGER, school_name TEXT NOT NULL,
+        sync_status TEXT NOT NULL, sync_completed_files INTEGER NOT NULL DEFAULT 0,
+        sync_total_files INTEGER NOT NULL DEFAULT 0, sync_failed_files INTEGER NOT NULL DEFAULT 0,
+        sync_error TEXT, finished_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE classes (
+        id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, cloud_id INTEGER,
+        class_name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE students (
+        id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, class_id INTEGER NOT NULL,
+        cloud_id INTEGER, first_name TEXT NOT NULL, last_name TEXT NOT NULL,
+        generated_student_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE captures (
+        id INTEGER PRIMARY KEY, capture_key TEXT NOT NULL, project_id INTEGER NOT NULL,
+        student_id INTEGER, class_id INTEGER, base_filename TEXT NOT NULL,
+        captured_at TEXT NOT NULL, pairing_status TEXT NOT NULL, created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE image_files (
+        id INTEGER PRIMARY KEY, capture_id INTEGER NOT NULL, file_role TEXT NOT NULL,
+        file_format TEXT NOT NULL, original_filename TEXT NOT NULL, stored_path TEXT NOT NULL,
+        file_size INTEGER NOT NULL, upload_status TEXT, file_url TEXT, import_time TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO projects VALUES (1, 700, 'Offline Academy', 'active', 0, 0, 0, NULL, NULL, ${sqliteQuote(now)}, ${sqliteQuote(now)});
+      INSERT INTO classes VALUES (1, 1, 701, 'Class A', ${sqliteQuote(now)}, ${sqliteQuote(now)});
+      INSERT INTO students VALUES (1, 1, 1, NULL, 'Maya', 'Chen', 'LATE-A7K9', ${sqliteQuote(now)}, ${sqliteQuote(now)});
+      INSERT INTO captures VALUES (1, 'offline-capture', 1, 1, 1, 'Maya_Chen', ${sqliteQuote(now)}, 'complete', ${sqliteQuote(now)}, ${sqliteQuote(now)});
+      INSERT INTO image_files VALUES
+        (1, 1, 'JPEG', 'JPEG', 'Maya_Chen.jpg', ${sqliteQuote(jpegPath)}, ${readFileSync(jpegPath).byteLength}, NULL, NULL, ${sqliteQuote(now)}, ${sqliteQuote(now)}),
+        (2, 1, 'RAW', 'CR3', 'Maya_Chen.cr3', ${sqliteQuote(rawPath)}, ${readFileSync(rawPath).byteLength}, NULL, NULL, ${sqliteQuote(now)}, ${sqliteQuote(now)});
+    `)
+  }
+
+  getProject(): TestProject | undefined {
+    return this.rows<TestProject>(`
+      SELECT id, cloud_id AS cloudId, sync_status AS syncStatus, sync_completed_files AS syncCompletedFiles,
+        sync_total_files AS syncTotalFiles, sync_failed_files AS syncFailedFiles,
+        sync_error AS syncError, finished_at AS finishedAt
+      FROM projects WHERE id = 1
+    `)[0]
+  }
+
+  updateProject(values: Partial<TestProject>): void {
+    const columns: Array<[string, string | number | null]> = []
+    if (values.syncStatus !== undefined) columns.push(['sync_status', values.syncStatus])
+    if (values.syncCompletedFiles !== undefined) columns.push(['sync_completed_files', values.syncCompletedFiles])
+    if (values.syncTotalFiles !== undefined) columns.push(['sync_total_files', values.syncTotalFiles])
+    if (values.syncFailedFiles !== undefined) columns.push(['sync_failed_files', values.syncFailedFiles])
+    if (values.syncError !== undefined) columns.push(['sync_error', values.syncError])
+    if (values.finishedAt !== undefined) columns.push(['finished_at', values.finishedAt])
+    if (columns.length) {
+      this.exec(`UPDATE projects SET ${columns.map(([name, value]) => `${name} = ${sqliteQuote(value)}`).join(', ')}, updated_at = datetime('now') WHERE id = 1`)
+    }
+  }
+
+  getFiles(): SqliteFile[] {
+    return this.rows<SqliteFile>(`
+      SELECT id, capture_id AS captureId, file_role AS fileRole, original_filename AS originalFilename,
+        stored_path AS storedPath, file_size AS fileSize, upload_status AS uploadStatus, file_url AS fileUrl
+      FROM image_files WHERE capture_id = 1 ORDER BY id
+    `)
+  }
+
+  setUploaded(fileId: number, fileUrl: string): void {
+    this.exec(`UPDATE image_files SET upload_status = 'done', file_url = ${sqliteQuote(fileUrl)} WHERE id = ${fileId}`)
+  }
+
+  getStudentCloudId(): number | null {
+    return this.rows<{ cloudId: number | null }>('SELECT cloud_id AS cloudId FROM students WHERE id = 1')[0]?.cloudId ?? null
+  }
+
+  getCloudProject(): { cloudId: number | null } {
+    return this.rows<{ cloudId: number | null }>('SELECT cloud_id AS cloudId FROM projects WHERE id = 1')[0]
+  }
+
+  getClass(): { projectId: number; cloudId: number | null } {
+    return this.rows<{ projectId: number; cloudId: number | null }>(
+      'SELECT project_id AS projectId, cloud_id AS cloudId FROM classes WHERE id = 1',
+    )[0]
+  }
+
+  getStudent(): { classId: number; generatedStudentId: string; cloudId: number | null } {
+    return this.rows<{ classId: number; generatedStudentId: string; cloudId: number | null }>(
+      'SELECT class_id AS classId, generated_student_id AS generatedStudentId, cloud_id AS cloudId FROM students WHERE id = 1',
+    )[0]
+  }
+
+  getCapture(): { studentId: number | null } {
+    return this.rows<{ studentId: number | null }>('SELECT student_id AS studentId FROM captures WHERE id = 1')[0]
+  }
+
+  setStudentCloudId(cloudId: number): void {
+    this.exec(`UPDATE students SET cloud_id = ${cloudId} WHERE id = 1`)
+  }
+
+  close(): void {}
 }
 
 type HarnessOptions = {
@@ -469,80 +601,108 @@ test('late offline student keeps paired captures across a real restart and produ
   const address = server.address()
   assert.ok(address && typeof address === 'object')
   const apiUrl = `http://127.0.0.1:${address.port}`
+  const sqlitePath = join(userDataDir, 'local.sqlite')
 
   try {
-    const db = getDb()
     const now = '2026-01-01T12:00:00.000Z'
-    db.insert(projectsTable).values({
-      cloudId: 700,
-      schoolName: 'Offline Academy',
-      syncStatus: 'active',
-      createdAt: now,
-      updatedAt: now,
-    }).run()
-    db.insert(classesTable).values({
-      projectId: 1,
-      cloudId: 701,
-      className: 'Class A',
-      createdAt: now,
-      updatedAt: now,
-    }).run()
-    db.insert(studentsTable).values({
-      projectId: 1,
-      classId: 1,
-      firstName: 'Maya',
-      lastName: 'Chen',
-      generatedStudentId: 'LATE-A7K9',
-      createdAt: now,
-      updatedAt: now,
-    }).run()
-    db.insert(capturesTable).values({
-      captureKey: 'offline-capture',
-      projectId: 1,
-      studentId: 1,
-      classId: 1,
-      baseFilename: 'Maya_Chen',
-      capturedAt: now,
-      pairingStatus: 'complete',
-      createdAt: now,
-      updatedAt: now,
-    }).run()
-    db.insert(imageFilesTable).values([
-      {
-        captureId: 1,
-        fileRole: 'JPEG',
-        fileFormat: 'JPEG',
-        originalFilename: 'Maya_Chen.jpg',
-        storedPath: jpegPath,
-        sourcePath: jpegPath,
-        fileSize: readFileSync(jpegPath).byteLength,
-        importTime: now,
-        createdAt: now,
+    let store = new RestartableSqliteStore(sqlitePath)
+    store.seed(jpegPath, rawPath, now)
+    let cloudReady = false
+    let createStudentPromise: Promise<void> | undefined
+    const settings = new Map<string, string>()
+    const makeDependencies = (): ProjectSyncDependencies => ({
+      getProject: () => store.getProject() as never,
+      updateProject: (_projectId, values) => store.updateProject(values),
+      emitProgress: () => {},
+      pauseLiveUploadForFinish: async () => {},
+      stopProjectWatcher: async () => {},
+      getUploadConfig: () => cloudReady
+        ? { apiUrl, connectionToken: 'test-token' }
+        : { apiUrl: '', connectionToken: '' },
+      isCloudSessionVerified: () => cloudReady,
+      getProjectCaptureBatchExpectedCount: () => store.getFiles().length,
+      getProjectUploadBlockerCount: () => 0,
+      syncGroupCloudIdentities: async () => {},
+      beginProjectCaptureBatch: (_projectId, expected) => beginProjectCaptureBatchWithDependencies(
+        1,
+        700,
+        expected,
+        {
+          apiUrl,
+          connectionToken: 'test-token',
+          getSetting: (key) => settings.get(key) ?? null,
+          setSetting: (key, value) => { settings.set(key, value) },
+          deleteSetting: (key) => { settings.delete(key) },
+          createBatchKey: () => 'sqlite-cli-restart-batch',
+          request: fetch,
+        },
+      ),
+      syncProjectUploads: async (projectId, onProgress, batchKey) => {
+        const projectsResponse = await fetch(`${apiUrl}/api/desktop/projects`)
+        assert.equal(projectsResponse.status, 200)
+        const bundleResponse = await fetch(`${apiUrl}/api/desktop/projects/700/bundle`)
+        assert.equal(bundleResponse.status, 200)
+        return syncProjectUploads(projectId, onProgress, batchKey, {
+          getJobs: () => store.getFiles().map((file) => ({ kind: 'capture-file', captureId: file.captureId, fileId: file.id })),
+          isCloudSessionVerified: () => cloudReady,
+          uploadProjectJob: async (job) => {
+            if (job.kind !== 'capture-file') throw new Error('Unexpected project-sync job')
+            const file = store.getFiles().find((candidate) => candidate.id === job.fileId)
+            assert.ok(file)
+            if (store.getStudentCloudId() === null) {
+              createStudentPromise ??= (async () => {
+                const studentResponse = await fetch(`${apiUrl}/api/desktop/projects/700/students`, {
+                  method: 'POST',
+                  headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    classId: 701,
+                    firstName: 'Maya',
+                    lastName: 'Chen',
+                    generatedStudentId: 'LATE-A7K9',
+                  }),
+                })
+                assert.equal(studentResponse.status, 200)
+                const student = await studentResponse.json() as { id: number }
+                store.setStudentCloudId(student.id)
+              })()
+              await createStudentPromise
+            }
+            const form = new FormData()
+            form.append('fileRole', file.fileRole)
+            form.append('file', new Blob([readFileSync(file.storedPath)]), file.originalFilename)
+            const uploadResponse = await fetch(`${apiUrl}/api/projects/700/students/8001/captures`, {
+              method: 'POST',
+              headers: { authorization: 'Bearer test-token' },
+              body: form,
+            })
+            assert.equal(uploadResponse.status, 200)
+            const payload = await uploadResponse.json() as { file: { fileUrl: string } }
+            store.setUploaded(file.id, `${apiUrl}/${payload.file.fileUrl}`)
+          },
+        })
       },
-      {
-        captureId: 1,
-        fileRole: 'RAW',
-        fileFormat: 'CR3',
-        originalFilename: 'Maya_Chen.cr3',
-        storedPath: rawPath,
-        sourcePath: rawPath,
-        fileSize: readFileSync(rawPath).byteLength,
-        importTime: now,
-        createdAt: now,
+      flushPendingCaptureReviews: async () => ({ portrait: 0, group: 0 }),
+      finishProjectCaptureBatch: async (_projectId, batchKey, status, failed) => {
+        const response = await fetch(`${apiUrl}/api/desktop/projects/700/capture-batches/${batchKey}`, {
+          method: 'PATCH',
+          headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
+          body: JSON.stringify({ status, failedFileCount: failed }),
+        })
+        assert.equal(response.status, 200)
       },
-    ]).run()
+    })
 
-    const offlineResult = await runProjectSync(1, {})
+    const offlineResult = await runProjectSync(1, {}, makeDependencies())
     assert.equal(offlineResult.syncStatus, 'finished_local')
-    const offlineProject = db.select().from(projectsTable).where(eq(projectsTable.id, 1)).get()!
-    const offlineCapture = db.select().from(capturesTable).where(eq(capturesTable.id, 1)).get()!
-    const offlineFiles = db.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, 1)).all()
+    const offlineProject = store.getProject()!
+    const offlineCapture = store.getCapture()
+    const offlineFiles = store.getFiles()
     assert.deepEqual(
-      [offlineProject.syncStatus, offlineProject.syncTotalFiles, offlineProject.cloudId],
+      [offlineProject.syncStatus, offlineProject.syncTotalFiles, store.getCloudProject().cloudId],
       ['finished_local', 2, 700],
     )
-    const offlineClass = db.select().from(classesTable).where(eq(classesTable.id, 1)).get()!
-    const offlineStudent = db.select().from(studentsTable).where(eq(studentsTable.id, 1)).get()!
+    const offlineClass = store.getClass()
+    const offlineStudent = store.getStudent()
     assert.deepEqual(
       [offlineClass.projectId, offlineClass.cloudId, offlineStudent.classId, offlineStudent.generatedStudentId],
       [1, 701, 1, 'LATE-A7K9'],
@@ -551,24 +711,21 @@ test('late offline student keeps paired captures across a real restart and produ
     assert.deepEqual(offlineFiles.map((file) => file.uploadStatus), [null, null])
     assert.deepEqual(requestPaths, [], 'offline completion must not call cloud endpoints')
 
-    closeDbForTests()
-    const restartedDb = getDb()
-    const restartedProject = restartedDb.select().from(projectsTable).where(eq(projectsTable.id, 1)).get()!
-    const restartedStudent = restartedDb.select().from(studentsTable).where(eq(studentsTable.id, 1)).get()!
-    const restartedCapture = restartedDb.select().from(capturesTable).where(eq(capturesTable.id, 1)).get()!
+    store.close()
+    store = new RestartableSqliteStore(sqlitePath)
+    const restartedProject = store.getProject()!
+    const restartedStudent = store.getStudent()
+    const restartedCapture = store.getCapture()
     assert.equal(restartedProject.syncStatus, 'finished_local')
     assert.equal(restartedStudent.cloudId, null)
     assert.equal(restartedCapture.studentId, 1)
     assert.deepEqual(
-      restartedDb.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, 1)).all()
-        .map((file) => file.uploadStatus),
+      store.getFiles().map((file) => file.uploadStatus),
       [null, null],
     )
 
-    setSetting('upload_api_url', apiUrl)
-    setSetting('desktop_connection_token', 'test-token')
-    markCloudSessionVerified()
-    const onlineResult = await runProjectSync(1, {})
+    cloudReady = true
+    const onlineResult = await runProjectSync(1, {}, makeDependencies())
     assert.equal(onlineResult.ok, true)
     assert.equal(onlineResult.syncStatus, 'synced')
     assert.deepEqual(uploadedRoles.sort(), ['JPEG', 'RAW'])
@@ -582,11 +739,11 @@ test('late offline student keeps paired captures across a real restart and produ
     assert.equal(requestPaths.filter((path) => path === 'GET /api/desktop/projects').length, 1)
     assert.ok(requestPaths.includes('GET /api/desktop/projects/700/bundle'))
 
-    const uploadedProject = restartedDb.select().from(projectsTable).where(eq(projectsTable.id, 1)).get()!
-    const uploadedClass = restartedDb.select().from(classesTable).where(eq(classesTable.id, 1)).get()!
-    const uploadedStudent = restartedDb.select().from(studentsTable).where(eq(studentsTable.id, 1)).get()!
-    const uploadedCapture = restartedDb.select().from(capturesTable).where(eq(capturesTable.id, 1)).get()!
-    const uploadedFiles = restartedDb.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, 1)).all()
+    const uploadedProject = store.getProject()!
+    const uploadedClass = store.getClass()
+    const uploadedStudent = store.getStudent()
+    const uploadedCapture = store.getCapture()
+    const uploadedFiles = store.getFiles()
     assert.deepEqual(
       [uploadedProject.syncStatus, uploadedProject.syncCompletedFiles, uploadedProject.syncTotalFiles, uploadedProject.syncFailedFiles],
       ['synced', 2, 2, 0],
@@ -601,8 +758,6 @@ test('late offline student keeps paired captures across a real restart and produ
     ])
     assert.ok(uploadedFiles.every((file) => file.fileUrl?.startsWith('http://127.0.0.1') === true))
   } finally {
-    markCloudSessionUnavailable()
-    closeDbForTests()
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     rmSync(userDataDir, { recursive: true, force: true })
     delete process.env.MC_SCHOOL_STUDIO_TEST_USER_DATA_DIR

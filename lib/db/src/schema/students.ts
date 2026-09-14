@@ -1,4 +1,5 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { projectsTable } from "./projects";
@@ -26,7 +27,14 @@ export const studentsTable = pgTable("students", {
   jsonQr: text("json_qr"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // A roster code is only meaningful inside its project.  lower() makes the
+  // invariant match QR/file matching, which is deliberately case-insensitive.
+  uniqueIndex("students_project_generated_student_id_ci").on(
+    table.projectId,
+    sql`lower(${table.generatedStudentId})`,
+  ),
+]);
 
 export const insertStudentSchema = createInsertSchema(studentsTable).omit({
   id: true,

@@ -92,18 +92,49 @@ test('routes portraits to a manually selected student and supports target change
   })
 })
 
-test('lets a valid QR marker replace the previous manual target', () => {
+test('keeps manual authority over valid, unknown, and malformed QR markers', () => {
   const state = createSequenceState(10)
   assert.deepEqual(
     advanceSequence(state, { kind: 'marker', studentId: 20, reference: 'STU-20' }),
     {
-      kind: 'marker',
-      studentId: 20,
+      kind: 'review',
+      reason: 'QR marker "STU-20" does not match the selected student',
+    },
+  )
+  assert.equal(state.manualStudentId, 10)
+  assert.equal(state.activeStudentId, 10)
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: null, reference: 'UNKNOWN' }),
+    {
+      kind: 'review',
+      reason: 'QR marker "UNKNOWN" was not accepted while a student is manually selected',
+    },
+  )
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: null, reference: 'malformed payload' }),
+    {
+      kind: 'review',
+      reason: 'QR marker "malformed payload" was not accepted while a student is manually selected',
     },
   )
   assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
     kind: 'matched',
-    studentId: 20,
+    studentId: 10,
+  })
+})
+
+test('rapid manual switching affects only later captures', () => {
+  const state = createSequenceState()
+  setManualStudent(state, 101)
+  const first = advanceSequence(state, { kind: 'portrait' })
+  setManualStudent(state, 202)
+  const second = advanceSequence(state, { kind: 'portrait' })
+  clearManualStudent(state)
+  assert.deepEqual(first, { kind: 'matched', studentId: 101 })
+  assert.deepEqual(second, { kind: 'matched', studentId: 202 })
+  assert.deepEqual(advanceSequence(state, { kind: 'portrait' }), {
+    kind: 'review',
+    reason: 'Portrait was captured before a valid student QR marker',
   })
 })
 
@@ -125,6 +156,7 @@ test('keeps the exact offline A/B/QR-C capture sequence assigned without auto-ad
     if (decision.kind === 'matched') assigned.push(decision.studentId)
   }
 
+  clearManualStudent(state)
   assert.deepEqual(
     advanceSequence(state, { kind: 'marker', studentId: 303, reference: 'STU-303' }),
     { kind: 'marker', studentId: 303 },

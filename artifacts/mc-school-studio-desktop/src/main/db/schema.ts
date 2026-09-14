@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
+import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const projectsTable = sqliteTable('projects', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -59,7 +60,12 @@ export const studentsTable = sqliteTable('students', {
   jsonQr: text('json_qr'),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
-})
+}, (table) => [
+  uniqueIndex('students_project_generated_student_id_ci').on(
+    table.projectId,
+    sql`lower(${table.generatedStudentId})`,
+  ),
+])
 
 /** Editable photographer groups. A default group is created for each class. */
 export const groupsTable = sqliteTable('groups', {

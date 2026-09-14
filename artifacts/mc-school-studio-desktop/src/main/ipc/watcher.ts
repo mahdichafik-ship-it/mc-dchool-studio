@@ -1030,6 +1030,33 @@ async function handleNewPhoto(
     ? capture.selectedStudentId
     : session.sequenceState.manualStudentId
   const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
+  let qrResult = manualStudentId !== null
+    ? await readQrFromImage(capture.filePath, capture.sourceBuffer)
+    : null
+
+  // A manual target must not turn a QR marker into a portrait just because
+  // the marker filename happens to resemble a Smart Shooter filename.
+  if (manualStudentId !== null && qrResult) {
+    const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
+    const qrStudent = knownStudents.find((candidate) =>
+      candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
+    const decision = advanceSequence(session.sequenceState, {
+      kind: 'marker',
+      studentId: qrStudent?.id ?? null,
+      reference: qrResult.studentId,
+    })
+    recordUnmatched(
+      db,
+      win,
+      projectId,
+      capture,
+      decision.kind === 'review'
+        ? decision.reason
+        : `QR marker "${qrResult.studentId}" was ignored while a student is manually selected`,
+    )
+    return 'unmatched'
+  }
+
   const filenameReference = extractStudentReference(
     capture.fileName,
     knownStudents.map((student) => student.generatedStudentId),
@@ -1108,8 +1135,7 @@ async function handleNewPhoto(
 
   // A QR marker can select the next student when the photographer has not
   // explicitly selected one in the roster.
-  const qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
-
+  qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
   if (qrResult) {
     const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
     const student = db

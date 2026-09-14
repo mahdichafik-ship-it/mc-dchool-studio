@@ -1,5 +1,9 @@
 export const app = {
-  getPath: () => '/tmp/mc-school-studio-test',
+  getPath: (name) => {
+    if (name === 'userData') return process.env.MC_SCHOOL_STUDIO_TEST_USER_DATA_DIR || '/tmp/mc-school-studio-test'
+    if (name === 'home') return process.env.MC_SCHOOL_STUDIO_TEST_HOME_DIR || '/tmp/mc-school-studio-test'
+    return '/tmp/mc-school-studio-test'
+  },
   getName: () => 'mc-school-studio-test',
   isPackaged: false,
   on: () => {},

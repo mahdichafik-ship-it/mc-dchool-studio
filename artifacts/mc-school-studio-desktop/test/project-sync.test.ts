@@ -1,9 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createServer } from 'node:http'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { runProjectSync } from '../src/main/ipc/projectSync.ts'
 import type { ProjectSyncDependencies } from '../src/main/ipc/projectSync.ts'
-import { syncProjectUploads } from '../src/main/ipc/upload.ts'
+import { syncProjectUploads, setSetting, markCloudSessionVerified, markCloudSessionUnavailable } from '../src/main/ipc/upload.ts'
 import type { ProjectSyncJob, ProjectSyncProgress } from '../src/main/ipc/upload.ts'
+import { closeDbForTests, getDb } from '../src/main/db/index.ts'
+import {
+  capturesTable,
+  classesTable,
+  imageFilesTable,
+  projectsTable,
+  studentsTable,
+} from '../src/main/db/schema.ts'
+import { eq } from 'drizzle-orm'
 
 type TestProject = {
   id: number
@@ -316,4 +329,226 @@ test('real upload aggregation de-duplicates repeated capture, RAW, group, and le
   )
 
   assert.deepEqual(progress, { completed: 3, total: 3, failed: 0 })
+})
+
+test('late offline student keeps paired captures across a real restart and production upload', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mc-school-studio-project-sync-'))
+  process.env.MC_SCHOOL_STUDIO_TEST_USER_DATA_DIR = userDataDir
+  process.env.MC_SCHOOL_STUDIO_TEST_HOME_DIR = userDataDir
+  const jpegPath = join(userDataDir, 'Maya_Chen.jpg')
+  const rawPath = join(userDataDir, 'Maya_Chen.cr3')
+  writeFileSync(jpegPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+  writeFileSync(rawPath, Buffer.from('raw camera bytes'))
+
+  const requestPaths: string[] = []
+  const studentCreateBodies: string[] = []
+  const uploadedRoles: string[] = []
+  const server = createServer(async (request, response) => {
+    const body = await new Promise<Buffer>((resolve) => {
+      const chunks: Buffer[] = []
+      request.on('data', (chunk: Buffer) => chunks.push(chunk))
+      request.on('end', () => resolve(Buffer.concat(chunks)))
+    })
+    const path = request.url ?? ''
+    requestPaths.push(`${request.method} ${path}`)
+    response.setHeader('Content-Type', 'application/json')
+
+    if (request.method === 'GET' && path === '/api/desktop/projects') {
+      response.end(JSON.stringify([{ id: 700, schoolName: 'Offline Academy' }]))
+      return
+    }
+    if (request.method === 'GET' && path === '/api/desktop/projects/700/bundle') {
+      response.end(JSON.stringify({
+        project: { id: 700, projectType: 'school' },
+        classes: [{ id: 701, className: 'Class A' }],
+        students: [],
+      }))
+      return
+    }
+    if (request.method === 'POST' && path === '/api/desktop/projects/700/students') {
+      studentCreateBodies.push(body.toString('utf8'))
+      response.end(JSON.stringify({
+        id: 8001,
+        classId: 701,
+        generatedStudentId: 'LATE-A7K9',
+        simpleQr: 'simple-late',
+        jsonQr: '{"studentId":"LATE-A7K9"}',
+      }))
+      return
+    }
+    if (request.method === 'POST' && path === '/api/desktop/projects/700/capture-batches') {
+      response.end(JSON.stringify({ batch: { status: 'active' } }))
+      return
+    }
+    if (request.method === 'PATCH' && /^\/api\/desktop\/projects\/700\/capture-batches\/.+$/.test(path)) {
+      response.end(JSON.stringify({ batch: { status: 'complete' } }))
+      return
+    }
+    if (request.method === 'POST' && path === '/api/projects/700/students/8001/captures') {
+      const multipart = body.toString('utf8')
+      uploadedRoles.push(multipart.includes('name="fileRole"\r\n\r\nRAW') ? 'RAW' : 'JPEG')
+      const fileRole = uploadedRoles.at(-1)!
+      response.end(JSON.stringify({
+        captureId: 9001,
+        captureKey: 'offline-capture',
+        pairingStatus: fileRole === 'RAW' ? 'complete' : 'jpeg_only',
+        file: {
+          id: fileRole === 'RAW' ? 9003 : 9002,
+          fileRole,
+          fileFormat: fileRole === 'RAW' ? 'CR3' : 'JPEG',
+          originalFilename: fileRole === 'RAW' ? 'Maya_Chen.cr3' : 'Maya_Chen.jpg',
+          mimeType: fileRole === 'RAW' ? 'application/octet-stream' : 'image/jpeg',
+          fileSize: body.byteLength,
+          fileUrl: `uploads/${fileRole.toLowerCase()}`,
+        },
+        reused: false,
+      }))
+      return
+    }
+    response.statusCode = 404
+    response.end(JSON.stringify({ error: 'not found' }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+  const apiUrl = `http://127.0.0.1:${address.port}`
+
+  try {
+    const db = getDb()
+    const now = '2026-01-01T12:00:00.000Z'
+    db.insert(projectsTable).values({
+      cloudId: 700,
+      schoolName: 'Offline Academy',
+      syncStatus: 'active',
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+    db.insert(classesTable).values({
+      projectId: 1,
+      cloudId: 701,
+      className: 'Class A',
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+    db.insert(studentsTable).values({
+      projectId: 1,
+      classId: 1,
+      firstName: 'Maya',
+      lastName: 'Chen',
+      generatedStudentId: 'LATE-A7K9',
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+    db.insert(capturesTable).values({
+      captureKey: 'offline-capture',
+      projectId: 1,
+      studentId: 1,
+      classId: 1,
+      baseFilename: 'Maya_Chen',
+      capturedAt: now,
+      pairingStatus: 'complete',
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+    db.insert(imageFilesTable).values([
+      {
+        captureId: 1,
+        fileRole: 'JPEG',
+        fileFormat: 'JPEG',
+        originalFilename: 'Maya_Chen.jpg',
+        storedPath: jpegPath,
+        sourcePath: jpegPath,
+        fileSize: readFileSync(jpegPath).byteLength,
+        importTime: now,
+        createdAt: now,
+      },
+      {
+        captureId: 1,
+        fileRole: 'RAW',
+        fileFormat: 'CR3',
+        originalFilename: 'Maya_Chen.cr3',
+        storedPath: rawPath,
+        sourcePath: rawPath,
+        fileSize: readFileSync(rawPath).byteLength,
+        importTime: now,
+        createdAt: now,
+      },
+    ]).run()
+
+    const offlineResult = await runProjectSync(1, {})
+    assert.equal(offlineResult.syncStatus, 'finished_local')
+    const offlineProject = db.select().from(projectsTable).where(eq(projectsTable.id, 1)).get()!
+    const offlineCapture = db.select().from(capturesTable).where(eq(capturesTable.id, 1)).get()!
+    const offlineFiles = db.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, 1)).all()
+    assert.deepEqual(
+      [offlineProject.syncStatus, offlineProject.syncTotalFiles, offlineProject.cloudId],
+      ['finished_local', 2, 700],
+    )
+    const offlineClass = db.select().from(classesTable).where(eq(classesTable.id, 1)).get()!
+    const offlineStudent = db.select().from(studentsTable).where(eq(studentsTable.id, 1)).get()!
+    assert.deepEqual(
+      [offlineClass.projectId, offlineClass.cloudId, offlineStudent.classId, offlineStudent.generatedStudentId],
+      [1, 701, 1, 'LATE-A7K9'],
+    )
+    assert.equal(offlineCapture.studentId, 1)
+    assert.deepEqual(offlineFiles.map((file) => file.uploadStatus), [null, null])
+    assert.deepEqual(requestPaths, [], 'offline completion must not call cloud endpoints')
+
+    closeDbForTests()
+    const restartedDb = getDb()
+    const restartedProject = restartedDb.select().from(projectsTable).where(eq(projectsTable.id, 1)).get()!
+    const restartedStudent = restartedDb.select().from(studentsTable).where(eq(studentsTable.id, 1)).get()!
+    const restartedCapture = restartedDb.select().from(capturesTable).where(eq(capturesTable.id, 1)).get()!
+    assert.equal(restartedProject.syncStatus, 'finished_local')
+    assert.equal(restartedStudent.cloudId, null)
+    assert.equal(restartedCapture.studentId, 1)
+    assert.deepEqual(
+      restartedDb.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, 1)).all()
+        .map((file) => file.uploadStatus),
+      [null, null],
+    )
+
+    setSetting('upload_api_url', apiUrl)
+    setSetting('desktop_connection_token', 'test-token')
+    markCloudSessionVerified()
+    const onlineResult = await runProjectSync(1, {})
+    assert.equal(onlineResult.ok, true)
+    assert.equal(onlineResult.syncStatus, 'synced')
+    assert.deepEqual(uploadedRoles.sort(), ['JPEG', 'RAW'])
+    assert.equal(studentCreateBodies.length, 1, 'late student must be created exactly once')
+    assert.deepEqual(JSON.parse(studentCreateBodies[0]), {
+      classId: 701,
+      firstName: 'Maya',
+      lastName: 'Chen',
+      generatedStudentId: 'LATE-A7K9',
+    })
+    assert.equal(requestPaths.filter((path) => path === 'GET /api/desktop/projects').length, 1)
+    assert.ok(requestPaths.includes('GET /api/desktop/projects/700/bundle'))
+
+    const uploadedProject = restartedDb.select().from(projectsTable).where(eq(projectsTable.id, 1)).get()!
+    const uploadedClass = restartedDb.select().from(classesTable).where(eq(classesTable.id, 1)).get()!
+    const uploadedStudent = restartedDb.select().from(studentsTable).where(eq(studentsTable.id, 1)).get()!
+    const uploadedCapture = restartedDb.select().from(capturesTable).where(eq(capturesTable.id, 1)).get()!
+    const uploadedFiles = restartedDb.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, 1)).all()
+    assert.deepEqual(
+      [uploadedProject.syncStatus, uploadedProject.syncCompletedFiles, uploadedProject.syncTotalFiles, uploadedProject.syncFailedFiles],
+      ['synced', 2, 2, 0],
+    )
+    assert.deepEqual(
+      [uploadedProject.cloudId, uploadedClass.cloudId, uploadedStudent.cloudId, uploadedCapture.studentId],
+      [700, 701, 8001, 1],
+    )
+    assert.deepEqual(uploadedFiles.map((file) => [file.fileRole, file.uploadStatus]), [
+      ['JPEG', 'done'],
+      ['RAW', 'done'],
+    ])
+    assert.ok(uploadedFiles.every((file) => file.fileUrl?.startsWith('http://127.0.0.1') === true))
+  } finally {
+    markCloudSessionUnavailable()
+    closeDbForTests()
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    rmSync(userDataDir, { recursive: true, force: true })
+    delete process.env.MC_SCHOOL_STUDIO_TEST_USER_DATA_DIR
+    delete process.env.MC_SCHOOL_STUDIO_TEST_HOME_DIR
+  }
 })

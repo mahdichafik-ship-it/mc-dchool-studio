@@ -10,6 +10,7 @@ import { ensureCaptureTables, ensureLegacyColumns } from './migrations'
 import { ensurePhotoSystemLayout, getPhotoSystemLayout } from '../lib/storageLayout'
 
 let _db: ReturnType<typeof drizzle> | null = null
+let _sqlite: Database.Database | null = null
 
 export function getDb() {
   if (_db) return _db
@@ -25,11 +26,23 @@ export function getDb() {
   sqlite.pragma('foreign_keys = ON')
 
   _db = drizzle(sqlite, { schema })
+  _sqlite = sqlite
 
   // Create tables if they don't exist
   initializeSchema(sqlite)
 
   return _db
+}
+
+/**
+ * Close the desktop database connection. The desktop process normally keeps
+ * this connection for its lifetime; the explicit seam also lets integration
+ * tests model an app restart against the same SQLite file.
+ */
+export function closeDbForTests(): void {
+  _sqlite?.close()
+  _sqlite = null
+  _db = null
 }
 
 function initializeSchema(sqlite: Database.Database) {

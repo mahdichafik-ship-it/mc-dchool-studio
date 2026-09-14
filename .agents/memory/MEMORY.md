@@ -56,6 +56,7 @@
 - [R2 verified upload promotion](r2-verified-upload-promotion.md) — presigned R2 PUTs require unique staging keys and server-only verified candidates to prevent replay and promotion races.
 - [Release smoke contract fixtures](release-smoke-contract-fixtures.md) — packaged-app smoke servers must return the same strict response shapes as production APIs.
 - [R2 photo variants](r2-photo-variants.md) — immutable keys bind optimized derivatives to original bytes, rendering settings, and watermark configuration.
+- [R2 deletion outbox](r2-deletion-outbox.md) — cascade deletion must lock ownership first; stale workers may finalize only their own claim.
 - [R2 staging cleanup](r2-staging-cleanup.md) — retries refresh attempt activity; cleanup atomically claims only expired database-owned staging keys before deletion.
 - [Desktop upload concurrency](desktop-upload-concurrency.md) — all desktop transfer paths share a three-file limit held through verification and persistence.
 - [Capture reframe editor](capture-reframe-editor.md) — focused non-destructive edits require desktop/cloud crop parity and a finish-time sync barrier.

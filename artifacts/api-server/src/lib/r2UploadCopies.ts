@@ -12,6 +12,7 @@ import {
   groupCapturesTable,
   groupsTable,
   photoStorageCopiesTable,
+  r2PhotoDeletionOutboxTable,
   projectsTable,
   studentPhotosTable,
   studentsTable,
@@ -538,6 +539,36 @@ export async function verifyR2Copy(
     );
   }
   copy = claimedCopy;
+  const sourceType = copy.studentPhotoId !== null
+    ? "student_photo"
+    : copy.captureFileId !== null
+      ? "capture_file"
+      : "group_capture_file";
+  const sourceId = copy.studentPhotoId ?? copy.captureFileId ?? copy.groupCaptureFileId;
+  if (sourceId === null) throw new Error("R2 storage copy source is missing");
+  await db.insert(r2PhotoDeletionOutboxTable).values({
+    storageCopyId: copy.id,
+    sourceType,
+    sourceId,
+    objectKey: stagingObjectKey,
+    objectKind: "staging",
+    // A successful promotion clears stagingObjectKey. Keep a durable second
+    // deletion pass beyond the maximum lifetime of every issued signed PUT.
+    nextRetryAt: new Date(Date.now() + 16 * 60_000),
+  }).onConflictDoUpdate({
+    target: [
+      r2PhotoDeletionOutboxTable.storageCopyId,
+      r2PhotoDeletionOutboxTable.objectKey,
+    ],
+    set: {
+      state: "pending",
+      objectKind: "staging",
+      nextRetryAt: new Date(Date.now() + 16 * 60_000),
+      lastError: null,
+      deletedAt: null,
+      updatedAt: new Date(),
+    },
+  });
   await testHooks.afterVerificationClaimed?.(claimedCopy);
 
   const metadata = await headR2Object(stagingObjectKey);
@@ -586,6 +617,54 @@ export async function verifyR2Copy(
     copy.objectKey,
     candidateAttemptKey,
   );
+  await db.insert(r2PhotoDeletionOutboxTable).values({
+    storageCopyId: copy.id,
+    sourceType,
+    sourceId,
+    objectKey: candidateObjectKey,
+    objectKind: "candidate",
+    // Reserve cleanup before the provider copy. A crashed verifier cannot
+    // leave an untracked candidate; active verification gets a bounded lease.
+    nextRetryAt: new Date(Date.now() + 20 * 60_000),
+  }).onConflictDoUpdate({
+    target: [
+      r2PhotoDeletionOutboxTable.storageCopyId,
+      r2PhotoDeletionOutboxTable.objectKey,
+    ],
+    set: {
+      state: "pending",
+      objectKind: "candidate",
+      nextRetryAt: new Date(Date.now() + 20 * 60_000),
+      lastError: null,
+      updatedAt: new Date(),
+    },
+  });
+  const cleanupCandidate = async (): Promise<void> => {
+    const cleanupAt = new Date();
+    try {
+      await deleteR2Object(candidateObjectKey);
+      await db.update(r2PhotoDeletionOutboxTable).set({
+        state: "deleted",
+        deletedAt: cleanupAt,
+        nextRetryAt: null,
+        lastError: null,
+        updatedAt: cleanupAt,
+      }).where(and(
+        eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
+        eq(r2PhotoDeletionOutboxTable.objectKey, candidateObjectKey),
+      ));
+    } catch (error) {
+      await db.update(r2PhotoDeletionOutboxTable).set({
+        state: "pending",
+        nextRetryAt: cleanupAt,
+        lastError: error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000),
+        updatedAt: cleanupAt,
+      }).where(and(
+        eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
+        eq(r2PhotoDeletionOutboxTable.objectKey, candidateObjectKey),
+      ));
+    }
+  };
   await copyR2Object(stagingObjectKey, candidateObjectKey, {
     sha256: actualSha256!,
   });
@@ -600,7 +679,7 @@ export async function verifyR2Copy(
     candidateDigest.size !== actualSize ||
     candidateDigest.sha256.toLowerCase() !== actualSha256
   ) {
-    await deleteR2Object(candidateObjectKey).catch(() => undefined);
+    await cleanupCandidate();
     throw Object.assign(
       new Error("Verified R2 object could not be promoted safely"),
       { code: "R2_UPLOAD_NOT_VERIFIED" },
@@ -636,12 +715,17 @@ export async function verifyR2Copy(
     ))
     .returning();
   if (!ready) {
-    await deleteR2Object(candidateObjectKey).catch(() => undefined);
+    await cleanupCandidate();
     throw Object.assign(
       new Error("A newer R2 upload attempt replaced this verification"),
       { code: "R2_UPLOAD_NOT_VERIFIED" },
     );
   }
+  await db.delete(r2PhotoDeletionOutboxTable).where(and(
+    eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
+    eq(r2PhotoDeletionOutboxTable.objectKey, candidateObjectKey),
+    eq(r2PhotoDeletionOutboxTable.objectKind, "candidate"),
+  ));
   await deleteR2Object(stagingObjectKey).catch(() => undefined);
   return ready;
 }

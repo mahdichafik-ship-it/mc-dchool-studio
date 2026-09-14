@@ -55,12 +55,19 @@ export function r2PhotoVariantKey(
     .update(`${original.sha256.toLowerCase()}:${kind}:${watermark}:${JSON.stringify(edits)}:variant-v2`)
     .digest("hex")
     .slice(0, 16);
-  const extension = extname(original.objectKey);
-  const stem = basename(original.objectKey, extension);
+  const originalFileName = basename(original.objectKey);
   const label = watermark ? `${kind}-watermarked` : kind;
-  return `${dirname(original.objectKey)}/.variants/${stem}__${label}__${signature}.jpg`;
+  return `${dirname(original.objectKey)}/.variants/${originalFileName}__${label}__${signature}.jpg`;
 }
 
+export function r2PhotoVariantPrefix(objectKey: string): string {
+  return `${dirname(objectKey)}/.variants/${basename(objectKey)}__`;
+}
+
+export function r2LegacyPhotoVariantPrefix(objectKey: string): string {
+  const extension = extname(objectKey);
+  return `${dirname(objectKey)}/.variants/${basename(objectKey, extension)}__`;
+}
 export async function getVerifiedR2CopyForPhoto(
   photo: typeof studentPhotosTable.$inferSelect,
 ): Promise<PhotoStorageCopy | null> {
@@ -111,6 +118,21 @@ export async function ensureR2PhotoVariant(
   if (original.destination !== "r2" || original.state !== "ready" || !original.sha256) {
     throw new Error("A verified R2 original is required to create a photo variant");
   }
+  const sourceStillLive = async (): Promise<boolean> => {
+    const [copy] = await db.select({ id: photoStorageCopiesTable.id })
+      .from(photoStorageCopiesTable)
+      .where(and(
+        eq(photoStorageCopiesTable.id, original.id),
+        eq(photoStorageCopiesTable.destination, "r2"),
+        eq(photoStorageCopiesTable.state, "ready"),
+        eq(photoStorageCopiesTable.objectKey, original.objectKey),
+      ))
+      .limit(1);
+    return !!copy;
+  };
+  if (!(await sourceStillLive())) {
+    throw new Error("R2 source was deleted before variant generation");
+  }
   let resolvedEditSettings = editSettings;
   if (resolvedEditSettings === undefined) {
     if (original.captureFileId !== null) {
@@ -158,7 +180,11 @@ export async function ensureR2PhotoVariant(
     }
   }
   const objectKey = r2PhotoVariantKey(original, kind, watermarkText, resolvedEditSettings);
-  if (await headR2Object(objectKey)) return objectKey;
+  if (await headR2Object(objectKey)) {
+    if (await sourceStillLive()) return objectKey;
+    await deleteR2Object(objectKey).catch(() => undefined);
+    throw new Error("R2 source was deleted during variant generation");
+  }
 
   const source = await getR2Object(original.objectKey);
   const sourceBytes = Buffer.from(await source.arrayBuffer());
@@ -186,6 +212,10 @@ export async function ensureR2PhotoVariant(
     || (verified.sha256 !== null && verified.sha256.toLowerCase() !== digest)
   ) {
     throw new Error("R2 photo variant could not be verified");
+  }
+  if (!(await sourceStillLive())) {
+    await deleteR2Object(objectKey);
+    throw new Error("R2 source was deleted during variant generation");
   }
   return objectKey;
 }

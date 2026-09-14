@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   classesTable,
   db,
   photoStorageCopiesTable,
   projectsTable,
+  r2PhotoDeletionOutboxTable,
   studentPhotosTable,
   studentsTable,
   studiosTable,
@@ -18,6 +19,7 @@ import {
   readableR2ObjectKey,
   verifyR2Copy,
 } from "../src/lib/r2UploadCopies";
+import { dispatchR2PhotoDeletions } from "../src/lib/r2PhotoDeletionOutbox";
 
 const hierarchy = {
   studioId: 7,
@@ -97,6 +99,8 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
   const objects = new Map<string, Buffer>();
   const deletedKeys: string[] = [];
   const candidateKeys: string[] = [];
+  let failNextCandidateDelete = false;
+  let failNextStagingDelete = false;
   const suffix = `${process.pid}-${Date.now()}`;
   let studioId: number | undefined;
   let releaseVerifierA!: () => void;
@@ -161,6 +165,14 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
     }
     if (method === "DELETE") {
       deletedKeys.push(objectKey);
+      if (failNextStagingDelete && objectKey === stagingObjectKey) {
+        failNextStagingDelete = false;
+        return new Response("temporary outage", { status: 503 });
+      }
+      if (failNextCandidateDelete && candidateKeys.includes(objectKey)) {
+        failNextCandidateDelete = false;
+        return new Response("temporary outage", { status: 503 });
+      }
       objects.delete(objectKey);
       return new Response(null, { status: 204 });
     }
@@ -234,6 +246,7 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
     });
     await verifierAPaused;
 
+    failNextStagingDelete = true;
     const winningCopy = await verifyR2Copy(copy);
     assert.equal(candidateKeys.length, 2);
     assert.notEqual(candidateKeys[0], candidateKeys[1]);
@@ -245,6 +258,7 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
       /\/concurrent-[^/]+__[a-f0-9]{12}\.jpg$/,
     );
 
+    failNextCandidateDelete = true;
     releaseVerifierA();
     await assert.rejects(
       verifierA,
@@ -253,6 +267,31 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
         "code" in error &&
         error.code === "R2_UPLOAD_NOT_VERIFIED",
     );
+
+    const [queuedCandidate] = await db.select()
+      .from(r2PhotoDeletionOutboxTable)
+      .where(and(
+        eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
+        eq(r2PhotoDeletionOutboxTable.objectKey, candidateKeys[0]),
+      ));
+    assert.equal(queuedCandidate.state, "pending");
+    await dispatchR2PhotoDeletions({
+      now: new Date(Date.now() + 1_000),
+      listVariantKeys: async () => [],
+      deleteObject: async (key) => {
+        deletedKeys.push(key);
+        objects.delete(key);
+      },
+    });
+    assert.equal(objects.has(stagingObjectKey), true);
+    await dispatchR2PhotoDeletions({
+      now: new Date(Date.now() + 17 * 60_000),
+      listVariantKeys: async () => [],
+      deleteObject: async (key) => {
+        deletedKeys.push(key);
+        objects.delete(key);
+      },
+    });
 
     const [storedCopy] = await db
       .select()
@@ -267,10 +306,22 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
     );
     assert.deepEqual(
       deletedKeys.filter((key) => candidateKeys.includes(key)),
-      [candidateKeys[0]],
+      [candidateKeys[0], candidateKeys[0]],
+      "the failed immediate cleanup and durable retry must target only the losing candidate",
     );
     assert.ok(!deletedKeys.includes(winningCopy.objectKey));
     assert.equal(objects.has(stagingObjectKey), false);
+    const [cleanedCandidate] = await db.select()
+      .from(r2PhotoDeletionOutboxTable)
+      .where(eq(r2PhotoDeletionOutboxTable.id, queuedCandidate.id));
+    assert.equal(cleanedCandidate.state, "deleted");
+    const [cleanedStaging] = await db.select()
+      .from(r2PhotoDeletionOutboxTable)
+      .where(and(
+        eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
+        eq(r2PhotoDeletionOutboxTable.objectKey, stagingObjectKey),
+      ));
+    assert.equal(cleanedStaging.state, "deleted");
   } finally {
     globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(originalR2Environment)) {

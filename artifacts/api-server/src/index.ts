@@ -11,6 +11,7 @@ import { getStripeSync, getUncachableStripeClient } from "./lib/stripeClient";
 import { ensureSingleManagedWebhook } from "./lib/managedStripeWebhook";
 import { pool } from "@workspace/db";
 import { dispatchDeliveryOrderNotifications } from "./lib/deliveryOrderNotifications";
+import { dispatchR2PhotoDeletions } from "./lib/r2PhotoDeletionOutbox";
 
 const rawPort = process.env["PORT"];
 
@@ -129,7 +130,18 @@ app.listen(port, (err) => {
       logger.warn({ err: error }, "Periodic order notification dispatch failed");
     });
   }, 60_000);
+
+  const r2DeletionInterval = setInterval(() => {
+    void dispatchR2PhotoDeletions().catch((error) => {
+      logger.warn({ err: error }, "Periodic R2 photo deletion dispatch failed");
+    });
+  }, 60_000);
   interval.unref();
+
+  void dispatchR2PhotoDeletions().catch((error) => {
+    logger.warn({ err: error }, "Initial R2 photo deletion dispatch failed");
+  });
+  r2DeletionInterval.unref();
 
   void cleanupExpiredR2StagingUploads().catch((error) => {
     logger.warn({ err: error }, "Initial R2 staging cleanup failed");

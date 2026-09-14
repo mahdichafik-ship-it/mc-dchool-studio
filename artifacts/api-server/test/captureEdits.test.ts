@@ -79,6 +79,21 @@ test("R2 variant keys change when saved edits change", () => {
   assert.notEqual(identity, reframed);
 });
 
+test("R2 variant namespaces separate same-stem originals with different extensions", () => {
+  const originalHash = "a".repeat(64);
+  const jpeg = r2PhotoVariantKey(
+    { objectKey: "studio/project/portrait.jpg", sha256: originalHash },
+    "preview",
+  );
+  const png = r2PhotoVariantKey(
+    { objectKey: "studio/project/portrait.png", sha256: originalHash },
+    "preview",
+  );
+  assert.notEqual(jpeg, png);
+  assert.match(jpeg, /\.variants\/portrait\.jpg__/);
+  assert.match(png, /\.variants\/portrait\.png__/);
+});
+
 test("saved aspect ratio and rotation transform derivative pixels", async () => {
   const source = await sharp({
     create: { width: 100, height: 50, channels: 3, background: "red" },

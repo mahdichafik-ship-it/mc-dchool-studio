@@ -1,9 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { projectsTable, classesTable, studentsTable } from "@workspace/db";
+import { projectsTable, classesTable, groupsTable, studentsTable } from "@workspace/db";
 import { eq, and, count } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject } from "../lib/studioAccess";
+import {
+  enqueueR2PhotoDeletionsForGroups,
+  enqueueR2PhotoDeletionsForStudents,
+} from "../lib/r2PhotoDeletionOutbox";
 
 const router = Router({ mergeParams: true });
 
@@ -142,9 +146,21 @@ router.delete("/:classId", requireAuth, async (req, res) => {
     return;
   }
 
-  await db
-    .delete(classesTable)
-    .where(and(eq(classesTable.id, classId), eq(classesTable.projectId, projectId)));
+  await db.transaction(async (tx) => {
+    await tx.select({ id: classesTable.id }).from(classesTable)
+      .where(and(eq(classesTable.id, classId), eq(classesTable.projectId, projectId)))
+      .for("update");
+    const [students, groups] = await Promise.all([
+      tx.select({ id: studentsTable.id }).from(studentsTable)
+        .where(eq(studentsTable.classId, classId)),
+      tx.select({ id: groupsTable.id }).from(groupsTable)
+        .where(eq(groupsTable.classId, classId)),
+    ]);
+    await enqueueR2PhotoDeletionsForStudents(tx, students.map((row) => row.id));
+    await enqueueR2PhotoDeletionsForGroups(tx, groups.map((row) => row.id));
+    await tx.delete(classesTable)
+      .where(and(eq(classesTable.id, classId), eq(classesTable.projectId, projectId)));
+  });
 
   res.status(204).send();
 });

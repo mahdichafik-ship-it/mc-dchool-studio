@@ -378,6 +378,15 @@ export async function deleteR2Object(
   );
 }
 
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
 function xmlTag(xml: string, tag: string): string | null {
   const match = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
   return match?.[1] ?? null;

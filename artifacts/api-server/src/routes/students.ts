@@ -11,6 +11,10 @@ import {
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { canAccessProject } from "../lib/studioAccess";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
+import {
+  enqueueR2PhotoDeletionsForStudents,
+  lockProjectStudentIds,
+} from "../lib/r2PhotoDeletionOutbox";
 
 const router = Router({ mergeParams: true });
 
@@ -112,19 +116,23 @@ router.post("/", requireAuth, async (req, res) => {
     captureNotes,
   } = req.body;
 
-  const normalizedFirstName = normalizeOptionalString(firstName);
-  const normalizedLastName = normalizeOptionalString(lastName);
+  const normalizedFirstName =
+    firstName !== undefined ? normalizeOptionalString(firstName) : undefined;
+  const normalizedLastName =
+    lastName !== undefined ? normalizeOptionalString(lastName) : undefined;
   if (!classId || !normalizedFirstName || !normalizedLastName) {
     res.status(400).json({ error: "classId, firstName, and lastName are required" });
     return;
   }
 
-  const normalizedEmail = normalizeOptionalString(email);
-  const normalizedSecondaryEmail = normalizeOptionalString(secondaryEmail);
-  const normalizedGeneratedStudentId = normalizeOptionalString(generatedStudentId);
+  const normalizedEmail = email !== undefined ? normalizeOptionalString(email) : undefined;
+  const normalizedSecondaryEmail =
+    secondaryEmail !== undefined ? normalizeOptionalString(secondaryEmail) : undefined;
+  const normalizedGeneratedStudentId =
+    generatedStudentId !== undefined ? normalizeOptionalString(generatedStudentId) : undefined;
   const emailError =
-    validateEmail(normalizedEmail, "email") ??
-    validateEmail(normalizedSecondaryEmail, "secondaryEmail");
+    validateEmail(normalizedEmail ?? null, "email") ??
+    validateEmail(normalizedSecondaryEmail ?? null, "secondaryEmail");
   if (emailError) {
     res.status(400).json({ error: emailError });
     return;
@@ -341,9 +349,13 @@ router.delete("/:studentId", requireAuth, async (req, res) => {
     return;
   }
 
-  await db
-    .delete(studentsTable)
-    .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)));
+  await db.transaction(async (tx) => {
+    const scopedIds = await lockProjectStudentIds(tx, projectId, [studentId]);
+    if (scopedIds.length === 0) return;
+    await enqueueR2PhotoDeletionsForStudents(tx, scopedIds);
+    await tx.delete(studentsTable)
+      .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)));
+  });
 
   res.status(204).send();
 });
@@ -358,22 +370,25 @@ router.post("/bulk-delete", requireAuth, async (req, res) => {
     return;
   }
 
-  const { studentIds } = req.body;
+  const { studentIds } = req.body ?? {};
   if (!Array.isArray(studentIds) || studentIds.length === 0) {
     res.status(400).json({ error: "studentIds must be a non-empty array" });
     return;
   }
 
-  await db
-    .delete(studentsTable)
-    .where(
-      and(
+  const deletedCount = await db.transaction(async (tx) => {
+    const scopedIds = await lockProjectStudentIds(tx, projectId, studentIds);
+    if (scopedIds.length === 0) return 0;
+    await enqueueR2PhotoDeletionsForStudents(tx, scopedIds);
+    await tx.delete(studentsTable)
+      .where(and(
         eq(studentsTable.projectId, projectId),
-        inArray(studentsTable.id, studentIds),
-      ),
-    );
+        inArray(studentsTable.id, scopedIds),
+      ));
+    return scopedIds.length;
+  });
 
-  res.json({ deleted: studentIds.length });
+  res.json({ deleted: deletedCount });
 });
 
 // POST /api/projects/:projectId/students/generate-qr
@@ -386,57 +401,41 @@ router.post("/generate-qr", requireAuth, async (req, res) => {
     return;
   }
 
-  const [project] = await db
-    .select()
-    .from(projectsTable)
+  const [project] = await db.select().from(projectsTable)
     .where(eq(projectsTable.id, projectId));
-
   const { studentIds } = req.body ?? {};
 
-  let studentsToProcess;
-  if (Array.isArray(studentIds) && studentIds.length > 0) {
-    studentsToProcess = await db
-      .select({ student: studentsTable, className: classesTable.className })
+  const studentsToProcess = Array.isArray(studentIds) && studentIds.length > 0
+    ? await db.select({ student: studentsTable, className: classesTable.className })
       .from(studentsTable)
       .innerJoin(classesTable, eq(studentsTable.classId, classesTable.id))
-      .where(
-        and(
-          eq(studentsTable.projectId, projectId),
-          inArray(studentsTable.id, studentIds),
-        ),
-      );
-  } else {
-    // Generate for all students in project
-    studentsToProcess = await db
-      .select({ student: studentsTable, className: classesTable.className })
+      .where(and(eq(studentsTable.projectId, projectId), inArray(studentsTable.id, studentIds)))
+    : await db.select({ student: studentsTable, className: classesTable.className })
       .from(studentsTable)
       .innerJoin(classesTable, eq(studentsTable.classId, classesTable.id))
       .where(eq(studentsTable.projectId, projectId));
-  }
-
-  // Only regenerate students that are actually missing QR codes (unless specific IDs requested)
   const needsQr = Array.isArray(studentIds) && studentIds.length > 0
     ? studentsToProcess
-    : studentsToProcess.filter(r => !r.student.simpleQr);
+    : studentsToProcess.filter((row) => !row.student.simpleQr);
 
-  // Generate all QR codes in parallel (concurrency-limited to avoid OOM on huge classes)
   const BATCH = 50;
   let generated = 0;
   for (let i = 0; i < needsQr.length; i += BATCH) {
-    const batch = needsQr.slice(i, i + BATCH);
-    await Promise.all(
-      batch.map(async ({ student, className }) => {
-        const [simpleQr, jsonQr] = await Promise.all([
-          generateSimpleQr(student.firstName, student.lastName, student.generatedStudentId),
-          generateJsonQr(project.schoolName, className, student.firstName, student.lastName, student.generatedStudentId),
-        ]);
-        await db
-          .update(studentsTable)
-          .set({ simpleQr, jsonQr, updatedAt: new Date() })
-          .where(eq(studentsTable.id, student.id));
-        generated++;
-      }),
-    );
+    await Promise.all(needsQr.slice(i, i + BATCH).map(async ({ student, className }) => {
+      const [simpleQr, jsonQr] = await Promise.all([
+        generateSimpleQr(student.firstName, student.lastName, student.generatedStudentId),
+        generateJsonQr(
+          project.schoolName,
+          className,
+          student.firstName,
+          student.lastName,
+          student.generatedStudentId,
+        ),
+      ]);
+      await db.update(studentsTable).set({ simpleQr, jsonQr, updatedAt: new Date() })
+        .where(eq(studentsTable.id, student.id));
+      generated += 1;
+    }));
   }
 
   res.json({ generated });

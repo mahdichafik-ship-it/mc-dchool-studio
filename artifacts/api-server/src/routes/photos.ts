@@ -39,10 +39,10 @@ import {
 import { getR2Object } from "../lib/r2Storage";
 import {
   ensureR2PhotoVariant,
-  deleteDirectR2AssetsForPhoto,
   getVerifiedR2CopyForPhoto,
 } from "../lib/photoVariants";
 import { parseCaptureEditSettings } from "../lib/captureEdits";
+import { enqueueR2PhotoDeletions } from "../lib/r2PhotoDeletionOutbox";
 
 const router = Router({ mergeParams: true });
 
@@ -497,15 +497,13 @@ export async function recoverPhotoDeleteBackups(): Promise<void> {
   }
 }
 
-async function restoreDeletedPhoto(
-  photo: typeof studentPhotosTable.$inferSelect,
+function restoreDeletedPhotoFile(
   filePath: string,
   backup: PhotoDeleteBackup,
-): Promise<void> {
+): void {
   if (!fs.existsSync(filePath)) {
     fs.copyFileSync(backup.filePath, filePath, fs.constants.COPYFILE_EXCL);
   }
-  await db.insert(studentPhotosTable).values(photo);
 }
 
 function photoToResponse(photo: typeof studentPhotosTable.$inferSelect) {
@@ -2055,45 +2053,32 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
 
   const filePath = resolveFilePath(photo.fileUrl);
   const backup = createPhotoDeleteBackup(filePath);
-  let rowDeleted = false;
   let preserveBackup = false;
-  let r2CleanupStarted = false;
-  let r2CleanupComplete = false;
 
   try {
-    r2CleanupStarted = true;
-    const cleanedR2CopyIds = await deleteDirectR2AssetsForPhoto(photoId);
-    r2CleanupStarted = cleanedR2CopyIds.length > 0;
-    r2CleanupComplete = cleanedR2CopyIds.length > 0;
-
-    const [deletedPhoto] = await db
-      .delete(studentPhotosTable)
-      .where(eq(studentPhotosTable.id, photoId))
-      .returning({ id: studentPhotosTable.id });
-
-    if (!deletedPhoto) {
-      throw new Error("Photo could not be deleted");
-    }
-    rowDeleted = true;
-
-    try {
-      fs.unlinkSync(filePath);
-    } catch (error) {
-      try {
-        await restoreDeletedPhoto(photo, filePath, backup);
-        rowDeleted = false;
-      } catch (restoreError) {
-        preserveBackup = true;
-        alertPhotoDeleteRecoveryRequired(
-          "backup_compensation_failed",
-          backup.filePath,
-          filePath,
-          restoreError,
-          backup.directory,
-        );
+    await db.transaction(async (tx) => {
+      const [lockedPhoto] = await tx
+        .select({ id: studentPhotosTable.id })
+        .from(studentPhotosTable)
+        .where(and(
+          eq(studentPhotosTable.id, photoId),
+          eq(studentPhotosTable.studentId, studentId),
+          eq(studentPhotosTable.projectId, projectId),
+        ))
+        .for("update");
+      if (!lockedPhoto) {
+        throw new Error("Photo could not be deleted");
       }
-      throw error;
-    }
+      await enqueueR2PhotoDeletions(tx, "student_photo", [photoId]);
+      const [deleted] = await tx
+        .delete(studentPhotosTable)
+        .where(eq(studentPhotosTable.id, photoId))
+        .returning({ id: studentPhotosTable.id });
+      if (!deleted) {
+        throw new Error("Photo could not be deleted");
+      }
+      fs.unlinkSync(filePath);
+    });
 
     try {
       removePhotoDeleteBackup(backup);
@@ -2108,32 +2093,21 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
       });
     }
   } catch (error) {
-    if (r2CleanupStarted && !r2CleanupComplete && !rowDeleted) {
+    // The database transaction rolls back both the source deletion and its
+    // outbox item. Restore local bytes before releasing the recovery backup.
+    try {
+      restoreDeletedPhotoFile(filePath, backup);
+    } catch (restoreError) {
       preserveBackup = true;
       alertPhotoDeleteRecoveryRequired(
-        "r2_delete_failed",
+        "backup_compensation_failed",
         backup.filePath,
         filePath,
-        error,
-        backup.directory,
-      );
-    } else if (r2CleanupComplete && !rowDeleted) {
-      // R2 deletion completed but the authoritative row could not be removed.
-      // Keep the local recovery bytes and the copy row in `cleaning` so the
-      // operation can be retried idempotently or recovered manually.
-      preserveBackup = true;
-      alertPhotoDeleteRecoveryRequired(
-        "r2_deleted_database_delete_failed",
-        backup.filePath,
-        filePath,
-        error,
+        restoreError,
         backup.directory,
       );
     }
-    // A failed compensation must retain the only durable recovery copy.
-    // Otherwise, the row still exists (DB failure) or has been restored, so
-    // the backup can be removed safely.
-    if (!preserveBackup && (!rowDeleted || fs.existsSync(filePath))) {
+    if (!preserveBackup) {
       try {
         if (fs.existsSync(backup.directory)) {
           removePhotoDeleteBackup(backup);

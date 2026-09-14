@@ -18,6 +18,7 @@ import { and, eq, count, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { accessibleProjectIds, canAccessProject, getStudioMember, isStudioManager } from "../lib/studioAccess";
 import { randomBytes } from "node:crypto";
+import { enqueueR2PhotoDeletionsForProject } from "../lib/r2PhotoDeletionOutbox";
 
 const router = Router();
 
@@ -372,9 +373,10 @@ router.delete("/:projectId", requireAuth, async (req, res) => {
     return;
   }
 
-  await db
-    .delete(projectsTable)
-    .where(eq(projectsTable.id, projectId));
+  await db.transaction(async (tx) => {
+    await enqueueR2PhotoDeletionsForProject(tx, projectId);
+    await tx.delete(projectsTable).where(eq(projectsTable.id, projectId));
+  });
 
   res.status(204).send();
 });

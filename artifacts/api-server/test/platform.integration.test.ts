@@ -217,8 +217,26 @@ test("creates one-time owner invites and onboards the invited account", async ()
   );
 
   const [persistedStudio] = await db.select().from(studiosTable).where(eq(studiosTable.id, onboardedStudioId));
+  assert.equal(persistedStudio.description, "Updated studio description.");
   assert.equal(persistedStudio.contactEmail, "hello@north-star.example");
   assert.equal(persistedStudio.website, "https://north-star-school.example");
+
+  const secondSessionOverview = await request(platformOwnerId, "/api/platform");
+  assert.equal(secondSessionOverview.status, 200);
+  const secondSessionBody = await secondSessionOverview.json() as {
+    studios: Array<{
+      id: number;
+      description: string | null;
+      website: string | null;
+      contactEmail: string | null;
+    }>;
+  };
+  const refreshedStudio = secondSessionBody.studios.find((studio) => studio.id === onboardedStudioId);
+  assert.ok(refreshedStudio);
+  assert.deepEqual(
+    [refreshedStudio.description, refreshedStudio.website, refreshedStudio.contactEmail],
+    ["Updated studio description.", "https://north-star-school.example", "hello@north-star.example"],
+  );
 
   const members = await db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, onboardedStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);

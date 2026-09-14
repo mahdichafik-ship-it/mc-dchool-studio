@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, RefreshCw, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useUser } from "@clerk/react";
 import type { PlatformInvite, PlatformOverview } from "@workspace/api-client-react";
 import { Link } from "wouter";
@@ -41,6 +41,7 @@ export default function Platform() {
   const [data, setData] = useState<PlatformData | null>(null);
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [editingStudio, setEditingStudio] = useState<PlatformData["studios"][number] | null>(null);
@@ -49,13 +50,20 @@ export default function Platform() {
   const [studioError, setStudioError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  async function load() {
-    const response = await fetch("/api/platform");
-    if (!response.ok) {
-      setError(response.status === 403 ? "This area is only available to the platform owner." : "Could not load platform data.");
-      return;
+  async function load(options?: { showLoading?: boolean }) {
+    const showLoading = options?.showLoading === true;
+    if (showLoading) setRefreshing(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/platform");
+      if (!response.ok) {
+        setError(response.status === 403 ? "This area is only available to the platform owner." : "Could not load platform data.");
+        return;
+      }
+      setData(await response.json() as PlatformData);
+    } finally {
+      if (showLoading) setRefreshing(false);
     }
-    setData(await response.json() as PlatformData);
   }
 
   useEffect(() => {
@@ -167,9 +175,21 @@ export default function Platform() {
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex items-start gap-3">
           <div className="rounded-lg bg-teal-100 p-2 text-teal-700"><ShieldCheck className="h-6 w-6" /></div>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Platform workspace</h1>
-            <p className="mt-1 text-slate-500">Create and oversee independent photography studios.</p>
+          <div className="flex min-w-0 flex-1 items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900">Platform workspace</h1>
+              <p className="mt-1 text-slate-500">Create and oversee independent photography studios.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void load({ showLoading: true })}
+              disabled={refreshing}
+              className="inline-flex shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+              aria-label="Refresh platform workspace"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
           </div>
         </header>
 

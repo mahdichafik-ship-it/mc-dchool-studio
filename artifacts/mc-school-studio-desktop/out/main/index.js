@@ -11,8 +11,8 @@ const sqliteCore = require("drizzle-orm/sqlite-core");
 const node_fs = require("node:fs");
 const node_path = require("node:path");
 const node_crypto = require("node:crypto");
-const exiftoolVendored = require("exiftool-vendored");
 const fs = require("node:fs/promises");
+const exiftoolVendored = require("exiftool-vendored");
 const sharp = require("sharp");
 const chokidar = require("chokidar");
 const promises = require("fs/promises");
@@ -548,7 +548,7 @@ function ensureCaptureTables(sqlite) {
     WHERE sync_status = 'synced' AND sync_total_files = 0
   `);
 }
-function safeFolderName$2(value) {
+function safeFolderName$3(value) {
   return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
 }
 function getPhotoSystemLayout(homeDir, configuredRoot) {
@@ -580,7 +580,7 @@ function ensurePhotoSystemLayout(layout) {
   return layout;
 }
 function getProjectStorageLayout(photoSystem, projectId, projectName) {
-  const folderName = `${safeFolderName$2(projectName)}-${projectId}`;
+  const folderName = `${safeFolderName$3(projectName)}-${projectId}`;
   const root = node_path.join(photoSystem.jobs, folderName);
   return {
     root,
@@ -1086,6 +1086,7 @@ function enableCloudSyncAfterSignIn() {
   cloudSyncDisabledForRetirement = false;
   cloudSessionVerified = true;
   kickEnabledLiveUploads();
+  retryPendingReviewsAfterConnectionRestore();
 }
 function markCloudSessionUnavailable() {
   cloudSessionVerified = false;
@@ -1094,9 +1095,18 @@ function markCloudSessionVerified() {
   if (cloudSyncDisabledForRetirement) return;
   cloudSessionVerified = true;
   kickEnabledLiveUploads();
+  retryPendingReviewsAfterConnectionRestore();
 }
 function isCloudSessionVerified() {
   return cloudSessionVerified && !cloudSyncDisabledForRetirement;
+}
+function retryPendingReviewsAfterConnectionRestore() {
+  void Promise.all([
+    syncPendingCaptureReviews(),
+    syncPendingGroupCaptureReviews()
+  ]).catch((error) => {
+    console.warn("[Review] Could not retry pending cloud review changes:", error);
+  });
 }
 async function repairCloudIdentity(projectId, studentId, apiUrl, connectionToken) {
   const db = getDb();
@@ -2418,6 +2428,200 @@ function getNewDefaultGroupMemberIds(existingMemberIds, rosterSnapshotIds, curre
 function serializeDefaultGroupRosterSnapshot(studentIds) {
   return [...new Set(studentIds)].join(",");
 }
+function safeFolderName$2(value) {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "Unknown";
+}
+function getStudentFolderNames(student) {
+  return {
+    legacy: safeFolderName$2(`${student.generatedStudentId}_${student.lastName}_${student.firstName}`),
+    canonical: safeFolderName$2(formatStudentFolderName(
+      student.firstName,
+      student.lastName,
+      student.generatedStudentId
+    ))
+  };
+}
+function normalizeName(name) {
+  return name.normalize("NFKC").toLocaleLowerCase();
+}
+async function findDirectory(parentPath, desiredName) {
+  try {
+    const entries = await fs.readdir(parentPath, { withFileTypes: true });
+    const match = entries.filter((entry) => entry.isDirectory() && normalizeName(entry.name) === normalizeName(desiredName)).sort((a, b) => a.name.localeCompare(b.name))[0];
+    return match ? node_path.join(parentPath, match.name) : null;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : void 0;
+    if (code === "ENOENT") return null;
+    throw error;
+  }
+}
+async function listFiles(rootPath, currentPath = rootPath) {
+  let entries;
+  try {
+    entries = await fs.readdir(currentPath, { withFileTypes: true });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : void 0;
+    if (code === "ENOENT") return [];
+    throw error;
+  }
+  const files = [];
+  for (const entry of entries) {
+    const entryPath = node_path.join(currentPath, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFiles(rootPath, entryPath));
+    } else if (entry.isFile()) {
+      const fileStat = await fs.stat(entryPath);
+      files.push({
+        sourcePath: entryPath,
+        relativePath: node_path.relative(rootPath, entryPath),
+        size: fileStat.size
+      });
+    }
+  }
+  return files;
+}
+async function inspectStudentFolder(classDir, student) {
+  const names2 = getStudentFolderNames(student);
+  const legacyFolderPath = await findDirectory(classDir, names2.legacy);
+  const canonicalFolderPath = await findDirectory(classDir, names2.canonical) ?? node_path.join(classDir, names2.canonical);
+  const files = legacyFolderPath ? await listFiles(legacyFolderPath) : [];
+  let conflicts = 0;
+  for (const file of files) {
+    if (await pathExists(node_path.join(canonicalFolderPath, file.relativePath))) conflicts++;
+  }
+  return {
+    studentId: student.id,
+    classId: student.classId,
+    studentName: `${student.firstName} ${student.lastName}`,
+    legacyFolderPath,
+    canonicalFolderPath,
+    legacyFolderFound: Boolean(legacyFolderPath),
+    canonicalFolderFound: Boolean(await pathExists(canonicalFolderPath)),
+    fileCount: files.length,
+    totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+    conflicts
+  };
+}
+async function pathExists(path2) {
+  try {
+    await fs.lstat(path2);
+    return true;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : void 0;
+    if (code === "ENOENT") return false;
+    throw error;
+  }
+}
+async function previewStudentFolderMigration(input) {
+  const projectDir = node_path.join(input.photosDir, safeFolderName$2(input.project.schoolName));
+  const items = [];
+  for (const classRow of input.classes) {
+    const classDir = node_path.join(projectDir, safeFolderName$2(classRow.className));
+    const students = input.students.filter((student) => student.classId === classRow.id);
+    for (const student of students) {
+      items.push(await inspectStudentFolder(classDir, student));
+    }
+  }
+  const legacyItems = items.filter((item) => item.legacyFolderFound);
+  return {
+    projectId: input.projectId,
+    projectFolderPath: projectDir,
+    legacyFolderCount: legacyItems.length,
+    fileCount: legacyItems.reduce((sum, item) => sum + item.fileCount, 0),
+    totalBytes: legacyItems.reduce((sum, item) => sum + item.totalBytes, 0),
+    conflictCount: legacyItems.reduce((sum, item) => sum + item.conflicts, 0),
+    students: items
+  };
+}
+async function hashFile$1(path2) {
+  const hash = node_crypto.createHash("sha256");
+  for await (const chunk of node_fs.createReadStream(path2)) hash.update(chunk);
+  return hash.digest("hex");
+}
+async function sameFile(left, right, leftSize) {
+  try {
+    const rightStat = await fs.stat(right);
+    return rightStat.isFile() && rightStat.size === leftSize && await hashFile$1(left) === await hashFile$1(right);
+  } catch {
+    return false;
+  }
+}
+async function copyWithoutOverwrite(sourcePath, destinationPath, sourceSize) {
+  await fs.mkdir(node_path.dirname(destinationPath), { recursive: true });
+  if (await pathExists(destinationPath)) {
+    if (await sameFile(sourcePath, destinationPath, sourceSize)) {
+      return { path: destinationPath, copied: false, conflict: false };
+    }
+    const parsed = node_path.parse(destinationPath);
+    let suffix = 2;
+    let candidate = node_path.join(parsed.dir, `${parsed.name}-legacy-${suffix}${parsed.ext}`);
+    while (await pathExists(candidate)) {
+      if (await sameFile(sourcePath, candidate, sourceSize)) {
+        return { path: candidate, copied: false, conflict: true };
+      }
+      suffix++;
+      candidate = node_path.join(parsed.dir, `${parsed.name}-legacy-${suffix}${parsed.ext}`);
+    }
+    await fs.copyFile(sourcePath, candidate);
+    return { path: candidate, copied: true, conflict: true };
+  }
+  await fs.copyFile(sourcePath, destinationPath);
+  return { path: destinationPath, copied: true, conflict: false };
+}
+async function migrateStudentFolderFiles(legacyFolderPath, canonicalFolderPath, onFileCopied) {
+  const sourceFiles = await listFiles(legacyFolderPath);
+  let migratedFiles = 0;
+  let skippedFiles = 0;
+  let conflictCount = 0;
+  for (const sourceFile of sourceFiles) {
+    const destinationPath = node_path.join(canonicalFolderPath, sourceFile.relativePath);
+    const result = await copyWithoutOverwrite(sourceFile.sourcePath, destinationPath, sourceFile.size);
+    if (result.copied) migratedFiles++;
+    else skippedFiles++;
+    if (result.conflict) conflictCount++;
+    onFileCopied?.(sourceFile.sourcePath, result.path);
+  }
+  return { migratedFiles, skippedFiles, conflictCount };
+}
+function updatePathReferences(db, projectId, sourcePath, destinationPath) {
+  db.update(photosTable).set({ filePath: destinationPath }).where(drizzleOrm.and(drizzleOrm.eq(photosTable.projectId, projectId), drizzleOrm.eq(photosTable.filePath, sourcePath))).run();
+  db.update(imageFilesTable).set({ storedPath: destinationPath }).where(drizzleOrm.eq(imageFilesTable.storedPath, sourcePath)).run();
+  db.update(qrMarkersTable).set({ filePath: destinationPath }).where(drizzleOrm.and(drizzleOrm.eq(qrMarkersTable.projectId, projectId), drizzleOrm.eq(qrMarkersTable.filePath, sourcePath))).run();
+}
+async function migrateStudentFoldersAt(db, projectId, photosDir) {
+  const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+  if (!project) throw new Error(`Project ${projectId} not found`);
+  const classes = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
+  const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
+  const preview = await previewStudentFolderMigration({
+    projectId,
+    photosDir,
+    project,
+    classes,
+    students
+  });
+  let migratedFiles = 0;
+  let skippedFiles = 0;
+  let conflictCount = 0;
+  for (const item of preview.students.filter((candidate) => candidate.legacyFolderFound)) {
+    const folderResult = await migrateStudentFolderFiles(
+      item.legacyFolderPath,
+      item.canonicalFolderPath,
+      (sourcePath, destinationPath) => updatePathReferences(db, projectId, sourcePath, destinationPath)
+    );
+    migratedFiles += folderResult.migratedFiles;
+    skippedFiles += folderResult.skippedFiles;
+    conflictCount += folderResult.conflictCount;
+  }
+  return {
+    projectId,
+    legacyFolderCount: preview.legacyFolderCount,
+    migratedFiles,
+    skippedFiles,
+    conflictCount,
+    originalsPreserved: true
+  };
+}
 function now$3() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
@@ -2549,7 +2753,7 @@ function registerProjectHandlers() {
     return projects.map((p) => {
       const [{ classCount }] = db.select({ classCount: drizzleOrm.count() }).from(classesTable).where(drizzleOrm.eq(classesTable.projectId, p.id)).all();
       const [{ studentCount }] = db.select({ studentCount: drizzleOrm.count() }).from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, p.id)).all();
-      const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(photosTable).where(drizzleOrm.eq(photosTable.projectId, p.id)).all();
+      const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, p.id), drizzleOrm.isNull(capturesTable.groupId))).all();
       return enrichProject(p, classCount, studentCount, photoCount);
     });
   });
@@ -2558,7 +2762,7 @@ function registerProjectHandlers() {
     if (!p) return null;
     const [{ classCount }] = db.select({ classCount: drizzleOrm.count() }).from(classesTable).where(drizzleOrm.eq(classesTable.projectId, p.id)).all();
     const [{ studentCount }] = db.select({ studentCount: drizzleOrm.count() }).from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, p.id)).all();
-    const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(photosTable).where(drizzleOrm.eq(photosTable.projectId, p.id)).all();
+    const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, p.id), drizzleOrm.isNull(capturesTable.groupId))).all();
     prepareProjectFolders(db, projectId);
     reconcileDefaultGroups(projectId);
     return enrichProject(p, classCount, studentCount, photoCount);
@@ -2569,6 +2773,23 @@ function registerProjectHandlers() {
       db.update(projectsTable).set({ watchFolder: folderPath, updatedAt: now$3() }).where(drizzleOrm.eq(projectsTable.id, projectId)).run();
     }
   );
+  electron.ipcMain.handle("projects:previewFolderMigration", async (_e, { projectId }) => {
+    const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
+    if (!project) throw new Error(`Project ${projectId} not found`);
+    const classes = db.select().from(classesTable).where(drizzleOrm.eq(classesTable.projectId, projectId)).all();
+    const students = db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.projectId, projectId)).all();
+    return previewStudentFolderMigration({
+      projectId,
+      photosDir: getPhotosDir(),
+      project,
+      classes,
+      students
+    });
+  });
+  electron.ipcMain.handle("projects:migrateFolderMigration", async (_e, { projectId, confirmed }) => {
+    if (confirmed !== true) throw new Error("Folder migration requires explicit confirmation.");
+    return migrateStudentFoldersAt(db, projectId, getPhotosDir());
+  });
   electron.ipcMain.handle("projects:import", async (_e, { filePath }) => {
     const raw = require$$0.readFileSync(filePath, "utf-8");
     const bundle = JSON.parse(raw);
@@ -2782,7 +3003,7 @@ function registerProjectHandlers() {
         className: classesTable.className
       }).from(studentsTable).leftJoin(classesTable, drizzleOrm.eq(studentsTable.classId, classesTable.id)).where(drizzleOrm.eq(studentsTable.projectId, projectId)).orderBy(classesTable.className, studentsTable.lastName, studentsTable.firstName).all().filter((r) => !classId || r.student.classId === classId);
       return rows.map(({ student: s, className }) => {
-        const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(photosTable).where(drizzleOrm.eq(photosTable.studentId, s.id)).all();
+        const [{ photoCount }] = db.select({ photoCount: drizzleOrm.count() }).from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.studentId, s.id), drizzleOrm.isNull(capturesTable.groupId))).all();
         return toStudent(s, className ?? "", photoCount);
       });
     }
@@ -2812,8 +3033,41 @@ async function assessImageContent(source) {
     return { usable: false, reason: "decode-failed" };
   }
 }
+const LOCAL_PREVIEW_TTL_MS = 5 * 6e4;
+const previewFiles = /* @__PURE__ */ new Map();
+function registerLocalPreview(traceId, filePath) {
+  const normalizedPath = node_path.resolve(filePath);
+  const expiresAt = Date.now() + LOCAL_PREVIEW_TTL_MS;
+  const reference = { filePath: normalizedPath, expiresAt };
+  previewFiles.set(traceId, reference);
+  const cleanup = setTimeout(() => {
+    if (previewFiles.get(traceId) === reference) previewFiles.delete(traceId);
+  }, LOCAL_PREVIEW_TTL_MS);
+  cleanup.unref();
+}
+function getLocalPreviewFile(traceId, now2 = Date.now()) {
+  const reference = previewFiles.get(traceId);
+  if (!reference) return void 0;
+  if (reference.expiresAt <= now2) {
+    previewFiles.delete(traceId);
+    return void 0;
+  }
+  return reference.filePath;
+}
+function getActiveLocalPreviewPaths(now2 = Date.now()) {
+  const activePaths = /* @__PURE__ */ new Set();
+  for (const [traceId, reference] of previewFiles) {
+    if (reference.expiresAt <= now2) {
+      previewFiles.delete(traceId);
+      continue;
+    }
+    activePaths.add(reference.filePath);
+  }
+  return activePaths;
+}
 const LIVE_PREVIEW_EDGE = 1440;
 const LIVE_PREVIEW_QUALITY = 84;
+const LIVE_PREVIEW_CLEANUP_BATCH_SIZE = 32;
 const RAW_EXTENSIONS$1 = /* @__PURE__ */ new Set([
   ".nef",
   ".nrw",
@@ -2826,6 +3080,7 @@ const RAW_EXTENSIONS$1 = /* @__PURE__ */ new Set([
   ".dng"
 ]);
 const EMBEDDED_PREVIEW_TAGS = ["PreviewImage", "JpgFromRaw", "ThumbnailImage"];
+const PREVIEW_ARTIFACT_NAME = /^[0-9a-f]{32}\.jpg$/;
 function isRawFile(filePath) {
   return RAW_EXTENSIONS$1.has(node_path.extname(filePath).toLowerCase());
 }
@@ -2879,6 +3134,7 @@ async function generateLivePreview(sourcePath, options) {
     return await job;
   } finally {
     if (previewJobs.get(destinationPath) === job) previewJobs.delete(destinationPath);
+    scheduleLivePreviewCacheCleanup(options.cacheDir);
   }
 }
 const previewJobs = /* @__PURE__ */ new Map();
@@ -2933,8 +3189,49 @@ async function generateLivePreviewFromSource(sourcePath, { previewKey, cacheDir,
     });
   }
 }
-const previewFiles = /* @__PURE__ */ new Map();
-const PREVIEW_TTL_MS = 5 * 6e4;
+async function cleanupLivePreviewArtifacts(cacheDir, options = {}) {
+  const now2 = options.now ?? Date.now();
+  const maxFiles = Math.max(0, Math.floor(options.maxFiles ?? LIVE_PREVIEW_CLEANUP_BATCH_SIZE));
+  if (maxFiles === 0) return 0;
+  let entries;
+  try {
+    entries = await fs.readdir(cacheDir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  const cutoff = now2 - LOCAL_PREVIEW_TTL_MS;
+  const activePaths = getActiveLocalPreviewPaths(now2);
+  let removed = 0;
+  for (const entry of entries) {
+    if (removed >= maxFiles) break;
+    if (!entry.isFile() || !PREVIEW_ARTIFACT_NAME.test(entry.name)) continue;
+    const filePath = node_path.resolve(cacheDir, entry.name);
+    if (activePaths.has(filePath)) continue;
+    try {
+      const metadata = await fs.stat(filePath);
+      if (metadata.mtimeMs > cutoff) continue;
+      if (getActiveLocalPreviewPaths(now2).has(filePath)) continue;
+      await fs.rm(filePath, { force: true });
+      removed++;
+    } catch {
+    }
+  }
+  return removed;
+}
+const LIVE_PREVIEW_CLEANUP_DELAY_MS = 15e3;
+const scheduledCleanup = /* @__PURE__ */ new Map();
+function scheduleLivePreviewCacheCleanup(cacheDir) {
+  const normalizedCacheDir = node_path.resolve(cacheDir);
+  if (scheduledCleanup.has(normalizedCacheDir)) return;
+  const timer = setTimeout(() => {
+    scheduledCleanup.delete(normalizedCacheDir);
+    void cleanupLivePreviewArtifacts(normalizedCacheDir).catch((error) => {
+      console.warn("[LivePreview] Could not clean preview cache:", error);
+    });
+  }, LIVE_PREVIEW_CLEANUP_DELAY_MS);
+  timer.unref();
+  scheduledCleanup.set(normalizedCacheDir, timer);
+}
 function registerLocalPreviewScheme() {
   electron.protocol.registerSchemesAsPrivileged([{
     scheme: "mc-preview",
@@ -2949,7 +3246,7 @@ function registerLocalPreviewScheme() {
 function registerLocalPreviewProtocol() {
   electron.protocol.handle("mc-preview", async (request) => {
     const key = decodeURIComponent(new URL(request.url).hostname);
-    const filePath = previewFiles.get(key);
+    const filePath = getLocalPreviewFile(key);
     if (!filePath) return new Response("Preview not found", { status: 404 });
     try {
       const bytes = await fs.readFile(filePath);
@@ -2966,9 +3263,7 @@ function registerLocalPreviewProtocol() {
   });
 }
 function createLocalPreviewUrl(filePath, traceId) {
-  previewFiles.set(traceId, filePath);
-  const cleanup = setTimeout(() => previewFiles.delete(traceId), PREVIEW_TTL_MS);
-  cleanup.unref();
+  registerLocalPreview(traceId, filePath);
   return `mc-preview://${encodeURIComponent(traceId)}`;
 }
 const JPEG_EXTENSIONS = /* @__PURE__ */ new Set([".jpg", ".jpeg"]);
@@ -3234,6 +3529,17 @@ function getMainWindow$1() {
 function now$2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+function normalizeReviewFlags(capture, values) {
+  const rating = values.rating === void 0 ? capture.rating : Math.max(0, Math.min(5, Math.round(values.rating)));
+  const rejected = values.rejected ?? (values.selected === true || values.rating !== void 0 && rating > 0 ? false : capture.rejected);
+  const selected = values.selected ?? (values.rating !== void 0 ? rating > 0 : capture.selected);
+  return {
+    favorite: values.favorite ?? capture.favorite,
+    rejected,
+    selected: rejected ? false : selected,
+    rating
+  };
+}
 const captureAspectRatios = ["original", "1:1", "4:5", "3:2", "16:9"];
 const captureRotations = [0, 90, 180, 270];
 function captureFraming(row) {
@@ -3470,11 +3776,12 @@ function registerPhotoHandlers() {
     }) => {
       const capture = db.select().from(capturesTable).where(drizzleOrm.eq(capturesTable.id, captureId)).get();
       if (!capture) return null;
+      const review = normalizeReviewFlags(capture, { favorite, rejected, selected, rating });
       db.update(capturesTable).set({
-        ...favorite === void 0 ? {} : { favorite },
-        ...rejected === void 0 ? {} : { rejected },
-        ...rating === void 0 ? selected === void 0 ? {} : { selected } : { selected: rating > 0 },
-        ...rating === void 0 ? {} : { rating: Math.max(0, Math.min(5, Math.round(rating))) },
+        favorite: review.favorite,
+        rejected: review.rejected,
+        selected: review.selected,
+        rating: review.rating,
         ...colorLabel === void 0 ? {} : { colorLabel },
         reviewSyncPending: true,
         updatedAt: now$2()
@@ -44092,6 +44399,19 @@ function markImagePipelineRendererStage(event) {
   if (!trace) return;
   const elapsedMs = Math.max(0, event.atEpochMs - trace.startedAtEpochMs);
   trace.marks.set(event.stage, { elapsedMs, details: event.details });
+  if (event.stage === "image decode started" && event.details) {
+    const queue = event.details.match(
+      /active=(\w+)\s+pendingLive=(\d+)\s+galleryQueued=(\d+)\s+galleryMax=(\d+)/
+    );
+    if (queue) {
+      trace.rendererQueue = {
+        activePriority: queue[1] === "none" ? null : queue[1],
+        pendingLive: queue[2] === "1",
+        galleryQueued: Number(queue[3]),
+        galleryMax: Number(queue[4])
+      };
+    }
+  }
   console.info(
     `[ImagePipeline] ${event.traceId} ${event.stage} +${elapsedMs.toFixed(1)}ms` + formatDetails(event.details)
   );
@@ -44133,6 +44453,10 @@ function reportAndDeleteTrace(traceId) {
       filePath: trace.filePath,
       totalToVisibleMs: paintedAt ?? null,
       newestImageVisibleLatencyMs: paintedAt ?? null,
+      rendererDecodeQueue: trace.rendererQueue ? {
+        ...trace.rendererQueue,
+        queueAccumulated: trace.rendererQueue.galleryMax > 0
+      } : null,
       ...burstIndex === void 0 || burstSize === void 0 ? {} : {
         burst: {
           imageIndex: burstIndex,
@@ -45618,7 +45942,8 @@ function buildLightroomFilename(input) {
   ].join("_") + extension;
 }
 function safeName(value) {
-  return value.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, " ").trim().slice(0, 100) || "captures";
+  const cleaned = value.normalize("NFKC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, " ").trim().slice(0, 100);
+  return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : "captures";
 }
 function shouldExport(mode, capture) {
   switch (mode) {
@@ -45638,6 +45963,70 @@ function shouldExport(mode, capture) {
       return true;
   }
 }
+function isPathInside(parentDir, candidatePath) {
+  const parent = path.resolve(parentDir);
+  const candidate = path.resolve(candidatePath);
+  return candidate === parent || candidate.startsWith(`${parent}${path.sep}`);
+}
+function exportCaptureRecords({
+  project,
+  records,
+  destinationDir,
+  mode,
+  layout = "capture_folders"
+}) {
+  const outputDir = layout === "lightroom_watch_folder" ? destinationDir : path.join(destinationDir, `${safeName(project.schoolName)}-captures`);
+  require$$0.mkdirSync(outputDir, { recursive: true });
+  let exportedCaptureCount = 0;
+  let exportedFileCount = 0;
+  let skippedMissingFiles = 0;
+  let skippedExistingFiles = 0;
+  for (const { capture, files, className, student } of records.filter(
+    ({ capture: capture2 }) => shouldExport(mode, capture2)
+  )) {
+    const sequence2 = String(capture.sequence ?? capture.id).padStart(6, "0");
+    const captureDir = path.join(outputDir, `${sequence2}_${safeName(capture.baseFilename)}`);
+    let captureExported = false;
+    for (const file of files) {
+      if (!require$$0.existsSync(file.storedPath)) {
+        skippedMissingFiles++;
+        continue;
+      }
+      const destinationPath = layout === "lightroom_watch_folder" ? path.join(outputDir, buildLightroomFilename({
+        schoolName: project.schoolName,
+        className,
+        student,
+        captureId: capture.id,
+        sequence: capture.sequence,
+        originalFilename: file.originalFilename,
+        fileRole: file.fileRole,
+        fileFormat: file.fileFormat
+      })) : path.join(captureDir, safeName(file.originalFilename));
+      const destinationParent = layout === "lightroom_watch_folder" ? outputDir : captureDir;
+      if (!isPathInside(destinationParent, destinationPath)) {
+        skippedMissingFiles++;
+        continue;
+      }
+      if (layout === "lightroom_watch_folder" && require$$0.existsSync(destinationPath)) {
+        skippedExistingFiles++;
+        continue;
+      }
+      if (layout === "capture_folders") require$$0.mkdirSync(captureDir, { recursive: true });
+      require$$0.copyFileSync(file.storedPath, destinationPath);
+      exportedFileCount++;
+      captureExported = true;
+    }
+    if (captureExported) exportedCaptureCount++;
+  }
+  return {
+    ok: true,
+    outputDir,
+    exportedCaptureCount,
+    exportedFileCount,
+    skippedMissingFiles,
+    skippedExistingFiles
+  };
+}
 function registerCaptureExportHandlers() {
   electron.ipcMain.handle(
     "captures:export",
@@ -45654,54 +46043,23 @@ function registerCaptureExportHandlers() {
         const db = getDb();
         const project = db.select().from(projectsTable).where(drizzleOrm.eq(projectsTable.id, projectId)).get();
         if (!project) return { ok: false, error: "Project not found." };
-        const outputDir = layout === "lightroom_watch_folder" ? destinationDir : path.join(destinationDir, `${safeName(project.schoolName)}-captures`);
-        require$$0.mkdirSync(outputDir, { recursive: true });
-        const captures = db.select().from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, projectId), drizzleOrm.isNull(capturesTable.groupId))).all().filter((capture) => shouldExport(mode, capture));
-        let exportedCaptureCount = 0;
-        let exportedFileCount = 0;
-        let skippedMissingFiles = 0;
-        let skippedExistingFiles = 0;
-        for (const capture of captures) {
-          const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
-          const sequence2 = String(capture.sequence ?? capture.id).padStart(6, "0");
-          const captureDir = path.join(outputDir, `${sequence2}_${safeName(capture.baseFilename)}`);
-          const student = capture.studentId === null ? null : db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get() ?? null;
-          const captureClass = capture.classId === null ? null : db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, capture.classId)).get() ?? null;
-          let captureExported = false;
-          for (const file of files) {
-            if (!require$$0.existsSync(file.storedPath)) {
-              skippedMissingFiles++;
-              continue;
-            }
-            const destinationPath = layout === "lightroom_watch_folder" ? path.join(outputDir, buildLightroomFilename({
-              schoolName: project.schoolName,
+        const captures = db.select().from(capturesTable).where(drizzleOrm.and(drizzleOrm.eq(capturesTable.projectId, projectId), drizzleOrm.isNull(capturesTable.groupId))).all();
+        return exportCaptureRecords({
+          project,
+          mode,
+          layout,
+          destinationDir,
+          records: captures.map((capture) => {
+            const captureClass = capture.classId === null ? null : db.select().from(classesTable).where(drizzleOrm.eq(classesTable.id, capture.classId)).get();
+            const student = capture.studentId === null ? null : db.select().from(studentsTable).where(drizzleOrm.eq(studentsTable.id, capture.studentId)).get() ?? null;
+            return {
+              capture,
+              files: db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all(),
               className: captureClass?.className ?? null,
-              student,
-              captureId: capture.id,
-              sequence: capture.sequence,
-              originalFilename: file.originalFilename,
-              fileRole: file.fileRole,
-              fileFormat: file.fileFormat
-            })) : path.join(captureDir, safeName(file.originalFilename));
-            if (layout === "lightroom_watch_folder" && require$$0.existsSync(destinationPath)) {
-              skippedExistingFiles++;
-              continue;
-            }
-            if (layout === "capture_folders") require$$0.mkdirSync(captureDir, { recursive: true });
-            require$$0.copyFileSync(file.storedPath, destinationPath);
-            exportedFileCount++;
-            captureExported = true;
-          }
-          if (captureExported) exportedCaptureCount++;
-        }
-        return {
-          ok: true,
-          outputDir,
-          exportedCaptureCount,
-          exportedFileCount,
-          skippedMissingFiles,
-          skippedExistingFiles
-        };
+              student
+            };
+          })
+        });
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -46684,6 +47042,7 @@ function monitorRetirement(mainWindow2) {
 }
 electron.app.whenReady().then(() => {
   registerLocalPreviewProtocol();
+  scheduleLivePreviewCacheCleanup(getLivePreviewCacheDir(electron.app.getPath("home")));
   getDb();
   registerProjectHandlers();
   registerPhotoHandlers();

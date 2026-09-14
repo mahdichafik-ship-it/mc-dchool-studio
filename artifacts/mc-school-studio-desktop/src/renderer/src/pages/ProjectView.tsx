@@ -31,6 +31,7 @@ import {
   waitForPaintFrames,
 } from '@/lib/previewScheduler'
 import { CaptureFramingPreview } from '@/lib/CaptureFramingPreview'
+import { captureUploadLabel } from '@/lib/shootWorkspace'
 import type {
   Student,
   Class,
@@ -894,7 +895,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
   return (
     <div
-      className="flex flex-col h-full font-sans bg-slate-50"
+      className="shoot-workspace flex flex-col h-full font-sans bg-slate-50"
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => event.preventDefault()}
     >
@@ -917,7 +918,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         </div>
       )}
       {/* Header bar */}
-      <header className="bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
+      <header className="shoot-toolbar bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
         <div className="flex items-center gap-5 min-w-0">
           <button onClick={onBack} aria-label="Back to projects" className="text-slate-400 hover:text-white transition-colors bg-slate-900 hover:bg-slate-800 p-1.5 rounded-md shrink-0">
             <ArrowLeft className="size-4" />
@@ -942,7 +943,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         <div className="flex items-center gap-4 shrink-0">
           {/* Watch Folder Control */}
           {project?.watchFolder ? (
-            <div className={cn(
+            <div data-testid="shoot-watch-status" className={cn(
               "flex items-center h-8 rounded-md border transition-colors overflow-hidden",
               isRunning ? "bg-teal-500/10 border-teal-500/20" : "bg-slate-900 border-slate-800"
             )}>
@@ -973,7 +974,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
            <button
              onClick={() => void handleConsolidateStudentFolders()}
              disabled={folderMigrationRunning}
-             className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900 px-2.5 h-8 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:cursor-wait disabled:opacity-60"
+              className="shoot-secondary-action flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900 px-2.5 h-8 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:cursor-wait disabled:opacity-60"
              title="Preview and consolidate legacy student folders"
            >
              <FolderSync className={cn("size-3.5", folderMigrationRunning && "animate-pulse")} />
@@ -983,7 +984,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
            <button
              onClick={() => void openUploadDialog()}
              aria-label={shootHealthLabel}
-             className="hidden md:flex items-center gap-3 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-md hover:bg-slate-800 hover:border-slate-700 transition-all text-left focus:outline-none focus:ring-2 focus:ring-teal-500/50 group"
+              className="hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-md hover:bg-slate-800 hover:border-slate-700 transition-all text-left focus:outline-none focus:ring-2 focus:ring-teal-500/50 group"
              title={shootHealthLabel}
            >
              <div className="flex flex-col gap-1">
@@ -1052,7 +1053,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                </button>
              </div>
              {captureSummary.total > 0 && (
-                <div className="flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
+                 <div className="shoot-secondary-action flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
                    <select
                       value={exportMode}
                       onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
@@ -1096,6 +1097,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
              <Button
                size="sm"
                 onClick={() => void openFinishDialog()}
+                data-testid="shoot-primary-action"
                 disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
                className={cn(
                  "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
@@ -2224,7 +2226,7 @@ function StudentDetail({
       onDrop={onDrop}
     >
        {/* Person info header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
+      <div className="shoot-subject-header bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
         {isActiveCaptureTarget && (
           <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
         )}
@@ -2242,7 +2244,7 @@ function StudentDetail({
               {student.className}
             </span>
           </div>
-             <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words" aria-label={employeeLabel}>
+             <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words" aria-label={employeeLabel}>
             {student.firstName} {student.lastName}
           </h2>
         </div>
@@ -2271,7 +2273,7 @@ function StudentDetail({
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="max-w-[1400px] mx-auto flex flex-col gap-5">
           {/* Latest confirmation stage and filmstrip */}
-          <div className="min-w-0 flex flex-col gap-3">
+          <div className="shoot-capture-area min-w-0 flex flex-col gap-3">
             <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_164px]">
               <div className="min-w-0">
                 {livePreviewMatchesLatest && livePreview ? (
@@ -2594,7 +2596,7 @@ function CaptureStage({ capture }: { capture: CaptureReview }) {
   const framing = capture.framing
   return (
     <div
-      className="relative flex min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg"
+      className="shoot-preview relative flex min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg"
     >
       {imageSource ? (
         <CaptureFramingPreview
@@ -2649,7 +2651,7 @@ function CaptureStageMeta({
 }) {
   const upload = captureUploadSummary(capture, uploadStatus)
   return (
-    <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5">
+    <div data-testid="shoot-completeness" className="shoot-completeness grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5">
       <div className="min-w-0">
         <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Rating</p>
         <div className="mt-1.5 flex items-center gap-0.5" aria-label={`${capture.rating} out of 5 stars`}>
@@ -3109,19 +3111,12 @@ function GroupDetail({
   onRefreshCaptures: () => void
 }) {
   function captureUploadState(capture: GroupCaptureReview) {
-    if (capture.files.some(file => file.uploadStatus === 'error')) {
-      return { label: 'Upload failed', className: 'bg-red-50 text-red-700 border-red-200' }
-    }
-    if (capture.files.some(file => file.uploadStatus === 'uploading')) {
-      return { label: 'Uploading', className: 'bg-blue-50 text-blue-700 border-blue-200' }
-    }
-    if (capture.files.some(file => file.uploadStatus !== 'done')) {
-      return { label: 'Queued', className: 'bg-amber-50 text-amber-700 border-amber-200' }
-    }
-    if (capture.files.some(file => file.fileRole === 'JPEG' && !file.galleryReady)) {
-      return { label: 'Preparing gallery', className: 'bg-violet-50 text-violet-700 border-violet-200' }
-    }
-    return { label: 'Uploaded', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+    const label = captureUploadLabel(capture.files)
+    if (label === 'Upload failed') return { label, className: 'bg-red-50 text-red-700 border-red-200' }
+    if (label === 'Uploading') return { label, className: 'bg-blue-50 text-blue-700 border-blue-200' }
+    if (label === 'Queued') return { label, className: 'bg-amber-50 text-amber-700 border-amber-200' }
+    if (label === 'Preparing gallery') return { label, className: 'bg-violet-50 text-violet-700 border-violet-200' }
+    return { label, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
   }
 
   function fileUploadState(file: GroupCaptureReview['files'][number]) {
@@ -3151,7 +3146,7 @@ function GroupDetail({
 
   return (
     <div className="flex flex-col h-full relative bg-slate-50">
-      <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
+      <div className="shoot-subject-header bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
         {isActiveCaptureTarget && (
           <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
         )}
@@ -3164,7 +3159,7 @@ function GroupDetail({
             )}
             <span className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Custom Group</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
+          <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
             {group.name}
           </h2>
         </div>
@@ -3181,7 +3176,7 @@ function GroupDetail({
       </div>
 
       <div className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8">
+        <div className="shoot-group-body max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8">
           {/* Members Column */}
           <div className="w-full xl:w-[340px] shrink-0">
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[300px] xl:max-h-[calc(100vh-250px)]">
@@ -3210,7 +3205,7 @@ function GroupDetail({
           </div>
 
           {/* Captures Column */}
-          <div className="flex-1 min-w-0 flex flex-col gap-4">
+          <div className="shoot-capture-area flex-1 min-w-0 flex flex-col gap-4">
             <div className="flex items-center justify-between mb-1">
               <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
                 2. Group Captures
@@ -3260,7 +3255,7 @@ function GroupDetail({
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <span className="font-extrabold text-base text-slate-900 truncate">{capture.baseFilename}</span>
-                        <Badge className={cn('shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none', overallUploadState.className)}>
+                        <Badge data-testid="shoot-completeness" className={cn('shoot-completeness shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none', overallUploadState.className)}>
                           {overallUploadState.label}
                         </Badge>
                       </div>
@@ -3399,7 +3394,7 @@ function LivePreview({
   }, [photo.filePath, photo.previewUrl, traceId])
 
   return (
-    <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group">
+    <div className="shoot-preview mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group">
       <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-5 z-10 flex justify-between items-start pointer-events-none transition-opacity duration-300">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-2 bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded shadow-sm">

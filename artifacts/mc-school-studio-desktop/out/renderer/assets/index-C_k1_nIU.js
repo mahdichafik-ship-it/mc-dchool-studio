@@ -331,10 +331,10 @@ react_production.cloneElement = function(element, config, children) {
   if (null != config)
     for (propName in void 0 !== config.ref && (owner = void 0), void 0 !== config.key && (key = "" + config.key), config)
       !hasOwnProperty$1.call(config, propName) || "key" === propName || "__self" === propName || "__source" === propName || "ref" === propName && void 0 === config.ref || (props[propName] = config[propName]);
-  var propName, props = {}, key = null;
+  var propName = arguments.length - 2;
   if (1 === propName) props.children = children;
   else if (1 < propName) {
-    for (var childArray = Array(childrenLength), i = 0; i < childrenLength; i++)
+    for (var childArray = Array(propName), i = 0; i < propName; i++)
       childArray[i] = arguments[i + 2];
     props.children = childArray;
   }
@@ -665,7 +665,7 @@ var scheduler_production = {};
       default:
         priorityLevel = currentPriorityLevel;
     }
-      var previousPriorityLevel = currentPriorityLevel;
+    var previousPriorityLevel = currentPriorityLevel;
     currentPriorityLevel = priorityLevel;
     try {
       return eventHandler();
@@ -687,7 +687,7 @@ var scheduler_production = {};
       default:
         priorityLevel = 3;
     }
-      var previousPriorityLevel = currentPriorityLevel;
+    var previousPriorityLevel = currentPriorityLevel;
     currentPriorityLevel = priorityLevel;
     try {
       return eventHandler();
@@ -823,24 +823,31 @@ reactDom_production.prefetchDNS = function(href) {
 };
 reactDom_production.preinit = function(href, options) {
   if ("string" === typeof href && options && "string" === typeof options.as) {
-    var as = options.as, crossOrigin = getCrossOriginStringAs(as, options.crossOrigin);
-    Internals.d.L(href, as, {
+    var as = options.as, crossOrigin = getCrossOriginStringAs(as, options.crossOrigin), integrity = "string" === typeof options.integrity ? options.integrity : void 0, fetchPriority = "string" === typeof options.fetchPriority ? options.fetchPriority : void 0;
+    "style" === as ? Internals.d.S(
+      href,
+      "string" === typeof options.precedence ? options.precedence : void 0,
+      {
+        crossOrigin,
+        integrity,
+        fetchPriority
+      }
+    ) : "script" === as && Internals.d.X(href, {
       crossOrigin,
-      integrity: "string" === typeof options.integrity ? options.integrity : void 0,
-      nonce: "string" === typeof options.nonce ? options.nonce : void 0,
-      type: "string" === typeof options.type ? options.type : void 0,
-      fetchPriority: "string" === typeof options.fetchPriority ? options.fetchPriority : void 0,
-      referrerPolicy: "string" === typeof options.referrerPolicy ? options.referrerPolicy : void 0,
-      imageSrcSet: "string" === typeof options.imageSrcSet ? options.imageSrcSet : void 0,
-      imageSizes: "string" === typeof options.imageSizes ? options.imageSizes : void 0,
-      media: "string" === typeof options.media ? options.media : void 0
+      integrity,
+      fetchPriority,
+      nonce: "string" === typeof options.nonce ? options.nonce : void 0
     });
   }
 };
-reactDom_production.preloadModule = function(href, options) {
+reactDom_production.preinitModule = function(href, options) {
   if ("string" === typeof href)
-    if (options) {
-      var crossOrigin = getCrossOriginStringAs(options.as, options.crossOrigin);
+    if ("object" === typeof options && null !== options) {
+      if (null == options.as || "script" === options.as) {
+        var crossOrigin = getCrossOriginStringAs(
+          options.as,
+          options.crossOrigin
+        );
         Internals.d.M(href, {
           crossOrigin,
           integrity: "string" === typeof options.integrity ? options.integrity : void 0,
@@ -11908,7 +11915,7 @@ if ("undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__) {
 }
 reactDomClient_production.createRoot = function(container, options) {
   if (!isValidContainer(container)) throw Error(formatProdErrorMessage(299));
-  var isStrictMode = false, identifierPrefix = "", onUncaughtError = defaultOnUncaughtError, onCaughtError = defaultOnCaughtError, onRecoverableError = defaultOnRecoverableError, transitionCallbacks = null, formState = null;
+  var isStrictMode = false, identifierPrefix = "", onUncaughtError = defaultOnUncaughtError, onCaughtError = defaultOnCaughtError, onRecoverableError = defaultOnRecoverableError, transitionCallbacks = null;
   null !== options && void 0 !== options && (true === options.unstable_strictMode && (isStrictMode = true), void 0 !== options.identifierPrefix && (identifierPrefix = options.identifierPrefix), void 0 !== options.onUncaughtError && (onUncaughtError = options.onUncaughtError), void 0 !== options.onCaughtError && (onCaughtError = options.onCaughtError), void 0 !== options.onRecoverableError && (onRecoverableError = options.onRecoverableError), void 0 !== options.unstable_transitionCallbacks && (transitionCallbacks = options.unstable_transitionCallbacks));
   options = createFiberRoot(
     container,
@@ -12083,11 +12090,22 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$C = [
+const __iconNode$D = [
   ["path", { d: "m12 19-7-7 7-7", key: "1l729n" }],
   ["path", { d: "M19 12H5", key: "x3x0zl" }]
 ];
-const ArrowLeft = createLucideIcon("arrow-left", __iconNode$C);
+const ArrowLeft = createLucideIcon("arrow-left", __iconNode$D);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$C = [
+  ["path", { d: "M5 12h14", key: "1ays0h" }],
+  ["path", { d: "m12 5 7 7-7 7", key: "xquz4c" }]
+];
+const ArrowRight = createLucideIcon("arrow-right", __iconNode$C);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12095,17 +12113,6 @@ const ArrowLeft = createLucideIcon("arrow-left", __iconNode$C);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$B = [
-  ["path", { d: "M5 12h14", key: "1ays0h" }],
-  ["path", { d: "m12 5 7 7-7 7", key: "xquz4c" }]
-];
-const ArrowRight = createLucideIcon("arrow-right", __iconNode$B);
-/**
- * @license lucide-react v0.545.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$A = [
   ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
   [
     "path",
@@ -12115,14 +12122,14 @@ const __iconNode$A = [
     }
   ]
 ];
-const Bell = createLucideIcon("bell", __iconNode$A);
+const Bell = createLucideIcon("bell", __iconNode$B);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$z = [
+const __iconNode$A = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -12132,14 +12139,14 @@ const __iconNode$z = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$z);
+const BookOpen = createLucideIcon("book-open", __iconNode$A);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$y = [
+const __iconNode$z = [
   [
     "path",
     {
@@ -12149,23 +12156,35 @@ const __iconNode$y = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$y);
+const Camera = createLucideIcon("camera", __iconNode$z);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$x = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-const Check = createLucideIcon("check", __iconNode$x);
+const __iconNode$y = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
+const Check = createLucideIcon("check", __iconNode$y);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$w = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$w);
+const __iconNode$x = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$x);
+/**
+ * @license lucide-react v0.545.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$w = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$w);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12173,11 +12192,10 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$w);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$v = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$v);
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$v);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12185,10 +12203,11 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$v);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$u = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
+  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$u);
+const CircleUser = createLucideIcon("circle-user", __iconNode$u);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12197,10 +12216,10 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$u);
  */
 const __iconNode$t = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
-  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleUser = createLucideIcon("circle-user", __iconNode$t);
+const CircleX = createLucideIcon("circle-x", __iconNode$t);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12208,11 +12227,11 @@ const CircleUser = createLucideIcon("circle-user", __iconNode$t);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$s = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M12 13v8", key: "1l5pq0" }],
+  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
+  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$s);
+const CloudUpload = createLucideIcon("cloud-upload", __iconNode$s);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12220,11 +12239,9 @@ const CircleX = createLucideIcon("circle-x", __iconNode$s);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$r = [
-  ["path", { d: "M12 13v8", key: "1l5pq0" }],
-  ["path", { d: "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242", key: "1pljnt" }],
-  ["path", { d: "m8 17 4-4 4 4", key: "1quai1" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const CloudUpload = createLucideIcon("cloud-upload", __iconNode$r);
+const Cloud = createLucideIcon("cloud", __iconNode$r);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12232,9 +12249,11 @@ const CloudUpload = createLucideIcon("cloud-upload", __iconNode$r);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$q = [
-  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const Cloud = createLucideIcon("cloud", __iconNode$q);
+const Download = createLucideIcon("download", __iconNode$q);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12242,11 +12261,11 @@ const Cloud = createLucideIcon("cloud", __iconNode$q);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$p = [
-  ["path", { d: "M12 15V3", key: "m9g1x1" }],
-  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
-  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const Download = createLucideIcon("download", __iconNode$p);
+const ExternalLink = createLucideIcon("external-link", __iconNode$p);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12254,11 +12273,15 @@ const Download = createLucideIcon("download", __iconNode$p);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$o = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+  [
+    "path",
+    {
+      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
+      key: "usdka0"
+    }
+  ]
 ];
-const ExternalLink = createLucideIcon("external-link", __iconNode$o);
+const FolderOpen = createLucideIcon("folder-open", __iconNode$o);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -12269,12 +12292,16 @@ const __iconNode$n = [
   [
     "path",
     {
-      d: "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
-      key: "usdka0"
+      d: "M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v.5",
+      key: "1dkoa9"
     }
-  ]
+  ],
+  ["path", { d: "M12 10v4h4", key: "1czhmt" }],
+  ["path", { d: "m12 14 1.535-1.605a5 5 0 0 1 8 1.5", key: "lvuxfi" }],
+  ["path", { d: "M22 22v-4h-4", key: "1ewp4q" }],
+  ["path", { d: "m22 18-1.535 1.605a5 5 0 0 1-8-1.5", key: "14ync0" }]
 ];
-const FolderOpen = createLucideIcon("folder-open", __iconNode$n);
+const FolderSync = createLucideIcon("folder-sync", __iconNode$n);
 /**
  * @license lucide-react v0.545.0 - ISC
  *
@@ -17149,6 +17176,13 @@ function CaptureFramingPreview({ source, alt, framing, maxBlockSize, className }
     }
   );
 }
+function captureUploadLabel(files) {
+  if (files.some((file) => file.uploadStatus === "error")) return "Upload failed";
+  if (files.some((file) => file.uploadStatus === "uploading")) return "Uploading";
+  if (files.some((file) => file.uploadStatus !== "done")) return "Queued";
+  if (files.some((file) => file.fileRole === "JPEG" && !file.galleryReady)) return "Preparing gallery";
+  return "Uploaded";
+}
 const captureFilterOptions = [
   { value: "all", label: "All" },
   { value: "complete", label: "JPEG + RAW" },
@@ -17212,6 +17246,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   const [uploadQueue, setUploadQueue] = reactExports.useState([]);
   const [deletingQueueItem, setDeletingQueueItem] = reactExports.useState(null);
   const [finishDialogOpen, setFinishDialogOpen] = reactExports.useState(false);
+  const [folderMigrationRunning, setFolderMigrationRunning] = reactExports.useState(false);
   const [photographerComment, setPhotographerComment] = reactExports.useState("");
   const [uploadActionRunning, setUploadActionRunning] = reactExports.useState(false);
   const [reviewSummary, setReviewSummary] = reactExports.useState({ unratedPortraits: 0, unratedGroups: 0 });
@@ -17540,6 +17575,44 @@ function ProjectView({ projectId, onBack, offline = false }) {
     reloadProject();
     addToast({ type: "success", title: "Watch folder set", description: folder });
   }
+  async function handleConsolidateStudentFolders() {
+    if (folderMigrationRunning) return;
+    setFolderMigrationRunning(true);
+    try {
+      const preview = await window.api.invoke("projects:previewFolderMigration", { projectId });
+      if (preview.legacyFolderCount === 0) {
+        addToast({
+          type: "success",
+          title: "Student folders are already consolidated",
+          description: "No legacy ID_LastName_FirstName folders were found."
+        });
+        return;
+      }
+      const confirmed = window.confirm([
+        `Found ${preview.legacyFolderCount} legacy student folder${preview.legacyFolderCount === 1 ? "" : "s"} containing ${preview.fileCount} file${preview.fileCount === 1 ? "" : "s"}.`,
+        preview.conflictCount > 0 ? `${preview.conflictCount} existing destination file${preview.conflictCount === 1 ? "" : "s"} will be kept; conflicting copies get a -legacy suffix.` : "Photos, RAW files, and QR markers will be copied into the new FirstName_LastName_ID folders.",
+        "Original folders will not be deleted. Continue?"
+      ].join("\n\n"));
+      if (!confirmed) return;
+      const result = await window.api.invoke("projects:migrateFolderMigration", {
+        projectId,
+        confirmed: true
+      });
+      addToast({
+        type: "success",
+        title: "Student folders consolidated",
+        description: `${result.migratedFiles} copied, ${result.skippedFiles} already present. Original folders were preserved.`
+      });
+    } catch (error) {
+      addToast({
+        type: "error",
+        title: "Could not consolidate student folders",
+        description: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setFolderMigrationRunning(false);
+    }
+  }
   async function handleToggleWatcher() {
     if (!project?.watchFolder) {
       addToast({ type: "error", title: "No watch folder", description: "Set a watch folder first" });
@@ -17769,7 +17842,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   let localText = "Waiting for photos";
   if (unmatchedPhotos.length > 0) {
     localColor = "text-rose-400";
-    localText = `${captureSummary.total} safe · ${unmatchedPhotos.length} unmatched`;
+    localText = `${captureSummary.total} captures · ${captureSummary.jpegFiles} JPEG · ${captureSummary.rawFiles} RAW · ${captureSummary.incompletePairs} incomplete · ${unmatchedPhotos.length} unmatched`;
     LocalIcon = CircleAlert;
   } else if (captureSummary.total === 0) {
     localText = !isRunning && !project?.finishedAt ? "No captures · watcher paused" : "Waiting for photos";
@@ -17813,7 +17886,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
-      className: "flex flex-col h-full font-sans bg-slate-50",
+      className: "shoot-workspace flex flex-col h-full font-sans bg-slate-50",
       onDragOver: (event) => event.preventDefault(),
       onDrop: (event) => event.preventDefault(),
       children: [
@@ -17835,7 +17908,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
             }
           ) })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "shoot-toolbar bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-5 min-w-0", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: onBack, "aria-label": "Back to projects", className: "text-slate-400 hover:text-white transition-colors bg-slate-900 hover:bg-slate-800 p-1.5 rounded-md shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ArrowLeft, { className: "size-4" }) }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
@@ -17860,7 +17933,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
             ] })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4 shrink-0", children: [
-            project?.watchFolder ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cn(
+            project?.watchFolder ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { "data-testid": "shoot-watch-status", className: cn(
               "flex items-center h-8 rounded-md border transition-colors overflow-hidden",
               isRunning ? "bg-teal-500/10 border-teal-500/20" : "bg-slate-900 border-slate-800"
             ), children: [
@@ -17883,9 +17956,22 @@ function ProjectView({ projectId, onBack, offline = false }) {
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "button",
               {
+                onClick: () => void handleConsolidateStudentFolders(),
+                disabled: folderMigrationRunning,
+                className: "shoot-secondary-action flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900 px-2.5 h-8 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:cursor-wait disabled:opacity-60",
+                title: "Preview and consolidate legacy student folders",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(FolderSync, { className: cn("size-3.5", folderMigrationRunning && "animate-pulse") }),
+                  folderMigrationRunning ? "Checking…" : "Consolidate folders"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
                 onClick: () => void openUploadDialog(),
                 "aria-label": shootHealthLabel,
-                className: "hidden md:flex items-center gap-3 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-md hover:bg-slate-800 hover:border-slate-700 transition-all text-left focus:outline-none focus:ring-2 focus:ring-teal-500/50 group",
+                className: "hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-md hover:bg-slate-800 hover:border-slate-700 transition-all text-left focus:outline-none focus:ring-2 focus:ring-teal-500/50 group",
                 title: shootHealthLabel,
                 children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-1", children: [
@@ -17945,7 +18031,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
                   }
                 )
               ] }),
-              captureSummary.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden", children: [
+              captureSummary.total > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shoot-secondary-action flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "select",
                   {
@@ -17992,6 +18078,7 @@ function ProjectView({ projectId, onBack, offline = false }) {
                 {
                   size: "sm",
                   onClick: () => void openFinishDialog(),
+                  "data-testid": "shoot-primary-action",
                   disabled: finishing || projectSynced || captureSummary.total === 0 && groupCaptureCount === 0,
                   className: cn(
                     "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
@@ -18895,7 +18982,7 @@ function StudentDetail({
       onDragLeave,
       onDrop,
       children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shoot-subject-header bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative", children: [
           isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-full h-1 bg-teal-500" }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col min-w-0", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-3 mb-2", children: [
@@ -18906,7 +18993,7 @@ function StudentDetail({
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-mono font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 truncate", children: student.generatedStudentId }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-extrabold uppercase tracking-widest text-slate-400 truncate", children: student.className })
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { className: "text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words", "aria-label": employeeLabel, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { className: "shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words", "aria-label": employeeLabel, children: [
               student.firstName,
               " ",
               student.lastName
@@ -18941,7 +19028,7 @@ function StudentDetail({
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto p-4 sm:p-6", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-[1400px] mx-auto flex flex-col gap-5", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex flex-col gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shoot-capture-area min-w-0 flex flex-col gap-3", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_164px]", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-w-0", children: livePreviewMatchesLatest && livePreview ? /* @__PURE__ */ jsxRuntimeExports.jsx(
                 LivePreview,
@@ -19234,7 +19321,7 @@ function CaptureStage({ capture }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
-      className: "relative flex min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg",
+      className: "shoot-preview relative flex min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg",
       children: [
         imageSource ? /* @__PURE__ */ jsxRuntimeExports.jsx(
           CaptureFramingPreview,
@@ -19269,7 +19356,7 @@ function CaptureStageMeta({
   onEditFraming
 }) {
   const upload = captureUploadSummary(capture, uploadStatus);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { "data-testid": "shoot-completeness", className: "shoot-completeness grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[9px] font-extrabold uppercase tracking-widest text-slate-400", children: "Rating" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1.5 flex items-center gap-0.5", "aria-label": `${capture.rating} out of 5 stars`, children: Array.from({ length: 5 }, (_, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -19707,19 +19794,12 @@ function GroupDetail({
   onRefreshCaptures
 }) {
   function captureUploadState(capture) {
-    if (capture.files.some((file) => file.uploadStatus === "error")) {
-      return { label: "Upload failed", className: "bg-red-50 text-red-700 border-red-200" };
-    }
-    if (capture.files.some((file) => file.uploadStatus === "uploading")) {
-      return { label: "Uploading", className: "bg-blue-50 text-blue-700 border-blue-200" };
-    }
-    if (capture.files.some((file) => file.uploadStatus !== "done")) {
-      return { label: "Queued", className: "bg-amber-50 text-amber-700 border-amber-200" };
-    }
-    if (capture.files.some((file) => file.fileRole === "JPEG" && !file.galleryReady)) {
-      return { label: "Preparing gallery", className: "bg-violet-50 text-violet-700 border-violet-200" };
-    }
-    return { label: "Uploaded", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    const label = captureUploadLabel(capture.files);
+    if (label === "Upload failed") return { label, className: "bg-red-50 text-red-700 border-red-200" };
+    if (label === "Uploading") return { label, className: "bg-blue-50 text-blue-700 border-blue-200" };
+    if (label === "Queued") return { label, className: "bg-amber-50 text-amber-700 border-amber-200" };
+    if (label === "Preparing gallery") return { label, className: "bg-violet-50 text-violet-700 border-violet-200" };
+    return { label, className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
   }
   function fileUploadState(file) {
     if (file.uploadStatus === "done" && file.fileRole === "JPEG" && !file.galleryReady) {
@@ -19745,7 +19825,7 @@ function GroupDetail({
     }
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col h-full relative bg-slate-50", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shoot-subject-header bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative", children: [
       isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-full h-1 bg-teal-500" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col min-w-0", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-2", children: [
@@ -19755,7 +19835,7 @@ function GroupDetail({
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-extrabold uppercase tracking-widest text-slate-400", children: "Custom Group" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words", children: group.name })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words", children: group.name })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-end gap-3 justify-center shrink-0", children: [
         isActiveCaptureTarget && /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", onClick: onClearCaptureTarget, className: "text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm", children: [
@@ -19770,7 +19850,7 @@ function GroupDetail({
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shoot-group-body max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full xl:w-[340px] shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[300px] xl:max-h-[calc(100vh-250px)]", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-6 border-b border-slate-100 bg-slate-50 shrink-0", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-3 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 w-fit shadow-sm", children: "1. Roster" }),
@@ -19792,7 +19872,7 @@ function GroupDetail({
           ] }, student.id);
         }) })
       ] }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0 flex flex-col gap-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shoot-capture-area flex-1 min-w-0 flex flex-col gap-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between mb-1", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit", children: "2. Group Captures" }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { size: "sm", variant: "outline", onClick: onRefreshCaptures, className: "h-8 text-[10px] font-bold uppercase tracking-wider text-slate-600", children: [
@@ -19835,7 +19915,7 @@ function GroupDetail({
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-2 mb-2", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-extrabold text-base text-slate-900 truncate", children: capture.baseFilename }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: cn("shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", overallUploadState.className), children: overallUploadState.label })
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { "data-testid": "shoot-completeness", className: cn("shoot-completeness shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", overallUploadState.className), children: overallUploadState.label })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none", children: capture.pairingStatus })
             ] }),
@@ -19944,7 +20024,7 @@ function LivePreview({
       cancel();
     };
   }, [photo.filePath, photo.previewUrl, traceId]);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shoot-preview mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-5 z-10 flex justify-between items-start pointer-events-none transition-opacity duration-300", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-2 bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded shadow-sm", children: [
@@ -20150,7 +20230,7 @@ function QrMarkerTile({
         source: marker.previewUrl,
         fallback: marker.thumbnailData,
         filePath: marker.filePath,
-        previewKey: `gallery-marker-${marker.fileName}`,
+        previewKey: `gallery-marker-${marker.id}`,
         alt: `QR marker ${marker.fileName}`
       }
     ),

@@ -1,4 +1,4 @@
-import { Router, type Request } from "express";
+import { Router } from "express";
 import QRCode from "qrcode";
 import { Readable } from "node:stream";
 import sharp from "sharp";
@@ -51,6 +51,7 @@ import {
   normalizeDeliveryProjectType,
   type DeliveryProjectType,
 } from "../lib/deliveryTerminology";
+import { publicAppUrl } from "../lib/publicAppUrl";
 
 const router = Router();
 const DELIVERY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -120,43 +121,6 @@ function isUniqueConstraintViolation(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { code?: unknown; cause?: unknown };
   return candidate.code === "23505" || isUniqueConstraintViolation(candidate.cause);
-}
-
-function deliveryOrigin(req: Request): string {
-  const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
-  const forwardedHost = req.get("x-forwarded-host")?.split(",")[0]?.trim();
-  return `${forwardedProto || req.protocol}://${forwardedHost || req.get("host")}`;
-}
-
-function publicAppUrl(): string {
-  const configured = process.env.PUBLIC_APP_URL?.trim();
-  const isProduction = process.env.NODE_ENV === "production";
-  const raw = configured || (
-    !isProduction && process.env.REPLIT_DEV_DOMAIN?.trim()
-      ? `https://${process.env.REPLIT_DEV_DOMAIN.trim().replace(/^https?:\/\//i, "")}`
-      : !isProduction && process.env.NODE_ENV === "test"
-        ? "http://localhost:3000"
-        : ""
-  );
-  if (!raw) {
-    throw new Error("PUBLIC_APP_URL must be configured with a valid HTTPS URL in production");
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new Error("PUBLIC_APP_URL must be a valid absolute URL");
-  }
-  if (!parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error("PUBLIC_APP_URL must be an absolute URL without credentials, query, or fragment");
-  }
-  if (isProduction && parsed.protocol !== "https:") {
-    throw new Error("PUBLIC_APP_URL must use HTTPS in production");
-  }
-  if (!isProduction && !["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("PUBLIC_APP_URL must use HTTP or HTTPS outside production");
-  }
-  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
 }
 
 function tokenSecret(): string {
@@ -997,7 +961,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     const itemSummary = pricedLines.map(({ offer, photos: linePhotos, orderQuantity }) =>
       `${offer.name} (${linePhotos.length} photo${linePhotos.length === 1 ? "" : "s"}${orderQuantity > 1 ? ` × ${orderQuantity}` : ""})`,
     );
-    const recoveryOrigin = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "") || deliveryOrigin(req);
+    const recoveryOrigin = publicAppUrl();
     const recoveryUrl = `${recoveryOrigin}/delivery/${encodeURIComponent(row.gallery.slug)}?orderRef=${encodeURIComponent(publicReference)}#recoveryToken=${encodeURIComponent(recoveryToken)}`;
     if (paymentMethod !== "stripe") {
       await dispatchOrderNotification(order, row.gallery, itemSummary, recoveryUrl);
@@ -1016,7 +980,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     }
 
     const stripe = await getUncachableStripeClient();
-    const origin = deliveryOrigin(req);
+    const origin = publicAppUrl();
     let session;
     try {
       session = await stripe.checkout.sessions.create({

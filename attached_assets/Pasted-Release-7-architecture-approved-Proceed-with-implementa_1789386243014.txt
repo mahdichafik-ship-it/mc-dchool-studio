@@ -1,0 +1,56 @@
+Release 7 architecture approved. Proceed with implementation exactly within the proposed scope.
+
+I approve:
+
+* extraction of Release 6’s validated PUBLIC_APP_URL logic into the shared server helper;
+* use of that helper for Delivery cards;
+* removal of request-derived origin from Stripe success_url and cancel_url;
+* removal of the request-origin fallback from order recovery;
+* migration of transactional invitation links to the same validated canonical helper;
+* preservation of path prefixes;
+* strict HTTPS/URL validation in production;
+* existing trusted development/test fallback;
+* no changes to Clerk, OAuth/storage callbacks, R2 signed URLs, desktop release URLs or unrelated internal URLs.
+
+Do not broaden Release 7 into a general URL refactor.
+
+Add the proposed hostile-header tests for Host, X-Forwarded-Host, and X-Forwarded-Proto, including combinations of all three.
+
+I also want one explicit assertion in the audit:
+
+When PUBLIC_APP_URL contains a valid path prefix, every affected customer URL must preserve that prefix exactly once — no missing prefix and no duplicated prefix.
+
+Verify this for:
+
+* Stripe success URL;
+* Stripe cancel URL;
+* order recovery URL;
+* transactional invitation URL;
+* Delivery card URL/QR.
+
+Also explicitly prove that malformed production PUBLIC_APP_URL fails before any external side effect where applicable—for example, no Stripe Checkout session should be created with an invalid callback origin and no invitation should be submitted to the email provider with an invalid public link.
+
+Preserve all existing Release 1–6 behavior and rerun the verification plan you proposed.
+
+No database migration.
+
+No frontend change.
+
+No desktop change.
+
+No OpenAPI contract change unless implementation unexpectedly proves one necessary.
+
+Do not publish production.
+
+When implementation is complete, provide the focused Release 7 audit with:
+
+* exact files/behavior changed;
+* canonical URL validation behavior;
+* hostile-header test results;
+* path-prefix tests;
+* Stripe/recovery/invitation/card regression results;
+* complete test/typecheck/build results;
+* security/privacy/dependency comparison;
+* any remaining limitations or launch blockers.
+
+Stop after the Release 7 audit.

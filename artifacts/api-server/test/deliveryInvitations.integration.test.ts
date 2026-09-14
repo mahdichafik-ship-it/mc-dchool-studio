@@ -817,3 +817,73 @@ test("access-card URLs reject invalid or non-HTTPS production configuration clea
     else process.env.PUBLIC_APP_URL = previousPublicAppUrl;
   }
 });
+
+test("canonical path prefix is preserved exactly once for cards and transactional invitations", async () => {
+  const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
+  const canonicalUrl = "https://gallery.test/volume-capture";
+  try {
+    process.env.PUBLIC_APP_URL = `${canonicalUrl}/`;
+    fakeMode = "success";
+    const gallery = await createGallery("school", [
+      { firstName: "Prefixed", lastName: "Student", email: `prefixed-${suffix}@example.com` },
+    ]);
+    const prepared = await prepare(gallery.projectId);
+    assert.equal(prepared.status, 200);
+    const body = await json<{
+      cards: Array<{ accessCode: string; accessUrl: string; qrUrl: string }>;
+    }>(prepared);
+    const card = body.cards[0];
+    assert(card);
+    assert.equal(card.accessUrl, `${canonicalUrl}/delivery/${gallery.slug}`);
+    assert.equal(card.qrUrl, `${canonicalUrl}/delivery/${gallery.slug}#code=${card.accessCode}`);
+    assert.equal((card.accessUrl.match(/\/volume-capture\//g) ?? []).length, 1);
+    assert.equal((card.qrUrl.match(/\/volume-capture\//g) ?? []).length, 1);
+
+    const requestCountBefore = requests.length;
+    assert.equal((await publish(gallery.projectId)).status, 200);
+    assert.equal(requests.length, requestCountBefore + 1);
+    const providerRequest = requests.at(-1);
+    assert(providerRequest);
+    const message = providerRequest.batch[0];
+    assert(message);
+    const serialized = JSON.stringify(message);
+    assert.equal(serialized.includes(`${canonicalUrl}/delivery/${gallery.slug}`), true);
+    assert.equal(
+      serialized.split("/volume-capture/delivery").length - 1,
+      2,
+      "text and HTML links each preserve one prefix",
+    );
+    assert.equal(serialized.includes("/volume-capture/volume-capture/"), false);
+  } finally {
+    if (previousPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
+    else process.env.PUBLIC_APP_URL = previousPublicAppUrl;
+  }
+});
+
+test("malformed canonical URL prevents transactional invitation provider calls", async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
+  const previousResendApiBaseUrl = process.env.RESEND_API_BASE_URL;
+  try {
+    process.env.NODE_ENV = "test";
+    process.env.PUBLIC_APP_URL = "https://[";
+    process.env.RESEND_API_BASE_URL = resendBaseUrl;
+    fakeMode = "success";
+    const gallery = await createGallery("school", [
+      { firstName: "Invalid", lastName: "URL", email: `invalid-url-${suffix}@example.com` },
+    ]);
+    const requestCountBefore = requests.length;
+    assert.equal((await publish(gallery.projectId)).status, 200);
+    assert.equal(requests.length, requestCountBefore);
+    const [invitation] = await invitationRows(gallery.galleryId);
+    assert.equal(invitation.status, "needs_review");
+    assert.match(invitation.lastError ?? "", /could not be prepared/i);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
+    else process.env.PUBLIC_APP_URL = previousPublicAppUrl;
+    if (previousResendApiBaseUrl === undefined) delete process.env.RESEND_API_BASE_URL;
+    else process.env.RESEND_API_BASE_URL = previousResendApiBaseUrl;
+  }
+});

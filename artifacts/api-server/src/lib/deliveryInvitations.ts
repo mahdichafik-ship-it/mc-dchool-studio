@@ -29,6 +29,7 @@ import {
   ResendSendError,
   sendResendEmailBatch,
 } from "./resendEmail";
+import { publicAppUrl } from "./publicAppUrl";
 
 const CLAIM_STALE_MS = 15 * 60 * 1000;
 const BATCH_SIZE = 100;
@@ -217,6 +218,7 @@ type InvitationMessage = {
 };
 
 async function invitationMessages(claimed: ClaimedInvitation[]): Promise<InvitationMessage[]> {
+  const appUrl = publicAppUrl();
   const ids = claimed.map((row) => row.id);
   const revisions = new Map(claimed.map((row) => [row.id, row.contentRevision]));
   const rows = await db.select({
@@ -246,7 +248,6 @@ async function invitationMessages(claimed: ClaimedInvitation[]): Promise<Invitat
     const claimedRevision = revisions.get(invitationId);
     if (first.invitation.status !== "sending" || claimedRevision !== first.invitation.contentRevision) return [];
     const corporate = first.project.projectType === "corporate";
-    const appUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "") ?? "";
     const lines = invitationRows.map(({ access, student, className }) => {
       const code = decryptStorageValue<string>(access.accessCodeEncrypted);
       const subject = `${student.firstName} ${student.lastName}`;

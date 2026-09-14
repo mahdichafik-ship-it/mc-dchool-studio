@@ -188,6 +188,7 @@ let stripeMode: "success" | "timeout" | "server_error" | "incomplete" | "accept_
 let stripeCreateCalls = 0;
 let stripeRetrieveCalls = 0;
 const stripeSessions = new Map<string, { id: string; url: string }>();
+const stripeCreateParams: Array<{ success_url?: string; cancel_url?: string }> = [];
 let acceptedStripeSession: { id: string; url: string } | null = null;
 let resendServer: Server;
 let resendBaseUrl: string;
@@ -205,8 +206,9 @@ before(async () => {
     },
     checkout: {
       sessions: {
-        create: async (_params: unknown, options: { idempotencyKey?: string }) => {
+        create: async (params: { success_url?: string; cancel_url?: string }, options: { idempotencyKey?: string }) => {
           stripeCreateCalls += 1;
+          stripeCreateParams.push(params);
           const idempotencyKey = options.idempotencyKey ?? "missing";
           const session = { id: `cs_test_${stripeCreateCalls}`, url: `https://checkout.test/${stripeCreateCalls}` };
           stripeSessions.set(idempotencyKey, session);
@@ -983,6 +985,108 @@ test("Stripe checkout stores its stable provider idempotency key and does not re
   assert.equal(replayBody.checkoutUrl, firstBody.checkoutUrl);
   assert.equal(stripeCreateCalls, 1);
   assert.equal(stripeRetrieveCalls, 1);
+});
+
+test("Stripe callbacks and recovery use canonical PUBLIC_APP_URL despite hostile request headers", async () => {
+  const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
+  const canonicalUrl = "https://public.example/volume-capture";
+  process.env.PUBLIC_APP_URL = `${canonicalUrl}/`;
+  stripeMode = "success";
+  try {
+    const headerCases = [
+      { host: "hostile.example" },
+      { "x-forwarded-host": "forwarded-hostile.example" },
+      { "x-forwarded-proto": "http" },
+      {
+        host: "combined-hostile.example",
+        "x-forwarded-host": "combined-forwarded.example",
+        "x-forwarded-proto": "http",
+      },
+    ];
+    for (const [index, hostileHeaders] of headerCases.entries()) {
+      const createCountBefore = stripeCreateCalls;
+      const response = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...hostileHeaders,
+        },
+        body: JSON.stringify({
+          token: unpaidAccessToken,
+          idempotencyKey: `canonical-url-${suffix}-${index}`,
+          offerId: "digital-single",
+          photoIds: [unpaidPhotoId],
+          quantity: 1,
+          customerName: "Canonical URL",
+          customerEmail: `canonical-url-${index}-${suffix}@example.com`,
+          paymentMethod: "stripe",
+          deliveryMethod: "digital",
+        }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(stripeCreateCalls, createCountBefore + 1);
+      const body = await response.json() as { orderId: number; recoveryUrl: string };
+      const params = stripeCreateParams.at(-1);
+      assert.equal(
+        params?.success_url,
+        `${canonicalUrl}/delivery/${gallerySlug}?paid=1&order=${body.orderId}`,
+      );
+      assert.equal(
+        params?.cancel_url,
+        `${canonicalUrl}/delivery/${gallerySlug}?cancelled=1&order=${body.orderId}`,
+      );
+      assert.equal(body.recoveryUrl.startsWith(`${canonicalUrl}/delivery/${gallerySlug}?orderRef=`), true);
+      assert.equal((params?.success_url?.match(/\/volume-capture\//g) ?? []).length, 1);
+      assert.equal((params?.cancel_url?.match(/\/volume-capture\//g) ?? []).length, 1);
+      assert.equal((body.recoveryUrl.match(/\/volume-capture\//g) ?? []).length, 1);
+      for (const [header, hostileValue] of Object.entries(hostileHeaders)) {
+        if (header === "x-forwarded-proto") {
+          assert.equal(new URL(params?.success_url ?? "").protocol, "https:");
+          assert.equal(new URL(params?.cancel_url ?? "").protocol, "https:");
+          assert.equal(new URL(body.recoveryUrl).protocol, "https:");
+          continue;
+        }
+        assert.equal(params?.success_url?.includes(hostileValue), false);
+        assert.equal(params?.cancel_url?.includes(hostileValue), false);
+        assert.equal(body.recoveryUrl.includes(hostileValue), false);
+      }
+    }
+  } finally {
+    if (previousPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
+    else process.env.PUBLIC_APP_URL = previousPublicAppUrl;
+  }
+});
+
+test("malformed canonical URL fails before Stripe Checkout creation", async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
+  const createCountBefore = stripeCreateCalls;
+  try {
+    process.env.NODE_ENV = "production";
+    process.env.PUBLIC_APP_URL = "https://[";
+    const response = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token: unpaidAccessToken,
+        idempotencyKey: `invalid-canonical-url-${suffix}`,
+        offerId: "digital-single",
+        photoIds: [unpaidPhotoId],
+        quantity: 1,
+        customerName: "Invalid URL",
+        customerEmail: `invalid-url-${suffix}@example.com`,
+        paymentMethod: "stripe",
+        deliveryMethod: "digital",
+      }),
+    });
+    assert.equal(response.status, 503);
+    assert.equal(stripeCreateCalls, createCountBefore);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
+    else process.env.PUBLIC_APP_URL = previousPublicAppUrl;
+  }
 });
 
 test("order notification rejection and unknown provider outcomes are durable and not retried", async () => {

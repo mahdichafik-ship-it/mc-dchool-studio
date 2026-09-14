@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { Activity, AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 
 type HealthAlert = {
   code: string;
@@ -34,6 +35,20 @@ type PlatformData = Omit<PlatformOverview, "studios"> & {
   studios: Array<PlatformOverview["studios"][number] & { health: StudioHealth }>;
 };
 
+const activityLabels: Record<string, string> = {
+  studio_invite_created: "Created a studio-owner invitation",
+  studio_invite_cancelled: "Cancelled a studio-owner invitation",
+  studio_onboarded: "Completed studio onboarding",
+  studio_archived: "Archived a studio",
+  studio_restored: "Restored a studio",
+  studio_details_updated: "Updated studio details",
+  member_suspended: "Suspended a studio member",
+  member_reactivated: "Reactivated a studio member",
+  desktop_revoke: "Revoked desktop access",
+  desktop_retire: "Retired desktop access",
+  desktop_set_expiry: "Changed desktop access expiry",
+  storage_revoked: "Revoked storage access",
+};
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function Platform() {
@@ -218,6 +233,36 @@ export default function Platform() {
             ))}
           </div>
         </section>}
+
+        <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
+          <div className="flex items-center gap-2 border-b px-6 py-4">
+            <Activity className="h-4 w-4 text-teal-700" />
+            <div>
+              <h2 className="font-semibold text-slate-900">Recent platform activity</h2>
+              <p className="mt-1 text-sm text-slate-500">A record of sensitive access and onboarding changes.</p>
+            </div>
+          </div>
+          {data.activity.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">No platform activity recorded yet.</div>
+          ) : (
+            <div className="divide-y">
+              {data.activity.map((item) => (
+                <div key={item.id} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900">{activityLabels[item.action] ?? item.action}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {item.studioName ?? (item.action.startsWith("studio_invite_") ? "Platform invitation" : "Platform workspace")}
+                      {" · "}Actor {item.actorUserId}
+                    </p>
+                  </div>
+                  <time className="shrink-0 text-xs text-slate-500" dateTime={new Date(item.createdAt).toISOString()}>
+                    {format(new Date(item.createdAt), "MMM d, yyyy HH:mm")}
+                  </time>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="space-y-4">
           <div className="flex items-end justify-between gap-4">

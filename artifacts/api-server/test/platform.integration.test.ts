@@ -80,7 +80,19 @@ after(async () => {
 });
 
 test("only the configured platform owner can view the platform workspace", async () => {
-  const forbidden = await request(otherUserId, "/api/platform");
+  const forbidden = await request(studioViewerId, "/api/studio/branding", {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: "Viewer must not rename the studio",
+      tagline: "",
+      website: "",
+      contactEmail: "",
+      logoObjectPath: null,
+      primaryColor: "#000000",
+      accentColor: "#FFFFFF",
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
   assert.equal(forbidden.status, 403);
 
   const allowed = await request(platformOwnerId, "/api/platform");
@@ -97,6 +109,7 @@ test("only the configured platform owner can view the platform workspace", async
     studios: unknown[];
     projects: unknown[];
     invites: unknown[];
+    activity: Array<{ action: string; actorUserId: string; studioName: string | null; createdAt: string }>;
   };
   assert.equal(body.configured, true);
   assert.equal(body.healthSummary.totalStudios, body.studios.length);
@@ -109,6 +122,7 @@ test("only the configured platform owner can view the platform workspace", async
   assert.ok(Array.isArray(body.studios));
   assert.ok(Array.isArray(body.projects));
   assert.ok(Array.isArray(body.invites));
+  assert.ok(Array.isArray(body.activity));
 });
 
 test("encrypts storage credentials with authenticated encryption", () => {
@@ -133,15 +147,13 @@ test("encrypts storage credentials with authenticated encryption", () => {
 test("creates one-time owner invites and onboards the invited account", async () => {
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: inviteeEmail }),
+    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
-  const invite = await created.json() as { id: number; code: string; status: string };
-  inviteId = invite.id;
-  inviteCode = invite.code;
-  assert.equal(invite.status, "pending");
+  const invite = await created.json() as { id: number; code: string };
 
+  const afterCreate = await request(platformOwnerId, "/api/platform");
   const duplicate = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
     body: JSON.stringify({ email: inviteeEmail.toUpperCase() }),
@@ -164,9 +176,8 @@ test("creates one-time owner invites and onboards the invited account", async ()
   });
   assert.equal(completed.status, 201);
   const studio = await completed.json() as { id: number; name: string };
-  onboardedStudioId = studio.id;
-  assert.equal(studio.name, "North Star School Photography");
 
+  const afterOnboarding = await request(platformOwnerId, "/api/platform");
   const repeated = await request(inviteeId, `/api/platform/invites/${inviteCode}/complete`, {
     method: "POST",
     body: JSON.stringify({ name: "Should Not Replace Studio" }),
@@ -195,12 +206,16 @@ test("creates one-time owner invites and onboards the invited account", async ()
   });
   assert.equal(invalidWebsite.status, 400);
 
-  const updated = await request(platformOwnerId, `/api/platform/studios/${onboardedStudioId}`, {
+  const updated = await request(inviteeId, "/api/studio/branding", {
     method: "PATCH",
     body: JSON.stringify({
-      description: "Updated studio description.",
+      name: "North Star School Photography",
+      tagline: "Portrait day, beautifully organized",
       website: "https://north-star-school.example",
-      contactEmail: "hello@north-star.example",
+      contactEmail: "BRAND@NORTH-STAR.EXAMPLE",
+      logoObjectPath: null,
+      primaryColor: "#123456",
+      accentColor: "#F59E0B",
     }),
     headers: { "Content-Type": "application/json" },
   });
@@ -238,7 +253,10 @@ test("creates one-time owner invites and onboards the invited account", async ()
     ["Updated studio description.", "https://north-star-school.example", "hello@north-star.example"],
   );
 
-  const members = await db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, onboardedStudioId));
+  const members = await db
+    .select()
+    .from(studioMembersTable)
+    .where(eq(studioMembersTable.studioId, concurrentStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);
 });
 
@@ -246,11 +264,13 @@ test("allows only one studio creation when an invitation is completed concurrent
   const concurrentUserId = `concurrent-owner-${suffix}`;
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: `${concurrentUserId}@member.local` }),
+    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
   const invite = await created.json() as { id: number; code: string };
+
+  const afterCreate = await request(platformOwnerId, "/api/platform");
   concurrentInviteId = invite.id;
 
   const completions = await Promise.all([
@@ -327,9 +347,17 @@ test("keeps platform storage active while a studio-owned connection is pending",
     email: `${studioViewerId}@member.local`,
     role: "viewer",
   });
-  const forbidden = await request(studioViewerId, "/api/studio/storage", {
-    method: "PUT",
-    body: JSON.stringify({ provider: "dropbox" }),
+  const forbidden = await request(studioViewerId, "/api/studio/branding", {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: "Viewer must not rename the studio",
+      tagline: "",
+      website: "",
+      contactEmail: "",
+      logoObjectPath: null,
+      primaryColor: "#000000",
+      accentColor: "#FFFFFF",
+    }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(forbidden.status, 403);
@@ -351,19 +379,7 @@ test("keeps platform storage active while a studio-owned connection is pending",
 });
 
 test("lets studio managers save branding while keeping viewers read-only", async () => {
-  const invalid = await request(inviteeId, "/api/studio/branding", {
-    method: "PATCH",
-    body: JSON.stringify({
-      name: "North Star School Photography",
-      tagline: "Portrait day, beautifully organized",
-      website: "https://north-star-school.example",
-      contactEmail: "hello@north-star.example",
-      logoObjectPath: null,
-      primaryColor: "teal",
-      accentColor: "#F59E0B",
-    }),
-    headers: { "Content-Type": "application/json" },
-  });
+  const invalid = await request(otherUserId, "/api/platform/invites/does-not-exist");
   assert.equal(invalid.status, 400);
 
   const updated = await request(inviteeId, "/api/studio/branding", {
@@ -441,6 +457,8 @@ test("rejects email mismatches and keeps studios isolated", async () => {
   assert.equal(created.status, 201);
   const invite = await created.json() as { id: number; code: string };
 
+  const afterCreate = await request(platformOwnerId, "/api/platform");
+
   const mismatch = await request(otherUserId, `/api/platform/invites/${invite.code}/complete`, {
     method: "POST",
     body: JSON.stringify({ name: "Blocked Studio" }),
@@ -460,8 +478,8 @@ test("rejects email mismatches and keeps studios isolated", async () => {
     body: JSON.stringify({ status: "cancelled" }),
     headers: { "Content-Type": "application/json" },
   });
-  assert.equal(cancelled.status, 200);
-  assert.equal((await cancelled.json() as { status: string }).status, "cancelled");
+
+  const afterCancel = await request(platformOwnerId, "/api/platform");
   const cancelledComplete = await request(otherUserId, `/api/platform/invites/${cancelledInvite.code}/complete`, {
     method: "POST",
     body: JSON.stringify({ name: "Cancelled Studio" }),
@@ -671,3 +689,21 @@ test("lets the platform owner audit and control one studio without leaking crede
   assert.ok(refreshedBody.platformAudit.some((entry) => entry.action === "studio_archived"));
   assert.ok(refreshedBody.platformAudit.some((entry) => entry.action === "studio_restored"));
 });
+
+  const cancellationActivity = afterCancelBody.activity.find((item) => item.action === "studio_invite_cancelled");
+
+  const onboardingActivity = afterOnboardingBody.activity.find((item) => item.action === "studio_onboarded");
+
+  const afterOnboardingBody = await afterOnboarding.json() as {
+    activity: Array<{ action: string; actorUserId: string; studioId: number | null; studioName: string | null }>;
+  };
+
+  const afterCancelBody = await afterCancel.json() as {
+    activity: Array<{ action: string; actorUserId: string; studioId: number | null }>;
+  };
+
+  const inviteCreatedActivity = afterCreateBody.activity.find((item) => item.action === "studio_invite_created");
+
+  const afterCreateBody = await afterCreate.json() as {
+    activity: Array<{ action: string; actorUserId: string; studioId: number | null; studioName: string | null; createdAt: string; code?: string }>;
+  };

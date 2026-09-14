@@ -23,7 +23,7 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function recordPlatformAction(
   actorUserId: string,
-  studioId: number,
+  studioId: number | null,
   action: string,
   targetType: string,
   targetId?: string | number | null,
@@ -38,6 +38,15 @@ async function recordPlatformAction(
     detail: detail?.slice(0, 500) || null,
   });
 }
+
+type PlatformActivity = {
+  id: number;
+  actorUserId: string;
+  studioId: number | null;
+  studioName: string | null;
+  action: string;
+  createdAt: Date;
+};
 
 function studioIdParam(value: string | string[] | undefined): number | null {
   const id = Number(Array.isArray(value) ? value[0] : value);
@@ -98,7 +107,7 @@ router.get("/status", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<void> => {
-  const [studios, members, projectCounts, projectRows, invites, desktopConnections] = await Promise.all([
+  const [studios, members, projectCounts, projectRows, invites, desktopConnections, activity] = await Promise.all([
     db.select().from(studiosTable).orderBy(asc(studiosTable.createdAt)),
     db.select().from(studioMembersTable).where(eq(studioMembersTable.status, "active")),
     db.select({ studioId: projectsTable.studioId, count: count() }).from(projectsTable).groupBy(projectsTable.studioId),
@@ -126,6 +135,18 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
       status: desktopConnectionsTable.status,
       expiresAt: desktopConnectionsTable.expiresAt,
     }).from(desktopConnectionsTable),
+    db.select({
+      id: platformActionAuditTable.id,
+      actorUserId: platformActionAuditTable.actorUserId,
+      studioId: platformActionAuditTable.studioId,
+      studioName: studiosTable.name,
+      action: platformActionAuditTable.action,
+      createdAt: platformActionAuditTable.createdAt,
+    })
+      .from(platformActionAuditTable)
+      .leftJoin(studiosTable, eq(platformActionAuditTable.studioId, studiosTable.id))
+      .orderBy(desc(platformActionAuditTable.createdAt))
+      .limit(100),
   ]);
 
   const ownerByStudio = new Map(
@@ -242,6 +263,7 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
     })),
     projects,
     invites,
+    activity: activity satisfies PlatformActivity[],
   });
 });
 
@@ -475,6 +497,7 @@ router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Pro
       invitedByUserId: getUserId(req),
     })
     .returning();
+  await recordPlatformAction(getUserId(req), null, "studio_invite_created", "platform_invite", invite.id);
   res.status(201).json(invite);
 });
 
@@ -493,6 +516,7 @@ router.patch("/invites/:inviteId", requireAuth, requirePlatformOwner, async (req
     res.status(404).json({ error: "Pending invitation not found" });
     return;
   }
+  await recordPlatformAction(getUserId(req), null, "studio_invite_cancelled", "platform_invite", updated.id);
   res.json(updated);
 });
 
@@ -607,6 +631,13 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
         role: "owner",
       });
     }
+    await tx.insert(platformActionAuditTable).values({
+      actorUserId: userId,
+      studioId: studio.id,
+      action: "studio_onboarded",
+      targetType: "studio",
+      targetId: String(studio.id),
+    });
     return { studio };
   });
 

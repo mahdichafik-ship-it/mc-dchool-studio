@@ -443,11 +443,22 @@ export type PlatformProject = Project & ({
   studioName: string | null;
 });
 
+export interface PlatformActivity {
+  id: number;
+  actorUserId: string;
+  /** @nullable */
+  studioId: number | null;
+  /** @nullable */
+  studioName: string | null;
+  action: string;
+  createdAt: string;
+}
 export interface PlatformOverview {
   configured: boolean;
   studios: PlatformStudio[];
   projects: PlatformProject[];
   invites: PlatformInvite[];
+  activity: PlatformActivity[];
 }
 
 export interface DeliveryAccessInput {
@@ -1357,4 +1368,3 @@ export const ListMarketingContactsConsent = {
 export type ListMarketingCampaigns200 = {
   campaigns?: MarketingCampaign[];
 };
-

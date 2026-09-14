@@ -1770,7 +1770,7 @@ components:
 
     PlatformOverview:
       type: object
-      required: [configured, studios, projects, invites]
+      required: [configured, studios, projects, invites, activity]
       properties:
         configured:
           type: boolean
@@ -1786,6 +1786,28 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PlatformInvite"
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformActivity"
+
+    PlatformActivity:
+      type: object
+      required: [id, actorUserId, studioId, studioName, action, createdAt]
+      properties:
+        id:
+          type: integer
+        actorUserId:
+          type: string
+        studioId:
+          type: ["integer", "null"]
+        studioName:
+          type: ["string", "null"]
+        action:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
 
     DeliveryAccessInput:
       type: object

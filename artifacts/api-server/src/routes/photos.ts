@@ -171,6 +171,29 @@ async function resolveCaptureBatch(
   return batch ?? undefined;
 }
 
+async function attachSupersededBatchFile<T extends {
+  id: number;
+  captureBatchId: number | null;
+  clientUploadId: string | null;
+}>(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  table: typeof captureFilesTable | typeof groupCaptureFilesTable | typeof studentPhotosTable,
+  file: T,
+  replacementBatch: typeof captureBatchesTable.$inferSelect | null | undefined,
+  clientUploadId: string | null,
+): Promise<T> {
+  if (!clientUploadId || file.clientUploadId !== clientUploadId
+    || !replacementBatch?.supersedesBatchId || file.captureBatchId !== replacementBatch.supersedesBatchId) return file;
+  const [attached] = await tx.update(table as typeof captureFilesTable)
+    .set({ captureBatchId: replacementBatch.id })
+    .where(and(
+      eq((table as typeof captureFilesTable).id, file.id),
+      eq((table as typeof captureFilesTable).captureBatchId, replacementBatch.supersedesBatchId),
+    ))
+    .returning();
+  return (attached ?? file) as T;
+}
+
 function validRouteId(value: string | string[] | undefined): value is string {
   return typeof value === "string" && /^[1-9]\d*$/.test(value);
 }
@@ -967,7 +990,12 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
               .where(eq(groupCaptureFilesTable.id, existing.file.id)).limit(1);
             return { capture: existing.capture, file: current ?? existing.file, backupFilePath: req.file!.path, reused: true };
           }
-          return { ...existing, backupFilePath: req.file!.path, reused: true };
+          return {
+            capture: existing.capture,
+            file: await attachSupersededBatchFile(tx, groupCaptureFilesTable, existing.file, captureBatch, clientUploadId),
+            backupFilePath: req.file!.path,
+            reused: true,
+          };
         }
       }
       let [capture] = await tx.select().from(groupCapturesTable).where(and(eq(groupCapturesTable.projectId, projectId), eq(groupCapturesTable.captureKey, captureKey))).limit(1);
@@ -980,6 +1008,7 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
       }).returning();
       const [existingRole] = await tx.select().from(groupCaptureFilesTable).where(and(eq(groupCaptureFilesTable.captureId, capture.id), eq(groupCaptureFilesTable.fileRole, role))).limit(1);
       if (existingRole) {
+        const resumedFile = await attachSupersededBatchFile(tx, groupCaptureFilesTable, existingRole, captureBatch, clientUploadId);
         if (
           captureBatch
           && existingRole.captureBatchId === null
@@ -997,7 +1026,7 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
             .where(eq(groupCaptureFilesTable.id, existingRole.id)).limit(1);
           return { capture, file: current ?? existingRole, backupFilePath: req.file!.path, reused: true };
         }
-        return { capture, file: existingRole, backupFilePath: req.file!.path, reused: true };
+        return { capture, file: resumedFile, backupFilePath: req.file!.path, reused: true };
       }
       const [file] = await tx.insert(groupCaptureFilesTable).values({
         captureId: capture.id, fileRole: role, fileFormat: captureFileFormat(req.file!.originalname),
@@ -1213,7 +1242,27 @@ router.post("/:studentId/photos", requireDesktopConnection, validateDesktopUploa
           if (existing.projectId !== projectId || existing.studentId !== studentId) {
             throw new Error("Desktop upload identifier was reused for a different photo target");
           }
-          return { photo: existing, backupFilePath: req.file!.path, reused: true };
+          return {
+            photo: await attachSupersededBatchFile(tx, studentPhotosTable, existing, captureBatch, clientUploadId),
+            backupFilePath: req.file!.path,
+            reused: true,
+          };
+        }
+        if (captureBatch?.supersedesBatchId) {
+          const [superseded] = await tx.select().from(studentPhotosTable).where(and(
+            eq(studentPhotosTable.captureBatchId, captureBatch.supersedesBatchId),
+            eq(studentPhotosTable.clientUploadId, clientUploadId),
+          )).limit(1);
+          if (superseded) {
+            if (superseded.projectId !== projectId || superseded.studentId !== studentId) {
+              throw new Error("Desktop upload identifier was reused for a different photo target");
+            }
+            return {
+              photo: await attachSupersededBatchFile(tx, studentPhotosTable, superseded, captureBatch, clientUploadId),
+              backupFilePath: req.file!.path,
+              reused: true,
+            };
+          }
         }
 
         const [photo] = await tx
@@ -1394,7 +1443,33 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
               conflict: "Desktop upload identifier was reused for a different capture file role",
             } as const;
           }
-          return { capture: existingByClientId.capture, file: existingByClientId.file, backupFilePath: uploadedFile.path, reused: true };
+          return {
+            capture: existingByClientId.capture,
+            file: await attachSupersededBatchFile(tx, captureFilesTable, existingByClientId.file, captureBatch, clientUploadId),
+            backupFilePath: uploadedFile.path,
+            reused: true,
+          };
+        }
+        if (captureBatch?.supersedesBatchId) {
+          const [superseded] = await tx.select({ file: captureFilesTable, capture: capturesTable })
+            .from(captureFilesTable)
+            .innerJoin(capturesTable, eq(captureFilesTable.captureId, capturesTable.id))
+            .where(and(
+              eq(captureFilesTable.captureBatchId, captureBatch.supersedesBatchId),
+              eq(captureFilesTable.clientUploadId, clientUploadId),
+            )).limit(1);
+          if (superseded) {
+            if (superseded.capture.projectId !== projectId || superseded.capture.studentId !== studentId
+              || superseded.file.fileRole !== role) {
+              return { conflict: "Desktop upload identifier was reused for a different capture target" } as const;
+            }
+            return {
+              capture: superseded.capture,
+              file: await attachSupersededBatchFile(tx, captureFilesTable, superseded.file, captureBatch, clientUploadId),
+              backupFilePath: uploadedFile.path,
+              reused: true,
+            };
+          }
         }
       }
 
@@ -1464,13 +1539,14 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
         ))
         .limit(1);
       if (existingByRole) {
+        const resumedFile = await attachSupersededBatchFile(tx, captureFilesTable, existingByRole, captureBatch, clientUploadId);
         [capture] = await tx.update(capturesTable).set({
           ...reviewFlags,
           rating,
           colorLabel,
           updatedAt: new Date(),
         }).where(eq(capturesTable.id, capture.id)).returning();
-        return { capture, file: existingByRole, backupFilePath: uploadedFile.path, reused: true };
+        return { capture, file: resumedFile, backupFilePath: uploadedFile.path, reused: true };
       }
 
       const [file] = await tx

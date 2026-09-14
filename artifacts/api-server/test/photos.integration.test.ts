@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test, { after, before } from "node:test";
 import express from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   classesTable,
   captureBatchesTable,
@@ -128,6 +128,7 @@ app.use((req, _res, next) => {
 app.use("/api/projects/:projectId/captures", photosRouter);
 app.use("/api/projects/:projectId/students", photosRouter);
 app.use("/api/projects", projectsRouter);
+app.use("/api/desktop", photosRouter);
 app.use("/api/desktop", desktopRouter);
 
 before(async () => {
@@ -635,6 +636,215 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
     }).where(eq(desktopConnectionsTable.id, desktopConnection.id));
   }
   await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, projectedDeliveryPhoto.id));
+});
+
+test("a reconnected Mac supersedes an interrupted batch and credits committed retries", async () => {
+  const interruptedCredentials = createDesktopToken();
+  const replacementCredentials = createDesktopToken();
+  const [interruptedConnection, replacementConnection] = await db.insert(desktopConnectionsTable).values([
+    {
+      studioId,
+      memberId,
+      deviceName: "Interrupted integration desktop",
+      tokenHash: interruptedCredentials.tokenHash,
+      tokenPrefix: interruptedCredentials.tokenPrefix,
+    },
+    {
+      studioId,
+      memberId,
+      deviceName: "Replacement integration desktop",
+      tokenHash: replacementCredentials.tokenHash,
+      tokenPrefix: replacementCredentials.tokenPrefix,
+    },
+  ]).returning({ id: desktopConnectionsTable.id });
+  const [group] = await db.insert(groupsTable).values({
+    projectId,
+    name: `Reconnect group ${Date.now()}`,
+    isDefaultClassGroup: false,
+  }).returning({ id: groupsTable.id });
+  const interruptedBatchKey = `interrupted-${process.pid}-${Date.now()}`;
+  const replacementBatchKey = `replacement-${process.pid}-${Date.now()}`;
+  const authHeaders = (token: string) => ({ Authorization: `Bearer ${token}` });
+  const start = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
+    method: "POST",
+    headers: { ...authHeaders(interruptedCredentials.token), "Content-Type": "application/json" },
+    body: JSON.stringify({ batchKey: interruptedBatchKey, expectedFileCount: 3 }),
+  });
+  assert.equal(start.status, 201);
+
+  const portraitUploadId = `resume-portrait-${Date.now()}`;
+  const portraitCaptureKey = `resume-portrait-capture-${Date.now()}`;
+  const portraitForm = new (globalThis as any).FormData();
+  portraitForm.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), "resume-portrait.jpg");
+  portraitForm.append("captureKey", portraitCaptureKey);
+  portraitForm.append("fileRole", "JPEG");
+  const portraitCommit = await fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(interruptedCredentials.token),
+      "X-MC-Upload-Id": portraitUploadId,
+      "X-MC-Capture-Batch": interruptedBatchKey,
+    },
+    body: portraitForm,
+  });
+  assert.equal(portraitCommit.status, 201);
+  const portrait = await portraitCommit.json() as { captureId: number; file: { id: number; fileUrl: string } };
+  captureFilePaths.push(path.resolve(process.cwd(), portrait.file.fileUrl.replace(/^\//, "")));
+
+  const legacyUploadId = String(Date.now()).slice(-9);
+  const legacyForm = new (globalThis as any).FormData();
+  legacyForm.append("photo", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), "resume-legacy.jpg");
+  const legacyCommit = await fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(interruptedCredentials.token),
+      "X-MC-Upload-Id": legacyUploadId,
+      "X-MC-Capture-Batch": interruptedBatchKey,
+    },
+    body: legacyForm,
+  });
+  assert.equal(legacyCommit.status, 201);
+  const legacy = await legacyCommit.json() as { id: number; fileUrl: string };
+  captureFilePaths.push(path.resolve(process.cwd(), legacy.fileUrl.replace(/^\//, "")));
+
+  const groupUploadId = `resume-group-${Date.now()}`;
+  const groupCaptureKey = `resume-group-capture-${Date.now()}`;
+  const groupForm = new (globalThis as any).FormData();
+  groupForm.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), "resume-group.jpg");
+  groupForm.append("captureKey", groupCaptureKey);
+  groupForm.append("fileRole", "JPEG");
+  const groupCommit = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/groups/${group.id}/captures`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(interruptedCredentials.token),
+      "X-MC-Upload-Id": groupUploadId,
+      "X-MC-Capture-Batch": interruptedBatchKey,
+    },
+    body: groupForm,
+  });
+  assert.equal(groupCommit.status, 201);
+  const groupFile = await groupCommit.json() as { file: { id: number; fileUrl: string } };
+  captureFilePaths.push(path.resolve(process.cwd(), groupFile.file.fileUrl.replace(/^\//, "")));
+
+  const activeMacConflict = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
+    method: "POST",
+    headers: { ...authHeaders(replacementCredentials.token), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      batchKey: replacementBatchKey,
+      supersedesBatchKey: interruptedBatchKey,
+      expectedFileCount: 3,
+    }),
+  });
+  assert.equal(activeMacConflict.status, 409);
+
+  await db.update(desktopConnectionsTable).set({
+    status: "revoked",
+    revokedAt: new Date(),
+  }).where(eq(desktopConnectionsTable.id, interruptedConnection.id));
+  const replacementStart = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
+    method: "POST",
+    headers: { ...authHeaders(replacementCredentials.token), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      batchKey: replacementBatchKey,
+      supersedesBatchKey: interruptedBatchKey,
+      expectedFileCount: 3,
+    }),
+  });
+  assert.equal(replacementStart.status, 201);
+  const replayedReplacementStart = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
+    method: "POST",
+    headers: { ...authHeaders(replacementCredentials.token), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      batchKey: replacementBatchKey,
+      supersedesBatchKey: interruptedBatchKey,
+      expectedFileCount: 3,
+    }),
+  });
+  assert.equal(replayedReplacementStart.status, 200, "a lost successful supersession response must be safely replayable");
+
+  const mismatchedGroupRetry = new (globalThis as any).FormData();
+  mismatchedGroupRetry.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), "resume-group.jpg");
+  mismatchedGroupRetry.append("captureKey", groupCaptureKey);
+  mismatchedGroupRetry.append("fileRole", "JPEG");
+  const mismatchedGroupResponse = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/groups/${group.id}/captures`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(replacementCredentials.token),
+      "X-MC-Upload-Id": `${groupUploadId}-different`,
+      "X-MC-Capture-Batch": replacementBatchKey,
+    },
+    body: mismatchedGroupRetry,
+  });
+  assert.equal(mismatchedGroupResponse.status, 200);
+  const [unmovedGroupFile] = await db.select().from(groupCaptureFilesTable)
+    .where(eq(groupCaptureFilesTable.id, groupFile.file.id));
+  const [interruptedBatch] = await db.select().from(captureBatchesTable)
+    .where(eq(captureBatchesTable.batchKey, interruptedBatchKey));
+  assert.equal(unmovedGroupFile.captureBatchId, interruptedBatch.id, "role-only reuse must not transfer batch membership");
+
+  const retryPortrait = new (globalThis as any).FormData();
+  retryPortrait.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), "resume-portrait.jpg");
+  retryPortrait.append("captureKey", portraitCaptureKey);
+  retryPortrait.append("fileRole", "JPEG");
+  const retryLegacy = new (globalThis as any).FormData();
+  retryLegacy.append("photo", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), "resume-legacy.jpg");
+  const retryGroup = new (globalThis as any).FormData();
+  retryGroup.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), "resume-group.jpg");
+  retryGroup.append("captureKey", groupCaptureKey);
+  retryGroup.append("fileRole", "JPEG");
+  const retryRequests = [
+    fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`, {
+      method: "POST",
+      headers: { ...authHeaders(replacementCredentials.token), "X-MC-Upload-Id": portraitUploadId, "X-MC-Capture-Batch": replacementBatchKey },
+      body: retryPortrait,
+    }),
+    fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`, {
+      method: "POST",
+      headers: { ...authHeaders(replacementCredentials.token), "X-MC-Upload-Id": legacyUploadId, "X-MC-Capture-Batch": replacementBatchKey },
+      body: retryLegacy,
+    }),
+    fetch(`${baseUrl}/api/desktop/projects/${projectId}/groups/${group.id}/captures`, {
+      method: "POST",
+      headers: { ...authHeaders(replacementCredentials.token), "X-MC-Upload-Id": groupUploadId, "X-MC-Capture-Batch": replacementBatchKey },
+      body: retryGroup,
+    }),
+  ];
+  const retryResponses = await Promise.all(retryRequests);
+  assert.deepEqual(retryResponses.map((response) => response.status), [200, 200, 200]);
+
+  const finish = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches/${replacementBatchKey}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(replacementCredentials.token), "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "complete", failedFileCount: 0 }),
+  });
+  assert.equal(finish.status, 200);
+  const completed = await finish.json() as { status: string; uploadedFileCount: number };
+  assert.equal(completed.status, "complete");
+  assert.equal(completed.uploadedFileCount, 3);
+
+  const batches = await db.select().from(captureBatchesTable).where(eq(captureBatchesTable.projectId, projectId));
+  const interrupted = batches.find((batch) => batch.batchKey === interruptedBatchKey);
+  const replacement = batches.find((batch) => batch.batchKey === replacementBatchKey);
+  assert.equal(interrupted?.status, "superseded");
+  assert(interrupted?.supersededAt);
+  assert.equal(replacement?.supersedesBatchId, interrupted?.id);
+  assert.equal(replacement?.uploadedFileCount, 3);
+  const [portraitFile] = await db.select().from(captureFilesTable).where(eq(captureFilesTable.id, portrait.file.id));
+  const [legacyFile] = await db.select().from(studentPhotosTable).where(eq(studentPhotosTable.id, legacy.id));
+  const [groupCaptureFile] = await db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, groupFile.file.id));
+  assert.equal(portraitFile.captureBatchId, replacement?.id);
+  assert.equal(legacyFile.captureBatchId, replacement?.id);
+  assert.equal(groupCaptureFile.captureBatchId, replacement?.id);
+  await db.delete(studentPhotosTable).where(and(
+    eq(studentPhotosTable.projectId, projectId),
+    eq(studentPhotosTable.studentId, studentId),
+    sql`${studentPhotosTable.fileName} in ('resume-portrait.jpg', 'resume-legacy.jpg')`,
+  ));
+  await db.delete(capturesTable).where(eq(capturesTable.id, portrait.captureId));
+  await db.delete(groupCapturesTable).where(eq(groupCapturesTable.captureKey, groupCaptureKey));
+  await db.delete(captureBatchesTable).where(eq(captureBatchesTable.projectId, projectId));
+  await db.delete(desktopConnectionsTable).where(eq(desktopConnectionsTable.id, interruptedConnection.id));
+  await db.delete(desktopConnectionsTable).where(eq(desktopConnectionsTable.id, replacementConnection.id));
 });
 
 test("lets a studio admin review a photo and keeps parent visibility synchronized", async () => {

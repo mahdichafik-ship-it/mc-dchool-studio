@@ -61,3 +61,4 @@
 - [Gallery contact consent](gallery-contact-consent.md) — required access email identifies gallery visits but never implies promotional consent; campaign audiences fail closed.
 - [Transactional gallery invitations](transactional-gallery-invitations.md) — aggregate each gallery recipient’s subject codes, dispatch after publication commits, and quarantine uncertain provider outcomes.
 - [SheetJS upstream releases](sheetjs-upstream-releases.md) — maintained SheetJS builds come from the vendor CDN; npm-only scanners can misclassify fixed upstream versions.
+- [Capture batch supersession](capture-batch-supersession.md) — reconnect recovery uses a new explicit batch and transfers committed file membership only after the old connection is inactive.

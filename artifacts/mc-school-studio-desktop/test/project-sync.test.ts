@@ -6,7 +6,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runProjectSync } from '../src/main/ipc/projectSync.ts'
 import type { ProjectSyncDependencies } from '../src/main/ipc/projectSync.ts'
-import { syncProjectUploads, setSetting, markCloudSessionVerified, markCloudSessionUnavailable } from '../src/main/ipc/upload.ts'
+import {
+  beginProjectCaptureBatchWithDependencies,
+  syncProjectUploads,
+  setSetting,
+  markCloudSessionVerified,
+  markCloudSessionUnavailable,
+} from '../src/main/ipc/upload.ts'
 import type { ProjectSyncJob, ProjectSyncProgress } from '../src/main/ipc/upload.ts'
 import { closeDbForTests, getDb } from '../src/main/db/index.ts'
 import {
@@ -329,6 +335,57 @@ test('real upload aggregation de-duplicates repeated capture, RAW, group, and le
   )
 
   assert.deepEqual(progress, { completed: 3, total: 3, failed: 0 })
+})
+
+test('replacement batch intent survives a lost server response and desktop restart', async () => {
+  const settings = new Map<string, string>()
+  const requestBodies: Array<{ batchKey: string; supersedesBatchKey?: string; expectedFileCount: number }> = []
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    requestBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+    response.setHeader('Content-Type', 'application/json')
+    if (requestBodies.length === 1) {
+      response.statusCode = 409
+      response.end(JSON.stringify({ code: 'CAPTURE_BATCH_CONNECTION_CHANGED' }))
+      return
+    }
+    if (requestBodies.length === 2) {
+      request.socket.destroy()
+      return
+    }
+    response.end(JSON.stringify({ status: 'uploading' }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  try {
+    let generatedKey = 0
+    const dependencies = {
+      apiUrl: `http://127.0.0.1:${address.port}`,
+      connectionToken: 'replacement-token',
+      getSetting: (key: string) => settings.get(key) ?? null,
+      setSetting: (key: string, value: string) => { settings.set(key, value) },
+      deleteSetting: (key: string) => { settings.delete(key) },
+      createBatchKey: () => `generated-batch-${++generatedKey}`,
+      request: fetch,
+    }
+    await assert.rejects(beginProjectCaptureBatchWithDependencies(1, 700, 3, dependencies))
+    assert.equal(requestBodies.length, 2)
+    assert.notEqual(requestBodies[1].batchKey, requestBodies[0].batchKey)
+    assert.equal(requestBodies[1].supersedesBatchKey, requestBodies[0].batchKey)
+
+    const resumedBatchKey = await beginProjectCaptureBatchWithDependencies(1, 700, 3, {
+      ...dependencies,
+      getSetting: (key) => settings.get(key) ?? null,
+    })
+    assert.equal(requestBodies.length, 3)
+    assert.deepEqual(requestBodies[2], requestBodies[1])
+    assert.equal(resumedBatchKey, requestBodies[1].batchKey)
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  }
 })
 
 test('late offline student keeps paired captures across a real restart and production upload', async () => {

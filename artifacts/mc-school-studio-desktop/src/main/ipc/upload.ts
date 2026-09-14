@@ -1944,26 +1944,85 @@ export async function syncProjectUploads(
   }
 }
 
+type CaptureBatchStartDependencies = {
+  apiUrl: string
+  connectionToken: string
+  getSetting: (key: string) => string | null
+  setSetting: (key: string, value: string) => void
+  deleteSetting: (key: string) => void
+  createBatchKey: () => string
+  request: typeof fetch
+}
+
+export async function beginProjectCaptureBatchWithDependencies(
+  projectId: number,
+  cloudProjectId: number,
+  expectedFileCount: number,
+  dependencies: CaptureBatchStartDependencies,
+): Promise<string> {
+  const settingKey = `capture_batch:${projectId}`
+  const supersedesSettingKey = `capture_batch_supersedes:${projectId}`
+  const batchKey = dependencies.getSetting(settingKey) ?? dependencies.createBatchKey()
+  const supersedesBatchKey = dependencies.getSetting(supersedesSettingKey)
+  dependencies.setSetting(settingKey, batchKey)
+  const response = await dependencies.request(`${dependencies.apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProjectId}/capture-batches`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${dependencies.connectionToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      batchKey,
+      expectedFileCount,
+      ...(supersedesBatchKey ? { supersedesBatchKey } : {}),
+    }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (response.status === 409) {
+    const conflict = await response.json().catch(() => null) as { code?: string } | null
+    if (conflict?.code === 'CAPTURE_BATCH_CONNECTION_CHANGED') {
+      const replacementBatchKey = dependencies.createBatchKey()
+      dependencies.setSetting(settingKey, replacementBatchKey)
+      dependencies.setSetting(supersedesSettingKey, batchKey)
+      const replacement = await dependencies.request(`${dependencies.apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProjectId}/capture-batches`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${dependencies.connectionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          batchKey: replacementBatchKey,
+          supersedesBatchKey: batchKey,
+          expectedFileCount,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      })
+      if (!replacement.ok) throw new Error(`Could not resume capture batch: HTTP ${replacement.status}: ${await replacement.text()}`)
+      dependencies.deleteSetting(supersedesSettingKey)
+      return replacementBatchKey
+    }
+    throw new Error(`Could not start capture batch: HTTP 409`)
+  }
+  if (!response.ok) throw new Error(`Could not start capture batch: HTTP ${response.status}: ${await response.text()}`)
+  if (supersedesBatchKey) dependencies.deleteSetting(supersedesSettingKey)
+  return batchKey
+}
+
 export async function beginProjectCaptureBatch(projectId: number, expectedFileCount: number): Promise<string> {
   const db = getDb()
   const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
   if (!project?.cloudId) throw new Error('This project needs to be re-synced before its batch can upload.')
-  const settingKey = `capture_batch:${projectId}`
-  const batchKey = getSetting(settingKey) ?? crypto.randomUUID()
-  setSetting(settingKey, batchKey)
   const { apiUrl, connectionToken } = getUploadConfig()
   if (!apiUrl || !connectionToken) throw new Error('Cloud upload is not configured.')
-  const response = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/capture-batches`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${connectionToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ batchKey, expectedFileCount }),
-    signal: AbortSignal.timeout(30_000),
+  return beginProjectCaptureBatchWithDependencies(projectId, project.cloudId, expectedFileCount, {
+    apiUrl,
+    connectionToken,
+    getSetting,
+    setSetting,
+    deleteSetting,
+    createBatchKey: () => crypto.randomUUID(),
+    request: fetch,
   })
-  if (!response.ok) throw new Error(`Could not start capture batch: HTTP ${response.status}: ${await response.text()}`)
-  return batchKey
 }
 
 export async function finishProjectCaptureBatch(

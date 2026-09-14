@@ -317,9 +317,12 @@ router.post("/auth/refresh", requireDesktopConnection, async (req, res): Promise
 router.post("/projects/:projectId/capture-batches", requireDesktopConnection, async (req, res): Promise<void> => {
   const projectId = Number(req.params.projectId);
   const batchKey = req.body?.batchKey;
+  const supersedesBatchKey = req.body?.supersedesBatchKey;
   const expectedFileCount = Number(req.body?.expectedFileCount);
   const connection = getDesktopConnection(req);
-  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey) || !Number.isInteger(expectedFileCount) || expectedFileCount < 0) {
+  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey)
+    || (supersedesBatchKey !== undefined && (!validCaptureBatchKey(supersedesBatchKey) || supersedesBatchKey === batchKey))
+    || !Number.isInteger(expectedFileCount) || expectedFileCount < 0) {
     res.status(400).json({ error: "A valid project, batch key, and expected file count are required" });
     return;
   }
@@ -343,7 +346,64 @@ router.post("/projects/:projectId/capture-batches", requireDesktopConnection, as
     ))
     .limit(1);
   if (existing && existing.desktopConnectionId !== connection.connectionId) {
-    res.status(409).json({ error: "Capture batch belongs to another desktop connection" });
+    res.status(409).json({
+      error: "Capture batch belongs to another desktop connection",
+      code: "CAPTURE_BATCH_CONNECTION_CHANGED",
+    });
+    return;
+  }
+  if (supersedesBatchKey !== undefined) {
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${projectId}:${supersedesBatchKey}`}))`);
+      const [predecessor] = await tx.select().from(captureBatchesTable).where(and(
+        eq(captureBatchesTable.projectId, projectId),
+        eq(captureBatchesTable.batchKey, supersedesBatchKey),
+      )).limit(1);
+      if (!predecessor || predecessor.desktopConnectionId === connection.connectionId) {
+        return { error: "Interrupted capture batch is not owned by a previous connection" } as const;
+      }
+      const [replayed] = await tx.select().from(captureBatchesTable).where(and(
+        eq(captureBatchesTable.projectId, projectId),
+        eq(captureBatchesTable.batchKey, batchKey),
+        eq(captureBatchesTable.desktopConnectionId, connection.connectionId),
+        eq(captureBatchesTable.supersedesBatchId, predecessor.id),
+      )).limit(1);
+      if (replayed) return { batch: replayed, replayed: true } as const;
+      if (predecessor.status === "complete" || predecessor.status === "superseded") {
+        return { error: "This capture batch can no longer be superseded" } as const;
+      }
+      const [previousConnection] = await tx.select({ status: desktopConnectionsTable.status })
+        .from(desktopConnectionsTable)
+        .where(eq(desktopConnectionsTable.id, predecessor.desktopConnectionId))
+        .limit(1);
+      if (previousConnection?.status === "active") {
+        return { error: "The previous Mac is still active and must be disconnected before this batch can resume" } as const;
+      }
+      const [batch] = await tx.insert(captureBatchesTable).values({
+        batchKey,
+        projectId,
+        memberId: connection.memberId,
+        desktopConnectionId: connection.connectionId,
+        status: "uploading",
+        expectedFileCount,
+        failedFileCount: 0,
+        lastSyncAt: new Date(),
+        completedAt: null,
+        supersedesBatchId: predecessor.id,
+      }).returning();
+      await tx.update(captureBatchesTable).set({
+        status: "superseded",
+        supersededAt: new Date(),
+        lastSyncAt: new Date(),
+        completedAt: null,
+      }).where(eq(captureBatchesTable.id, predecessor.id));
+      return { batch, replayed: false } as const;
+    });
+    if ("error" in result) {
+      res.status(409).json({ error: result.error });
+      return;
+    }
+    res.status(result.replayed ? 200 : 201).json(result.batch);
     return;
   }
   if (

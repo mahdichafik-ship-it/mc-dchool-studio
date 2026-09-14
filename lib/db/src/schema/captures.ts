@@ -24,7 +24,9 @@ export const captureBatchesTable = pgTable("capture_batches", {
   desktopConnectionId: integer("desktop_connection_id")
     .notNull()
     .references(() => desktopConnectionsTable.id, { onDelete: "cascade" }),
-  status: text("status", { enum: ["uploading", "failed", "complete"] }).notNull().default("uploading"),
+  status: text("status", { enum: ["uploading", "failed", "complete", "superseded"] }).notNull().default("uploading"),
+  supersedesBatchId: integer("supersedes_batch_id"),
+  supersededAt: timestamp("superseded_at", { withTimezone: true }),
   expectedFileCount: integer("expected_file_count").notNull().default(0),
   uploadedFileCount: integer("uploaded_file_count").notNull().default(0),
   failedFileCount: integer("failed_file_count").notNull().default(0),
@@ -34,6 +36,7 @@ export const captureBatchesTable = pgTable("capture_batches", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("capture_batches_project_key_unique").on(table.projectId, table.batchKey),
+  uniqueIndex("capture_batches_supersedes_unique").on(table.supersedesBatchId),
 ]);
 
 export const capturesTable = pgTable("captures", {

@@ -22,6 +22,7 @@
     "test:capture-upload-export": "node --experimental-loader ./test/resolve-ts-loader.mjs --experimental-strip-types --test test/capture-upload-export.test.ts",
     "test:project-sync": "node --experimental-loader ./test/resolve-ts-loader.mjs --experimental-strip-types --test test/project-sync.test.ts",
     "test:project-scale": "node --experimental-strip-types --test test/project-roster-scale.test.ts",
+    "test:roster-shortcuts": "node --experimental-strip-types --test test/roster-shortcuts.test.ts",
     "test:live-preview": "node --experimental-strip-types --test test/live-preview.test.ts",
     "test:blank-portrait": "node --experimental-strip-types --test test/blank-portrait.test.ts",
     "test:shoot-layout": "pnpm run build && node --experimental-strip-types --test test/shoot-workspace-layout.test.ts && node test/shoot-workspace-rendered-layout.mjs",

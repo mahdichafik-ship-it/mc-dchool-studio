@@ -33,6 +33,10 @@ import {
 import { CaptureFramingPreview } from '@/lib/CaptureFramingPreview'
 import { captureUploadLabel } from '@/lib/shootWorkspace'
 import { getEmployeeCaptureContext } from '@/lib/employeeCaptureContext'
+import {
+  isRosterShortcutEditingTarget,
+  resolveRosterShortcut,
+} from '@/lib/rosterShortcuts'
 import type {
   Student,
   Class,
@@ -168,13 +172,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
-      const isInput =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.tagName === 'SELECT' ||
-        target.isContentEditable
-
-      if (isInput) {
+      if (isRosterShortcutEditingTarget(target)) {
         if (e.key === 'Escape' && target === searchInputRef.current) {
           setSearch('')
           target.blur()
@@ -190,95 +188,42 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         renamingGroupId !== null ||
         document.querySelector('[role="dialog"], [aria-modal="true"]') !== null
 
-      if (anyDialogOpen) return
-      if (project?.finishedAt) return
+      const action = resolveRosterShortcut({
+        key: e.key,
+        students: filteredStudents,
+        selectedStudentId: selectedStudent?.id ?? null,
+        activeStudentId,
+        hasSearch: search.length > 0,
+        hasActiveTarget:
+          activeStudentId !== null ||
+          selectedStudent !== null ||
+          activeGroupId !== null ||
+          selectedGroup !== null,
+        blocked: anyDialogOpen || Boolean(project?.finishedAt),
+      })
 
-      if (e.key === '/') {
+      if (action.type === 'focus-search') {
         e.preventDefault()
         searchInputRef.current?.focus()
         return
       }
 
-      if (e.key === 'Escape') {
-        if (search) {
-          setSearch('')
-        } else if (
-          activeStudentId !== null ||
-          selectedStudent !== null ||
-          activeGroupId !== null ||
-          selectedGroup !== null
-        ) {
-          void actionsRef.current.handleClearCaptureStudent()
-          setSelectedStudent(null)
-          actionsRef.current.setSelectedGroup(null)
-          void actionsRef.current.setActiveGroupTarget(null)
-        }
+      if (action.type === 'clear-search') {
+        setSearch('')
         return
       }
 
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        e.preventDefault()
-        if (filteredStudents.length === 0) return
-
-        let currentIndex = -1
-        if (selectedStudent) {
-          currentIndex = filteredStudents.findIndex((s) => s.id === selectedStudent.id)
-        } else if (activeStudentId) {
-          currentIndex = filteredStudents.findIndex((s) => s.id === activeStudentId)
-        }
-
-        let nextIndex = 0
-        if (e.key === 'ArrowUp') {
-          nextIndex = currentIndex > 0 ? currentIndex - 1 : 0
-        } else {
-          nextIndex =
-            currentIndex >= 0 && currentIndex < filteredStudents.length - 1
-              ? currentIndex + 1
-              : currentIndex >= 0
-                ? currentIndex
-                : 0
-        }
-
-        const nextStudent = filteredStudents[nextIndex]
-        if (nextStudent) {
-          void actionsRef.current.handleSelectCaptureStudent(nextStudent)
-        }
+      if (action.type === 'clear-target') {
+        void actionsRef.current.handleClearCaptureStudent()
+        setSelectedStudent(null)
+        actionsRef.current.setSelectedGroup(null)
+        void actionsRef.current.setActiveGroupTarget(null)
         return
       }
 
-      if (e.key === 'n' || e.key === 'N') {
+      if (action.type === 'select-student') {
         e.preventDefault()
-        if (filteredStudents.length === 0) return
-
-        let currentIndex = -1
-        if (selectedStudent) {
-          currentIndex = filteredStudents.findIndex((s) => s.id === selectedStudent.id)
-        } else if (activeStudentId) {
-          currentIndex = filteredStudents.findIndex((s) => s.id === activeStudentId)
-        }
-
-        const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0
-        let nextStudent = null
-
-        for (let i = startIndex; i < filteredStudents.length; i++) {
-          if (filteredStudents[i].photoCount === 0) {
-            nextStudent = filteredStudents[i]
-            break
-          }
-        }
-
-        if (!nextStudent) {
-          for (let i = 0; i < startIndex; i++) {
-            if (filteredStudents[i].photoCount === 0) {
-              nextStudent = filteredStudents[i]
-              break
-            }
-          }
-        }
-
-        if (nextStudent) {
-          void actionsRef.current.handleSelectCaptureStudent(nextStudent)
-        }
+        void actionsRef.current.handleSelectCaptureStudent(action.student)
       }
     }
 
@@ -485,10 +430,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   }
 
   async function handleSelectCaptureStudent(student: Student) {
-    setSelectedStudent(student)
-    setSelectedGroup(null)
     try {
       await setActiveCaptureTarget(student.id)
+      setSelectedStudent(student)
+      setSelectedGroup(null)
     } catch (error) {
       addToast({
         type: 'error',

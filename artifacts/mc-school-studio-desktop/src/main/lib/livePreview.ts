@@ -1,19 +1,25 @@
 import { exiftool } from 'exiftool-vendored'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { extname, join } from 'node:path'
+import { extname, join, resolve } from 'node:path'
 import sharp from 'sharp'
 import { getPhotoSystemLayout } from './storageLayout.ts'
 import { assessImageContent } from './imageContent.ts'
+import {
+  getActiveLocalPreviewPaths,
+  LOCAL_PREVIEW_TTL_MS,
+} from './localPreviewRegistry.ts'
 
 export const LIVE_PREVIEW_EDGE = 1440
 export const LIVE_PREVIEW_QUALITY = 84
 
+export const LIVE_PREVIEW_CLEANUP_BATCH_SIZE = 32
 const RAW_EXTENSIONS = new Set([
   '.nef', '.nrw', '.cr2', '.cr3', '.arw', '.raf', '.orf', '.rw2', '.dng',
 ])
 const EMBEDDED_PREVIEW_TAGS = ['PreviewImage', 'JpgFromRaw', 'ThumbnailImage'] as const
 
+const PREVIEW_ARTIFACT_NAME = /^[0-9a-f]{32}\.jpg$/
 export interface LivePreviewOptions {
   cacheDir: string
   previewKey: string
@@ -34,6 +40,11 @@ function cacheName(previewKey: string): string {
 
 export function getLivePreviewCacheDir(homeDir: string): string {
   return join(getPhotoSystemLayout(homeDir).cache, 'Previews')
+}
+
+export interface LivePreviewCleanupOptions {
+  now?: number
+  maxFiles?: number
 }
 
 export async function getCachedLivePreview(
@@ -97,6 +108,7 @@ export async function generateLivePreview(
     return await job
   } finally {
     if (previewJobs.get(destinationPath) === job) previewJobs.delete(destinationPath)
+    scheduleLivePreviewCacheCleanup(options.cacheDir)
   }
 }
 
@@ -165,4 +177,72 @@ async function generateLivePreviewFromSource(
     await rm(embeddedPath, { force: true }).catch(() => {})
     await rm(sourceCopyPath, { force: true }).catch(() => {})
   }
+}
+
+/**
+ * Removes old generated preview artifacts without touching source files or
+ * previews that can still be requested through the local protocol.
+ *
+ * The deletion batch is deliberately small. This function is scheduled in
+ * the background and is never awaited by capture-time preview generation.
+ */
+export async function cleanupLivePreviewArtifacts(
+  cacheDir: string,
+  options: LivePreviewCleanupOptions = {},
+): Promise<number> {
+  const now = options.now ?? Date.now()
+  const maxFiles = Math.max(0, Math.floor(options.maxFiles ?? LIVE_PREVIEW_CLEANUP_BATCH_SIZE))
+  if (maxFiles === 0) return 0
+
+  let entries
+  try {
+    entries = await readdir(cacheDir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+
+  const cutoff = now - LOCAL_PREVIEW_TTL_MS
+  const activePaths = getActiveLocalPreviewPaths(now)
+  let removed = 0
+  for (const entry of entries) {
+    if (removed >= maxFiles) break
+    if (!entry.isFile() || !PREVIEW_ARTIFACT_NAME.test(entry.name)) continue
+
+    const filePath = resolve(cacheDir, entry.name)
+    if (activePaths.has(filePath)) continue
+
+    try {
+      const metadata = await stat(filePath)
+      if (metadata.mtimeMs > cutoff) continue
+      // Check again immediately before deletion in case a URL was issued
+      // while the filesystem metadata was being read.
+      if (getActiveLocalPreviewPaths(now).has(filePath)) continue
+      await rm(filePath, { force: true })
+      removed++
+    } catch {
+      // A concurrent preview write or another cleanup pass owns this file.
+    }
+  }
+  return removed
+}
+
+export const LIVE_PREVIEW_CLEANUP_DELAY_MS = 15_000
+
+const scheduledCleanup = new Map<string, ReturnType<typeof setTimeout>>()
+
+/**
+ * Schedules one deferred, deduplicated cleanup pass for a cache directory.
+ */
+export function scheduleLivePreviewCacheCleanup(cacheDir: string): void {
+  const normalizedCacheDir = resolve(cacheDir)
+  if (scheduledCleanup.has(normalizedCacheDir)) return
+
+  const timer = setTimeout(() => {
+    scheduledCleanup.delete(normalizedCacheDir)
+    void cleanupLivePreviewArtifacts(normalizedCacheDir).catch((error) => {
+      console.warn('[LivePreview] Could not clean preview cache:', error)
+    })
+  }, LIVE_PREVIEW_CLEANUP_DELAY_MS)
+  timer.unref()
+  scheduledCleanup.set(normalizedCacheDir, timer)
 }

@@ -12,6 +12,7 @@ import { registerCloudHandlers } from './ipc/cloud'
 import { registerUpdateHandlers, scheduleUpdateCheck } from './ipc/updates'
 import { getDb } from './db'
 import { registerLocalPreviewProtocol, registerLocalPreviewScheme } from './lib/localPreviewProtocol'
+import { getLivePreviewCacheDir, scheduleLivePreviewCacheCleanup } from './lib/livePreview'
 import { createShutdownCoordinator } from './lib/shutdownCoordinator'
 
 const isDev = !app.isPackaged
@@ -98,6 +99,7 @@ function monitorRetirement(mainWindow: BrowserWindow): void {
 
 app.whenReady().then(() => {
   registerLocalPreviewProtocol()
+  scheduleLivePreviewCacheCleanup(getLivePreviewCacheDir(app.getPath('home')))
   // Initialize database (creates tables if needed)
   getDb()
 

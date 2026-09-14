@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, RefreshCw, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { Activity, AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, RefreshCw, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useUser } from "@clerk/react";
 import type { PlatformInvite, PlatformOverview } from "@workspace/api-client-react";
 import { Link } from "wouter";
@@ -8,8 +8,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Activity, AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, ShieldCheck, UserPlus, Users, X } from "lucide-react";
-
 type HealthAlert = {
   code: string;
   label: string;

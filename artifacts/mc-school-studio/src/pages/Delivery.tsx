@@ -234,12 +234,6 @@ export default function Delivery() {
     setSelectedOfferId("");
   }, [contentIsError, contentError]);
 
-  useEffect(() => {
-    if (content?.offers && content.offers.length > 0 && !selectedOfferId) {
-      setSelectedOfferId(content.offers[0].id);
-    }
-  }, [content?.offers, selectedOfferId]);
-
   const { data: orderData } = useGetDeliveryOrder(slug as string, orderIdToCheck as number, {
     query: {
       enabled: !!slug && !!token && !!orderIdToCheck,
@@ -281,31 +275,61 @@ export default function Delivery() {
     });
   }
 
-  const activeOffer = content?.offers?.find(o => o.id === selectedOfferId) || content?.offers?.[0];
+  const activeOffer = content?.offers?.find(o => o.id === selectedOfferId);
 
   function togglePhoto(photoId: number) {
-    if (!activeOffer) return;
-    
-    let limit: number | null = null;
-    if (activeOffer.productType === 'print') limit = 1;
-    else if (activeOffer.productType === 'pack') limit = activeOffer.photoCount * quantity;
-
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(photoId)) {
         next.delete(photoId);
+        if (next.size === 0) {
+          setSelectedOfferId("");
+          setQuantity(1);
+        }
       } else {
-        if (limit === null) {
-          next.add(photoId);
-        } else if (limit === 1 && next.size === 1) {
+        if (!activeOffer) {
           next.clear();
           next.add(photoId);
-        } else if (next.size < limit) {
-          next.add(photoId);
+        } else {
+          let limit = 1;
+          if (activeOffer.productType === 'pack') limit = activeOffer.photoCount * quantity;
+
+          if (limit === 1 && next.size === 1) {
+            next.clear();
+            next.add(photoId);
+          } else if (next.size < limit) {
+            next.add(photoId);
+          }
         }
       }
       return next;
     });
+  }
+
+  function handleSelectOffer(offerId: string) {
+    setSelectedOfferId(offerId);
+    setQuantity(1);
+
+    const offer = content?.offers?.find(o => o.id === offerId);
+    if (!offer) return;
+
+    const limit = offer.productType === 'pack' ? offer.photoCount : 1;
+
+    if (selected.size > limit) {
+      setSelected(current => new Set(Array.from(current).slice(0, limit)));
+    }
+  }
+
+  function handleQuantityChange(delta: number) {
+    const nextQuantity = Math.max(1, quantity + delta);
+    setQuantity(nextQuantity);
+
+    if (activeOffer && activeOffer.productType === 'pack') {
+      const limit = activeOffer.photoCount * nextQuantity;
+      if (selected.size > limit) {
+        setSelected(current => new Set(Array.from(current).slice(0, limit)));
+      }
+    }
   }
 
   const { delivery: commonDelivery, payment: commonPayment, currency: basketCurrency } = useMemo(
@@ -355,7 +379,8 @@ export default function Delivery() {
   let selectedTotal = 0;
   if (activeOffer) {
     if (activeOffer.productType === 'digital') {
-      selectedTotal = activeOffer.unitAmount * selected.size;
+      requiredPhotoCount = 1;
+      selectedTotal = activeOffer.unitAmount;
     } else if (activeOffer.productType === 'print') {
       requiredPhotoCount = 1;
       selectedTotal = activeOffer.unitAmount * quantity;
@@ -380,6 +405,7 @@ export default function Delivery() {
     
     setBasket(prev => [...prev, newItem]);
     setSelected(new Set());
+    setSelectedOfferId("");
     setQuantity(1);
     setNotice({ kind: "added", offerName: activeOffer.name });
     setTimeout(() => setNotice(null), 3000);
@@ -852,64 +878,6 @@ export default function Delivery() {
           </p>
         </div>
 
-        {offers.length > 0 && (
-          <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <label className="text-base font-semibold text-slate-900">{t("chooseProduct")}</label>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {offers.map(offer => (
-                <button
-                  key={offer.id}
-                  data-testid={`button-select-offer-${offer.id}`}
-                  onClick={() => {
-                    setSelectedOfferId(offer.id);
-                    setSelected(new Set());
-                    setQuantity(1);
-                  }}
-                  className={`rounded-lg border px-5 py-2.5 text-sm font-medium transition-all ${
-                    selectedOfferId === offer.id
-                      ? "border-teal-600 bg-teal-50 text-teal-800 shadow-sm"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  {offer.name}
-                </button>
-              ))}
-            </div>
-            {activeOffer && (
-              <div className="mt-5 space-y-4 border-t border-slate-100 pt-5">
-                <p className="text-sm text-slate-600">
-                  <span className="font-medium text-slate-900">{formatPrice(activeOffer.unitAmount, activeOffer.currency)}</span>
-                  <span className="mx-2 text-slate-300">|</span>
-                  {activeOffer.description}
-                  {activeOffer.printSize ? ` · ${activeOffer.printSize}` : ""}
-                  {activeOffer.productType === 'digital' 
-                    ? ` · ${t("perPhoto")}`
-                    : activeOffer.productType === 'print'
-                      ? ` · ${t("selectOne")}`
-                      : ` · ${t("selectOne").replace("1", String(activeOffer.photoCount))} ${t("perPack")}`}
-                </p>
-
-                {activeOffer.productType !== 'digital' && (
-                  <div className="flex items-center gap-3">
-                    <label className="text-sm font-medium text-slate-700">{t("quantity")}</label>
-                    <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
-                      <button type="button" onClick={() => setQuantity(Math.max(1, quantity - 1))} className="px-3 py-1.5 text-slate-500 hover:bg-slate-100">-</button>
-                      <span className="px-3 text-sm font-medium">{quantity}</span>
-                      <button type="button" onClick={() => setQuantity(quantity + 1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-100">+</button>
-                    </div>
-                  </div>
-                )}
-
-                {!canAddOffer(activeOffer) && (
-                  <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 border border-amber-200">
-                    {t("cannotCombine")}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-        
         {notice && (
           <div className="mt-6 flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900 shadow-sm animate-in fade-in zoom-in duration-300">
             <Check className="mt-0.5 size-4 shrink-0 text-teal-700" />
@@ -923,6 +891,12 @@ export default function Delivery() {
           </div>
         )}
         
+        <section className="mt-8" aria-labelledby="delivery-photos-heading">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: "var(--delivery-primary)" }}>{t("stepOne")}</p>
+            <h2 id="delivery-photos-heading" className="mt-1 text-xl font-semibold text-slate-900">{t("choosePhoto")}</h2>
+            <p className="mt-1 text-sm text-slate-500">{t("choosePhotoHelp")}</p>
+          </div>
         {content.photos.length === 0 ? (
           <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-12 text-center">
             <ImageIcon className="mx-auto size-10 text-slate-300" />
@@ -936,7 +910,7 @@ export default function Delivery() {
             </button>
           </div>
         ) : (
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
             {content.photos.map((photo) => {
               const isSelected = selected.has(photo.id as number);
               const isPaid = paidPhotoIds.has(photo.id as number);
@@ -947,6 +921,7 @@ export default function Delivery() {
                   type="button" 
                   data-testid={`button-toggle-photo-${photo.id}`}
                   onClick={() => !isPaid && togglePhoto(photo.id as number)} 
+                  aria-pressed={isSelected}
                   disabled={isPaid}
                   className={`group relative overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
                     isSelected ? "border-teal-600 ring-2 ring-teal-200" : "border-slate-200"
@@ -982,7 +957,7 @@ export default function Delivery() {
                     </span>
                   </div>
                   
-                  <div className="flex items-center justify-between gap-3 p-4">
+                  <div className="flex items-center justify-between gap-3 p-3 sm:p-4">
                     <span className="truncate text-sm font-medium text-slate-700" title={photo.fileName}>
                       {photo.fileName}
                     </span>
@@ -991,6 +966,67 @@ export default function Delivery() {
               );
             })}
           </div>
+        )}
+        </section>
+
+        {selected.size > 0 && offers.length > 0 && (
+          <section data-testid="section-compatible-products" className="mt-10 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7" aria-labelledby="delivery-products-heading">
+            <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: "var(--delivery-primary)" }}>{t("stepTwo")}</p>
+            <h2 id="delivery-products-heading" className="mt-1 text-xl font-semibold text-slate-900">{t("chooseProductForPhoto")}</h2>
+            <p className="mt-1 text-sm text-slate-500">{t("chooseProductHelp")}</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {offers.map(offer => (
+                <button
+                  key={offer.id}
+                  type="button"
+                  data-testid={`button-select-offer-${offer.id}`}
+                  aria-pressed={selectedOfferId === offer.id}
+                  onClick={() => handleSelectOffer(offer.id)}
+                  className={`rounded-xl border p-4 text-left transition-all ${
+                    selectedOfferId === offer.id
+                      ? "border-teal-600 bg-teal-50 text-teal-950 ring-2 ring-teal-100"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:shadow-sm"
+                  }`}
+                >
+                  <span className="block font-semibold">{offer.name}</span>
+                  <span className="mt-1 block text-sm font-medium">{formatPrice(offer.unitAmount, offer.currency)}</span>
+                  {(offer.description || offer.printSize) && (
+                    <span className="mt-2 block text-xs leading-5 text-slate-500">
+                      {[offer.description, offer.printSize].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                  {offer.productType === "pack" && (
+                    <span className="mt-2 block text-xs font-medium text-slate-600">
+                      {offer.photoCount} {t("photosPerPack")}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {activeOffer && (
+              <div className="mt-6 space-y-4 border-t border-slate-100 pt-5">
+                {activeOffer.productType !== "digital" && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-sm font-medium text-slate-700">{t("quantity")}</label>
+                    <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
+                      <button type="button" data-testid="button-decrease-product-quantity" aria-label={t("decreaseQuantity")} onClick={() => handleQuantityChange(-1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-100">-</button>
+                      <span data-testid="text-product-quantity" className="px-3 text-sm font-medium">{quantity}</span>
+                      <button type="button" data-testid="button-increase-product-quantity" aria-label={t("increaseQuantity")} onClick={() => handleQuantityChange(1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-100">+</button>
+                    </div>
+                  </div>
+                )}
+                {activeOffer.productType === "pack" && (
+                  <p data-testid="status-pack-photo-count" className={`rounded-lg border p-3 text-sm ${isValidSelection ? "border-teal-200 bg-teal-50 text-teal-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                    {selected.size} / {requiredPhotoCount} {t("packPhotosSelected")}
+                  </p>
+                )}
+                {!canAddOffer(activeOffer) && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{t("cannotCombine")}</p>
+                )}
+              </div>
+            )}
+          </section>
         )}
         
         {paidPhotoIds.size > 0 && (
@@ -1060,14 +1096,16 @@ export default function Delivery() {
             </div>
             
             <div className="flex flex-col sm:flex-row gap-3">
-              {selected.size > 0 && (
+              {selected.size > 0 && activeOffer && (
                 <button 
+                  type="button"
+                  data-testid="button-add-selection-to-basket"
                   onClick={addToBasket} 
-                  disabled={!isValidSelection || (activeOffer && !canAddOffer(activeOffer))} 
+                  disabled={!isValidSelection || !canAddOffer(activeOffer)}
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-teal-50 px-6 text-sm font-semibold text-teal-800 shadow-sm transition-colors hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ color: "var(--delivery-primary)" }}
                 >
-                  {t("add")}
+                  {isValidSelection ? t("add") : t("selectRemainingPhotos")}
                 </button>
               )}
               {basket.length > 0 && (

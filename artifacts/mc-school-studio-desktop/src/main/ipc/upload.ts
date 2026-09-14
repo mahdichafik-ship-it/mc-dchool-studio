@@ -25,12 +25,13 @@ import {
   groupMembersTable,
 } from '../db/schema'
 import { normalizeProjectType } from '../../shared/types'
-import { eq, and, or, isNull } from 'drizzle-orm'
+import { eq, and, or, asc } from 'drizzle-orm'
 import type { LiveUploadQueueItem, LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
 import { AsyncTaskLimiter, runWithConcurrency } from '../lib/uploadConcurrency'
 import { startActiveUploadRun } from '../lib/activeUploadRun'
+import { classifyProjectUploadFile } from '../lib/projectUploadClassification'
 import {
   assertR2VerifierResponse,
   parseR2UploadSession,
@@ -1181,50 +1182,175 @@ function uniqueProjectSyncJobs(jobs: ProjectSyncJob[]): ProjectSyncJob[] {
   })
 }
 
-function getProjectSyncJobs(projectId: number, includeDone = false): ProjectSyncJob[] {
+type ProjectUploadCapture = {
+  capture: typeof capturesTable.$inferSelect
+  student: typeof studentsTable.$inferSelect | undefined
+}
+
+type ProjectUploadGroupCapture = {
+  capture: typeof groupCapturesTable.$inferSelect
+  group: typeof groupsTable.$inferSelect | undefined
+}
+
+type ProjectUploadLegacyPhoto = {
+  photo: typeof photosTable.$inferSelect
+  student: typeof studentsTable.$inferSelect | undefined
+}
+
+type ProjectUploadSnapshot = {
+  captures: Map<number, ProjectUploadCapture>
+  captureFiles: Map<number, typeof imageFilesTable.$inferSelect>
+  captureFilesByCapture: Map<number, typeof imageFilesTable.$inferSelect[]>
+  groupCaptures: Map<number, ProjectUploadGroupCapture>
+  groupCaptureFiles: Map<number, typeof groupCaptureFilesTable.$inferSelect>
+  groupCaptureFilesByCapture: Map<number, typeof groupCaptureFilesTable.$inferSelect[]>
+  legacyPhotos: Map<number, ProjectUploadLegacyPhoto>
+}
+
+/**
+ * Load all upload inputs for one project with a fixed number of joined
+ * queries. In particular, do not turn this into a lookup inside one of the
+ * job loops: large school rosters commonly have thousands of files.
+ *
+ * The project predicates on the parent rows, plus the project predicates in
+ * the optional metadata joins, are intentional. IDs are database-global, but
+ * upload IPC must never use a student/group from another project if a stale
+ * local row points at one.
+ */
+function loadProjectUploadSnapshot(projectId: number): ProjectUploadSnapshot {
   const db = getDb()
-  const captures = db
-    .select()
+  const personalRows = db
+    .select({
+      capture: capturesTable,
+      file: imageFilesTable,
+      student: studentsTable,
+    })
     .from(capturesTable)
+    .leftJoin(imageFilesTable, eq(imageFilesTable.captureId, capturesTable.id))
+    .leftJoin(studentsTable, and(
+      eq(studentsTable.id, capturesTable.studentId),
+      eq(studentsTable.projectId, projectId),
+    ))
     .where(eq(capturesTable.projectId, projectId))
+    .orderBy(asc(capturesTable.id), asc(imageFilesTable.id))
     .all()
-  const jobs: ProjectSyncJob[] = []
-  const mirroredPhotoIds = new Set<number>()
-  const groupCaptures = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.projectId, projectId)).all()
-  for (const capture of groupCaptures) {
-    for (const file of db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.captureId, capture.id)).all()) {
-      if (includeDone || file.uploadStatus !== 'done' || (file.fileRole === 'JPEG' && !file.galleryReady)) {
-        jobs.push({ kind: 'group-capture-file', captureId: capture.id, fileId: file.id })
-      }
-    }
-  }
-
-  for (const capture of captures) {
-    if (capture.legacyPhotoId !== null) mirroredPhotoIds.add(capture.legacyPhotoId)
-    if (capture.studentId === null) continue
-    const files = db
-      .select()
-      .from(imageFilesTable)
-      .where(eq(imageFilesTable.captureId, capture.id))
-      .all()
-    for (const file of files) {
-      if (includeDone || file.uploadStatus !== 'done') {
-        jobs.push({ kind: 'capture-file', captureId: capture.id, fileId: file.id })
-      }
-    }
-  }
-
-  const legacyPhotos = db
-    .select()
+  const groupRows = db
+    .select({
+      capture: groupCapturesTable,
+      file: groupCaptureFilesTable,
+      group: groupsTable,
+    })
+    .from(groupCapturesTable)
+    .innerJoin(groupCaptureFilesTable, eq(groupCaptureFilesTable.captureId, groupCapturesTable.id))
+    .leftJoin(groupsTable, and(
+      eq(groupsTable.id, groupCapturesTable.groupId),
+      eq(groupsTable.projectId, projectId),
+    ))
+    .where(eq(groupCapturesTable.projectId, projectId))
+    .orderBy(asc(groupCapturesTable.id), asc(groupCaptureFilesTable.id))
+    .all()
+  const legacyRows = db
+    .select({
+      photo: photosTable,
+      student: studentsTable,
+    })
     .from(photosTable)
+    .leftJoin(studentsTable, and(
+      eq(studentsTable.id, photosTable.studentId),
+      eq(studentsTable.projectId, projectId),
+    ))
     .where(eq(photosTable.projectId, projectId))
+    .orderBy(asc(photosTable.id))
     .all()
-  for (const photo of legacyPhotos) {
+
+  const captures = new Map<number, ProjectUploadCapture>()
+  const captureFiles = new Map<number, typeof imageFilesTable.$inferSelect>()
+  const captureFilesByCapture = new Map<number, typeof imageFilesTable.$inferSelect[]>()
+  for (const row of personalRows) {
+    if (!captures.has(row.capture.id)) {
+      captures.set(row.capture.id, { capture: row.capture, student: row.student ?? undefined })
+    }
+    if (!row.file) continue
+    captureFiles.set(row.file.id, row.file)
+    const files = captureFilesByCapture.get(row.capture.id) ?? []
+    files.push(row.file)
+    captureFilesByCapture.set(row.capture.id, files)
+  }
+
+  const groupCaptures = new Map<number, ProjectUploadGroupCapture>()
+  const groupCaptureFiles = new Map<number, typeof groupCaptureFilesTable.$inferSelect>()
+  const groupCaptureFilesByCapture = new Map<number, typeof groupCaptureFilesTable.$inferSelect[]>()
+  for (const row of groupRows) {
+    if (!groupCaptures.has(row.capture.id)) {
+      groupCaptures.set(row.capture.id, { capture: row.capture, group: row.group ?? undefined })
+    }
+    groupCaptureFiles.set(row.file.id, row.file)
+    const files = groupCaptureFilesByCapture.get(row.capture.id) ?? []
+    files.push(row.file)
+    groupCaptureFilesByCapture.set(row.capture.id, files)
+  }
+
+  const legacyPhotos = new Map<number, ProjectUploadLegacyPhoto>()
+  for (const row of legacyRows) {
+    legacyPhotos.set(row.photo.id, { photo: row.photo, student: row.student ?? undefined })
+  }
+
+  return {
+    captures,
+    captureFiles,
+    captureFilesByCapture,
+    groupCaptures,
+    groupCaptureFiles,
+    groupCaptureFilesByCapture,
+    legacyPhotos,
+  }
+}
+
+function getProjectSyncJobsFromSnapshot(
+  projectId: number,
+  snapshot: ProjectUploadSnapshot,
+  includeDone = false,
+): ProjectSyncJob[] {
+  const jobs: ProjectSyncJob[] = []
+  for (const { capture, group } of snapshot.groupCaptures.values()) {
+    for (const file of snapshot.groupCaptureFilesByCapture.get(capture.id) ?? []) {
+      const classification = classifyProjectUploadFile({
+        kind: 'group',
+        associationResolved: group !== undefined,
+        status: file.uploadStatus,
+        fileRole: file.fileRole,
+        galleryReady: file.galleryReady,
+      })
+      if (!group || (!includeDone && classification !== 'ready')) continue
+      jobs.push({ kind: 'group-capture-file', captureId: capture.id, fileId: file.id })
+    }
+  }
+
+  for (const { capture, student } of snapshot.captures.values()) {
+    for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
+      const classification = classifyProjectUploadFile({
+        kind: 'personal',
+        associationResolved: capture.studentId !== null && student !== undefined,
+        status: file.uploadStatus,
+      })
+      if (capture.studentId === null || !student || (!includeDone && classification !== 'ready')) continue
+      jobs.push({ kind: 'capture-file', captureId: capture.id, fileId: file.id })
+    }
+  }
+
+  const mirroredPhotoIds = getMirroredLegacyPhotoIds(snapshot)
+  for (const { photo, student } of snapshot.legacyPhotos.values()) {
+    const classification = classifyProjectUploadFile({
+      kind: 'legacy',
+      associationResolved: photo.studentId !== null && student !== undefined,
+      status: photo.uploadStatus,
+    })
     if (
       !photo.isMatched
-      || photo.studentId === null
       || mirroredPhotoIds.has(photo.id)
-      || (!includeDone && photo.uploadStatus === 'done')
+      || photo.studentId === null
+      || !student
+      || (!includeDone && classification !== 'ready')
     ) continue
     jobs.push({
       kind: 'legacy-photo',
@@ -1238,6 +1364,58 @@ function getProjectSyncJobs(projectId: number, includeDone = false): ProjectSync
   }
 
   return uniqueProjectSyncJobs(jobs)
+}
+
+function getMirroredLegacyPhotoIds(snapshot: ProjectUploadSnapshot): Set<number> {
+  return new Set(
+    [...snapshot.captures.values()]
+      .flatMap(({ capture }) => capture.legacyPhotoId === null ? [] : [capture.legacyPhotoId]),
+  )
+}
+
+function getProjectUploadAccountingKeys(snapshot: ProjectUploadSnapshot): Set<string> {
+  const keys = new Set<string>()
+  const mirroredPhotoIds = getMirroredLegacyPhotoIds(snapshot)
+  for (const { capture, student } of snapshot.captures.values()) {
+    for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
+      const classification = classifyProjectUploadFile({
+        kind: 'personal',
+        associationResolved: capture.studentId !== null && student !== undefined,
+        status: file.uploadStatus,
+      })
+      if (classification !== 'excluded' || (capture.studentId !== null && student !== undefined)) {
+        keys.add(`capture:${file.id}`)
+      }
+    }
+  }
+  for (const { capture, group } of snapshot.groupCaptures.values()) {
+    for (const file of snapshot.groupCaptureFilesByCapture.get(capture.id) ?? []) {
+      const classification = classifyProjectUploadFile({
+        kind: 'group',
+        associationResolved: group !== undefined,
+        status: file.uploadStatus,
+        fileRole: file.fileRole,
+        galleryReady: file.galleryReady,
+      })
+      if (classification !== 'excluded' || group !== undefined) keys.add(`group:${file.id}`)
+    }
+  }
+  for (const { photo, student } of snapshot.legacyPhotos.values()) {
+    if (!photo.isMatched || mirroredPhotoIds.has(photo.id)) continue
+    const classification = classifyProjectUploadFile({
+      kind: 'legacy',
+      associationResolved: photo.studentId !== null && student !== undefined,
+      status: photo.uploadStatus,
+    })
+    if (classification !== 'excluded' || (photo.studentId !== null && student !== undefined)) {
+      keys.add(`legacy:${photo.id}`)
+    }
+  }
+  return keys
+}
+
+function getProjectSyncJobs(projectId: number, includeDone = false): ProjectSyncJob[] {
+  return getProjectSyncJobsFromSnapshot(projectId, loadProjectUploadSnapshot(projectId), includeDone)
 }
 
 const LIVE_UPLOAD_SETTING_PREFIX = 'live_upload:'
@@ -1289,7 +1467,11 @@ function projectSyncJobKey(job: ProjectSyncJob): string {
   return `legacy:${job.photoId}`
 }
 
-function registerProjectBatchJobs(projectId: number, jobs: ProjectSyncJob[]): number {
+function registerProjectBatchJobs(
+  projectId: number,
+  jobs: ProjectSyncJob[],
+  snapshot = loadProjectUploadSnapshot(projectId),
+): number {
   const settingKey = `${CAPTURE_BATCH_FILE_KEYS_PREFIX}${projectId}`
   let existing: string[] = []
   try {
@@ -1298,7 +1480,7 @@ function registerProjectBatchJobs(projectId: number, jobs: ProjectSyncJob[]): nu
   } catch {
     existing = []
   }
-  const validKeys = new Set(getProjectSyncJobs(projectId, true).map(projectSyncJobKey))
+  const validKeys = getProjectUploadAccountingKeys(snapshot)
   const keys = new Set(existing.filter((key) => validKeys.has(key)))
   // Include completed files too. Older releases may have durable done rows
   // without a local batch-key setting, and those files still belong in the
@@ -1310,21 +1492,48 @@ function registerProjectBatchJobs(projectId: number, jobs: ProjectSyncJob[]): nu
 }
 
 export function getProjectCaptureBatchExpectedCount(projectId: number): number {
-  return registerProjectBatchJobs(projectId, getProjectSyncJobs(projectId))
+  const snapshot = loadProjectUploadSnapshot(projectId)
+  return registerProjectBatchJobs(
+    projectId,
+    getProjectSyncJobsFromSnapshot(projectId, snapshot),
+    snapshot,
+  )
 }
 
 /** Files that are durable locally but cannot be sent until a student match exists. */
 export function getProjectUploadBlockerCount(projectId: number): number {
-  const db = getDb()
-  return db.select({ id: capturesTable.id })
-    .from(capturesTable)
-    .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.studentId)))
-    .all()
-    .reduce((count, capture) => count + db.select({ status: imageFilesTable.uploadStatus })
-      .from(imageFilesTable)
-      .where(eq(imageFilesTable.captureId, capture.id))
-      .all()
-      .filter((file) => file.status !== 'done').length, 0)
+  const snapshot = loadProjectUploadSnapshot(projectId)
+  const mirroredPhotoIds = getMirroredLegacyPhotoIds(snapshot)
+  let blocked = 0
+  for (const { capture, student } of snapshot.captures.values()) {
+    for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
+      if (classifyProjectUploadFile({
+        kind: 'personal',
+        associationResolved: capture.studentId !== null && student !== undefined,
+        status: file.uploadStatus,
+      }) === 'blocked') blocked += 1
+    }
+  }
+  for (const { capture, group } of snapshot.groupCaptures.values()) {
+    for (const file of snapshot.groupCaptureFilesByCapture.get(capture.id) ?? []) {
+      if (classifyProjectUploadFile({
+        kind: 'group',
+        associationResolved: group !== undefined,
+        status: file.uploadStatus,
+        fileRole: file.fileRole,
+        galleryReady: file.galleryReady,
+      }) === 'blocked') blocked += 1
+    }
+  }
+  for (const { photo, student } of snapshot.legacyPhotos.values()) {
+    if (!photo.isMatched || mirroredPhotoIds.has(photo.id)) continue
+    if (classifyProjectUploadFile({
+      kind: 'legacy',
+      associationResolved: photo.studentId !== null && student !== undefined,
+      status: photo.uploadStatus,
+    }) === 'blocked') blocked += 1
+  }
+  return blocked
 }
 
 function isLiveUploadEnabled(projectId: number): boolean {
@@ -1332,43 +1541,53 @@ function isLiveUploadEnabled(projectId: number): boolean {
 }
 
 function getUploadStatusCounts(projectId: number) {
-  const db = getDb()
+  const snapshot = loadProjectUploadSnapshot(projectId)
   const statuses: UploadStatus[] = []
   let blocked = 0
-  const captures = db.select({
-    id: capturesTable.id,
-    studentId: capturesTable.studentId,
-  }).from(capturesTable)
-    .where(eq(capturesTable.projectId, projectId)).all()
-  for (const capture of captures) {
-    const captureStatuses = db.select({ status: imageFilesTable.uploadStatus }).from(imageFilesTable)
-      .where(eq(imageFilesTable.captureId, capture.id)).all().map((row) => row.status)
-    if (capture.studentId === null) {
-      blocked += captureStatuses.filter((status) => status !== 'done').length
-    } else {
-      statuses.push(...captureStatuses)
+  for (const { capture, student } of snapshot.captures.values()) {
+    const associationResolved = capture.studentId !== null && student !== undefined
+    for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
+      const classification = classifyProjectUploadFile({
+        kind: 'personal',
+        associationResolved,
+        status: file.uploadStatus,
+      })
+      if (classification === 'blocked') blocked += 1
+      else if (associationResolved) statuses.push(file.uploadStatus)
     }
   }
-  const groupCaptures = db.select({ id: groupCapturesTable.id }).from(groupCapturesTable)
-    .where(eq(groupCapturesTable.projectId, projectId)).all()
-  for (const capture of groupCaptures) {
-    statuses.push(...db.select({
-      status: groupCaptureFilesTable.uploadStatus,
-      fileRole: groupCaptureFilesTable.fileRole,
-      galleryReady: groupCaptureFilesTable.galleryReady,
-    }).from(groupCaptureFilesTable)
-      .where(eq(groupCaptureFilesTable.captureId, capture.id)).all().map((row) =>
-        row.fileRole === 'JPEG' && row.status === 'done' && !row.galleryReady ? 'pending' : row.status,
-      ))
+  for (const { capture, group } of snapshot.groupCaptures.values()) {
+    const associationResolved = group !== undefined
+    for (const file of snapshot.groupCaptureFilesByCapture.get(capture.id) ?? []) {
+      const classification = classifyProjectUploadFile({
+        kind: 'group',
+        associationResolved,
+        status: file.uploadStatus,
+        fileRole: file.fileRole,
+        galleryReady: file.galleryReady,
+      })
+      if (classification === 'blocked') blocked += 1
+      else if (associationResolved) {
+        statuses.push(
+          file.fileRole === 'JPEG' && file.uploadStatus === 'done' && !file.galleryReady
+            ? 'pending'
+            : file.uploadStatus,
+        )
+      }
+    }
   }
-  const mirroredPhotoIds = new Set(
-    db.select({ legacyPhotoId: capturesTable.legacyPhotoId }).from(capturesTable)
-      .where(eq(capturesTable.projectId, projectId)).all()
-      .flatMap((row) => row.legacyPhotoId === null ? [] : [row.legacyPhotoId]),
-  )
-  statuses.push(...db.select({ id: photosTable.id, status: photosTable.uploadStatus }).from(photosTable)
-    .where(and(eq(photosTable.projectId, projectId), eq(photosTable.isMatched, true))).all()
-    .filter((row) => !mirroredPhotoIds.has(row.id)).map((row) => row.status))
+  const mirroredPhotoIds = getMirroredLegacyPhotoIds(snapshot)
+  for (const { photo, student } of snapshot.legacyPhotos.values()) {
+    if (!photo.isMatched || mirroredPhotoIds.has(photo.id)) continue
+    const associationResolved = photo.studentId !== null && student !== undefined
+    const classification = classifyProjectUploadFile({
+      kind: 'legacy',
+      associationResolved,
+      status: photo.uploadStatus,
+    })
+    if (classification === 'blocked') blocked += 1
+    else if (associationResolved) statuses.push(photo.uploadStatus)
+  }
   return {
     pending: statuses.filter((status) => status === 'pending' || status === null).length,
     uploading: statuses.filter((status) => status === 'uploading').length,
@@ -1391,25 +1610,23 @@ export function getLiveUploadState(projectId: number): LiveUploadState {
 }
 
 function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
-  const db = getDb()
-  const uploadableItems = getProjectSyncJobs(projectId).map((job) => {
+  const snapshot = loadProjectUploadSnapshot(projectId)
+  const uploadableItems = getProjectSyncJobsFromSnapshot(projectId, snapshot).map((job) => {
     const key = projectSyncJobKey(job)
     const retryAt = failedUploadRetryAfter.get(key)
     const attempts = failedUploadAttempts.get(key) ?? 0
     const lastError = failedUploadErrors.get(key)
     if (job.kind === 'capture-file') {
-      const capture = db.select().from(capturesTable).where(eq(capturesTable.id, job.captureId)).get()
-      const file = db.select().from(imageFilesTable).where(eq(imageFilesTable.id, job.fileId)).get()
-      const student = capture?.studentId == null
-        ? undefined
-        : db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get()
+      const capture = snapshot.captures.get(job.captureId)
+      const file = snapshot.captureFiles.get(job.fileId)
+      const student = capture?.student
       return {
         key,
         kind: 'portrait',
         fileName: file?.originalFilename ?? basename(file?.storedPath ?? key),
         fileRole: file?.fileRole ?? 'JPEG',
         subject: student ? `${student.firstName} ${student.lastName}` : 'Unassigned portrait',
-        capturedAt: capture?.capturedAt ?? file?.createdAt ?? '',
+        capturedAt: capture?.capture.capturedAt ?? file?.createdAt ?? '',
         status: file?.uploadStatus === 'uploading'
           ? 'uploading'
           : file?.uploadStatus === 'error' ? 'failed' : 'queued',
@@ -1419,18 +1636,16 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
       } satisfies LiveUploadQueueItem
     }
     if (job.kind === 'group-capture-file') {
-      const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, job.captureId)).get()
-      const file = db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, job.fileId)).get()
-      const group = capture
-        ? db.select().from(groupsTable).where(eq(groupsTable.id, capture.groupId)).get()
-        : undefined
+      const capture = snapshot.groupCaptures.get(job.captureId)
+      const file = snapshot.groupCaptureFiles.get(job.fileId)
+      const group = capture?.group
       return {
         key,
         kind: 'group',
         fileName: file?.originalFilename ?? basename(file?.storedPath ?? key),
         fileRole: file?.fileRole ?? 'JPEG',
         subject: group?.name ?? 'Group photo',
-        capturedAt: capture?.capturedAt ?? file?.createdAt ?? '',
+        capturedAt: capture?.capture.capturedAt ?? file?.createdAt ?? '',
         status: file?.fileRole === 'JPEG' && file.uploadStatus === 'done' && !file.galleryReady
           ? 'preparing_gallery'
           : file?.uploadStatus === 'uploading'
@@ -1441,31 +1656,33 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
         ...(lastError ? { lastError } : {}),
       } satisfies LiveUploadQueueItem
     }
-    const photo = db.select().from(photosTable).where(eq(photosTable.id, job.photoId)).get()
-    const student = db.select().from(studentsTable).where(eq(studentsTable.id, job.studentId)).get()
+    const photo = snapshot.legacyPhotos.get(job.photoId)
+    const student = photo?.student
     return {
       key,
       kind: 'legacy',
-      fileName: photo?.fileName ?? basename(job.filePath),
+      fileName: photo?.photo.fileName ?? basename(job.filePath),
       fileRole: 'JPEG',
       subject: student ? `${student.firstName} ${student.lastName}` : 'Legacy portrait',
-      capturedAt: photo?.capturedAt ?? job.capturedAt,
-      status: photo?.uploadStatus === 'uploading'
+      capturedAt: photo?.photo.capturedAt ?? job.capturedAt,
+      status: photo?.photo.uploadStatus === 'uploading'
         ? 'uploading'
-        : photo?.uploadStatus === 'error' ? 'failed' : 'queued',
+        : photo?.photo.uploadStatus === 'error' ? 'failed' : 'queued',
       attempts,
       ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}),
       ...(lastError ? { lastError } : {}),
     } satisfies LiveUploadQueueItem
   })
-  const blockedItems = db.select().from(capturesTable)
-    .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.studentId)))
-    .all()
-    .flatMap((capture) => db.select().from(imageFilesTable)
-      .where(eq(imageFilesTable.captureId, capture.id))
-      .all()
-      .filter((file) => file.uploadStatus !== 'done')
-      .map((file): LiveUploadQueueItem => ({
+  const blockedItems: LiveUploadQueueItem[] = []
+  for (const { capture, student } of snapshot.captures.values()) {
+    const associationResolved = capture.studentId !== null && student !== undefined
+    for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
+      if (classifyProjectUploadFile({
+        kind: 'personal',
+        associationResolved,
+        status: file.uploadStatus,
+      }) !== 'blocked') continue
+      blockedItems.push({
         key: `capture:${file.id}`,
         kind: 'portrait',
         fileName: file.originalFilename,
@@ -1475,7 +1692,52 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
         status: 'blocked',
         blockedReason: 'This capture has no student match yet.',
         attempts: 0,
-      })))
+      })
+    }
+  }
+  for (const { capture, group } of snapshot.groupCaptures.values()) {
+    const associationResolved = group !== undefined
+    for (const file of snapshot.groupCaptureFilesByCapture.get(capture.id) ?? []) {
+      if (classifyProjectUploadFile({
+        kind: 'group',
+        associationResolved,
+        status: file.uploadStatus,
+        fileRole: file.fileRole,
+        galleryReady: file.galleryReady,
+      }) !== 'blocked') continue
+      blockedItems.push({
+        key: `group:${file.id}`,
+        kind: 'group',
+        fileName: file.originalFilename,
+        fileRole: file.fileRole,
+        subject: 'Waiting for group match',
+        capturedAt: capture.capturedAt,
+        status: 'blocked',
+        blockedReason: 'This capture has no group match yet.',
+        attempts: 0,
+      })
+    }
+  }
+  const mirroredPhotoIds = getMirroredLegacyPhotoIds(snapshot)
+  for (const { photo, student } of snapshot.legacyPhotos.values()) {
+    if (!photo.isMatched || mirroredPhotoIds.has(photo.id)) continue
+    if (classifyProjectUploadFile({
+      kind: 'legacy',
+      associationResolved: photo.studentId !== null && student !== undefined,
+      status: photo.uploadStatus,
+    }) !== 'blocked') continue
+    blockedItems.push({
+      key: `legacy:${photo.id}`,
+      kind: 'legacy',
+      fileName: photo.fileName,
+      fileRole: 'JPEG',
+      subject: 'Waiting for student match',
+      capturedAt: photo.capturedAt,
+      status: 'blocked',
+      blockedReason: 'This legacy portrait has no student match yet.',
+      attempts: 0,
+    })
+  }
   return [...uploadableItems, ...blockedItems]
 }
 
@@ -1484,16 +1746,13 @@ function emitLiveUploadState(projectId: number): void {
 }
 
 function getProjectLiveUploadJobs(projectId: number, includeErrors: boolean): ProjectSyncJob[] {
-  const db = getDb()
-  const jobs = getProjectSyncJobs(projectId).filter((job) => {
+  const snapshot = loadProjectUploadSnapshot(projectId)
+  const jobs = getProjectSyncJobsFromSnapshot(projectId, snapshot).filter((job) => {
     const status = job.kind === 'capture-file'
-      ? db.select({ value: imageFilesTable.uploadStatus }).from(imageFilesTable)
-        .where(eq(imageFilesTable.id, job.fileId)).get()?.value
+      ? snapshot.captureFiles.get(job.fileId)?.uploadStatus
       : job.kind === 'group-capture-file'
-        ? db.select({ value: groupCaptureFilesTable.uploadStatus }).from(groupCaptureFilesTable)
-          .where(eq(groupCaptureFilesTable.id, job.fileId)).get()?.value
-        : db.select({ value: photosTable.uploadStatus }).from(photosTable)
-          .where(eq(photosTable.id, job.photoId)).get()?.value
+        ? snapshot.groupCaptureFiles.get(job.fileId)?.uploadStatus
+        : snapshot.legacyPhotos.get(job.photoId)?.photo.uploadStatus
     return status !== 'error' || includeErrors
   })
   if (includeErrors) return jobs

@@ -462,21 +462,24 @@ export function registerProjectHandlers() {
       .orderBy(classesTable.className)
       .all()
 
-    return rows.map((c) => {
-      const [{ studentCount }] = db
-        .select({ studentCount: count() })
+    const studentCounts = new Map(
+      db
+        .select({ classId: studentsTable.classId, studentCount: count() })
         .from(studentsTable)
-        .where(eq(studentsTable.classId, c.id))
+        .where(eq(studentsTable.projectId, projectId))
+        .groupBy(studentsTable.classId)
         .all()
-      return {
+        .map(({ classId, studentCount }) => [classId, studentCount]),
+    )
+
+    return rows.map((c) => ({
         id: c.id,
         projectId: c.projectId,
         className: c.className,
-        studentCount,
+        studentCount: studentCounts.get(c.id) ?? 0,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
-      }
-    })
+      }))
   })
 
   // Students
@@ -532,6 +535,9 @@ export function registerProjectHandlers() {
       _e,
       { projectId, classId }: { projectId: number; classId?: number },
     ): Promise<Student[]> => {
+      const rosterFilter = classId
+        ? and(eq(studentsTable.projectId, projectId), eq(studentsTable.classId, classId))
+        : eq(studentsTable.projectId, projectId)
       const rows = db
         .select({
           student: studentsTable,
@@ -539,19 +545,23 @@ export function registerProjectHandlers() {
         })
         .from(studentsTable)
         .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
-        .where(eq(studentsTable.projectId, projectId))
+        .where(rosterFilter)
         .orderBy(classesTable.className, studentsTable.lastName, studentsTable.firstName)
         .all()
-        .filter((r) => !classId || r.student.classId === classId)
 
-      return rows.map(({ student: s, className }) => {
-        const [{ photoCount }] = db
-          .select({ photoCount: count() })
+      const photoCounts = new Map(
+        db
+          .select({ studentId: capturesTable.studentId, photoCount: count() })
           .from(capturesTable)
-          .where(and(eq(capturesTable.studentId, s.id), isNull(capturesTable.groupId)))
+          .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
+          .groupBy(capturesTable.studentId)
           .all()
-        return toStudent(s, className ?? '', photoCount)
-      })
+          .flatMap(({ studentId, photoCount }) => studentId === null ? [] : [[studentId, photoCount] as const]),
+      )
+
+      return rows.map(({ student: s, className }) =>
+        toStudent(s, className ?? '', photoCounts.get(s.id) ?? 0),
+      )
     },
   )
 }

@@ -1037,6 +1037,17 @@ paths:
       tags: [delivery]
       parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
       responses: { "200": { description: Published, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryMutationResponse" } } } }, "409": { description: Invalid photos/settings } }
+  /projects/{projectId}/delivery/invitations/retry:
+    post:
+      operationId: retryDeliveryInvitations
+      tags: [delivery]
+      summary: Retry rejected gallery invitations
+      description: Retries failed delivery invitations only; uncertain, sending, pending, and sent invitations are not reset.
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Invitation retry summary, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryInvitationRetryResponse" } } } }
+        "403": { description: Studio owner or admin required }
+        "404": { description: Project or gallery not found }
   /projects/{projectId}/delivery/revoke:
     post:
       operationId: revokeDelivery
@@ -2028,6 +2039,30 @@ components:
             status: { type: string }
         publicUrl: { type: string }
         message: { type: string }
+        invitationSummary: { $ref: "#/components/schemas/DeliveryInvitationSummary" }
+    DeliveryInvitationSummary:
+      type: object
+      required: [dispatched, claimed, sent, failed, needsReview, pending]
+      properties:
+        dispatched: { type: boolean }
+        claimed: { type: integer }
+        sent: { type: integer }
+        failed: { type: integer }
+        needsReview: { type: integer }
+        pending: { type: integer }
+        reason: { type: ["string", "null"] }
+    DeliveryInvitationRetryResponse:
+      type: object
+      required: [gallery, invitationSummary]
+      properties:
+        gallery:
+          type: object
+          required: [id, slug, status]
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            status: { type: string }
+        invitationSummary: { $ref: "#/components/schemas/DeliveryInvitationSummary" }
     DeliveryAccessCardsResponse:
       type: array
       items:

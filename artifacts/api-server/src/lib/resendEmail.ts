@@ -27,6 +27,18 @@ function resendApiBaseUrl(): string {
   return "https://api.resend.com";
 }
 
+function isAllowedTestApiOverride(): boolean {
+  if (process.env.NODE_ENV !== "test" || !process.env.RESEND_API_BASE_URL) return false;
+  try {
+    const url = new URL(process.env.RESEND_API_BASE_URL);
+    const hostname = url.hostname.toLowerCase();
+    return (url.protocol === "http:" || url.protocol === "https:")
+      && (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]");
+  } catch {
+    return false;
+  }
+}
+
 export function resendConfiguration() {
   const apiKey = process.env.RESEND_API_KEY?.trim() ?? "";
   const from = process.env.RESEND_FROM_EMAIL?.trim() ?? "";
@@ -40,13 +52,45 @@ export function resendConfiguration() {
   };
 }
 
+export function resendConfigurationStatus() {
+  const config = resendConfiguration();
+  const senderAddress = config.from.match(/<([^>]+)>/)?.[1] ?? config.from;
+  const senderValid = /^[^@\s]+@[^@\s]+$/.test(senderAddress)
+    && !senderAddress.toLowerCase().endsWith("@resend.dev");
+  const appUrlValid = process.env.NODE_ENV === "production"
+    ? /^https:\/\//.test(config.publicAppUrl)
+    : /^https?:\/\//.test(config.publicAppUrl);
+  const testOverrideAllowed = isAllowedTestApiOverride();
+  const canDispatch = process.env.NODE_ENV === "production"
+    ? Boolean(config.apiKey && senderValid && appUrlValid)
+    : testOverrideAllowed && Boolean(config.apiKey && senderValid && appUrlValid);
+  return {
+    configured: Boolean(config.apiKey && senderValid && appUrlValid),
+    canDispatch,
+    environment: process.env.NODE_ENV ?? "development",
+    reason: canDispatch
+      ? null
+      : process.env.NODE_ENV !== "production" && !testOverrideAllowed
+        ? "Email dispatch is disabled outside production (except the test API override)"
+        : !config.apiKey
+          ? "RESEND_API_KEY is not configured"
+          : !senderValid
+            ? "RESEND_FROM_EMAIL must be a verified custom sender (onboarding@resend.dev is not allowed)"
+            : !appUrlValid
+              ? "PUBLIC_APP_URL must be an absolute HTTPS URL in production"
+              : "Email provider configuration is incomplete",
+    fromEmail: config.from || null,
+    publicAppUrl: config.publicAppUrl || null,
+  };
+}
+
 export async function sendResendEmailBatch(
   messages: Omit<ResendEmail, "from" | "reply_to">[],
   idempotencyKey: string,
 ): Promise<string[]> {
+  const status = resendConfigurationStatus();
+  if (!status.canDispatch) throw new Error(status.reason ?? "Resend dispatch is disabled");
   const config = resendConfiguration();
-  if (!config.apiKey) throw new Error("RESEND_API_KEY is not configured");
-  if (!config.from) throw new Error("RESEND_FROM_EMAIL is not configured");
   if (messages.length < 1 || messages.length > RESEND_BATCH_SIZE) {
     throw new Error(`Resend batches must contain 1-${RESEND_BATCH_SIZE} messages`);
   }
@@ -73,9 +117,9 @@ export async function sendResendEmailBatch(
     throw new ResendSendError("unknown", `Resend delivery outcome is unknown: ${detail}`);
   }
   if (!response.ok) {
-    const detail = (await response.text()).slice(0, 500);
+    await response.text();
     const outcome = response.status >= 400 && response.status < 500 ? "rejected" : "unknown";
-    throw new ResendSendError(outcome, `Resend rejected the batch (${response.status}): ${detail || response.statusText}`);
+    throw new ResendSendError(outcome, `Resend rejected the batch (${response.status})`);
   }
   const payload = await response.json() as { data?: Array<{ id?: unknown }> };
   const ids = payload.data?.map((item) => typeof item.id === "string" ? item.id : "") ?? [];

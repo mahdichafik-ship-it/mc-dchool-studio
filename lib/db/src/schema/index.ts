@@ -8,6 +8,7 @@ export * from "./storage";
 export * from "./platformAudit";
 export * from "./groups";
 export * from "./deliveries";
+export * from "./deliveryInvitations";
 export * from "./deliveryOrders";
 export * from "./photoStorageCopies";
 export * from "./marketing";

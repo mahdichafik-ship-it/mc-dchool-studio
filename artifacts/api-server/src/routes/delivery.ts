@@ -19,6 +19,7 @@ import {
   projectsTable,
   studentPhotosTable,
   studentsTable,
+  studioMembersTable,
   studiosTable,
 } from "@workspace/db";
 import { photoStorageCopiesTable } from "@workspace/db/schema";
@@ -38,6 +39,12 @@ import { normalizeMarketingEmail, recordSuccessfulGalleryAccess, markContactOrde
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
 import { materializeGroupJpegsForDelivery, projectAvailableGroupJpegsToStudent } from "../lib/groupDeliveryPhotos";
 import { FailureRateLimiter } from "../lib/failureRateLimiter";
+import {
+  dispatchDeliveryInvitations,
+  enqueueDeliveryInvitations,
+  retryFailedDeliveryInvitations,
+} from "../lib/deliveryInvitations";
+import { logger } from "../lib/logger";
 import {
   deliveryTerminology,
   normalizeDeliveryProjectType,
@@ -1132,9 +1139,25 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
         };
       })).onConflictDoNothing();
     }
+    await enqueueDeliveryInvitations(tx, published.id, students);
     return published;
   });
 
+  let invitationSummary;
+  try {
+    invitationSummary = await dispatchDeliveryInvitations(gallery.id);
+  } catch (error) {
+    logger.error({ err: error, galleryId: gallery.id }, "Delivery invitation dispatch failed after publication");
+    invitationSummary = {
+      dispatched: false,
+      claimed: 0,
+      sent: 0,
+      failed: 0,
+      needsReview: 0,
+      pending: 0,
+      reason: "Invitation dispatch failed after publication",
+    };
+  }
   res.json({
     gallery: {
       ...gallery,
@@ -1145,6 +1168,50 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     },
     publicUrl: `/delivery/${gallery.slug}`,
     message: "Delivery is published. Download the access-card list to share each private code.",
+    invitationSummary,
+  });
+});
+
+router.post("/projects/:projectId/delivery/invitations/retry", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const userId = getUserId(req);
+  if (!Number.isInteger(projectId)) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [targetProject] = await db.select({
+    studioId: projectsTable.studioId,
+  }).from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+  if (!targetProject?.studioId) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [targetMember] = await db.select({ role: studioMembersTable.role })
+    .from(studioMembersTable)
+    .where(and(
+      eq(studioMembersTable.studioId, targetProject.studioId),
+      eq(studioMembersTable.userId, userId),
+      eq(studioMembersTable.status, "active"),
+    ))
+    .limit(1);
+  if (targetMember?.role !== "owner" && targetMember?.role !== "admin") {
+    res.status(403).json({ error: "Studio owner or admin required" });
+    return;
+  }
+  if (!(await canAccessProject(userId, projectId, "manage"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [gallery] = await db.select().from(deliveryGalleriesTable)
+    .where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
+  if (!gallery) {
+    res.status(404).json({ error: "Publish the delivery gallery first" });
+    return;
+  }
+  const invitationSummary = await retryFailedDeliveryInvitations(gallery.id);
+  res.json({
+    gallery: { id: gallery.id, slug: gallery.slug, status: gallery.status },
+    invitationSummary,
   });
 });
 

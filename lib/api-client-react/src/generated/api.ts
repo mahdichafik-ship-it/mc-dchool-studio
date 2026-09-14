@@ -35,6 +35,7 @@ import type {
   DeliveryCheckoutResponse,
   DeliveryCodeResponse,
   DeliveryGallery,
+  DeliveryInvitationRetryResponse,
   DeliveryMutationResponse,
   DeliveryOrderDetailResponse,
   DeliveryOrderInput,
@@ -4529,6 +4530,78 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getPublishDeliveryMutationOptions(options));
+    }
+
+export const getRetryDeliveryInvitationsUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/invitations/retry`
+}
+
+/**
+ * Retries failed delivery invitations only; uncertain, sending, pending, and sent invitations are not reset.
+ * @summary Retry rejected gallery invitations
+ */
+export const retryDeliveryInvitations = async (projectId: number, options?: RequestInit): Promise<DeliveryInvitationRetryResponse> => {
+
+  return customFetch<DeliveryInvitationRetryResponse>(getRetryDeliveryInvitationsUrl(projectId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetryDeliveryInvitationsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryDeliveryInvitations>>, TError,{projectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryDeliveryInvitations>>, TError,{projectId: number}, TContext> => {
+
+const mutationKey = ['retryDeliveryInvitations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryDeliveryInvitations>>, {projectId: number}> = (props) => {
+          const {projectId} = props ?? {};
+
+          return  retryDeliveryInvitations(projectId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryDeliveryInvitationsMutationResult = NonNullable<Awaited<ReturnType<typeof retryDeliveryInvitations>>>
+
+    export type RetryDeliveryInvitationsMutationError = ErrorType<void>
+
+    /**
+ * @summary Retry rejected gallery invitations
+ */
+export const useRetryDeliveryInvitations = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryDeliveryInvitations>>, TError,{projectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryDeliveryInvitations>>,
+        TError,
+        {projectId: number},
+        TContext
+      > => {
+      return useMutation(getRetryDeliveryInvitationsMutationOptions(options));
     }
 
 export const getRevokeDeliveryUrl = (projectId: number,) => {

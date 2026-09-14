@@ -965,10 +965,33 @@ export type DeliveryMutationResponseGallery = {
   status?: string;
 };
 
+export interface DeliveryInvitationSummary {
+  dispatched: boolean;
+  claimed: number;
+  sent: number;
+  failed: number;
+  needsReview: number;
+  pending: number;
+  /** @nullable */
+  reason?: string | null;
+}
+
 export interface DeliveryMutationResponse {
   gallery: DeliveryMutationResponseGallery;
   publicUrl?: string;
   message?: string;
+  invitationSummary?: DeliveryInvitationSummary;
+}
+
+export type DeliveryInvitationRetryResponseGallery = {
+  id: number;
+  slug: string;
+  status: string;
+};
+
+export interface DeliveryInvitationRetryResponse {
+  gallery: DeliveryInvitationRetryResponseGallery;
+  invitationSummary: DeliveryInvitationSummary;
 }
 
 export type DeliveryAccessCardsResponseItem = {

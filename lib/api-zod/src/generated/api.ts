@@ -1865,7 +1865,42 @@ export const PublishDeliveryResponse = zod.object({
   "status": zod.string().optional()
 }),
   "publicUrl": zod.string().optional(),
-  "message": zod.string().optional()
+  "message": zod.string().optional(),
+  "invitationSummary": zod.object({
+  "dispatched": zod.boolean(),
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number(),
+  "reason": zod.string().nullish()
+}).optional()
+})
+
+
+/**
+ * Retries failed delivery invitations only; uncertain, sending, pending, and sent invitations are not reset.
+ * @summary Retry rejected gallery invitations
+ */
+export const RetryDeliveryInvitationsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const RetryDeliveryInvitationsResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "status": zod.string()
+}),
+  "invitationSummary": zod.object({
+  "dispatched": zod.boolean(),
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number(),
+  "reason": zod.string().nullish()
+})
 })
 
 
@@ -1880,7 +1915,16 @@ export const RevokeDeliveryResponse = zod.object({
   "status": zod.string().optional()
 }),
   "publicUrl": zod.string().optional(),
-  "message": zod.string().optional()
+  "message": zod.string().optional(),
+  "invitationSummary": zod.object({
+  "dispatched": zod.boolean(),
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number(),
+  "reason": zod.string().nullish()
+}).optional()
 })
 
 

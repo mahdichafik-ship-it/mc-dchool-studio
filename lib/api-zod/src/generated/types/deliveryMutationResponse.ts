@@ -5,10 +5,12 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeliveryInvitationSummary } from './deliveryInvitationSummary';
 import type { DeliveryMutationResponseGallery } from './deliveryMutationResponseGallery';
 
 export interface DeliveryMutationResponse {
   gallery: DeliveryMutationResponseGallery;
   publicUrl?: string;
   message?: string;
+  invitationSummary?: DeliveryInvitationSummary;
 }

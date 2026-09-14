@@ -148,6 +148,7 @@ interface ElectronAPI {
   invoke(channel: 'app:getSpoolDir'): Promise<string>
   invoke(channel: 'app:getVersion'): Promise<string>
   invoke(channel: 'app:setPhotosDir', args: { dir: string }): Promise<string>
+  invoke(channel: 'photos:getPreview', args: { filePath: string; previewKey: string }): Promise<string | null>
   // Cloud upload
   invoke(channel: 'upload:testConnection'): Promise<UploadResult>
   invoke(channel: 'auth:getSession'): Promise<AuthSession>

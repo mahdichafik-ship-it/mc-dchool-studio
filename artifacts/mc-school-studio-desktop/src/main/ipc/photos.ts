@@ -4,7 +4,11 @@ import { join } from 'path'
 import { and, eq, count, or, isNull } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
-import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
+import {
+  generateLivePreview,
+  getCachedLivePreview,
+  getLivePreviewCacheDir,
+} from '../lib/livePreview'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
 import { syncCaptureReview, syncGroupCaptureReview } from './upload'
@@ -172,10 +176,10 @@ export function registerPhotoHandlers() {
         .where(eq(groupCaptureFilesTable.captureId, row.id)).all().map(async (file) => {
           const mapped = rowToGroupCaptureFile(file)
           if (file.fileRole !== 'JPEG') return mapped
-          const previewPath = await generateLivePreview(file.storedPath, {
-            previewKey: `group-capture-${row.id}`,
-            cacheDir: getLivePreviewCacheDir(app.getPath('home')),
-          })
+           const previewPath = await getCachedLivePreview(
+             `group-capture-${row.id}`,
+             getLivePreviewCacheDir(app.getPath('home')),
+           )
           return { ...mapped, previewUrl: previewPath ? createLocalPreviewUrl(previewPath, `group-capture-${row.id}`) : undefined }
         })),
     })))
@@ -230,10 +234,10 @@ export function registerPhotoHandlers() {
 
     const result: Photo[] = []
     for (const row of rows) {
-      const previewPath = await generateLivePreview(row.filePath, {
-        previewKey: `gallery-photo-${row.id}`,
-        cacheDir: getLivePreviewCacheDir(app.getPath('home')),
-      })
+      const previewPath = await getCachedLivePreview(
+        `gallery-photo-${row.id}`,
+        getLivePreviewCacheDir(app.getPath('home')),
+      )
       result.push(rowToPhoto(
         row,
         null,
@@ -276,10 +280,10 @@ export function registerPhotoHandlers() {
         const jpegFile = files.find((file) => file.fileRole === 'JPEG')
         const sourcePath = jpegFile?.storedPath ?? photo?.filePath
         const previewPath = sourcePath
-          ? await generateLivePreview(sourcePath, {
-            previewKey: `gallery-capture-${capture.id}`,
-            cacheDir: getLivePreviewCacheDir(app.getPath('home')),
-          })
+          ? await getCachedLivePreview(
+            `gallery-capture-${capture.id}`,
+            getLivePreviewCacheDir(app.getPath('home')),
+          )
           : null
         const previewUrl = previewPath
           ? createLocalPreviewUrl(previewPath, `gallery-capture-${capture.id}`)
@@ -315,10 +319,10 @@ export function registerPhotoHandlers() {
         .orderBy(qrMarkersTable.capturedAt)
         .all()
       const qrMarkers = await Promise.all(markerRows.map(async (marker) => {
-        const previewPath = await generateLivePreview(marker.filePath, {
-          previewKey: `gallery-marker-${marker.id}`,
-          cacheDir: getLivePreviewCacheDir(app.getPath('home')),
-        })
+        const previewPath = await getCachedLivePreview(
+          `gallery-marker-${marker.id}`,
+          getLivePreviewCacheDir(app.getPath('home')),
+        )
         return {
           id: marker.id,
           projectId: marker.projectId,
@@ -444,6 +448,30 @@ export function registerPhotoHandlers() {
     'photos:getThumbnail',
     async (_e, { filePath }: { filePath: string }): Promise<string | null> => {
       return generateThumbnail(filePath)
+    },
+  )
+
+  ipcMain.handle(
+    'photos:getPreview',
+    async (
+      _e,
+      { filePath, previewKey }: { filePath: string; previewKey: string },
+    ): Promise<string | null> => {
+      if (
+        typeof filePath !== 'string'
+        || !filePath.trim()
+        || typeof previewKey !== 'string'
+        || !previewKey.trim()
+      ) {
+        return null
+      }
+      const previewPath = await generateLivePreview(filePath, {
+        previewKey,
+        cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+      })
+      return previewPath
+        ? createLocalPreviewUrl(previewPath, previewKey)
+        : null
     },
   )
 

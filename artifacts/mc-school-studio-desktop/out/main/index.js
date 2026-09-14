@@ -2835,6 +2835,10 @@ function cacheName(previewKey) {
 function getLivePreviewCacheDir(homeDir) {
   return node_path.join(getPhotoSystemLayout(homeDir).cache, "Previews");
 }
+async function getCachedLivePreview(previewKey, cacheDir) {
+  const previewPath = node_path.join(cacheDir, cacheName(previewKey));
+  return await existingFileSize(previewPath) ? previewPath : null;
+}
 async function existingFileSize(filePath) {
   try {
     const result = await fs.stat(filePath);
@@ -3330,10 +3334,10 @@ function registerPhotoHandlers() {
       files: await Promise.all(db.select().from(groupCaptureFilesTable).where(drizzleOrm.eq(groupCaptureFilesTable.captureId, row.id)).all().map(async (file) => {
         const mapped = rowToGroupCaptureFile(file);
         if (file.fileRole !== "JPEG") return mapped;
-        const previewPath = await generateLivePreview(file.storedPath, {
-          previewKey: `group-capture-${row.id}`,
-          cacheDir: getLivePreviewCacheDir(electron.app.getPath("home"))
-        });
+        const previewPath = await getCachedLivePreview(
+          `group-capture-${row.id}`,
+          getLivePreviewCacheDir(electron.app.getPath("home"))
+        );
         return { ...mapped, previewUrl: previewPath ? createLocalPreviewUrl(previewPath, `group-capture-${row.id}`) : void 0 };
       }))
     })));
@@ -3368,10 +3372,10 @@ function registerPhotoHandlers() {
     const rows = db.select().from(photosTable).where(drizzleOrm.eq(photosTable.studentId, studentId)).orderBy(photosTable.capturedAt).all();
     const result = [];
     for (const row of rows) {
-      const previewPath = await generateLivePreview(row.filePath, {
-        previewKey: `gallery-photo-${row.id}`,
-        cacheDir: getLivePreviewCacheDir(electron.app.getPath("home"))
-      });
+      const previewPath = await getCachedLivePreview(
+        `gallery-photo-${row.id}`,
+        getLivePreviewCacheDir(electron.app.getPath("home"))
+      );
       result.push(rowToPhoto(
         row,
         null,
@@ -3394,10 +3398,10 @@ function registerPhotoHandlers() {
         const files = db.select().from(imageFilesTable).where(drizzleOrm.eq(imageFilesTable.captureId, capture.id)).all();
         const jpegFile = files.find((file) => file.fileRole === "JPEG");
         const sourcePath = jpegFile?.storedPath ?? photo?.filePath;
-        const previewPath = sourcePath ? await generateLivePreview(sourcePath, {
-          previewKey: `gallery-capture-${capture.id}`,
-          cacheDir: getLivePreviewCacheDir(electron.app.getPath("home"))
-        }) : null;
+        const previewPath = sourcePath ? await getCachedLivePreview(
+          `gallery-capture-${capture.id}`,
+          getLivePreviewCacheDir(electron.app.getPath("home"))
+        ) : null;
         const previewUrl = previewPath ? createLocalPreviewUrl(previewPath, `gallery-capture-${capture.id}`) : void 0;
         result.push({
           id: capture.id,
@@ -3425,10 +3429,10 @@ function registerPhotoHandlers() {
       }
       const markerRows = db.select().from(qrMarkersTable).where(drizzleOrm.eq(qrMarkersTable.studentId, studentId)).orderBy(qrMarkersTable.capturedAt).all();
       const qrMarkers = await Promise.all(markerRows.map(async (marker) => {
-        const previewPath = await generateLivePreview(marker.filePath, {
-          previewKey: `gallery-marker-${marker.id}`,
-          cacheDir: getLivePreviewCacheDir(electron.app.getPath("home"))
-        });
+        const previewPath = await getCachedLivePreview(
+          `gallery-marker-${marker.id}`,
+          getLivePreviewCacheDir(electron.app.getPath("home"))
+        );
         return {
           id: marker.id,
           projectId: marker.projectId,
@@ -3512,6 +3516,19 @@ function registerPhotoHandlers() {
     "photos:getThumbnail",
     async (_e, { filePath }) => {
       return generateThumbnail(filePath);
+    }
+  );
+  electron.ipcMain.handle(
+    "photos:getPreview",
+    async (_e, { filePath, previewKey }) => {
+      if (typeof filePath !== "string" || !filePath.trim() || typeof previewKey !== "string" || !previewKey.trim()) {
+        return null;
+      }
+      const previewPath = await generateLivePreview(filePath, {
+        previewKey,
+        cacheDir: getLivePreviewCacheDir(electron.app.getPath("home"))
+      });
+      return previewPath ? createLocalPreviewUrl(previewPath, previewKey) : null;
     }
   );
   electron.ipcMain.handle(
@@ -44041,6 +44058,13 @@ function markImagePipeline(traceId, stage, details) {
   trace.marks.set(stage, { elapsedMs: elapsed, details });
   console.info(`[ImagePipeline] ${traceId} ${stage} +${elapsedMs}ms${formatDetails(details)}`);
 }
+function setImagePipelineBurstContext(traceId, burstIndex, burstSize) {
+  if (!traceId || !diagnosticsEnabled()) return;
+  const trace = traces.get(traceId);
+  if (!trace || !Number.isInteger(burstIndex) || !Number.isInteger(burstSize)) return;
+  trace.burstIndex = burstIndex;
+  trace.burstSize = burstSize;
+}
 function getImagePipelinePreviewContext(traceId) {
   if (!traceId || !diagnosticsEnabled()) return void 0;
   const trace = traces.get(traceId);
@@ -44101,10 +44125,21 @@ function reportAndDeleteTrace(traceId) {
     previousElapsed = mark.elapsedMs;
   }
   const paintedAt = trace.marks.get("image pixels painted")?.elapsedMs;
+  const burstIndex = trace.burstIndex;
+  const burstSize = trace.burstSize;
+  const burstMilestone = burstIndex === void 0 || burstSize === void 0 ? void 0 : burstIndex === 1 ? "image 1" : burstIndex === 5 ? "image 5" : burstIndex === 10 ? "image 10" : burstIndex === burstSize ? "final image" : void 0;
   console.info(
     `[ImagePipeline] REPORT ${traceId} ` + JSON.stringify({
       filePath: trace.filePath,
       totalToVisibleMs: paintedAt ?? null,
+      newestImageVisibleLatencyMs: paintedAt ?? null,
+      ...burstIndex === void 0 || burstSize === void 0 ? {} : {
+        burst: {
+          imageIndex: burstIndex,
+          imageCount: burstSize,
+          milestone: burstMilestone ?? null
+        }
+      },
       cloudSynchronization: "deferred by explicit project sync",
       slowest,
       stages
@@ -44848,7 +44883,8 @@ async function stopProjectWatcher(projectId, options = {}) {
   const pending = sortCaptureFiles(session.pendingFiles.splice(0));
   if (drain && pending.length > 0) {
     session.processing = session.processing.then(async () => {
-      for (const capture of pending) {
+      for (const [index, capture] of pending.entries()) {
+        setImagePipelineBurstContext(capture.diagnosticId, index + 1, pending.length);
         try {
           await handleNewPhoto(projectId, capture, session);
         } catch (error) {
@@ -44945,7 +44981,8 @@ function scheduleFlush(projectId) {
     const batch = sortCaptureFiles(session.pendingFiles.splice(0));
     if (batch.length === 0) return;
     session.processing = session.processing.then(async () => {
-      for (const capture of batch) {
+      for (const [index, capture] of batch.entries()) {
+        setImagePipelineBurstContext(capture.diagnosticId, index + 1, batch.length);
         try {
           await handleNewPhoto(projectId, capture, session);
         } catch (error) {

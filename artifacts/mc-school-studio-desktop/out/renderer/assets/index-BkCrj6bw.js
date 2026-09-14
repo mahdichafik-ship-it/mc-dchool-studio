@@ -16935,6 +16935,7 @@ class PreviewScheduler {
     this.active = null;
     this.pendingLive = null;
     this.galleryQueue = [];
+    this.maxGalleryQueued = 0;
   }
   enqueue(job) {
     const queued = { ...job, cancelled: false };
@@ -16944,6 +16945,7 @@ class PreviewScheduler {
       if (this.active) this.cancel(this.active.job);
     } else {
       this.galleryQueue.push(queued);
+      this.maxGalleryQueued = Math.max(this.maxGalleryQueued, this.galleryQueue.length);
     }
     void this.pump();
     return () => this.cancel(queued);
@@ -16988,6 +16990,14 @@ class PreviewScheduler {
       if (this.active === active) this.active = null;
       void this.pump();
     }
+  }
+  snapshot() {
+    return {
+      activePriority: this.active?.job.priority ?? null,
+      pendingLive: Boolean(this.pendingLive && !this.pendingLive.cancelled),
+      galleryQueued: this.galleryQueue.filter((job) => !job.cancelled).length,
+      maxGalleryQueued: this.maxGalleryQueued
+    };
   }
 }
 const previewScheduler = new PreviewScheduler();
@@ -19623,7 +19633,9 @@ function CaptureFilmstrip({
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: stripRef, className: "flex gap-2 overflow-x-auto pb-1", children: captures.map((capture) => {
       const isCurrent = selectedCaptureId === capture.id;
       const isNewest = capture.id === latestCaptureId;
-      const source = capture.legacyPhoto?.previewUrl ?? capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl;
+      const jpegFile = capture.files.find((file) => file.fileRole === "JPEG");
+      const source = capture.legacyPhoto?.previewUrl ?? jpegFile?.previewUrl;
+      const filePath = jpegFile?.storedPath ?? capture.legacyPhoto?.filePath;
       const fallback = capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData;
       return /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
@@ -19639,7 +19651,16 @@ function CaptureFilmstrip({
           "aria-pressed": isCurrent,
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative aspect-[1.45] overflow-hidden bg-slate-900", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(GalleryThumbnail, { source, fallback, alt: `Capture ${capture.baseFilename}` }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                GalleryThumbnail,
+                {
+                  source,
+                  fallback,
+                  filePath,
+                  previewKey: `gallery-capture-${capture.id}`,
+                  alt: `Capture ${capture.baseFilename}`
+                }
+              ),
               (source || fallback) && /* @__PURE__ */ jsxRuntimeExports.jsx(
                 "span",
                 {
@@ -19791,7 +19812,7 @@ function GroupDetail({
           const overallUploadState = captureUploadState(capture);
           return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-0 left-0 w-1 h-full bg-teal-500" }),
-            capture.files.find((file) => file.fileRole === "JPEG")?.previewUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            capture.files.find((file) => file.fileRole === "JPEG") && /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
                 type: "button",
@@ -19801,11 +19822,12 @@ function GroupDetail({
                 }),
                 title: "Open full-size image to inspect focus and zoom",
                 children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "img",
+                  GalleryThumbnail,
                   {
-                    src: capture.files.find((file) => file.fileRole === "JPEG").previewUrl,
-                    alt: capture.baseFilename,
-                    className: "h-full w-full object-contain bg-slate-950"
+                    source: capture.files.find((file) => file.fileRole === "JPEG").previewUrl,
+                    filePath: capture.files.find((file) => file.fileRole === "JPEG").storedPath,
+                    previewKey: `group-capture-${capture.id}`,
+                    alt: capture.baseFilename
                   }
                 )
               }
@@ -19881,7 +19903,11 @@ function LivePreview({
       priority: "live",
       execute: async (signal) => {
         try {
-          report("image decode started", "source=resized-local-url");
+          const queue = previewScheduler.snapshot();
+          report(
+            "image decode started",
+            `source=resized-local-url active=${queue.activePriority ?? "none"} pendingLive=${queue.pendingLive ? "1" : "0"} galleryQueued=${queue.galleryQueued} galleryMax=${queue.maxGalleryQueued}`
+          );
           const bitmap = await decodeResizedPreview(photo.previewUrl, 1440, signal);
           if (!bitmap || signal.aborted || !mounted) {
             bitmap?.close();
@@ -19963,19 +19989,26 @@ function LivePreview({
 function GalleryThumbnail({
   source,
   fallback,
+  filePath,
+  previewKey,
   alt
 }) {
   const [generatedSource, setGeneratedSource] = reactExports.useState(null);
   reactExports.useEffect(() => {
     setGeneratedSource(null);
-    if (fallback || !source) return;
+    if (fallback || !source && !filePath) return;
     let mounted = true;
     let objectUrl = null;
     const cancel = previewScheduler.enqueue({
-      id: `gallery-${source}`,
+      id: `gallery-${previewKey ?? source ?? filePath}`,
       priority: "gallery",
       execute: async (signal) => {
-        const bitmap = await decodeResizedPreview(source, 320, signal);
+        const resolvedSource = source ?? await window.api.invoke("photos:getPreview", {
+          filePath,
+          previewKey: previewKey ?? `gallery-${filePath}`
+        });
+        if (!resolvedSource || signal.aborted || !mounted) return;
+        const bitmap = await decodeResizedPreview(resolvedSource, 320, signal);
         if (!bitmap || signal.aborted || !mounted) {
           bitmap?.close();
           return;
@@ -19998,7 +20031,7 @@ function GalleryThumbnail({
       cancel();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [fallback, source]);
+  }, [fallback, filePath, previewKey, source]);
   const imageSource = fallback ?? generatedSource;
   if (!imageSource) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex h-full w-full items-center justify-center bg-slate-100", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300" }) });
@@ -20034,14 +20067,16 @@ function PhotoTile({
   retrying
 }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md", children: [
-    photo.thumbnailData || photo.previewUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
       GalleryThumbnail,
       {
         source: photo.previewUrl,
         fallback: photo.thumbnailData,
+        filePath: photo.filePath,
+        previewKey: `gallery-photo-${photo.id}`,
         alt: photo.fileName
       }
-    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300" }) }),
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex flex-col items-center justify-center gap-2.5 p-4 duration-200 z-20", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-white text-[11px] font-mono font-medium truncate w-full text-center mb-1 bg-black/40 px-2 py-1 rounded border border-white/10", children: photo.fileName }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -20109,14 +20144,16 @@ function QrMarkerTile({
   onOpen
 }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full", children: [
-    marker.thumbnailData || marker.previewUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
       GalleryThumbnail,
       {
         source: marker.previewUrl,
         fallback: marker.thumbnailData,
+        filePath: marker.filePath,
+        previewKey: `gallery-marker-${marker.fileName}`,
         alt: `QR marker ${marker.fileName}`
       }
-    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full h-full flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Image, { className: "size-8 text-slate-300" }) }),
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-2 left-2 rounded bg-teal-600/90 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-widest text-white shadow-sm border border-teal-500/50 backdrop-blur-sm z-10", children: "QR MARKER" }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex items-center justify-center p-4 z-20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",

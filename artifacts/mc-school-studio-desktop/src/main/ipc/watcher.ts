@@ -33,6 +33,7 @@ import {
   markImagePipelinePreviewSuperseded,
   markImagePipelineRendererStage,
   retainImagePipelineTraceForPaint,
+  setImagePipelineBurstContext,
   startImagePipelineTrace,
 } from '../lib/imagePipelineDiagnostics'
 import {
@@ -690,7 +691,8 @@ export async function stopProjectWatcher(
 
   if (drain && pending.length > 0) {
     session.processing = session.processing.then(async () => {
-      for (const capture of pending) {
+      for (const [index, capture] of pending.entries()) {
+        setImagePipelineBurstContext(capture.diagnosticId, index + 1, pending.length)
         try {
           await handleNewPhoto(projectId, capture, session)
         } catch (error) {
@@ -809,7 +811,8 @@ function scheduleFlush(projectId: number): void {
 
     session.processing = session.processing
       .then(async () => {
-        for (const capture of batch) {
+        for (const [index, capture] of batch.entries()) {
+          setImagePipelineBurstContext(capture.diagnosticId, index + 1, batch.length)
           try {
             await handleNewPhoto(projectId, capture, session)
           } catch (error) {

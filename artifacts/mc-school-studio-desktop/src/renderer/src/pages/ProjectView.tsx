@@ -2969,10 +2969,11 @@ function CaptureFilmstrip({
       <div ref={stripRef} className="flex gap-2 overflow-x-auto pb-1">
         {captures.map((capture) => {
           const isCurrent = selectedCaptureId === capture.id
-          const isNewest = capture.id === latestCaptureId
-           const source = capture.legacyPhoto?.previewUrl
-             ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
-          const fallback = capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData
+           const isNewest = capture.id === latestCaptureId
+           const jpegFile = capture.files.find((file) => file.fileRole === 'JPEG')
+           const source = capture.legacyPhoto?.previewUrl ?? jpegFile?.previewUrl
+           const filePath = jpegFile?.storedPath ?? capture.legacyPhoto?.filePath
+           const fallback = capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData
           return (
             <button
               key={capture.id}
@@ -2987,7 +2988,13 @@ function CaptureFilmstrip({
               aria-pressed={isCurrent}
             >
               <div className="relative aspect-[1.45] overflow-hidden bg-slate-900">
-                <GalleryThumbnail source={source} fallback={fallback} alt={`Capture ${capture.baseFilename}`} />
+                <GalleryThumbnail
+                  source={source}
+                  fallback={fallback}
+                  filePath={filePath}
+                  previewKey={`gallery-capture-${capture.id}`}
+                  alt={`Capture ${capture.baseFilename}`}
+                />
                 {(source || fallback) && (
                   <span
                     role="button"
@@ -3180,7 +3187,7 @@ function GroupDetail({
                   return (
                   <div key={capture.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md">
                     <div className="absolute top-0 left-0 w-1 h-full bg-teal-500" />
-                    {capture.files.find(file => file.fileRole === 'JPEG')?.previewUrl && (
+                    {capture.files.find(file => file.fileRole === 'JPEG') && (
                       <button
                         type="button"
                         className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100"
@@ -3189,10 +3196,11 @@ function GroupDetail({
                         })}
                         title="Open full-size image to inspect focus and zoom"
                       >
-                        <img
-                          src={capture.files.find(file => file.fileRole === 'JPEG')!.previewUrl}
+                        <GalleryThumbnail
+                          source={capture.files.find(file => file.fileRole === 'JPEG')!.previewUrl}
+                          filePath={capture.files.find(file => file.fileRole === 'JPEG')!.storedPath}
+                          previewKey={`group-capture-${capture.id}`}
                           alt={capture.baseFilename}
-                          className="h-full w-full object-contain bg-slate-950"
                         />
                       </button>
                     )}
@@ -3289,7 +3297,14 @@ function LivePreview({
       priority: 'live',
       execute: async (signal) => {
         try {
-          report('image decode started', 'source=resized-local-url')
+          const queue = previewScheduler.snapshot()
+          report(
+            'image decode started',
+            `source=resized-local-url active=${queue.activePriority ?? 'none'}`
+              + ` pendingLive=${queue.pendingLive ? '1' : '0'}`
+              + ` galleryQueued=${queue.galleryQueued}`
+              + ` galleryMax=${queue.maxGalleryQueued}`,
+          )
           const bitmap = await decodeResizedPreview(photo.previewUrl!, 1440, signal)
           if (!bitmap || signal.aborted || !mounted) {
             bitmap?.close()
@@ -3379,24 +3394,33 @@ function LivePreview({
 function GalleryThumbnail({
   source,
   fallback,
+  filePath,
+  previewKey,
   alt,
 }: {
   source?: string
   fallback?: string | null
+  filePath?: string
+  previewKey?: string
   alt: string
 }) {
   const [generatedSource, setGeneratedSource] = useState<string | null>(null)
 
   useEffect(() => {
     setGeneratedSource(null)
-    if (fallback || !source) return
+    if (fallback || (!source && !filePath)) return
     let mounted = true
     let objectUrl: string | null = null
     const cancel = previewScheduler.enqueue({
-      id: `gallery-${source}`,
+      id: `gallery-${previewKey ?? source ?? filePath}`,
       priority: 'gallery',
       execute: async (signal) => {
-        const bitmap = await decodeResizedPreview(source, 320, signal)
+        const resolvedSource = source ?? await window.api.invoke('photos:getPreview', {
+          filePath: filePath!,
+          previewKey: previewKey ?? `gallery-${filePath}`,
+        })
+        if (!resolvedSource || signal.aborted || !mounted) return
+        const bitmap = await decodeResizedPreview(resolvedSource, 320, signal)
         if (!bitmap || signal.aborted || !mounted) {
           bitmap?.close()
           return
@@ -3420,7 +3444,7 @@ function GalleryThumbnail({
       cancel()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [fallback, source])
+  }, [fallback, filePath, previewKey, source])
 
   const imageSource = fallback ?? generatedSource
   if (!imageSource) {
@@ -3482,17 +3506,13 @@ function PhotoTile({
 }) {
   return (
     <div className="group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md">
-      {photo.thumbnailData || photo.previewUrl ? (
-        <GalleryThumbnail
-          source={photo.previewUrl}
-          fallback={photo.thumbnailData}
-          alt={photo.fileName}
-        />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <Image className="size-8 text-slate-300" />
-        </div>
-      )}
+      <GalleryThumbnail
+        source={photo.previewUrl}
+        fallback={photo.thumbnailData}
+        filePath={photo.filePath}
+        previewKey={`gallery-photo-${photo.id}`}
+        alt={photo.fileName}
+      />
 
       {/* Hover overlay */}
       <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex flex-col items-center justify-center gap-2.5 p-4 duration-200 z-20">
@@ -3556,6 +3576,7 @@ function QrMarkerTile({
   onOpen,
 }: {
   marker: {
+    id: number
     fileName: string
     filePath: string
     thumbnailData: string | null
@@ -3565,17 +3586,13 @@ function QrMarkerTile({
 }) {
   return (
     <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
-        {marker.thumbnailData || marker.previewUrl ? (
-          <GalleryThumbnail
-            source={marker.previewUrl}
-            fallback={marker.thumbnailData}
-            alt={`QR marker ${marker.fileName}`}
-          />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <Image className="size-8 text-slate-300" />
-        </div>
-      )}
+        <GalleryThumbnail
+          source={marker.previewUrl}
+          fallback={marker.thumbnailData}
+          filePath={marker.filePath}
+          previewKey={`gallery-marker-${marker.id}`}
+          alt={`QR marker ${marker.fileName}`}
+        />
 
       <div className="absolute top-2 left-2 rounded bg-teal-600/90 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-widest text-white shadow-sm border border-teal-500/50 backdrop-blur-sm z-10">
         QR MARKER

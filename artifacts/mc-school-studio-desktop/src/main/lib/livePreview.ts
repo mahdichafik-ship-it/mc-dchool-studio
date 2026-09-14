@@ -36,6 +36,14 @@ export function getLivePreviewCacheDir(homeDir: string): string {
   return join(getPhotoSystemLayout(homeDir).cache, 'Previews')
 }
 
+export async function getCachedLivePreview(
+  previewKey: string,
+  cacheDir: string,
+): Promise<string | null> {
+  const previewPath = join(cacheDir, cacheName(previewKey))
+  return (await existingFileSize(previewPath)) ? previewPath : null
+}
+
 async function existingFileSize(filePath: string): Promise<number | null> {
   try {
     const result = await stat(filePath)

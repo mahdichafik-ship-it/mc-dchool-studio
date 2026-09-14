@@ -16,10 +16,18 @@ interface ActiveJob {
   controller: AbortController
 }
 
+export interface PreviewSchedulerSnapshot {
+  activePriority: PreviewPriority | null
+  pendingLive: boolean
+  galleryQueued: number
+  maxGalleryQueued: number
+}
+
 export class PreviewScheduler {
   private active: ActiveJob | null = null
   private pendingLive: QueuedJob | null = null
   private galleryQueue: QueuedJob[] = []
+  private maxGalleryQueued = 0
 
   enqueue(job: PreviewSchedulerJob): () => void {
     const queued: QueuedJob = { ...job, cancelled: false }
@@ -30,6 +38,7 @@ export class PreviewScheduler {
       if (this.active) this.cancel(this.active.job)
     } else {
       this.galleryQueue.push(queued)
+      this.maxGalleryQueued = Math.max(this.maxGalleryQueued, this.galleryQueue.length)
     }
 
     void this.pump()
@@ -81,6 +90,15 @@ export class PreviewScheduler {
     } finally {
       if (this.active === active) this.active = null
       void this.pump()
+    }
+  }
+
+  snapshot(): PreviewSchedulerSnapshot {
+    return {
+      activePriority: this.active?.job.priority ?? null,
+      pendingLive: Boolean(this.pendingLive && !this.pendingLive.cancelled),
+      galleryQueued: this.galleryQueue.filter((job) => !job.cancelled).length,
+      maxGalleryQueued: this.maxGalleryQueued,
     }
   }
 }

@@ -18,6 +18,40 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Returns independently validated macOS installer assets from the latest published GitHub release.
+ * @summary Get the latest validated desktop release
+ */
+export const getDesktopReleaseResponseVersionRegExp = new RegExp('^[0-9]+\\.[0-9]+\\.[0-9]+$');
+
+
+
+
+
+export const GetDesktopReleaseResponse = zod.object({
+  "version": zod.string().regex(getDesktopReleaseResponseVersionRegExp),
+  "publishedAt": zod.coerce.date(),
+  "releasePage": zod.string(),
+  "platforms": zod.array(zod.enum(['macos'])).min(1),
+  "architectures": zod.object({
+  "arm64": zod.object({
+  "displayName": zod.string(),
+  "asset": zod.object({
+  "url": zod.string(),
+  "size": zod.number().min(1)
+})
+}).optional(),
+  "x64": zod.object({
+  "displayName": zod.string(),
+  "asset": zod.object({
+  "url": zod.string(),
+  "size": zod.number().min(1)
+})
+}).optional()
+})
+})
+
+
+/**
  * Returns aggregate counts for projects, schools, classes, and students
  * @summary Get dashboard statistics
  */

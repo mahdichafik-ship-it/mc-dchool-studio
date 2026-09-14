@@ -21,6 +21,7 @@ await build({
     path.resolve(artifactDir, "test/deliveryInvitations.integration.test.ts"),
     path.resolve(artifactDir, "test/students.integration.test.ts"),
     path.resolve(artifactDir, "test/securityMiddleware.test.ts"),
+    path.resolve(artifactDir, "test/desktopRelease.test.ts"),
   ],
   outdir: path.resolve(artifactDir, "test"),
   entryNames: "[name]",

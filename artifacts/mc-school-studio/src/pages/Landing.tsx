@@ -1,9 +1,7 @@
 import React from 'react';
 import { Link } from 'wouter';
-import { Camera, ArrowRight, ShieldCheck, Zap, Users, Monitor, Apple } from 'lucide-react';
-
-const DESKTOP_RELEASE_URL = 'https://github.com/mahdichafik-ship-it/mc-dchool-studio/releases/download/v1.0.48';
-const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_URL}/mc-school-studio-1.0.48-arm64.dmg`;
+import { ArrowRight, ShieldCheck, Zap, Users } from 'lucide-react';
+import { DesktopDownload } from '@/components/DesktopDownload';
 
 export default function Landing() {
   return (
@@ -43,32 +41,7 @@ export default function Landing() {
         </section>
 
         {/* Desktop app download */}
-        <section className="pb-16 px-8 max-w-6xl mx-auto">
-          <div className="rounded-2xl border border-teal-200 bg-teal-50 px-8 py-7 flex flex-col sm:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-5">
-              <div className="w-12 h-12 rounded-xl bg-teal-600 flex items-center justify-center shrink-0">
-                <Monitor className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Download the Desktop App</h2>
-                <p className="text-sm text-slate-600 mt-0.5">
-                  Shoot-day tool — auto-matches QR codes as photos land in your camera folder.
-                </p>
-              </div>
-            </div>
-            <div className="shrink-0">
-              <a
-                href={MAC_DOWNLOAD_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
-              >
-                <Apple className="w-4 h-4" />
-                Mac (.dmg)
-              </a>
-            </div>
-          </div>
-        </section>
+        <DesktopDownload variant="landing" />
 
         {/* Features */}
         <section className="py-20 bg-white border-y border-slate-200">

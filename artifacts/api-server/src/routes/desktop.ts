@@ -29,9 +29,14 @@ import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptur
 import { verifyR2Copy } from "../lib/r2UploadCopies";
 import { prepareBaseR2PhotoVariants } from "../lib/photoVariants";
 import { logger } from "../lib/logger";
+import { createDesktopReleaseHandler } from "../lib/desktopRelease";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
+
+// Public read-only distribution metadata. Keep this before authenticated
+// desktop routes: browsers need it before they have a desktop connection.
+router.get("/release", createDesktopReleaseHandler());
 
 async function storageCopyProjectId(
   copy: typeof photoStorageCopiesTable.$inferSelect,

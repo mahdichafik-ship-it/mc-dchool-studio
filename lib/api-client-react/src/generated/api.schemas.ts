@@ -9,6 +9,39 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface DesktopReleaseAsset {
+  url: string;
+  /** @minimum 1 */
+  size: number;
+}
+
+export interface DesktopReleaseArchitecture {
+  displayName: string;
+  asset: DesktopReleaseAsset;
+}
+
+export type DesktopReleasePlatformsItem = typeof DesktopReleasePlatformsItem[keyof typeof DesktopReleasePlatformsItem];
+
+
+export const DesktopReleasePlatformsItem = {
+  macos: 'macos',
+} as const;
+
+export type DesktopReleaseArchitectures = {
+  arm64?: DesktopReleaseArchitecture;
+  x64?: DesktopReleaseArchitecture;
+};
+
+export interface DesktopRelease {
+  /** @pattern ^[0-9]+\.[0-9]+\.[0-9]+$ */
+  version: string;
+  publishedAt: string;
+  releasePage: string;
+  /** @minItems 1 */
+  platforms: DesktopReleasePlatformsItem[];
+  architectures: DesktopReleaseArchitectures;
+}
+
 export interface DashboardStats {
   totalProjects: number;
   totalSchools: number;

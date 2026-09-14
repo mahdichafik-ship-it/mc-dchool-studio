@@ -1,0 +1,51 @@
+Release 3 accepted. Proceed with Release 4 — Desktop Distribution according to your proposed plan.
+
+Keep Release 4 strictly scoped to desktop release/distribution correctness and the original desktop-download finding.
+
+The primary objective is to eliminate the hardcoded/outdated desktop installer problem and ensure that a studio/photographer is offered the correct current supported installer.
+
+Before making changes, inspect the existing desktop release architecture and determine exactly which packaged platforms/architectures are genuinely supported today. Do not claim support for Intel Mac or Windows unless a packaged application can actually be built and verified on that platform.
+
+The dashboard must no longer advertise stale version 1.0.48 when the actual release is newer. Prefer a single authoritative release metadata source rather than manually duplicating version numbers in the web application.
+
+Verify:
+
+* current desktop version/release;
+* Apple Silicon package;
+* Intel package status;
+* Windows package status;
+* download URLs;
+* architecture detection/selection;
+* version displayed to users;
+* installer availability;
+* signing/notarization status where applicable;
+* packaged application startup;
+* updater/release metadata if the desktop application uses automatic updates.
+
+Do not simply change 1.0.48 to 1.0.66. Fix the mechanism that allowed the dashboard and actual desktop release to become inconsistent.
+
+If Intel or Windows is not currently supported, show that honestly in the UI rather than presenting an incorrect installer.
+
+Do not create or publish a new production release merely to make the version number look correct. Establish what can actually be built, packaged, signed and tested first.
+
+Do not modify capture behavior, watch-folder behavior, assignments, local persistence, gallery functionality, email delivery, or unrelated UI.
+
+After implementation, perform the full Release 4 audit and report:
+
+* exactly what changed;
+* authoritative version/release source;
+* supported platforms and architectures;
+* packages actually built;
+* packages actually launched/tested;
+* signing/notarization results;
+* download-link verification;
+* update-path verification;
+* tests/typechecks/builds;
+* original findings closed/remaining;
+* regressions/new findings;
+* production differences;
+* anything that still prevents a photographer from downloading, installing, launching and using the correct desktop version.
+
+Do not publish production.
+
+Stop after Release 4. Do not begin Release 5 until I approve it.

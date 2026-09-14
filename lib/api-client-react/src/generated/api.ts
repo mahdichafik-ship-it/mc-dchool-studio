@@ -47,6 +47,7 @@ import type {
   DeliveryPriceSheetInput,
   DeliverySettingsInput,
   DeliverySettingsResponse,
+  DesktopRelease,
   FulfillmentInput,
   GenerateQrRequest,
   GenerateQrResult,
@@ -182,6 +183,84 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetDesktopReleaseUrl = () => {
+
+
+
+
+  return `/api/desktop/release`
+}
+
+/**
+ * Returns independently validated macOS installer assets from the latest published GitHub release.
+ * @summary Get the latest validated desktop release
+ */
+export const getDesktopRelease = async ( options?: RequestInit): Promise<DesktopRelease> => {
+
+  return customFetch<DesktopRelease>(getGetDesktopReleaseUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDesktopReleaseQueryKey = () => {
+    return [
+    `/api/desktop/release`
+    ] as const;
+    }
+
+
+export const getGetDesktopReleaseQueryOptions = <TData = Awaited<ReturnType<typeof getDesktopRelease>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDesktopRelease>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDesktopReleaseQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDesktopRelease>>> = ({ signal }) => getDesktopRelease({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDesktopRelease>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDesktopReleaseQueryResult = NonNullable<Awaited<ReturnType<typeof getDesktopRelease>>>
+export type GetDesktopReleaseQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get the latest validated desktop release
+ */
+
+export function useGetDesktopRelease<TData = Awaited<ReturnType<typeof getDesktopRelease>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDesktopRelease>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDesktopReleaseQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

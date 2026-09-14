@@ -107,6 +107,20 @@ function verifyNativeArchitecture(executablePath) {
   )
 }
 
+function macOSReleaseEnvironment() {
+  const readSwVers = (key) => execFileSync('/usr/bin/sw_vers', [key], {
+    encoding: 'utf8',
+  }).trim()
+
+  return {
+    macOSVersion: readSwVers('-productVersion'),
+    macOSBuild: readSwVers('-buildVersion'),
+    architecture: execFileSync('/usr/bin/uname', ['-m'], {
+      encoding: 'utf8',
+    }).trim(),
+  }
+}
+
 function findBundleByVersion(expectedVersion) {
   const candidates = readdirSync(installDirectory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.endsWith('.app'))
@@ -272,6 +286,7 @@ function verifySignedBundle(bundlePath) {
 
 try {
   assert.equal(process.platform, 'darwin', 'the update smoke test requires macOS')
+  const environment = macOSReleaseEnvironment()
   assert(existsSync(appExecutable), `packaged app executable not found: ${appExecutable}`)
   assert.equal(
     bundleVersion(appPath),
@@ -279,7 +294,8 @@ try {
     `expected the installed app to be ${sourceVersion}`,
   )
   verifyNativeArchitecture(appExecutable)
-  record('installed', { version: sourceVersion, appPath })
+  record('environment', environment)
+  record('installed', { version: sourceVersion, appPath, ...environment })
   verifySignedBundle(appPath)
   record('gatekeeper-accepted', { version: sourceVersion })
 

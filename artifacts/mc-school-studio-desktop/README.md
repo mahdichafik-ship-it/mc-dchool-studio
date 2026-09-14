@@ -102,6 +102,21 @@ unsigned or unnotarized DMG.
 After configuring the secrets, push a version tag and confirm the resulting
 GitHub Release assets install without Gatekeeper warnings.
 
+### Photographer Mac update acceptance
+
+Before calling a signed release accepted, complete
+[`macos-release-acceptance.md`](./macos-release-acceptance.md) on one supported
+Intel photographer Mac and one supported Apple-silicon photographer Mac. The
+check must start from the previous signed release and use the in-app updater.
+Record the exact macOS version/build, Gatekeeper result, restart result,
+installed target version, and preservation of an existing local project and
+photo fixture.
+
+The hosted `update-smoke-intel` and `update-smoke-arm64` jobs are automated
+release evidence, not a replacement for this field check. They upload a
+`lifecycle.jsonl` artifact containing the runner macOS version/build and each
+updater lifecycle outcome.
+
 ## CI/CD — automated installers via GitHub Actions
 
 Pushing a `v*` tag triggers `.github/workflows/desktop-release.yml`, which

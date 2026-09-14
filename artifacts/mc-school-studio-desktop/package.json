@@ -30,6 +30,7 @@
     "test:updater": "node --test test/updater-metadata.test.mjs",
     "test:prune-mac-native": "node --test test/prune-mac-native-dependencies.test.mjs",
     "test:db-migration": "node --experimental-strip-types --test test/database-migration.test.ts",
+    "check:release-history": "node scripts/verify-release-history.mjs",
     "validate:updater": "node scripts/validate-updater-metadata.mjs",
     "prune:mac-native": "node scripts/prune-mac-native-dependencies.mjs",
     "dist:mac": "pnpm run build && electron-builder --mac --publish never",

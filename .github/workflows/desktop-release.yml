@@ -82,11 +82,46 @@ jobs:
         run: pnpm --filter @workspace/mc-school-studio-desktop run test:blank-portrait
 
   # ---------------------------------------------------------------------------
+  # Release history — only package source that is already reachable from main.
+  # This prevents tags on release-only commits from creating a second history
+  # that later has to be reconciled or force-pushed.
+  # ---------------------------------------------------------------------------
+  verify-release-history:
+    name: Release history validation
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify release commit is reachable from main
+        env:
+          RELEASE_REF: ${{ github.sha }}
+          MAIN_REF: refs/remotes/origin/main
+        run: pnpm --filter @workspace/mc-school-studio-desktop run check:release-history
+
+  # ---------------------------------------------------------------------------
   # macOS — produces separate installers for Intel and Apple silicon Macs.
   # ---------------------------------------------------------------------------
   build-mac:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: test-capture-integrity
+    needs: [test-capture-integrity, verify-release-history]
     strategy:
       fail-fast: false
       matrix:

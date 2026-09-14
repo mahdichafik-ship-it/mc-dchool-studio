@@ -125,11 +125,29 @@ Gatekeeper acceptance and notarization before the job can pass, and attaches
 the installers, update metadata, and blockmaps to the GitHub Release
 automatically.
 
+Desktop release tags must point to commits already reachable from `main`. The
+release-history validation job checks this before any macOS packaging starts,
+so a tag made from a release-only commit fails instead of creating a second
+history that later needs force-pushing or manual reconciliation.
+
+Prepare every release by merging the reviewed source into `main`, updating the
+local branch with a fast-forward-only pull, and tagging that exact `main`
+history:
+
 ```bash
-# Tag a release and push — CI does the rest
+git fetch origin main
+git switch main
+git pull --ff-only origin main
+pnpm --filter @workspace/mc-school-studio-desktop run check:release-history \
+  -- --release-ref HEAD --main-ref origin/main
 git tag v1.0.0
+git push origin main
 git push origin v1.0.0
 ```
+
+If the history check fails, do not move the tag with a force push. Merge the
+release source into `main` through the normal review flow, then create a new
+version tag from the resulting `main` commit.
 
 The workflow handles the Replit-only `pnpm-workspace.yaml` overrides
 automatically: it runs `node scripts/strip-replit-overrides.mjs` before

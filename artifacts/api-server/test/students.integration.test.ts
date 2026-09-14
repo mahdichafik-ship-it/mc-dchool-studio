@@ -121,6 +121,7 @@ test("creates, lists, and updates contact/profile fields without changing QR dat
       jobTitle: " Engineer ",
       officeLocation: " HQ ",
       photoSession: " Morning ",
+      captureNotes: " Glasses off ",
     }),
   });
   assert.equal(createResponse.status, 201);
@@ -130,6 +131,7 @@ test("creates, lists, and updates contact/profile fields without changing QR dat
   assert.equal(created.jobTitle, "Engineer");
   assert.equal(created.officeLocation, "HQ");
   assert.equal(created.photoSession, "Morning");
+  assert.equal(created.captureNotes, "Glasses off");
   const studentId = created.id as number;
 
   await db.update(studentsTable).set({ simpleQr: "simple-qr", jsonQr: "json-qr" }).where(eq(studentsTable.id, studentId));
@@ -147,6 +149,7 @@ test("creates, lists, and updates contact/profile fields without changing QR dat
       jobTitle: " ",
       officeLocation: " Remote ",
       photoSession: " ",
+      captureNotes: " Face camera ",
     }),
   });
   assert.equal(patchResponse.status, 200);
@@ -155,6 +158,7 @@ test("creates, lists, and updates contact/profile fields without changing QR dat
   assert.equal(updated.jobTitle, null);
   assert.equal(updated.officeLocation, "Remote");
   assert.equal(updated.photoSession, null);
+  assert.equal(updated.captureNotes, "Face camera");
   assert.equal(updated.simpleQr, "simple-qr");
   assert.equal(updated.jsonQr, "json-qr");
 
@@ -234,9 +238,10 @@ test("maps import contact columns and leaves omitted legacy fields nullable", as
         jobTitleColumn: "Title",
         officeLocationColumn: "Office",
         photoSessionColumn: "Session",
+        captureNotesColumn: "Capture Notes",
         phoneColumn: "Phone",
-        headers: ["First", "Last", "Guardian", "Alternate", "Title", "Office", "Session", "Phone"],
-        rows: [["  Grace ", "Hopper", " grace@example.com ", " alt@example.com ", " Admiral ", " Room 1 ", " Evening ", " 555 " ]],
+        headers: ["First", "Last", "Guardian", "Alternate", "Title", "Office", "Session", "Capture Notes", "Phone"],
+        rows: [["  Grace ", "Hopper", " grace@example.com ", " alt@example.com ", " Admiral ", " Room 1 ", " Evening ", " Chin up ", " 555 " ]],
       }],
     }),
   });
@@ -255,6 +260,7 @@ test("maps import contact columns and leaves omitted legacy fields nullable", as
   assert.equal(imported.jobTitle, "Admiral");
   assert.equal(imported.officeLocation, "Room 1");
   assert.equal(imported.photoSession, "Evening");
+  assert.equal(imported.captureNotes, "Chin up");
 
   const legacyResponse = await request(`/api/projects/${projectId}/students`, {
     method: "POST",
@@ -267,6 +273,7 @@ test("maps import contact columns and leaves omitted legacy fields nullable", as
   assert.equal(legacy.jobTitle, null);
   assert.equal(legacy.officeLocation, null);
   assert.equal(legacy.photoSession, null);
+  assert.equal(legacy.captureNotes, null);
 });
 
 test("rolls back an import when a later row has an invalid email", async () => {

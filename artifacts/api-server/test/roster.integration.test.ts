@@ -390,6 +390,7 @@ test("supports corporate rosters, blank legacy fields, authorization, and projec
   assert.equal(employee.jobTitle, null);
   assert.equal(employee.officeLocation, null);
   assert.equal(employee.photoSession, null);
+  assert.equal(employee.captureNotes, null);
 
   const unauthorized = await confirm(corporateProjectId, [
     sheet("Engineering", [["No", "Access", "NO-1"]], { id: true }),

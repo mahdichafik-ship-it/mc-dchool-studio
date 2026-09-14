@@ -15,7 +15,7 @@ export function ensureColumn(
 }
 
 export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
-  for (const migration of [
+  const migrations: ReadonlyArray<readonly [string, string, string]> = [
     ['photos', 'upload_status', 'TEXT'],
     ['photos', 'file_url', 'TEXT'],
     ['projects', 'cloud_id', 'INTEGER'],
@@ -23,6 +23,11 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
     ['students', 'cloud_id', 'INTEGER'],
     ['students', 'email', 'TEXT'],
     ['students', 'phone', 'TEXT'],
+    ['students', 'secondary_email', 'TEXT'],
+    ['students', 'job_title', 'TEXT'],
+    ['students', 'office_location', 'TEXT'],
+    ['students', 'photo_session', 'TEXT'],
+    ['students', 'capture_notes', 'TEXT'],
     ['projects', 'finished_at', 'TEXT'],
     ['projects', 'sync_status', "TEXT NOT NULL DEFAULT 'active'"],
     ['projects', 'sync_completed_files', 'INTEGER NOT NULL DEFAULT 0'],
@@ -30,8 +35,9 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
     ['projects', 'sync_failed_files', 'INTEGER NOT NULL DEFAULT 0'],
     ['projects', 'sync_error', 'TEXT'],
     ['projects', 'project_type', "TEXT NOT NULL DEFAULT 'school'"],
-  ] as const) {
-    ensureColumn(sqlite, ...migration)
+  ]
+  for (const [table, column, definition] of migrations) {
+    ensureColumn(sqlite, table, column, definition)
   }
   // Releases before the durable sync lifecycle only wrote finished_at after a
   // successful cloud handoff. Treat those rows as fully synced, while an

@@ -25,6 +25,8 @@ export interface SheetMapping {
   officeLocationColumn?: string | null;
   /** @nullable */
   photoSessionColumn?: string | null;
+  /** @nullable */
+  captureNotesColumn?: string | null;
   rows: string[][];
   headers?: string[];
 }

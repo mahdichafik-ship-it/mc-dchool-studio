@@ -53,6 +53,7 @@ function formatStudent(
     jobTitle: s.jobTitle ?? null,
     officeLocation: s.officeLocation ?? null,
     photoSession: s.photoSession ?? null,
+    captureNotes: s.captureNotes ?? null,
     simpleQr: s.simpleQr,
     jsonQr: s.jsonQr,
     createdAt: s.createdAt.toISOString(),
@@ -104,6 +105,7 @@ router.post("/", requireAuth, async (req, res) => {
     jobTitle,
     officeLocation,
     photoSession,
+    captureNotes,
   } = req.body;
 
   const normalizedFirstName = normalizeOptionalString(firstName);
@@ -154,6 +156,7 @@ router.post("/", requireAuth, async (req, res) => {
       jobTitle: normalizeOptionalString(jobTitle),
       officeLocation: normalizeOptionalString(officeLocation),
       photoSession: normalizeOptionalString(photoSession),
+      captureNotes: normalizeOptionalString(captureNotes),
     })
     .returning();
 
@@ -193,6 +196,7 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     jobTitle,
     officeLocation,
     photoSession,
+    captureNotes,
   } = req.body;
 
   const normalizedEmail = email !== undefined ? normalizeOptionalString(email) : undefined;
@@ -250,6 +254,7 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
       ...(jobTitle !== undefined && { jobTitle: normalizeOptionalString(jobTitle) }),
       ...(officeLocation !== undefined && { officeLocation: normalizeOptionalString(officeLocation) }),
       ...(photoSession !== undefined && { photoSession: normalizeOptionalString(photoSession) }),
+      ...(captureNotes !== undefined && { captureNotes: normalizeOptionalString(captureNotes) }),
       // Regenerate QR if name or ID changed
       ...(identityChanged
         ? { simpleQr: null, jsonQr: null }

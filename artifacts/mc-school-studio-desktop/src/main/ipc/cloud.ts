@@ -129,6 +129,9 @@ export function registerCloudHandlers() {
             id: number; classId: number; className: string | null
             firstName: string; lastName: string; generatedStudentId: string
             email?: string | null; phone?: string | null
+            secondaryEmail?: string | null; jobTitle?: string | null
+            officeLocation?: string | null; photoSession?: string | null
+            captureNotes?: string | null
             simpleQr?: string | null; jsonQr?: string | null
           }[]
           groups?: { id: number; projectId?: number; classId?: number | null; name: string; isDefaultClassGroup?: boolean; memberStudentIds?: number[] }[]
@@ -145,12 +148,16 @@ export function registerCloudHandlers() {
 
         const imported = db.transaction((tx) => {
           const localProjects = tx.select().from(projectsTable).all()
+          const projectType = normalizeProjectType(p.projectType)
           const existingProject = localProjects.find((project) => project.cloudId === p.id)
-            ?? localProjects.find((project) => project.cloudId === null && project.schoolName === p.schoolName)
+            ?? localProjects.find((project) =>
+              project.cloudId === null
+              && project.schoolName === p.schoolName
+              && normalizeProjectType(project.projectType) === projectType)
 
           const projectValues = {
             cloudId: p.id,
-             projectType: normalizeProjectType(p.projectType),
+            projectType,
             schoolName: p.schoolName,
             photoDate: p.photoDate ?? null,
             address: p.address ?? null,
@@ -217,6 +224,11 @@ export function registerCloudHandlers() {
               generatedStudentId: student.generatedStudentId,
               email: student.email ?? null,
               phone: student.phone ?? null,
+               secondaryEmail: student.secondaryEmail ?? null,
+               jobTitle: student.jobTitle ?? null,
+               officeLocation: student.officeLocation ?? null,
+               photoSession: student.photoSession ?? null,
+               captureNotes: student.captureNotes ?? null,
               simpleQr: student.simpleQr ?? null,
               jsonQr: student.jsonQr ?? null,
               updatedAt: now(),

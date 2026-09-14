@@ -12,6 +12,8 @@ function safeFileSegment(value: string, fallback: string): string {
 
 export interface LightroomFilenameInput {
   schoolName: string
+  /** Omitted by older callers, which retain the original school naming. */
+  projectType?: 'school' | 'corporate'
   className: string | null
   student: {
     firstName: string
@@ -33,18 +35,22 @@ export interface LightroomFilenameInput {
 export function buildLightroomFilename(input: LightroomFilenameInput): string {
   const extension = extname(input.originalFilename)
     || (input.fileRole === 'JPEG' ? '.jpg' : `.${input.fileFormat.toLowerCase()}`)
+  const corporate = input.projectType === 'corporate'
   const student = input.student
     ? [
-        safeFileSegment(input.student.lastName, 'Student'),
+        safeFileSegment(input.student.lastName, corporate ? 'Employee' : 'Student'),
         safeFileSegment(input.student.firstName, 'Unknown'),
         safeFileSegment(input.student.generatedStudentId, 'No-ID'),
       ].join('_')
-    : 'Unmatched'
+    : corporate ? 'Employee' : 'Unmatched'
   const sequence = String(input.sequence ?? input.captureId).padStart(6, '0')
 
   return [
-    safeFileSegment(input.schoolName, 'School'),
-    safeFileSegment(input.className ?? 'Unassigned', 'Unassigned'),
+    safeFileSegment(input.schoolName, corporate ? 'Company' : 'School'),
+    safeFileSegment(
+      input.className ?? (corporate ? 'Department' : 'Unassigned'),
+      corporate ? 'Department' : 'Unassigned',
+    ),
     student,
     sequence,
     `capture-${input.captureId}`,

@@ -95,6 +95,13 @@ function toStudent(
     firstName: student.firstName,
     lastName: student.lastName,
     generatedStudentId: student.generatedStudentId,
+    email: student.email,
+    phone: student.phone,
+    secondaryEmail: student.secondaryEmail,
+    jobTitle: student.jobTitle,
+    officeLocation: student.officeLocation,
+    photoSession: student.photoSession,
+    captureNotes: student.captureNotes,
     simpleQr: student.simpleQr,
     jsonQr: student.jsonQr,
     photoCount,
@@ -254,19 +261,20 @@ export function registerProjectHandlers() {
     const bundle = JSON.parse(raw)
     const { project: p, classes, students, groups = [], groupMembers = [] } = bundle
 
-    // Upsert project by schoolName
-    const existing = db
-      .select()
-      .from(projectsTable)
-      .where(eq(projectsTable.schoolName, p.schoolName))
-      .get()
+    const projectType = normalizeProjectType(p.projectType)
+    const localProjects = db.select().from(projectsTable).all()
+    const existing = localProjects.find((project) => Number.isInteger(p.id) && project.cloudId === p.id)
+      ?? localProjects.find((project) =>
+        project.cloudId === null
+        && project.schoolName === p.schoolName
+        && normalizeProjectType(project.projectType) === projectType)
 
     let projectId: number
     if (existing) {
       db.update(projectsTable)
         .set({
           cloudId: Number.isInteger(p.id) ? p.id : existing.cloudId,
-           projectType: normalizeProjectType(p.projectType),
+          projectType,
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,
@@ -286,7 +294,7 @@ export function registerProjectHandlers() {
         .insert(projectsTable)
         .values({
           cloudId: Number.isInteger(p.id) ? p.id : null,
-           projectType: normalizeProjectType(p.projectType),
+          projectType,
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,
@@ -330,6 +338,13 @@ export function registerProjectHandlers() {
           firstName: stu.firstName,
           lastName: stu.lastName,
           generatedStudentId: stu.generatedStudentId,
+          email: stu.email ?? null,
+          phone: stu.phone ?? null,
+          secondaryEmail: stu.secondaryEmail ?? null,
+          jobTitle: stu.jobTitle ?? null,
+          officeLocation: stu.officeLocation ?? null,
+          photoSession: stu.photoSession ?? null,
+          captureNotes: stu.captureNotes ?? null,
           simpleQr: stu.simpleQr ?? null,
           jsonQr: stu.jsonQr ?? null,
           createdAt: stu.createdAt ?? now(),

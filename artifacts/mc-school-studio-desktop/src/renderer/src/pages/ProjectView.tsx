@@ -32,6 +32,7 @@ import {
 } from '@/lib/previewScheduler'
 import { CaptureFramingPreview } from '@/lib/CaptureFramingPreview'
 import { captureUploadLabel } from '@/lib/shootWorkspace'
+import { getEmployeeCaptureContext } from '@/lib/employeeCaptureContext'
 import type {
   Student,
   Class,
@@ -1621,6 +1622,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           ) : selectedStudent ? (
             <StudentDetail
               student={selectedStudent}
+              isCorporate={isCorporate}
               projectId={projectId}
               photoStatusMap={photoStatusMap}
               onReassign={() => reloadStudents()}
@@ -2000,6 +2002,7 @@ function StudentRow({
 
 function StudentDetail({
   student,
+  isCorporate,
   projectId,
   photoStatusMap,
   onReassign,
@@ -2014,6 +2017,7 @@ function StudentDetail({
   onDrop,
 }: {
   student: Student
+  isCorporate: boolean
   projectId: number
   photoStatusMap: Map<number, ProjectUploadStatusRow>
   onReassign: () => void
@@ -2027,6 +2031,7 @@ function StudentDetail({
   onDragLeave: () => void
   onDrop: (event: React.DragEvent<HTMLDivElement>) => void
 }) {
+  const employeeContext = getEmployeeCaptureContext(student, isCorporate)
   const {
     data: review,
     loading: capturesLoading,
@@ -2230,7 +2235,7 @@ function StudentDetail({
         {isActiveCaptureTarget && (
           <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
         )}
-        <div className="flex flex-col min-w-0">
+         <div className="flex flex-col min-w-0">
           <div className="flex flex-wrap items-center gap-3 mb-2">
             {isActiveCaptureTarget && (
               <Badge className="bg-teal-500 hover:bg-teal-500 text-white font-extrabold uppercase tracking-widest text-[10px] px-2.5 py-0.5 shadow-sm">
@@ -2247,6 +2252,26 @@ function StudentDetail({
              <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words" aria-label={employeeLabel}>
             {student.firstName} {student.lastName}
           </h2>
+           {employeeContext.length > 0 && (
+             <dl className="mt-3 flex max-w-4xl flex-wrap gap-x-5 gap-y-2 text-sm">
+               {employeeContext.map((item) => (
+                 <div
+                   key={item.label}
+                   className={cn(
+                     'min-w-0',
+                     item.emphasized && 'basis-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950',
+                   )}
+                 >
+                   <dt className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">
+                     {item.label}
+                   </dt>
+                   <dd className={cn('break-words font-semibold text-slate-800', item.emphasized && 'text-amber-950')}>
+                     {item.value}
+                   </dd>
+                 </div>
+               ))}
+             </dl>
+           )}
         </div>
         <div className="flex flex-col items-end gap-2 justify-center shrink-0">
           <div className="flex flex-wrap items-center justify-end gap-2">

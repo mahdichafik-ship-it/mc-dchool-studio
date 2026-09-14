@@ -24,6 +24,9 @@ export const HealthCheckResponse = zod.object({
 export const getDesktopReleaseResponseVersionRegExp = new RegExp('^[0-9]+\\.[0-9]+\\.[0-9]+$');
 
 
+
+
+
 export const GetDesktopReleaseResponse = zod.object({
   "version": zod.string().regex(getDesktopReleaseResponseVersionRegExp),
   "publishedAt": zod.coerce.date(),
@@ -151,6 +154,8 @@ export const UpdateProjectParams = zod.object({
 })
 
 
+
+
 export const UpdateProjectBody = zod.object({
   "projectType": zod.enum(['school', 'corporate']).optional(),
   "schoolName": zod.string().min(1).optional(),
@@ -216,6 +221,8 @@ export const CreateClassParams = zod.object({
 })
 
 
+
+
 export const CreateClassBody = zod.object({
   "className": zod.string().min(1)
 })
@@ -237,6 +244,8 @@ export const UpdateClassParams = zod.object({
   "projectId": zod.coerce.number(),
   "classId": zod.coerce.number()
 })
+
+
 
 
 export const UpdateClassBody = zod.object({
@@ -285,6 +294,7 @@ export const ListStudentsResponseItem = zod.object({
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -301,6 +311,9 @@ export const CreateStudentParams = zod.object({
 })
 
 
+
+
+
 export const CreateStudentBody = zod.object({
   "classId": zod.number(),
   "firstName": zod.string().min(1),
@@ -311,7 +324,8 @@ export const CreateStudentBody = zod.object({
   "secondaryEmail": zod.string().nullish(),
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
-  "photoSession": zod.string().nullish()
+  "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish()
 })
 
 export const CreateStudentResponse = zod.object({
@@ -328,6 +342,7 @@ export const CreateStudentResponse = zod.object({
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -367,6 +382,8 @@ export const CreateGroupParams = zod.object({
 })
 
 
+
+
 export const CreateGroupBody = zod.object({
   "name": zod.string().min(1),
   "classId": zod.number().nullish(),
@@ -393,6 +410,8 @@ export const UpdateGroupParams = zod.object({
   "projectId": zod.coerce.number(),
   "groupId": zod.coerce.number()
 })
+
+
 
 
 export const UpdateGroupBody = zod.object({
@@ -470,6 +489,9 @@ export const UpdateStudentParams = zod.object({
 })
 
 
+
+
+
 export const UpdateStudentBody = zod.object({
   "firstName": zod.string().min(1).optional(),
   "lastName": zod.string().min(1).optional(),
@@ -480,7 +502,8 @@ export const UpdateStudentBody = zod.object({
   "secondaryEmail": zod.string().nullish(),
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
-  "photoSession": zod.string().nullish()
+  "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish()
 })
 
 export const UpdateStudentResponse = zod.object({
@@ -497,6 +520,7 @@ export const UpdateStudentResponse = zod.object({
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -588,6 +612,7 @@ export const ConfirmImportBody = zod.object({
   "jobTitleColumn": zod.string().nullish(),
   "officeLocationColumn": zod.string().nullish(),
   "photoSessionColumn": zod.string().nullish(),
+  "captureNotesColumn": zod.string().nullish(),
   "rows": zod.array(zod.array(zod.string())),
   "headers": zod.array(zod.string()).optional()
 }))
@@ -699,6 +724,7 @@ export const updatePlatformStudioBodyWebsiteMax = 200;
 export const updatePlatformStudioBodyContactEmailMax = 254;
 
 
+
 export const UpdatePlatformStudioBody = zod.object({
   "description": zod.string().max(updatePlatformStudioBodyDescriptionMax).nullish(),
   "website": zod.string().max(updatePlatformStudioBodyWebsiteMax).nullish(),
@@ -783,6 +809,7 @@ export const completePlatformInviteBodyDescriptionMax = 500;
 export const completePlatformInviteBodyWebsiteMax = 200;
 
 
+
 export const CompletePlatformInviteBody = zod.object({
   "name": zod.string().min(completePlatformInviteBodyNameMin).max(completePlatformInviteBodyNameMax),
   "description": zod.string().max(completePlatformInviteBodyDescriptionMax).optional(),
@@ -840,6 +867,7 @@ export const updatePhotoSharingResponseOffersItemCurrencyMin = 3;
 export const updatePhotoSharingResponseOffersItemCurrencyMax = 3;
 
 
+
 export const updatePhotoSharingResponseOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const UpdatePhotoSharingResponse = zod.object({
@@ -888,6 +916,7 @@ export const enterDeliveryAccessBodyEmailMax = 254;
 export const enterDeliveryAccessBodyConsentSourceMax = 100;
 
 
+
 export const EnterDeliveryAccessBody = zod.object({
   "code": zod.string().min(enterDeliveryAccessBodyCodeMin).max(enterDeliveryAccessBodyCodeMax),
   "email": zod.string().max(enterDeliveryAccessBodyEmailMax),
@@ -930,7 +959,9 @@ export const GetMarketingOverviewResponse = zod.object({
 })
 
 
+
 export const listMarketingContactsQueryPageSizeMax = 100;
+
 
 
 export const ListMarketingContactsQueryParams = zod.object({
@@ -969,6 +1000,7 @@ export const UpdateMarketingConsentParams = zod.object({
 })
 
 export const updateMarketingConsentBodySourceMax = 100;
+
 
 
 export const UpdateMarketingConsentBody = zod.object({
@@ -1026,6 +1058,7 @@ export const listMarketingTemplatesResponseOneSubjectMax = 200;
 export const listMarketingTemplatesResponseOneCategoryMax = 80;
 
 
+
 export const ListMarketingTemplatesResponseItem = zod.object({
   "name": zod.string().min(1).max(listMarketingTemplatesResponseOneNameMax),
   "subject": zod.string().min(1).max(listMarketingTemplatesResponseOneSubjectMax),
@@ -1048,6 +1081,7 @@ export const createMarketingTemplateBodySubjectMax = 200;
 export const createMarketingTemplateBodyCategoryMax = 80;
 
 
+
 export const CreateMarketingTemplateBody = zod.object({
   "name": zod.string().min(1).max(createMarketingTemplateBodyNameMax),
   "subject": zod.string().min(1).max(createMarketingTemplateBodySubjectMax),
@@ -1061,6 +1095,7 @@ export const createMarketingTemplateResponseOneSubjectMax = 200;
 
 
 export const createMarketingTemplateResponseOneCategoryMax = 80;
+
 
 
 export const CreateMarketingTemplateResponse = zod.object({
@@ -1088,6 +1123,7 @@ export const updateMarketingTemplateBodySubjectMax = 200;
 export const updateMarketingTemplateBodyCategoryMax = 80;
 
 
+
 export const UpdateMarketingTemplateBody = zod.object({
   "name": zod.string().min(1).max(updateMarketingTemplateBodyNameMax),
   "subject": zod.string().min(1).max(updateMarketingTemplateBodySubjectMax),
@@ -1101,6 +1137,7 @@ export const updateMarketingTemplateResponseOneSubjectMax = 200;
 
 
 export const updateMarketingTemplateResponseOneCategoryMax = 80;
+
 
 
 export const UpdateMarketingTemplateResponse = zod.object({
@@ -1126,6 +1163,7 @@ export const DeleteMarketingTemplateResponse = zod.void()
 export const listMarketingCampaignsResponseCampaignsItemOneNameMax = 120;
 
 export const listMarketingCampaignsResponseCampaignsItemOneAudienceFilterSearchMax = 200;
+
 
 
 export const ListMarketingCampaignsResponse = zod.object({
@@ -1157,6 +1195,7 @@ export const createMarketingCampaignDraftBodyNameMax = 120;
 export const createMarketingCampaignDraftBodyAudienceFilterSearchMax = 200;
 
 
+
 export const CreateMarketingCampaignDraftBody = zod.object({
   "name": zod.string().min(1).max(createMarketingCampaignDraftBodyNameMax),
   "templateId": zod.number(),
@@ -1170,6 +1209,7 @@ export const CreateMarketingCampaignDraftBody = zod.object({
 export const createMarketingCampaignDraftResponseOneNameMax = 120;
 
 export const createMarketingCampaignDraftResponseOneAudienceFilterSearchMax = 200;
+
 
 
 export const CreateMarketingCampaignDraftResponse = zod.object({
@@ -1209,6 +1249,7 @@ export const sendMarketingCampaignResponseCampaignOneNameMax = 120;
 export const sendMarketingCampaignResponseCampaignOneAudienceFilterSearchMax = 200;
 
 
+
 export const SendMarketingCampaignResponse = zod.object({
   "campaign": zod.object({
   "name": zod.string().min(1).max(sendMarketingCampaignResponseCampaignOneNameMax),
@@ -1246,6 +1287,7 @@ export const getDeliveryPhotosResponseOffersItemUnitAmountMin = 0;
 
 export const getDeliveryPhotosResponseOffersItemCurrencyMin = 3;
 export const getDeliveryPhotosResponseOffersItemCurrencyMax = 3;
+
 
 
 export const getDeliveryPhotosResponseOffersItemIncludesDigitalDownloadsDefault = false;
@@ -1319,6 +1361,7 @@ export const getDeliveryCatalogResponseOffersItemCurrencyMin = 3;
 export const getDeliveryCatalogResponseOffersItemCurrencyMax = 3;
 
 
+
 export const getDeliveryCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const GetDeliveryCatalogResponse = zod.object({
@@ -1363,6 +1406,9 @@ export const createDeliveryOrderBodyItemsItemPhotoIdsMax = 100;
 export const createDeliveryOrderBodyItemsItemQuantityMax = 100;
 
 export const createDeliveryOrderBodyItemsMax = 20;
+
+
+
 
 
 export const CreateDeliveryOrderBody = zod.object({
@@ -1472,6 +1518,7 @@ export const updateDeliverySettingsBodyOffersItemCurrencyMin = 3;
 export const updateDeliverySettingsBodyOffersItemCurrencyMax = 3;
 
 
+
 export const updateDeliverySettingsBodyOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const UpdateDeliverySettingsBody = zod.object({
@@ -1521,6 +1568,7 @@ export const listStudioPriceSheetsResponseOffersItemCurrencyMin = 3;
 export const listStudioPriceSheetsResponseOffersItemCurrencyMax = 3;
 
 
+
 export const listStudioPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault = false;
 
 export const ListStudioPriceSheetsResponseItem = zod.object({
@@ -1560,6 +1608,7 @@ export const createStudioPriceSheetBodyOffersItemCurrencyMin = 3;
 export const createStudioPriceSheetBodyOffersItemCurrencyMax = 3;
 
 
+
 export const createStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
 
 
@@ -1590,6 +1639,7 @@ export const createStudioPriceSheetResponseOffersItemUnitAmountMin = 0;
 
 export const createStudioPriceSheetResponseOffersItemCurrencyMin = 3;
 export const createStudioPriceSheetResponseOffersItemCurrencyMax = 3;
+
 
 
 export const createStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
@@ -1634,6 +1684,7 @@ export const updateStudioPriceSheetBodyOffersItemCurrencyMin = 3;
 export const updateStudioPriceSheetBodyOffersItemCurrencyMax = 3;
 
 
+
 export const updateStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
 
 
@@ -1664,6 +1715,7 @@ export const updateStudioPriceSheetResponseOffersItemUnitAmountMin = 0;
 
 export const updateStudioPriceSheetResponseOffersItemCurrencyMin = 3;
 export const updateStudioPriceSheetResponseOffersItemCurrencyMax = 3;
+
 
 
 export const updateStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
@@ -1704,6 +1756,7 @@ export const listDeliveryPriceSheetsResponseOffersItemUnitAmountMin = 0;
 
 export const listDeliveryPriceSheetsResponseOffersItemCurrencyMin = 3;
 export const listDeliveryPriceSheetsResponseOffersItemCurrencyMax = 3;
+
 
 
 export const listDeliveryPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault = false;
@@ -1749,6 +1802,7 @@ export const createDeliveryPriceSheetBodyOffersItemCurrencyMin = 3;
 export const createDeliveryPriceSheetBodyOffersItemCurrencyMax = 3;
 
 
+
 export const createDeliveryPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
 
 
@@ -1779,6 +1833,7 @@ export const createDeliveryPriceSheetResponseOffersItemUnitAmountMin = 0;
 
 export const createDeliveryPriceSheetResponseOffersItemCurrencyMin = 3;
 export const createDeliveryPriceSheetResponseOffersItemCurrencyMax = 3;
+
 
 
 export const createDeliveryPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
@@ -1824,6 +1879,7 @@ export const updateDeliveryPriceSheetBodyOffersItemCurrencyMin = 3;
 export const updateDeliveryPriceSheetBodyOffersItemCurrencyMax = 3;
 
 
+
 export const updateDeliveryPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
 
 
@@ -1854,6 +1910,7 @@ export const updateDeliveryPriceSheetResponseOffersItemUnitAmountMin = 0;
 
 export const updateDeliveryPriceSheetResponseOffersItemCurrencyMin = 3;
 export const updateDeliveryPriceSheetResponseOffersItemCurrencyMax = 3;
+
 
 
 export const updateDeliveryPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
@@ -1995,6 +2052,7 @@ export const prepareDeliveryAccessCardsResponsePreparedCountMin = 0;
 export const prepareDeliveryAccessCardsResponseStudentCountMin = 0;
 
 
+
 export const PrepareDeliveryAccessCardsResponse = zod.object({
   "gallery": zod.object({
   "id": zod.number(),
@@ -2030,6 +2088,7 @@ export const listDeliveryStripeCatalogResponseOffersItemUnitAmountMin = 0;
 
 export const listDeliveryStripeCatalogResponseOffersItemCurrencyMin = 3;
 export const listDeliveryStripeCatalogResponseOffersItemCurrencyMax = 3;
+
 
 
 export const listDeliveryStripeCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
@@ -2103,6 +2162,7 @@ export const listDeliveryOrdersResponseOrdersItemNotificationsOrderReceivedAttem
 export const listDeliveryOrdersResponseOrdersItemNotificationsPaymentConfirmedAttemptsMin = 0;
 
 
+
 export const ListDeliveryOrdersResponse = zod.object({
   "orders": zod.array(zod.object({
   "id": zod.number(),
@@ -2168,6 +2228,7 @@ export const getDeliveryOperationsResponseIssuesInvitationsMin = 0;
 export const getDeliveryOperationsResponseIssuesOrderNotificationsMin = 0;
 
 
+
 export const GetDeliveryOperationsResponse = zod.object({
   "invitations": zod.object({
   "pending": zod.number().min(getDeliveryOperationsResponseInvitationsPendingMin),
@@ -2198,6 +2259,7 @@ export const GetStudioDeliveryOrderParams = zod.object({
 export const getStudioDeliveryOrderResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
 
 export const getStudioDeliveryOrderResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
 
 
 export const GetStudioDeliveryOrderResponse = zod.object({
@@ -2259,6 +2321,7 @@ export const updateDeliveryFulfillmentResponseOrderNotificationsOrderReceivedAtt
 export const updateDeliveryFulfillmentResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
 
 
+
 export const UpdateDeliveryFulfillmentResponse = zod.object({
   "order": zod.object({
   "id": zod.number(),
@@ -2304,6 +2367,7 @@ export const UpdateDeliveryPaymentBody = zod.object({
 export const updateDeliveryPaymentResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
 
 export const updateDeliveryPaymentResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
 
 
 export const UpdateDeliveryPaymentResponse = zod.object({

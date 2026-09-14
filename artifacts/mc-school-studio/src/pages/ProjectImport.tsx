@@ -95,6 +95,7 @@ export default function ProjectImport() {
     jobTitleColumn: string;
     officeLocationColumn: string;
     photoSessionColumn: string;
+    captureNotesColumn: string;
   }>>({});
 
   // State from Confirm
@@ -140,7 +141,13 @@ export default function ProjectImport() {
             secondaryEmailColumn: guessSecondaryEmailColumn(sheet.headers),
             jobTitleColumn: guessColumnByKeywords(sheet.headers, ['job', 'title', 'role', 'poste']),
             officeLocationColumn: guessColumnByKeywords(sheet.headers, ['office', 'location', 'bureau', 'lieu']),
-            photoSessionColumn: guessColumnByKeywords(sheet.headers, ['session', 'group', 'groupe']),
+            photoSessionColumn: guessColumnByKeywords(
+              sheet.headers,
+              isCorporate ? ['appointment', 'appointment time', 'session', 'group', 'groupe'] : ['session', 'group', 'groupe'],
+            ),
+            captureNotesColumn: isCorporate
+              ? guessColumnByKeywords(sheet.headers, ['capture notes', 'capture', 'notes', 'note', 'comment', 'remark'])
+              : '',
           };
         });
         setMappings(initialMappings);
@@ -229,6 +236,7 @@ export default function ProjectImport() {
           jobTitleColumn: map.jobTitleColumn || null,
           officeLocationColumn: map.officeLocationColumn || null,
           photoSessionColumn: map.photoSessionColumn || null,
+          captureNotesColumn: isCorporate ? (map.captureNotesColumn || null) : null,
           rows: rows,
           headers: sheetPreview.headers
         });
@@ -445,12 +453,22 @@ export default function ProjectImport() {
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label className="text-slate-500">Photography Group/Session <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                            <Label className="text-slate-500">{isCorporate ? 'Appointment time' : 'Photography Group/Session'} <span className="text-slate-400 font-normal">(Optional)</span></Label>
                             <Select value={mappings[sheet.name]?.photoSessionColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'photoSessionColumn', v === 'none' ? '' : v)}>
                               <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="none">-- Skip --</SelectItem>
                                 {sheet.headers.map((h, i) => <SelectItem key={`ps-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-slate-500">Capture Notes <span className="text-slate-400 font-normal">(Optional)</span></Label>
+                            <Select value={mappings[sheet.name]?.captureNotesColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'captureNotesColumn', v === 'none' ? '' : v)}>
+                              <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-- Skip --</SelectItem>
+                                {sheet.headers.map((h, i) => <SelectItem key={`cn-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </div>

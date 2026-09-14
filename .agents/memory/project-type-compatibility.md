@@ -9,4 +9,4 @@ School and corporate projects follow the same operational workflow end to end: r
 
 **Why:** Reusing the proven capture model avoids destabilizing existing projects, desktop installations, folders, QR codes, pairing, offline work, and uploads. Legacy payloads and local databases do not contain a project type.
 
-**How to apply:** Carry project type through every project projection, export, cloud bundle, and desktop import path. Keep all operational behavior shared and adapt only terminology, filters, and reporting unless the user explicitly scopes a future difference.
+**How to apply:** Carry project type and optional roster fields through every project projection, export, cloud bundle, and desktop import path. Match desktop imports by cloud ID first; a legacy name match must also match project type so a company and school with the same name remain separate. Keep all operational behavior shared and adapt only terminology, filters, and reporting unless the user explicitly scopes a future difference.

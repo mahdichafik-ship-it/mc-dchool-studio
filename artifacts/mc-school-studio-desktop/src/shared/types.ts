@@ -48,6 +48,13 @@ export interface Student {
   firstName: string
   lastName: string
   generatedStudentId: string
+  email: string | null
+  phone: string | null
+  secondaryEmail: string | null
+  jobTitle: string | null
+  officeLocation: string | null
+  photoSession: string | null
+  captureNotes: string | null
   simpleQr: string | null
   jsonQr: string | null
   photoCount: number

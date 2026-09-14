@@ -42,12 +42,17 @@ test('upgrades an older local database without replacing existing rows', () => {
   })
   assert(columns.get('students')?.has('email'))
   assert(columns.get('students')?.has('phone'))
+  assert(columns.get('students')?.has('secondary_email'))
+  assert(columns.get('students')?.has('job_title'))
+  assert(columns.get('students')?.has('office_location'))
+  assert(columns.get('students')?.has('photo_session'))
+  assert(columns.get('students')?.has('capture_notes'))
   assert(columns.get('projects')?.has('project_type'))
   assert(columns.get('projects')?.has('sync_status'))
   assert(columns.get('projects')?.has('sync_completed_files'))
   assert(columns.get('projects')?.has('sync_total_files'))
   assert(migrationStatements.some((statement) => /SET sync_status = 'synced'/.test(statement)))
-  assert.equal(columns.get('students')?.size, 9)
+  assert.equal(columns.get('students')?.size, 14)
 })
 
 test('backfills active, finished, and interrupted project lifecycles safely', () => {

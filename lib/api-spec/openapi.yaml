@@ -1402,6 +1402,8 @@ components:
           type: ["string", "null"]
         photoSession:
           type: ["string", "null"]
+        captureNotes:
+          type: ["string", "null"]
         simpleQr:
           type: ["string", "null"]
         jsonQr:
@@ -1437,6 +1439,8 @@ components:
           type: ["string", "null"]
         photoSession:
           type: ["string", "null"]
+        captureNotes:
+          type: ["string", "null"]
 
     StudentPatch:
       type: object
@@ -1462,6 +1466,8 @@ components:
         officeLocation:
           type: ["string", "null"]
         photoSession:
+          type: ["string", "null"]
+        captureNotes:
           type: ["string", "null"]
 
     BulkStudentIds:
@@ -1556,6 +1562,8 @@ components:
         officeLocationColumn:
           type: ["string", "null"]
         photoSessionColumn:
+          type: ["string", "null"]
+        captureNotesColumn:
           type: ["string", "null"]
         rows:
           type: array

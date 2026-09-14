@@ -193,12 +193,14 @@ router.post("/confirm", requireAuth, async (req, res) => {
         jobTitle: string | null;
         officeLocation: string | null;
         photoSession: string | null;
+        captureNotes: string | null;
         hasEmail: boolean;
         hasSecondaryEmail: boolean;
         hasPhone: boolean;
         hasJobTitle: boolean;
         hasOfficeLocation: boolean;
         hasPhotoSession: boolean;
+        hasCaptureNotes: boolean;
       };
 
       const existing = await tx
@@ -283,6 +285,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
           jobTitleColumn,
           officeLocationColumn,
           photoSessionColumn,
+          captureNotesColumn,
           phoneColumn,
           rows,
           headers,
@@ -307,6 +310,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
         const jobTitleIdx = jobTitleColumn ? headers.indexOf(jobTitleColumn) : -1;
         const officeLocationIdx = officeLocationColumn ? headers.indexOf(officeLocationColumn) : -1;
         const photoSessionIdx = photoSessionColumn ? headers.indexOf(photoSessionColumn) : -1;
+        const captureNotesIdx = captureNotesColumn ? headers.indexOf(captureNotesColumn) : -1;
         const phoneIdx = phoneColumn ? headers.indexOf(phoneColumn) : -1;
 
         if (firstNameIdx === -1 || lastNameIdx === -1) {
@@ -349,6 +353,8 @@ router.post("/confirm", requireAuth, async (req, res) => {
             officeLocationIdx >= 0 ? normalizeOptionalString(row[officeLocationIdx]) : null;
           const photoSession =
             photoSessionIdx >= 0 ? normalizeOptionalString(row[photoSessionIdx]) : null;
+          const captureNotes =
+            captureNotesIdx >= 0 ? normalizeOptionalString(row[captureNotesIdx]) : null;
           importRows.push({
             className: displayClassName,
             firstName,
@@ -360,12 +366,14 @@ router.post("/confirm", requireAuth, async (req, res) => {
             jobTitle,
             officeLocation,
             photoSession,
+            captureNotes,
             hasEmail: emailIdx >= 0,
             hasSecondaryEmail: secondaryEmailIdx >= 0,
             hasPhone: phoneIdx >= 0,
             hasJobTitle: jobTitleIdx >= 0,
             hasOfficeLocation: officeLocationIdx >= 0,
             hasPhotoSession: photoSessionIdx >= 0,
+            hasCaptureNotes: captureNotesIdx >= 0,
           });
         }
       }
@@ -388,12 +396,14 @@ router.post("/confirm", requireAuth, async (req, res) => {
         normalizeKey(input.jobTitle),
         normalizeKey(input.officeLocation),
         normalizeKey(input.photoSession),
+        normalizeKey(input.captureNotes),
         input.hasEmail,
         input.hasSecondaryEmail,
         input.hasPhone,
         input.hasJobTitle,
         input.hasOfficeLocation,
         input.hasPhotoSession,
+        input.hasCaptureNotes,
       ].join("\u0000");
       importRows.forEach((input, rowIndex) => {
         const keys = [normalizeKey(input.email), normalizeKey(input.secondaryEmail)]
@@ -499,6 +509,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
             jobTitle: input.jobTitle,
             officeLocation: input.officeLocation,
             photoSession: input.photoSession,
+            captureNotes: input.captureNotes,
           }).returning();
           const row: WorkingStudent = { student: created, className: targetClassName };
           working.push(row);
@@ -520,6 +531,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
           ...(input.hasJobTitle ? { jobTitle: input.jobTitle } : {}),
           ...(input.hasOfficeLocation ? { officeLocation: input.officeLocation } : {}),
           ...(input.hasPhotoSession ? { photoSession: input.photoSession } : {}),
+          ...(input.hasCaptureNotes ? { captureNotes: input.captureNotes } : {}),
         };
         const changed =
           old.firstName !== next.firstName ||
@@ -530,7 +542,8 @@ router.post("/confirm", requireAuth, async (req, res) => {
           (input.hasSecondaryEmail && old.secondaryEmail !== next.secondaryEmail) ||
           (input.hasJobTitle && old.jobTitle !== next.jobTitle) ||
           (input.hasOfficeLocation && old.officeLocation !== next.officeLocation) ||
-          (input.hasPhotoSession && old.photoSession !== next.photoSession);
+          (input.hasPhotoSession && old.photoSession !== next.photoSession) ||
+          (input.hasCaptureNotes && old.captureNotes !== next.captureNotes);
         if (!changed) {
           studentsSkipped++;
           continue;

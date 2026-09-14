@@ -26,4 +26,6 @@ export interface StudentInput {
   officeLocation?: string | null;
   /** @nullable */
   photoSession?: string | null;
+  /** @nullable */
+  captureNotes?: string | null;
 }

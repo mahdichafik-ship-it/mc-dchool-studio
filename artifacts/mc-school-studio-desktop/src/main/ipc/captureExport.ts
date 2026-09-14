@@ -67,7 +67,9 @@ export interface CaptureExportRecord {
 }
 
 export interface CaptureExportInput {
-  project: Pick<typeof projectsTable.$inferSelect, 'schoolName'>
+  project: Pick<typeof projectsTable.$inferSelect, 'schoolName'> & {
+    projectType?: 'school' | 'corporate'
+  }
   records: CaptureExportRecord[]
   destinationDir: string
   mode: CaptureExportMode
@@ -112,6 +114,7 @@ export function exportCaptureRecords({
       const destinationPath = layout === 'lightroom_watch_folder'
         ? join(outputDir, buildLightroomFilename({
             schoolName: project.schoolName,
+            projectType: project.projectType,
             className,
             student,
             captureId: capture.id,

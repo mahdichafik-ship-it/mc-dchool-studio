@@ -47,3 +47,19 @@ test('labels unmatched captures without exposing unsafe path characters', () => 
   assert.equal(filename, 'School_Unassigned_Unmatched_000012_capture-12.nef')
   assert.doesNotMatch(filename, /[/:\\]/)
 })
+
+test('uses corporate fallback labels without changing school filename semantics', () => {
+  const filename = buildLightroomFilename({
+    projectType: 'corporate',
+    schoolName: '',
+    className: null,
+    student: null,
+    captureId: 9,
+    sequence: null,
+    originalFilename: 'headshot.jpg',
+    fileRole: 'JPEG',
+    fileFormat: 'JPG',
+  })
+
+  assert.equal(filename, 'Company_Department_Employee_000009_capture-9.jpg')
+})

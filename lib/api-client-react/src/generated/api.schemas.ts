@@ -174,6 +174,8 @@ export interface Student {
   /** @nullable */
   photoSession?: string | null;
   /** @nullable */
+  captureNotes?: string | null;
+  /** @nullable */
   simpleQr?: string | null;
   /** @nullable */
   jsonQr?: string | null;
@@ -201,6 +203,8 @@ export interface StudentInput {
   officeLocation?: string | null;
   /** @nullable */
   photoSession?: string | null;
+  /** @nullable */
+  captureNotes?: string | null;
 }
 
 export interface StudentPatch {
@@ -223,6 +227,8 @@ export interface StudentPatch {
   officeLocation?: string | null;
   /** @nullable */
   photoSession?: string | null;
+  /** @nullable */
+  captureNotes?: string | null;
 }
 
 export interface BulkStudentIds {
@@ -271,6 +277,8 @@ export interface SheetMapping {
   officeLocationColumn?: string | null;
   /** @nullable */
   photoSessionColumn?: string | null;
+  /** @nullable */
+  captureNotesColumn?: string | null;
   rows: string[][];
   headers?: string[];
 }
@@ -453,6 +461,7 @@ export interface PlatformActivity {
   action: string;
   createdAt: string;
 }
+
 export interface PlatformOverview {
   configured: boolean;
   studios: PlatformStudio[];

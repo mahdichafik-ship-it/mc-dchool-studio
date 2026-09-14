@@ -21,6 +21,7 @@ export const studentsTable = pgTable("students", {
   jobTitle: text("job_title"),
   officeLocation: text("office_location"),
   photoSession: text("photo_session"),
+  captureNotes: text("capture_notes"),
   simpleQr: text("simple_qr"),
   jsonQr: text("json_qr"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

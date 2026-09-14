@@ -24,6 +24,7 @@ const studentSchema = z.object({
   jobTitle: z.string().optional(),
   officeLocation: z.string().optional(),
   photoSession: z.string().optional(),
+  captureNotes: z.string().optional(),
 });
 
 type StudentFormValues = z.infer<typeof studentSchema>;
@@ -60,6 +61,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
       jobTitle: "",
       officeLocation: "",
       photoSession: "",
+      captureNotes: "",
     },
   });
 
@@ -76,6 +78,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
         jobTitle: editingStudent.jobTitle || "",
         officeLocation: editingStudent.officeLocation || "",
         photoSession: editingStudent.photoSession || "",
+        captureNotes: editingStudent.captureNotes || "",
       });
     } else if (!isFormOpen) {
       form.reset({
@@ -89,6 +92,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
         jobTitle: "",
         officeLocation: "",
         photoSession: "",
+        captureNotes: "",
       });
       setEditingStudent(null);
     }
@@ -105,6 +109,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
       jobTitle: data.jobTitle || null,
       officeLocation: data.officeLocation || null,
       photoSession: data.photoSession || null,
+      captureNotes: data.captureNotes || null,
     };
 
     if (editingStudent) {
@@ -144,7 +149,8 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
         (s.phone && s.phone.toLowerCase().includes(searchStr)) ||
         (s.jobTitle && s.jobTitle.toLowerCase().includes(searchStr)) ||
         (s.officeLocation && s.officeLocation.toLowerCase().includes(searchStr)) ||
-        (s.photoSession && s.photoSession.toLowerCase().includes(searchStr));
+        (s.photoSession && s.photoSession.toLowerCase().includes(searchStr)) ||
+        (s.captureNotes && s.captureNotes.toLowerCase().includes(searchStr));
         
       const matchesClass = classFilter === 'all' || s.classId.toString() === classFilter;
       
@@ -397,7 +403,18 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
                     name="photoSession"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Photography Session/Group</FormLabel>
+                        <FormLabel>Appointment time</FormLabel>
+                        <FormControl><Input {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="captureNotes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Capture Notes</FormLabel>
                         <FormControl><Input {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>

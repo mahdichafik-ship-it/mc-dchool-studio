@@ -1,0 +1,69 @@
+Treat the approved prepublication access-card lifecycle change as Release 6 — Pre-Photo-Day Access Cards.
+
+Release 6 has one primary objective:
+
+Allow permanent parent/customer delivery credentials and printable access cards to be prepared after roster import and before photo day, without publishing the gallery.
+
+Implement the previously approved design.
+
+Release 6 must build on Releases 1–5 rather than replace or redesign their behavior.
+
+As part of the Release 6 audit, explicitly regression-test its interaction with each previous release:
+
+Release 1 — Security & Data Integrity
+
+* Preserve project/studio authorization.
+* Preserve access-code throttling.
+* Preparing/scanning a draft card must not create usable gallery/media sessions.
+* No unpublished photographs or protected data may become accessible.
+
+Release 2 — Gallery Correctness
+
+* Preserve gallery eligibility/authorization rules.
+* Preserve actual-original download behavior.
+* Preserve complete gallery-specific printed URLs.
+* Credentials can now exist before publication, but photographs remain inaccessible until explicit publication.
+
+Release 3 — Transactional Invitations
+
+* Publication must reuse previously prepared credentials.
+* It must never rotate/replace a preprinted access code.
+* Publication must still create/send transactional invitations correctly.
+* Existing deduplication, idempotency, retry, failure and needs_review behavior must remain unchanged.
+* No invitation may be sent merely because cards were prepared.
+
+Release 4 — Desktop Distribution
+
+* No desktop distribution/release behavior should change.
+* Existing photographer Capture QR format and parsing must remain unchanged.
+* Capture QR and parent Delivery QR remain separate systems.
+
+Release 5 — Operational Quality
+
+* Roster re-import must preserve prepared delivery credentials.
+* Student information changes must preserve credentials.
+* Class moves within the same project must preserve credentials.
+* Newly added students can receive new credentials without changing existing students’ cards.
+* Order/payment/recovery/media-refresh behavior must remain unchanged.
+
+The key Release 6 lifecycle test must prove:
+
+Create project → import roster → prepare access cards → record credentials → prepare again → credentials unchanged → re-import/update roster → unchanged → move class within same project → unchanged → capture/upload → publish → credentials unchanged → use ORIGINAL pre-photo-day card → access eligible published gallery successfully.
+
+Also test prepublication scanning, concurrency, unauthorized preparation, cross-project/studio isolation, new students, legacy query-based cards, new fragment-based QR cards, publication invitations, school/corporate behavior, and draft-gallery information leakage.
+
+Do not redesign the cards beyond the basic functional layout already approved.
+
+Do not publish production.
+
+At completion provide:
+
+* Release 6 exact changes;
+* tests and results;
+* schema/API/frontend changes;
+* security/privacy results;
+* impact/regression results for Releases 1–5;
+* remaining limitations;
+* any launch blockers.
+
+Stop after the Release 6 audit. Do not run the final comprehensive launch audit until Release 6 is approved.

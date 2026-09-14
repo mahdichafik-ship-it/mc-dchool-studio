@@ -10,7 +10,12 @@ import { canAccessProject } from "../lib/studioAccess";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
 
 const router = Router({ mergeParams: true });
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const IMPORT_FILE_MAX_BYTES = 10 * 1024 * 1024;
+const IMPORT_MAX_SHEETS = 100;
+const IMPORT_MAX_ROWS = 20_000;
+const IMPORT_MAX_COLUMNS = 250;
+const IMPORT_MAX_CELL_LENGTH = 2_000;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: IMPORT_FILE_MAX_BYTES, files: 1 } });
 
 function normalizeOptionalString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -23,6 +28,32 @@ function isValidEmail(value: string | null): boolean {
 }
 
 class ImportValidationError extends Error {}
+
+function boundedCell(value: unknown): string {
+  const cell = String(value ?? "").trim();
+  if (cell.length > IMPORT_MAX_CELL_LENGTH) {
+    throw new ImportValidationError(`Roster cells cannot exceed ${IMPORT_MAX_CELL_LENGTH} characters`);
+  }
+  return cell;
+}
+
+function validateWorkbookShape(workbook: XLSX.WorkBook): void {
+  if (workbook.SheetNames.length < 1 || workbook.SheetNames.length > IMPORT_MAX_SHEETS) {
+    throw new ImportValidationError(`Roster files must contain between 1 and ${IMPORT_MAX_SHEETS} sheets`);
+  }
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const range = sheet?.["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+    if (!range) continue;
+    const rows = range.e.r - range.s.r + 1;
+    const columns = range.e.c - range.s.c + 1;
+    if (rows > IMPORT_MAX_ROWS + 1 || columns > IMPORT_MAX_COLUMNS) {
+      throw new ImportValidationError(
+        `Each roster sheet is limited to ${IMPORT_MAX_ROWS} rows and ${IMPORT_MAX_COLUMNS} columns`,
+      );
+    }
+  }
+}
 
 async function verifyProject(projectId: number, userId: string) {
   if (!(await canAccessProject(userId, projectId, "edit"))) return null;
@@ -51,7 +82,16 @@ router.post("/parse", requireAuth, upload.single("file"), async (req, res) => {
     req.file.mimetype === "text/csv";
 
   try {
-    const workbook = XLSX.read(buffer, { type: "buffer", raw: false });
+    const workbook = XLSX.read(buffer, {
+      type: "buffer",
+      raw: false,
+      cellFormula: false,
+      cellHTML: false,
+      cellNF: false,
+      cellStyles: false,
+      sheetRows: IMPORT_MAX_ROWS + 2,
+    });
+    validateWorkbookShape(workbook);
 
     const sheets = workbook.SheetNames.map((sheetName) => {
       const sheet = workbook.Sheets[sheetName];
@@ -59,17 +99,18 @@ router.post("/parse", requireAuth, upload.single("file"), async (req, res) => {
         header: 1,
         defval: "",
         raw: false,
+        blankrows: false,
       }) as string[][];
 
       if (allRows.length === 0) {
         return { name: sheetName, headers: [], rows: [] };
       }
 
-      const headers = allRows[0].map((h) => String(h ?? "").trim());
+      const headers = allRows[0].map(boundedCell);
       const dataRows = allRows
         .slice(1)
-        .filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""))
-        .map((row) => row.map((cell) => String(cell ?? "").trim()));
+        .filter((row) => row.some((cell) => boundedCell(cell) !== ""))
+        .map((row) => row.map(boundedCell));
 
       return {
         name: sheetName,
@@ -86,7 +127,11 @@ router.post("/parse", requireAuth, upload.single("file"), async (req, res) => {
 
     res.json({ sheets });
   } catch (err) {
-    res.status(400).json({ error: "Failed to parse file. Ensure it is a valid .xlsx or .csv file." });
+    res.status(400).json({
+      error: err instanceof ImportValidationError
+        ? err.message
+        : "Failed to parse file. Ensure it is a valid .xlsx or .csv file.",
+    });
   }
 });
 
@@ -104,6 +149,10 @@ router.post("/confirm", requireAuth, async (req, res) => {
   const { sheets } = req.body;
   if (!Array.isArray(sheets) || sheets.length === 0) {
     res.status(400).json({ error: "sheets is required" });
+    return;
+  }
+  if (sheets.length > IMPORT_MAX_SHEETS) {
+    res.status(400).json({ error: `A roster import cannot exceed ${IMPORT_MAX_SHEETS} sheets` });
     return;
   }
 
@@ -135,6 +184,12 @@ router.post("/confirm", requireAuth, async (req, res) => {
           rows,
           headers,
         } = sheet;
+        if (!Array.isArray(headers) || !Array.isArray(rows)
+          || headers.length > IMPORT_MAX_COLUMNS || rows.length > IMPORT_MAX_ROWS) {
+          throw new ImportValidationError(
+            `Each roster sheet is limited to ${IMPORT_MAX_ROWS} rows and ${IMPORT_MAX_COLUMNS} columns`,
+          );
+        }
 
         if (!className || !firstNameColumn || !lastNameColumn) {
           continue;
@@ -170,12 +225,15 @@ router.post("/confirm", requireAuth, async (req, res) => {
         }
 
         for (const row of rows) {
-          const firstName = String(row[firstNameIdx] ?? "").trim();
-          const lastName = String(row[lastNameIdx] ?? "").trim();
+          if (!Array.isArray(row) || row.length > IMPORT_MAX_COLUMNS) {
+            throw new ImportValidationError(`Roster rows cannot exceed ${IMPORT_MAX_COLUMNS} columns`);
+          }
+          const firstName = boundedCell(row[firstNameIdx]);
+          const lastName = boundedCell(row[lastNameIdx]);
 
           if (!firstName && !lastName) continue;
 
-          const providedId = studentIdIdx >= 0 ? String(row[studentIdIdx] ?? "").trim() : "";
+          const providedId = studentIdIdx >= 0 ? boundedCell(row[studentIdIdx]) : "";
           const generatedStudentId =
             providedId && !existingIds.has(providedId)
               ? providedId

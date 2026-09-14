@@ -19,7 +19,7 @@ import {
   studiosTable,
 } from "@workspace/db";
 import { photoStorageCopiesTable } from "@workspace/db/schema";
-import { and, eq, gt, inArray, isNull, isNotNull, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject, getStudioMember } from "../lib/studioAccess";
@@ -34,6 +34,7 @@ import { getUncachableStripeClient } from "../lib/stripeClient";
 import { normalizeMarketingEmail, recordSuccessfulGalleryAccess, markContactOrder } from "../lib/marketing";
 import { deliveryAmount, deliveryOrderQuantity, validateDeliverySelection } from "../lib/deliveryOfferRules";
 import { materializeGroupJpegsForDelivery } from "../lib/groupDeliveryPhotos";
+import { FailureRateLimiter } from "../lib/failureRateLimiter";
 import {
   deliveryTerminology,
   normalizeDeliveryProjectType,
@@ -45,6 +46,9 @@ const DELIVERY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ACCESS_MAX_FAILURES = 5;
 const ACCESS_LOCK_SECONDS = 15 * 60;
+const PUBLIC_ACCESS_WINDOW_MS = 15 * 60 * 1000;
+const publicAccessByIp = new FailureRateLimiter(20, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
+const publicAccessByGallery = new FailureRateLimiter(200, PUBLIC_ACCESS_WINDOW_MS, PUBLIC_ACCESS_WINDOW_MS);
 
 function makeCode(length = 8): string {
   const bytes = randomBytes(length);
@@ -63,51 +67,102 @@ function tokenSecret(): string {
   return secret;
 }
 
-function signToken(payload: { galleryId: number; accessId: number; expiresAt: number }): string {
+type DeliveryTokenPayload = {
+  kind: "delivery";
+  version: 1;
+  galleryId: number;
+  accessId: number;
+  accessVersion: number;
+  issuedAt: number;
+  expiresAt: number;
+};
+
+type MediaTokenPayload = {
+  kind: "delivery-media";
+  version: 1;
+  galleryId: number;
+  accessId: number;
+  accessVersion: number;
+  photoId: number;
+  issuedAt: number;
+  expiresAt: number;
+};
+
+function signedPayload(payload: object): string {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = createHmac("sha256", tokenSecret()).update(encoded).digest("base64url");
   return `${encoded}.${signature}`;
 }
 
-function signMediaToken(payload: { galleryId: number; accessId: number; photoId: number; expiresAt: number }): string {
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return `${encoded}.${createHmac("sha256", tokenSecret()).update(encoded).digest("base64url")}`;
+function signToken(payload: Pick<DeliveryTokenPayload, "galleryId" | "accessId" | "accessVersion" | "expiresAt">): string {
+  return signedPayload({
+    kind: "delivery",
+    version: 1,
+    issuedAt: Math.floor(Date.now() / 1000),
+    ...payload,
+  } satisfies DeliveryTokenPayload);
 }
 
-function verifyMediaToken(token: string, galleryId: number, photoId: number): { accessId: number } | null {
+function signMediaToken(payload: Pick<MediaTokenPayload, "galleryId" | "accessId" | "accessVersion" | "photoId" | "expiresAt">): string {
+  return signedPayload({
+    kind: "delivery-media",
+    version: 1,
+    issuedAt: Math.floor(Date.now() / 1000),
+    ...payload,
+  } satisfies MediaTokenPayload);
+}
+
+function decodeVerifiedPayload(token: string): Record<string, unknown> | null {
   const [encoded, signature] = token.split(".");
-  if (!encoded || !signature) return null;
+  if (!encoded || !signature || token.split(".").length !== 2) return null;
   const expected = createHmac("sha256", tokenSecret()).update(encoded).digest("base64url");
   if (expected.length !== signature.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) return null;
   try {
-    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
-      galleryId: number; accessId: number; photoId: number; expiresAt: number;
-    };
-    if (payload.galleryId !== galleryId || payload.photoId !== photoId || payload.expiresAt < Math.floor(Date.now() / 1000)) return null;
-    return { accessId: payload.accessId };
-  } catch { return null; }
-}
-
-function verifyToken(token: string, galleryId: number): { accessId: number } | null {
-  const [encoded, providedSignature] = token.split(".");
-  if (!encoded || !providedSignature) return null;
-  const expectedSignature = createHmac("sha256", tokenSecret()).update(encoded).digest("base64url");
-  if (
-    expectedSignature.length !== providedSignature.length
-    || !timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(providedSignature))
-  ) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
-      galleryId: number;
-      accessId: number;
-      expiresAt: number;
-    };
-    if (payload.galleryId !== galleryId || payload.expiresAt < Math.floor(Date.now() / 1000)) return null;
-    return { accessId: payload.accessId };
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as unknown;
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : null;
   } catch {
     return null;
   }
+}
+
+function validTokenTimes(payload: Record<string, unknown>, maxTtlSeconds: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  return Number.isSafeInteger(payload.issuedAt)
+    && Number.isSafeInteger(payload.expiresAt)
+    && Number(payload.issuedAt) <= now + 60
+    && Number(payload.expiresAt) > now
+    && Number(payload.expiresAt) - Number(payload.issuedAt) <= maxTtlSeconds;
+}
+
+function verifyMediaToken(token: string, galleryId: number, photoId: number): { accessId: number; accessVersion: number } | null {
+  const payload = decodeVerifiedPayload(token);
+  const keys = payload ? Object.keys(payload).sort().join(",") : "";
+  if (!payload
+    || keys !== "accessId,accessVersion,expiresAt,galleryId,issuedAt,kind,photoId,version"
+    || payload.kind !== "delivery-media"
+    || payload.version !== 1
+    || payload.galleryId !== galleryId
+    || payload.photoId !== photoId
+    || !Number.isSafeInteger(payload.accessId)
+    || !Number.isSafeInteger(payload.accessVersion)
+    || !validTokenTimes(payload, 15 * 60)) return null;
+  return { accessId: Number(payload.accessId), accessVersion: Number(payload.accessVersion) };
+}
+
+function verifyToken(token: string, galleryId: number): { accessId: number; accessVersion: number } | null {
+  const payload = decodeVerifiedPayload(token);
+  const keys = payload ? Object.keys(payload).sort().join(",") : "";
+  if (!payload
+    || keys !== "accessId,accessVersion,expiresAt,galleryId,issuedAt,kind,version"
+    || payload.kind !== "delivery"
+    || payload.version !== 1
+    || payload.galleryId !== galleryId
+    || !Number.isSafeInteger(payload.accessId)
+    || !Number.isSafeInteger(payload.accessVersion)
+    || !validTokenTimes(payload, DELIVERY_TOKEN_TTL_SECONDS)) return null;
+  return { accessId: Number(payload.accessId), accessVersion: Number(payload.accessVersion) };
 }
 
 async function materializeCaptureJpegsForDelivery(projectId: number): Promise<number> {
@@ -396,6 +451,13 @@ router.post("/delivery/:slug/access", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Enter the 8-character access code from your card" });
     return;
   }
+  const ipKey = `ip:${req.ip ?? req.socket.remoteAddress ?? "unknown"}`;
+  const galleryKey = `gallery:${row.gallery.id}`;
+  if (publicAccessByIp.isBlocked(ipKey) || publicAccessByGallery.isBlocked(galleryKey)) {
+    res.setHeader("Retry-After", String(ACCESS_LOCK_SECONDS));
+    res.status(429).json({ error: "Too many access attempts. Try again later." });
+    return;
+  }
 
   const [access] = await db
     .select()
@@ -409,6 +471,8 @@ router.post("/delivery/:slug/access", async (req, res): Promise<void> => {
   // Deliberately use the same response for malformed, unknown, expired, and
   // revoked cards: card ownership must not be enumerable.
   if (!access || !accessIsUsable(access)) {
+    publicAccessByIp.recordFailure(ipKey);
+    publicAccessByGallery.recordFailure(galleryKey);
     if (access) {
       const now = new Date();
       await db.update(deliveryAccessesTable).set({
@@ -450,6 +514,7 @@ router.post("/delivery/:slug/access", async (req, res): Promise<void> => {
   const token = signToken({
     galleryId: row.gallery.id,
     accessId: access.id,
+    accessVersion: access.tokenVersion,
     expiresAt: Math.floor(Date.now() / 1000) + DELIVERY_TOKEN_TTL_SECONDS,
   });
   res.json({ token, expiresIn: DELIVERY_TOKEN_TTL_SECONDS });
@@ -468,7 +533,7 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
   }
 
   const access = await getAccessForToken(row.gallery.id, verified.accessId);
-  if (!access || !accessIsUsable(access.access)) {
+  if (!access || !accessIsUsable(access.access) || access.access.tokenVersion !== verified.accessVersion) {
     res.status(401).json({ error: "Delivery access has been revoked" });
     return;
   }
@@ -518,8 +583,8 @@ router.get("/delivery/:slug/gallery", async (req, res): Promise<void> => {
       id: photo.id,
       fileName: photo.fileName,
       mimeType: photo.mimeType,
-      fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?preview=1&size=thumbnail&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
-      downloadUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?download=1&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
+      fileUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?preview=1&size=thumbnail&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, accessVersion: verified.accessVersion, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
+      downloadUrl: `/api/delivery/${row.gallery.slug}/photos/${photo.id}/file?download=1&mediaToken=${encodeURIComponent(signMediaToken({ galleryId: row.gallery.id, accessId: verified.accessId, accessVersion: verified.accessVersion, photoId: photo.id, expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 }))}`,
     })),
   });
 });
@@ -536,7 +601,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     return;
   }
   const access = await getAccessForToken(row.gallery.id, verified.accessId);
-  if (!access || !accessIsUsable(access.access)) {
+  if (!access || !accessIsUsable(access.access) || access.access.tokenVersion !== verified.accessVersion) {
     res.status(401).json({ error: "Delivery access has been revoked" });
     return;
   }
@@ -741,6 +806,12 @@ router.get("/delivery/:slug/orders/:orderId", async (req, res): Promise<void> =>
     res.status(401).json({ error: "Delivery access has expired" });
     return;
   }
+  const orderAccess = await getAccessForToken(row.gallery.id, verified.accessId);
+  if (!orderAccess || !accessIsUsable(orderAccess.access)
+    || orderAccess.access.tokenVersion !== verified.accessVersion) {
+    res.status(401).json({ error: "Delivery access has expired" });
+    return;
+  }
   const [order] = await db
     .select()
     .from(deliveryOrdersTable)
@@ -770,6 +841,7 @@ router.get("/delivery/:slug/orders/:orderId", async (req, res): Promise<void> =>
         printUrl: `/api/delivery/${row.gallery.slug}/photos/${item.photoId}/file?print=1&mediaToken=${encodeURIComponent(signMediaToken({
           galleryId: row.gallery.id,
           accessId: verified.accessId,
+          accessVersion: verified.accessVersion,
           photoId: item.photoId,
           expiresAt: Math.floor(Date.now() / 1000) + 15 * 60,
         }))}`,
@@ -807,7 +879,8 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     return;
   }
   const tokenAccess = await getAccessForToken(row.gallery.id, verified.accessId);
-  if (!tokenAccess || !accessIsUsable(tokenAccess.access)) {
+  if (!tokenAccess || !accessIsUsable(tokenAccess.access)
+    || tokenAccess.access.tokenVersion !== verified.accessVersion) {
     res.status(401).json({ error: "Delivery access has expired" });
     return;
   }
@@ -1309,6 +1382,7 @@ router.post("/projects/:projectId/delivery/access/:studentId/regenerate", requir
   const [updated] = await db.update(deliveryAccessesTable).set({
     accessCodeHash: hashCode(code), accessCodeEncrypted: encryptStorageValue(code), accessCodeLast4: code.slice(-4),
     failedAttempts: 0, lockedUntil: null, revokedAt: null,
+    tokenVersion: sql`${deliveryAccessesTable.tokenVersion} + 1`,
   }).where(and(eq(deliveryAccessesTable.galleryId, gallery.id), eq(deliveryAccessesTable.studentId, studentId))).returning();
   if (!updated) { res.status(404).json({ error: "Subject access not found" }); return; }
   res.json({ studentId, accessCode: code });
@@ -1320,7 +1394,9 @@ router.patch("/projects/:projectId/delivery/access/:studentId", requireAuth, asy
   const [gallery] = await db.select({ id: deliveryGalleriesTable.id }).from(deliveryGalleriesTable)
     .where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
   if (!gallery) { res.status(404).json({ error: "Delivery gallery not found" }); return; }
-  const update: Record<string, Date | null> = {};
+  const update: Record<string, Date | null | ReturnType<typeof sql>> = {
+    tokenVersion: sql`${deliveryAccessesTable.tokenVersion} + 1`,
+  };
   if (typeof req.body?.revoked === "boolean") update.revokedAt = req.body.revoked ? new Date() : null;
   if (req.body?.expiresAt !== undefined) update.expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt) : null;
   const [updated] = await db.update(deliveryAccessesTable).set(update)

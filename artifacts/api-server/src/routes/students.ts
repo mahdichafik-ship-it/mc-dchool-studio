@@ -222,6 +222,18 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     return;
   }
 
+  let destinationClass: typeof classesTable.$inferSelect | undefined;
+  if (classId !== undefined) {
+    [destinationClass] = await db
+      .select()
+      .from(classesTable)
+      .where(and(eq(classesTable.id, Number(classId)), eq(classesTable.projectId, projectId)));
+    if (!destinationClass) {
+      res.status(400).json({ error: "Class not found in this project" });
+      return;
+    }
+  }
+
   const [updated] = await db
     .update(studentsTable)
     .set({
@@ -247,10 +259,10 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)))
     .returning();
 
-  const [cls] = await db
+  const cls = destinationClass ?? (await db
     .select()
     .from(classesTable)
-    .where(eq(classesTable.id, updated.classId));
+    .where(and(eq(classesTable.id, updated.classId), eq(classesTable.projectId, projectId))))[0];
 
   res.json(formatStudent(updated, cls?.className ?? ""));
 });

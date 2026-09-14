@@ -48,3 +48,4 @@
 - [Desktop upload concurrency](desktop-upload-concurrency.md) — all desktop transfer paths share a three-file limit held through verification and persistence.
 - [Capture reframe editor](capture-reframe-editor.md) — focused non-destructive edits require desktop/cloud crop parity and a finish-time sync barrier.
 - [Gallery contact consent](gallery-contact-consent.md) — required access email identifies gallery visits but never implies promotional consent; campaign audiences fail closed.
+- [SheetJS upstream releases](sheetjs-upstream-releases.md) — maintained SheetJS builds come from the vendor CDN; npm-only scanners can misclassify fixed upstream versions.

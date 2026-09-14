@@ -36,6 +36,8 @@ let inviteCode: string;
 let onboardedStudioId: number;
 let isolatedStudioId: number;
 let isolatedProjectId: number;
+let concurrentInviteId: number;
+let concurrentStudioId: number;
 
 const app = express();
 app.use(express.json());
@@ -69,6 +71,8 @@ before(async () => {
 
 after(async () => {
   if (inviteId) await db.delete(platformInvitesTable).where(eq(platformInvitesTable.id, inviteId));
+  if (concurrentInviteId) await db.delete(platformInvitesTable).where(eq(platformInvitesTable.id, concurrentInviteId));
+  if (concurrentStudioId) await db.delete(studiosTable).where(eq(studiosTable.id, concurrentStudioId));
   if (isolatedStudioId) await db.delete(studiosTable).where(eq(studiosTable.id, isolatedStudioId));
   if (onboardedStudioId) await db.delete(studiosTable).where(eq(studiosTable.id, onboardedStudioId));
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -218,6 +222,44 @@ test("creates one-time owner invites and onboards the invited account", async ()
 
   const members = await db.select().from(studioMembersTable).where(eq(studioMembersTable.studioId, onboardedStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);
+});
+
+test("allows only one studio creation when an invitation is completed concurrently", async () => {
+  const concurrentUserId = `concurrent-owner-${suffix}`;
+  const created = await request(platformOwnerId, "/api/platform/invites", {
+    method: "POST",
+    body: JSON.stringify({ email: `${concurrentUserId}@member.local` }),
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(created.status, 201);
+  const invite = await created.json() as { id: number; code: string };
+  concurrentInviteId = invite.id;
+
+  const completions = await Promise.all([
+    request(concurrentUserId, `/api/platform/invites/${invite.code}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Concurrent Studio" }),
+      headers: { "Content-Type": "application/json" },
+    }),
+    request(concurrentUserId, `/api/platform/invites/${invite.code}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Concurrent Studio" }),
+      headers: { "Content-Type": "application/json" },
+    }),
+  ]);
+  assert.deepEqual(completions.map((response) => response.status).sort(), [201, 409]);
+
+  const createdStudios = await db
+    .select()
+    .from(studiosTable)
+    .where(eq(studiosTable.createdByUserId, concurrentUserId));
+  assert.equal(createdStudios.length, 1);
+  concurrentStudioId = createdStudios[0].id;
+  const members = await db
+    .select()
+    .from(studioMembersTable)
+    .where(eq(studioMembersTable.studioId, concurrentStudioId));
+  assert.deepEqual(members.map((member) => [member.userId, member.role]), [[concurrentUserId, "owner"]]);
 });
 
 test("keeps platform storage active while a studio-owned connection is pending", async () => {

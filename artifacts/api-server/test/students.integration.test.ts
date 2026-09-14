@@ -25,6 +25,7 @@ let baseUrl: string;
 let projectId: number;
 let classId: number;
 let importedClassId: number;
+let foreignClassId: number;
 
 const app = express();
 app.use(express.json());
@@ -75,6 +76,19 @@ before(async () => {
     .values({ projectId, className: `Class ${suffix}` })
     .returning({ id: classesTable.id });
   classId = cls.id;
+  const [foreignProject] = await db
+    .insert(projectsTable)
+    .values({
+      userId,
+      studioId: studio.id,
+      schoolName: `Foreign students project ${suffix}`,
+    })
+    .returning({ id: projectsTable.id });
+  const [foreignClass] = await db
+    .insert(classesTable)
+    .values({ projectId: foreignProject.id, className: `Foreign class ${suffix}` })
+    .returning({ id: classesTable.id });
+  foreignClassId = foreignClass.id;
 
   server = createServer(app);
   server.listen(0, "127.0.0.1");
@@ -181,6 +195,28 @@ test("normalizes blank contact values and rejects invalid primary or secondary e
     body: JSON.stringify({ classId, firstName: "Invalid", lastName: "Secondary", secondaryEmail: "not-an-email" }),
   });
   assert.equal(invalidSecondary.status, 400);
+});
+
+test("rejects moving a student into a class from another project", async () => {
+  const createdResponse = await request(`/api/projects/${projectId}/students`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId, firstName: "Project", lastName: "Boundary" }),
+  });
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json() as { id: number; classId: number };
+
+  const response = await request(`/api/projects/${projectId}/students/${created.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ classId: foreignClassId }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json() as { error: string }).error, "Class not found in this project");
+
+  const [persisted] = await db.select().from(studentsTable).where(eq(studentsTable.id, created.id));
+  assert.equal(persisted.classId, classId);
+  assert.equal(persisted.projectId, projectId);
 });
 
 test("maps import contact columns and leaves omitted legacy fields nullable", async () => {

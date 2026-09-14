@@ -54,6 +54,7 @@ export const deliveryAccessesTable = pgTable("delivery_accesses", {
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   failedAttempts: integer("failed_attempts").notNull().default(0),
+  tokenVersion: integer("token_version").notNull().default(1),
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
   lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

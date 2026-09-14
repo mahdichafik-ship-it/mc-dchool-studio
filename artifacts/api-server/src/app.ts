@@ -13,14 +13,17 @@ import router from "./routes";
 import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger";
 import { WebhookHandlers } from "./lib/webhookHandlers";
+import { corsOrigin, requireTrustedMutationOrigin } from "./lib/trustedOrigins";
 
 const app = express();
+app.set("trust proxy", 1);
 
 app.use(pinoHttp({ logger }));
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(cors({ credentials: true, origin: true }));
+app.use(cors({ credentials: true, origin: corsOrigin }));
+app.use(requireTrustedMutationOrigin);
 
 app.post(["/api/stripe/webhook", "/api/stripe/webhook/:uuid"], express.raw({ type: "application/json" }), async (req, res) => {
   const signature = req.headers["stripe-signature"];

@@ -162,7 +162,17 @@ export default function ProjectImport() {
     try {
       // Re-parse the full file client-side to get all rows
       const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const workbook = XLSX.read(arrayBuffer, {
+        type: 'array',
+        cellFormula: false,
+        cellHTML: false,
+        cellNF: false,
+        cellStyles: false,
+        sheetRows: 20_002,
+      });
+      if (workbook.SheetNames.length > 100) {
+        throw new Error('Roster files cannot contain more than 100 sheets.');
+      }
       
       const sheetsData: SheetMapping[] = [];
 
@@ -174,7 +184,15 @@ export default function ProjectImport() {
         if (!worksheet) continue;
         
         // Convert to array of arrays
-        const rawData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: "" });
+        const rawData = XLSX.utils.sheet_to_json<any[]>(worksheet, {
+          header: 1,
+          defval: "",
+          blankrows: false,
+          raw: false,
+        });
+        if (rawData.length > 20_001 || rawData.some((row) => row.length > 250)) {
+          throw new Error('Each roster sheet is limited to 20,000 rows and 250 columns.');
+        }
         
         // Find header row (using the headers from preview to locate it)
         const headerRowIndex = rawData.findIndex(row => 
@@ -182,7 +200,13 @@ export default function ProjectImport() {
         );
         
         const startRow = headerRowIndex !== -1 ? headerRowIndex + 1 : 1;
-        const rows = rawData.slice(startRow).map(r => r.map(String));
+        const rows = rawData.slice(startRow).map((row) => row.map((cell) => {
+          const value = String(cell ?? '').trim();
+          if (value.length > 2_000) {
+            throw new Error('Roster cells cannot exceed 2,000 characters.');
+          }
+          return value;
+        }));
         const map = mappings[sheetPreview.name];
 
         sheetsData.push({

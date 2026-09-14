@@ -552,9 +552,9 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
       .where(and(eq(studioMembersTable.userId, userId), eq(studioMembersTable.status, "active")))
       .limit(1);
 
-    let studio;
+    let existingStudio: typeof studiosTable.$inferSelect | undefined;
     if (existingMember) {
-      const [existingStudio] = await tx.select().from(studiosTable).where(eq(studiosTable.id, existingMember.studioId)).limit(1);
+      [existingStudio] = await tx.select().from(studiosTable).where(eq(studiosTable.id, existingMember.studioId)).limit(1);
       if (
         existingMember.role !== "owner" ||
         !existingStudio ||
@@ -562,6 +562,23 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
       ) {
         return { error: "This account already belongs to another studio" as const };
       }
+    }
+
+    const [claimedInvite] = await tx
+      .update(platformInvitesTable)
+      .set({
+        status: "accepted",
+        acceptedByUserId: userId,
+        acceptedAt: new Date(),
+      })
+      .where(and(eq(platformInvitesTable.id, invite.id), eq(platformInvitesTable.status, "pending")))
+      .returning({ id: platformInvitesTable.id });
+    if (!claimedInvite) {
+      return { error: "This invitation is already accepted or cancelled" as const };
+    }
+
+    let studio;
+    if (existingMember && existingStudio) {
       [studio] = await tx
         .update(studiosTable)
         .set({
@@ -590,15 +607,6 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
         role: "owner",
       });
     }
-
-    await tx
-      .update(platformInvitesTable)
-      .set({
-        status: "accepted",
-        acceptedByUserId: userId,
-        acceptedAt: new Date(),
-      })
-      .where(and(eq(platformInvitesTable.id, invite.id), eq(platformInvitesTable.status, "pending")));
     return { studio };
   });
 

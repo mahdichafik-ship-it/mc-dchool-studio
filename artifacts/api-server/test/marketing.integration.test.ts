@@ -41,6 +41,8 @@ let studioId: number;
 let otherStudioId: number;
 let galleryId: number;
 let accessId: number;
+let projectId: number;
+let studentId: number;
 
 process.env.SESSION_SECRET = "marketing-integration-secret-that-is-at-least-32-bytes";
 process.env.RESEND_API_KEY = "re_test_marketing";
@@ -118,6 +120,7 @@ before(async () => {
     schoolName: `Marketing Project ${suffix}`,
     projectType: "corporate",
   }).returning({ id: projectsTable.id });
+  projectId = project.id;
   const [studentClass] = await db.insert(classesTable).values({
     projectId: project.id,
     className: `Marketing Department ${suffix}`,
@@ -129,6 +132,7 @@ before(async () => {
     lastName: "Contact",
     generatedStudentId: `MKT-${suffix}`,
   }).returning({ id: studentsTable.id });
+  studentId = student.id;
   const [gallery] = await db.insert(deliveryGalleriesTable).values({
     projectId: project.id,
     studioId,
@@ -362,4 +366,68 @@ test("template CRUD returns direct OpenAPI objects and campaign previews only el
   assert.equal(storedUncertainCampaign.sentCount, 0);
   resendResponseMode = "success";
   assert(uncertainContact.id);
+});
+
+test("regenerating an access code immediately invalidates existing delivery tokens", async () => {
+  const slug = `marketing-${suffix}`;
+  const granted = await request("public", `/api/delivery/${slug}/access`, {
+    method: "POST",
+    body: JSON.stringify({ code: accessCode, email: "token-version@example.com" }),
+  });
+  assert.equal(granted.status, 200);
+  const oldToken = (await json<{ token: string }>(granted)).token;
+  const before = await request("public", `/api/delivery/${slug}/gallery`, {
+    headers: { "x-delivery-token": oldToken },
+  });
+  assert.equal(before.status, 200);
+
+  const regenerated = await request(ownerUserId, `/api/projects/${projectId}/delivery/access/${studentId}/regenerate`, {
+    method: "POST",
+  });
+  assert.equal(regenerated.status, 200);
+  const newCode = (await json<{ accessCode: string }>(regenerated)).accessCode;
+
+  const expired = await request("public", `/api/delivery/${slug}/gallery`, {
+    headers: { "x-delivery-token": oldToken },
+  });
+  assert.equal(expired.status, 401);
+  const refreshed = await request("public", `/api/delivery/${slug}/access`, {
+    method: "POST",
+    body: JSON.stringify({ code: newCode, email: "token-version@example.com" }),
+  });
+  assert.equal(refreshed.status, 200);
+  const refreshedToken = (await json<{ token: string }>(refreshed)).token;
+
+  const revoked = await request(ownerUserId, `/api/projects/${projectId}/delivery/access/${studentId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ revoked: true }),
+  });
+  assert.equal(revoked.status, 200);
+  assert.equal((await request("public", `/api/delivery/${slug}/gallery`, {
+    headers: { "x-delivery-token": refreshedToken },
+  })).status, 401);
+
+  const restored = await request(ownerUserId, `/api/projects/${projectId}/delivery/access/${studentId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ revoked: false }),
+  });
+  assert.equal(restored.status, 200);
+  assert.equal((await request("public", `/api/delivery/${slug}/gallery`, {
+    headers: { "x-delivery-token": refreshedToken },
+  })).status, 401);
+});
+
+test("throttles repeated unknown access-code attempts", async () => {
+  const slug = `marketing-${suffix}`;
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    response = await request("public", `/api/delivery/${slug}/access`, {
+      method: "POST",
+      body: JSON.stringify({ code: `BAD${String(attempt).padStart(5, "0")}`, email: "limited@example.com" }),
+    });
+    if (response.status === 429) break;
+  }
+  assert(response);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "900");
 });

@@ -98,7 +98,7 @@ export function DeliveryTab({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b bg-white px-6 pt-6">
+      <div className="border-b bg-white px-4 pt-5 sm:px-6 sm:pt-6">
         <div className="flex items-center gap-3 pb-6">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-100 text-teal-700">
             <LockKeyhole className="size-5" />
@@ -111,8 +111,8 @@ export function DeliveryTab({
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="w-full justify-start rounded-none border-b-0 bg-transparent p-0">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full overflow-x-auto">
+          <TabsList className="h-auto min-w-max justify-start rounded-none border-b-0 bg-transparent p-0">
             <TabsTrigger 
               value="overview" 
               className="relative rounded-none border-b-2 border-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-slate-500 shadow-none data-[state=active]:border-teal-600 data-[state=active]:text-teal-700 data-[state=active]:shadow-none"
@@ -135,7 +135,7 @@ export function DeliveryTab({
         </Tabs>
       </div>
 
-      <div className="flex-1 overflow-auto bg-slate-50 p-6">
+      <div className="flex-1 overflow-auto bg-slate-50 p-4 sm:p-6">
         {activeTab === "overview" && (
           <OverviewTab projectId={projectId} />
         )}

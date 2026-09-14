@@ -162,13 +162,21 @@ test("encrypts storage credentials with authenticated encryption", () => {
 test("creates one-time owner invites and onboards the invited account", async () => {
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
+    body: JSON.stringify({ email: inviteeEmail }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
-  const invite = await created.json() as { id: number; code: string };
+  const invite = await created.json() as { id: number; code: string; createdAt: string };
+  inviteId = invite.id;
+  inviteCode = invite.code;
+  assert.equal(sentInviteEmails.length, 1);
+  assert.equal(sentInviteEmails[0]?.to, inviteeEmail);
+  assert.match(sentInviteEmails[0]?.invitationUrl ?? "", /\/studio-invite\//);
+  assert.equal(sentInviteEmails[0]?.invitationUrl.includes(invite.code), true);
+  assert.equal(sentInviteEmails[0]?.expiresAt.getTime(), new Date(invite.createdAt).getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const afterCreate = await request(platformOwnerId, "/api/platform");
+  assert.equal(afterCreate.status, 200);
   const duplicate = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
     body: JSON.stringify({ email: inviteeEmail.toUpperCase() }),
@@ -194,6 +202,7 @@ test("creates one-time owner invites and onboards the invited account", async ()
   onboardedStudioId = studio.id;
 
   const afterOnboarding = await request(platformOwnerId, "/api/platform");
+  assert.equal(afterOnboarding.status, 200);
   const repeated = await request(inviteeId, `/api/platform/invites/${inviteCode}/complete`, {
     method: "POST",
     body: JSON.stringify({ name: "Should Not Replace Studio" }),
@@ -235,6 +244,7 @@ test("creates one-time owner invites and onboards the invited account", async ()
     }),
     headers: { "Content-Type": "application/json" },
   });
+  assert.equal(updated.status, 200);
   const updatedStudio = await updated.json() as {
     studio: {
       name: string;
@@ -273,7 +283,7 @@ test("creates one-time owner invites and onboards the invited account", async ()
   const members = await db
     .select()
     .from(studioMembersTable)
-    .where(eq(studioMembersTable.studioId, concurrentStudioId));
+    .where(eq(studioMembersTable.studioId, onboardedStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);
 });
 
@@ -281,13 +291,14 @@ test("allows only one studio creation when an invitation is completed concurrent
   const concurrentUserId = `concurrent-owner-${suffix}`;
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
+    body: JSON.stringify({ email: `${concurrentUserId}@member.local` }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
   const invite = await created.json() as { id: number; code: string };
 
   const afterCreate = await request(platformOwnerId, "/api/platform");
+  assert.equal(afterCreate.status, 200);
   concurrentInviteId = invite.id;
 
   const completions = await Promise.all([

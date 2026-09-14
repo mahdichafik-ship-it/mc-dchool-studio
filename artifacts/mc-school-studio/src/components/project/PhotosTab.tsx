@@ -145,7 +145,7 @@ export function PhotosTab({ projectId, isCorporate }: { projectId: number; isCor
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-5">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-5 sm:px-6">
         <div>
           <h3 className="text-lg font-semibold text-slate-900">Capture review</h3>
           <p className="mt-1 text-sm text-slate-500">
@@ -162,14 +162,14 @@ export function PhotosTab({ projectId, isCorporate }: { projectId: number; isCor
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 border-b border-slate-200 bg-slate-50/70 px-6 py-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-4 sm:grid-cols-4 sm:px-6">
         <Summary label="Paired" value={review.totals.complete} tone="emerald" />
         <Summary label="JPEG only" value={review.totals.jpegOnly} tone="amber" />
         <Summary label="RAW only" value={review.totals.rawOnly} tone="slate" />
         <Summary label="Total" value={review.totals.captures} tone="teal" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+      <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
         <div className="space-y-3">
           {review.students.map((student) => {
             const isExpanded = expanded.has(student.studentId);

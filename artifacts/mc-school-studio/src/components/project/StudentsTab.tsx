@@ -203,8 +203,8 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row gap-4 justify-between bg-white flex-shrink-0">
-        <div className="flex items-center gap-3 flex-1">
-          <div className="relative w-full max-w-xs">
+        <div className="flex flex-col gap-3 flex-1 sm:flex-row sm:items-center">
+          <div className="relative w-full sm:max-w-xs">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
             <Input 
               placeholder={isCorporate ? "Search employees..." : "Search students..."}
@@ -214,7 +214,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
             />
           </div>
           <Select value={classFilter} onValueChange={setClassFilter}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue placeholder={isCorporate ? "All Departments" : "All Classes"} />
             </SelectTrigger>
@@ -263,7 +263,8 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
       </div>
 
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="flex max-h-[calc(100dvh-1rem)] max-w-2xl flex-col overflow-hidden p-0 sm:max-h-[90dvh]">
+          <div className="overflow-y-auto px-5 pt-5 sm:px-6 sm:pt-6">
           <DialogHeader>
             <DialogTitle>{editingStudent ? 'Edit' : 'Add'} {isCorporate ? 'Employee' : 'Student'}</DialogTitle>
             <DialogDescription>
@@ -271,7 +272,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onFormSubmit)} className="space-y-4 py-4">
+            <form id="student-form" onSubmit={form.handleSubmit(onFormSubmit)} className="space-y-4 py-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
@@ -358,7 +359,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="phone"
@@ -423,14 +424,15 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
                 </div>
               )}
 
-              <DialogFooter className="sticky bottom-0 z-10 mt-6 border-t border-slate-200 bg-white py-4">
-                <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancel</Button>
-                <Button type="submit" className="bg-teal-600 hover:bg-teal-700" disabled={createStudent.isPending || updateStudent.isPending}>
-                  {editingStudent ? 'Save Changes' : `Add ${isCorporate ? 'Employee' : 'Student'}`}
-                </Button>
-              </DialogFooter>
             </form>
           </Form>
+          </div>
+          <DialogFooter className="shrink-0 border-t border-slate-200 bg-white px-5 py-4 sm:px-6">
+            <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancel</Button>
+            <Button type="submit" form="student-form" className="bg-teal-600 hover:bg-teal-700" disabled={createStudent.isPending || updateStudent.isPending}>
+              {editingStudent ? 'Save Changes' : `Add ${isCorporate ? 'Employee' : 'Student'}`}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -452,7 +454,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
       </Dialog>
 
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm text-left">
+        <table className="min-w-[760px] w-full text-sm text-left">
           <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
             <tr>
               <th className="px-4 py-3 w-12">

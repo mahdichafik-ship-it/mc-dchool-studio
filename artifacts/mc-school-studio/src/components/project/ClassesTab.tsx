@@ -78,12 +78,12 @@ export function ClassesTab({ projectId, isCorporate }: { projectId: number, isCo
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white flex-shrink-0">
+      <div className="p-4 border-b border-slate-100 flex flex-col gap-3 bg-white flex-shrink-0 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="font-semibold text-slate-900">Manage {isCorporate ? 'Departments' : 'Classes'}</h2>
         
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="bg-teal-600 hover:bg-teal-700">
+            <Button size="sm" className="w-full bg-teal-600 hover:bg-teal-700 sm:w-auto">
               <Plus className="w-4 h-4 mr-2" /> Add {isCorporate ? 'Department' : 'Class'}
             </Button>
           </DialogTrigger>
@@ -162,7 +162,7 @@ export function ClassesTab({ projectId, isCorporate }: { projectId: number, isCo
                 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant="ghost" size="icon" className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                       <MoreHorizontal className="w-4 h-4" />
                     </Button>
                   </DropdownMenuTrigger>

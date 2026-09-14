@@ -2,7 +2,7 @@ import React from 'react';
 import { useRoute } from 'wouter';
 import { useGetProject, getGetProjectQueryKey, useUpdateProject } from '@workspace/api-client-react';
 import { Link } from 'wouter';
-import { ArrowLeft, Edit2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
@@ -30,7 +30,7 @@ export default function ProjectOverview() {
 
   if (isLoading) {
     return (
-      <div className="flex-1 overflow-auto bg-slate-50 p-8">
+      <div className="flex-1 overflow-auto bg-slate-50 p-4 sm:p-8">
         <div className="max-w-6xl mx-auto space-y-6">
           <Skeleton className="w-32 h-4 mb-4" />
           <Skeleton className="w-64 h-10 mb-2" />
@@ -55,16 +55,16 @@ export default function ProjectOverview() {
 
   return (
     <div className="flex-1 overflow-auto bg-slate-50 flex flex-col min-h-0">
-      <div className="px-8 py-6 bg-white border-b border-slate-200 flex-shrink-0">
+      <div className="px-4 py-5 sm:px-8 sm:py-6 bg-white border-b border-slate-200 flex-shrink-0">
         <div className="max-w-6xl mx-auto">
           <Link href="/dashboard" className="inline-flex items-center text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors mb-3">
             <ArrowLeft className="w-4 h-4 mr-1" />
             Back to Dashboard
           </Link>
-          <div className="flex items-end justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-900">{project.schoolName}</h1>
-              <p className="text-slate-500 mt-1 flex items-center gap-3">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
+              <h1 className="break-words text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{project.schoolName}</h1>
+              <p className="text-slate-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm sm:text-base">
                 {project.photoDate && (
                   <span>{isCorporate ? 'Headshot Day' : 'Photo Day'}: {format(new Date(project.photoDate), 'MMM d, yyyy')}</span>
                 )}
@@ -75,7 +75,7 @@ export default function ProjectOverview() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Link href={`/projects/${project.id}/import`} className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-teal-600 text-white hover:bg-teal-700 h-10 px-4 py-2">
+              <Link href={`/projects/${project.id}/import`} className="inline-flex w-full items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-teal-600 text-white hover:bg-teal-700 h-10 px-4 py-2 sm:w-auto">
                 Import Data
               </Link>
             </div>
@@ -83,10 +83,11 @@ export default function ProjectOverview() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-3 sm:p-8">
         <div className="max-w-6xl mx-auto h-full">
           <Tabs defaultValue="students" className="h-full flex flex-col">
-            <TabsList className="bg-slate-100/50 p-1 border border-slate-200 w-full justify-start rounded-lg self-start">
+            <div className="-mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
+            <TabsList className="h-auto min-w-max bg-slate-100/50 p-1 border border-slate-200 justify-start rounded-lg self-start">
               <TabsTrigger value="students" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">{isCorporate ? 'Employees' : 'Students'}</TabsTrigger>
               <TabsTrigger value="classes" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">{isCorporate ? 'Departments' : 'Classes'}</TabsTrigger>
               <TabsTrigger value="groups" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Groups</TabsTrigger>
@@ -96,9 +97,10 @@ export default function ProjectOverview() {
               <TabsTrigger value="exports" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Exports</TabsTrigger>
               <TabsTrigger value="info" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-teal-700">Project Info</TabsTrigger>
             </TabsList>
+            </div>
 
-            <div className="mt-6 flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              <TabsContent value="info" className="m-0 p-6 flex-1 overflow-auto">
+            <div className="mt-3 flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col sm:mt-6">
+              <TabsContent value="info" className="m-0 p-4 sm:p-6 flex-1 overflow-auto">
                 <InfoTab project={project} />
               </TabsContent>
               <TabsContent value="classes" className="m-0 p-0 flex-1 overflow-auto flex flex-col">
@@ -119,7 +121,7 @@ export default function ProjectOverview() {
               <TabsContent value="delivery" className="m-0 p-0 flex-1 overflow-auto">
                 <DeliveryTab projectId={project.id} projectName={project.schoolName} isCorporate={isCorporate} />
               </TabsContent>
-              <TabsContent value="exports" className="m-0 p-6 flex-1 overflow-auto">
+              <TabsContent value="exports" className="m-0 p-4 sm:p-6 flex-1 overflow-auto">
                 <ExportsTab project={project} isCorporate={isCorporate} />
               </TabsContent>
             </div>

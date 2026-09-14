@@ -36,7 +36,7 @@ export const photoStorageCopiesTable = pgTable(
     stagingObjectKey: text("staging_object_key"),
     providerObjectId: text("provider_object_id"),
     state: text("state", {
-      enum: ["pending", "uploading", "ready", "failed"],
+      enum: ["pending", "uploading", "cleaning", "ready", "failed"],
     })
       .notNull()
       .default("pending"),
@@ -45,6 +45,7 @@ export const photoStorageCopiesTable = pgTable(
     sha256: text("sha256"),
     etag: text("etag"),
     attemptCount: integer("attempt_count").notNull().default(0),
+    cleanupAttemptCount: integer("cleanup_attempt_count").notNull().default(0),
     nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
     lastError: text("last_error"),

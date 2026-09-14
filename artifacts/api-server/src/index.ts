@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { cleanupExpiredR2StagingUploads } from "./lib/r2UploadCopies";
 import { recoverPhotoDeleteBackups } from "./routes/photos";
 import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync, getUncachableStripeClient } from "./lib/stripeClient";
@@ -129,4 +130,14 @@ app.listen(port, (err) => {
     });
   }, 60_000);
   interval.unref();
+
+  void cleanupExpiredR2StagingUploads().catch((error) => {
+    logger.warn({ err: error }, "Initial R2 staging cleanup failed");
+  });
+  const r2CleanupInterval = setInterval(() => {
+    void cleanupExpiredR2StagingUploads().catch((error) => {
+      logger.warn({ err: error }, "Periodic R2 staging cleanup failed");
+    });
+  }, 15 * 60_000);
+  r2CleanupInterval.unref();
 });

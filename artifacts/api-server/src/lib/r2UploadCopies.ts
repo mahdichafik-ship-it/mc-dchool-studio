@@ -18,7 +18,7 @@ import {
   studiosTable,
   type PhotoStorageCopy,
 } from "@workspace/db/schema";
-import { and, eq, or } from "drizzle-orm";
+import { and, asc, eq, isNull, like, lt, lte, or } from "drizzle-orm";
 import {
   canonicalProjectFolderName,
   canonicalStoragePathName,
@@ -55,6 +55,17 @@ export interface R2CopyUpload extends R2PutUpload {
   copyId: number;
   objectKey: string;
   alreadyVerified: boolean;
+}
+
+const R2_STAGING_EXPIRY_MS = 60 * 60 * 1_000;
+const R2_CLEANUP_LEASE_MS = 10 * 60 * 1_000;
+const R2_CLEANUP_BATCH_SIZE = 25;
+const R2_CLEANUP_MAX_BACKOFF_MS = 6 * 60 * 60 * 1_000;
+
+export interface R2StagingCleanupResult {
+  inspected: number;
+  deleted: number;
+  failed: number;
 }
 
 export async function sha256File(filePath: string): Promise<string> {
@@ -359,7 +370,49 @@ export async function createR2CopyUpload(input: {
     if (!copy.stagingObjectKey) {
       throw new Error("R2 upload attempt has no staging object");
     }
-    return signedUpload(copy.stagingObjectKey);
+    const retryAt = new Date();
+    const [refreshed] = await db
+      .update(photoStorageCopiesTable)
+      .set({
+        lastAttemptAt: retryAt,
+        nextRetryAt: null,
+        lastError: null,
+        updatedAt: retryAt,
+      })
+      .where(and(
+        eq(photoStorageCopiesTable.id, copy.id),
+        eq(photoStorageCopiesTable.state, "uploading"),
+        eq(photoStorageCopiesTable.stagingObjectKey, copy.stagingObjectKey),
+      ))
+      .returning();
+    if (!refreshed) {
+      throw new Error("R2 upload changed concurrently; retry with a fresh session");
+    }
+    return signedUpload(refreshed.stagingObjectKey!);
+  }
+
+  if (copy.state === "failed" && copy.stagingObjectKey) {
+    const retryAt = new Date();
+    const [retried] = await db
+      .update(photoStorageCopiesTable)
+      .set({
+        state: "uploading",
+        attemptCount: copy.attemptCount + 1,
+        lastAttemptAt: retryAt,
+        nextRetryAt: null,
+        lastError: null,
+        updatedAt: retryAt,
+      })
+      .where(and(
+        eq(photoStorageCopiesTable.id, copy.id),
+        eq(photoStorageCopiesTable.state, "failed"),
+        eq(photoStorageCopiesTable.stagingObjectKey, copy.stagingObjectKey),
+      ))
+      .returning();
+    if (!retried) {
+      throw new Error("R2 upload changed concurrently; retry with a fresh session");
+    }
+    return signedUpload(retried.stagingObjectKey!);
   }
 
   const stagingObjectKey =
@@ -442,6 +495,7 @@ export async function createR2CopyUpload(input: {
  * racing on the same server-owned upload attempt.
  */
 export interface VerifyR2CopyTestHooks {
+  afterVerificationClaimed?: (copy: PhotoStorageCopy) => void | Promise<void>;
   afterCandidateHashed?: (candidate: {
     objectKey: string;
     sha256: string;
@@ -462,6 +516,30 @@ export async function verifyR2Copy(
     });
   }
   const stagingObjectKey = copy.stagingObjectKey;
+  const verificationStartedAt = new Date();
+  const [claimedCopy] = await db
+    .update(photoStorageCopiesTable)
+    .set({
+      lastAttemptAt: verificationStartedAt,
+      nextRetryAt: null,
+      updatedAt: verificationStartedAt,
+    })
+    .where(and(
+      eq(photoStorageCopiesTable.id, copy.id),
+      eq(photoStorageCopiesTable.destination, "r2"),
+      eq(photoStorageCopiesTable.state, "uploading"),
+      eq(photoStorageCopiesTable.stagingObjectKey, stagingObjectKey),
+    ))
+    .returning();
+  if (!claimedCopy) {
+    throw Object.assign(
+      new Error("R2 upload changed before verification could start"),
+      { code: "R2_UPLOAD_NOT_VERIFIED" },
+    );
+  }
+  copy = claimedCopy;
+  await testHooks.afterVerificationClaimed?.(claimedCopy);
+
   const metadata = await headR2Object(stagingObjectKey);
   let actualSha256: string | null = null;
   let actualSize = 0;
@@ -566,4 +644,129 @@ export async function verifyR2Copy(
   }
   await deleteR2Object(stagingObjectKey).catch(() => undefined);
   return ready;
+}
+
+export async function cleanupExpiredR2StagingUploads(options: {
+  now?: Date;
+  expiryMs?: number;
+  leaseMs?: number;
+  batchSize?: number;
+  deleteObject?: (objectKey: string) => Promise<void>;
+} = {}): Promise<R2StagingCleanupResult> {
+  if (!getR2Config()) return { inspected: 0, deleted: 0, failed: 0 };
+
+  const now = options.now ?? new Date();
+  const expiryMs = Math.max(15 * 60 * 1_000, options.expiryMs ?? R2_STAGING_EXPIRY_MS);
+  const leaseMs = Math.max(60_000, options.leaseMs ?? R2_CLEANUP_LEASE_MS);
+  const batchSize = Math.max(1, Math.min(100, options.batchSize ?? R2_CLEANUP_BATCH_SIZE));
+  const expiredBefore = new Date(now.getTime() - expiryMs);
+  const leaseExpiredBefore = new Date(now.getTime() - leaseMs);
+  const deleteObject = options.deleteObject ?? deleteR2Object;
+  const candidates = await db
+    .select()
+    .from(photoStorageCopiesTable)
+    .where(and(
+      eq(photoStorageCopiesTable.destination, "r2"),
+      like(photoStorageCopiesTable.stagingObjectKey, "staging/%"),
+      or(
+        and(
+          or(
+            eq(photoStorageCopiesTable.state, "uploading"),
+            eq(photoStorageCopiesTable.state, "failed"),
+          ),
+          lt(photoStorageCopiesTable.lastAttemptAt, expiredBefore),
+        ),
+        and(
+          eq(photoStorageCopiesTable.state, "cleaning"),
+          lt(photoStorageCopiesTable.updatedAt, leaseExpiredBefore),
+        ),
+      ),
+      or(
+        isNull(photoStorageCopiesTable.nextRetryAt),
+        lte(photoStorageCopiesTable.nextRetryAt, now),
+      ),
+    ))
+    .orderBy(asc(photoStorageCopiesTable.lastAttemptAt))
+    .limit(batchSize);
+
+  const result: R2StagingCleanupResult = {
+    inspected: candidates.length,
+    deleted: 0,
+    failed: 0,
+  };
+
+  for (const candidate of candidates) {
+    const stagingObjectKey = candidate.stagingObjectKey;
+    if (!stagingObjectKey?.startsWith("staging/")) continue;
+
+    const [claimed] = await db
+      .update(photoStorageCopiesTable)
+      .set({ state: "cleaning", updatedAt: now })
+      .where(and(
+        eq(photoStorageCopiesTable.id, candidate.id),
+        eq(photoStorageCopiesTable.stagingObjectKey, stagingObjectKey),
+        or(
+          and(
+            or(
+              eq(photoStorageCopiesTable.state, "uploading"),
+              eq(photoStorageCopiesTable.state, "failed"),
+            ),
+            lt(photoStorageCopiesTable.lastAttemptAt, expiredBefore),
+          ),
+          and(
+            eq(photoStorageCopiesTable.state, "cleaning"),
+            lt(photoStorageCopiesTable.updatedAt, leaseExpiredBefore),
+          ),
+        ),
+        or(
+          isNull(photoStorageCopiesTable.nextRetryAt),
+          lte(photoStorageCopiesTable.nextRetryAt, now),
+        ),
+      ))
+      .returning();
+    if (!claimed) continue;
+
+    try {
+      await deleteObject(stagingObjectKey);
+      await db
+        .update(photoStorageCopiesTable)
+        .set({
+          state: "pending",
+          stagingObjectKey: null,
+          cleanupAttemptCount: 0,
+          nextRetryAt: null,
+          lastError: null,
+          updatedAt: now,
+        })
+        .where(and(
+          eq(photoStorageCopiesTable.id, claimed.id),
+          eq(photoStorageCopiesTable.state, "cleaning"),
+          eq(photoStorageCopiesTable.stagingObjectKey, stagingObjectKey),
+        ));
+      result.deleted += 1;
+    } catch (error) {
+      const cleanupAttemptCount = claimed.cleanupAttemptCount + 1;
+      const exponent = Math.min(cleanupAttemptCount - 1, 6);
+      const backoffMs = Math.min(5 * 60 * 1_000 * (2 ** exponent), R2_CLEANUP_MAX_BACKOFF_MS);
+      await db
+        .update(photoStorageCopiesTable)
+        .set({
+          state: "failed",
+          cleanupAttemptCount,
+          nextRetryAt: new Date(now.getTime() + backoffMs),
+          lastError: `R2 staging cleanup failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`.slice(0, 1_000),
+          updatedAt: now,
+        })
+        .where(and(
+          eq(photoStorageCopiesTable.id, claimed.id),
+          eq(photoStorageCopiesTable.state, "cleaning"),
+          eq(photoStorageCopiesTable.stagingObjectKey, stagingObjectKey),
+        ));
+      result.failed += 1;
+    }
+  }
+
+  return result;
 }

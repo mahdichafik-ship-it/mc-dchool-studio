@@ -12,6 +12,8 @@ import {
   studiosTable,
 } from "@workspace/db";
 import {
+  cleanupExpiredR2StagingUploads,
+  createR2CopyUpload,
   readableR2CandidateKey,
   readableR2ObjectKey,
   verifyR2Copy,
@@ -213,6 +215,18 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
     }).returning();
 
     const verifierA = verifyR2Copy(copy, {
+      afterVerificationClaimed: async () => {
+        const cleanupWhileVerifying = await cleanupExpiredR2StagingUploads({
+          now: new Date(),
+          deleteObject: async (key) => {
+            deletedKeys.push(key);
+          },
+        });
+        assert.deepEqual(
+          cleanupWhileVerifying,
+          { inspected: 0, deleted: 0, failed: 0 },
+        );
+      },
       afterCandidateHashed: async () => {
         notifyVerifierAPaused();
         await verifierAResumed;
@@ -263,6 +277,185 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+    if (studioId !== undefined) {
+      await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
+    }
+  }
+});
+
+test("expired staging cleanup preserves active and verified objects and retries failures", async () => {
+  const originalAccountId = process.env.R2_ACCOUNT_ID;
+  const originalAccessKey = process.env.R2_ACCESS_KEY_ID;
+  const originalSecret = process.env.R2_SECRET_ACCESS_KEY;
+  const originalBucket = process.env.R2_BUCKET_NAME;
+  const suffix = `${process.pid}-${Date.now()}`;
+  const now = new Date("2026-09-14T12:00:00.000Z");
+  let studioId: number | undefined;
+
+  process.env.R2_ACCOUNT_ID = "cleanup-test-account";
+  process.env.R2_ACCESS_KEY_ID = "cleanup-test-key";
+  process.env.R2_SECRET_ACCESS_KEY = "cleanup-test-secret";
+  process.env.R2_BUCKET_NAME = "cleanup-test-bucket";
+
+  try {
+    const [studio] = await db.insert(studiosTable).values({
+      name: `R2 cleanup studio ${suffix}`,
+      createdByUserId: `r2-cleanup-${suffix}`,
+    }).returning({ id: studiosTable.id });
+    studioId = studio.id;
+    const [project] = await db.insert(projectsTable).values({
+      userId: `r2-cleanup-${suffix}`,
+      studioId,
+      schoolName: `R2 cleanup project ${suffix}`,
+    }).returning({ id: projectsTable.id });
+    const [studentClass] = await db.insert(classesTable).values({
+      projectId: project.id,
+      className: "Cleanup test class",
+    }).returning({ id: classesTable.id });
+
+    const copies = [];
+    for (const label of ["expired", "active", "ready"]) {
+      const [student] = await db.insert(studentsTable).values({
+        projectId: project.id,
+        classId: studentClass.id,
+        firstName: label,
+        lastName: "Cleanup",
+        generatedStudentId: `r2-cleanup-${label}-${suffix}`,
+      }).returning({ id: studentsTable.id });
+      const [photo] = await db.insert(studentPhotosTable).values({
+        projectId: project.id,
+        studentId: student.id,
+        fileName: `${label}.jpg`,
+        fileUrl: `/objects/${label}-${suffix}.jpg`,
+        mimeType: "image/jpeg",
+      }).returning({ id: studentPhotosTable.id });
+      const [copy] = await db.insert(photoStorageCopiesTable).values({
+        studentPhotoId: photo.id,
+        destination: "r2",
+        objectKey: label === "ready"
+          ? `final/${label}-${suffix}.jpg`
+          : `final/pending-${label}-${suffix}.jpg`,
+        stagingObjectKey: label === "ready"
+          ? null
+          : `staging/${label}-${suffix}.jpg`,
+        state: label === "ready" ? "ready" : "uploading",
+        attemptCount: 1,
+        lastAttemptAt: label === "active"
+          ? new Date(now.getTime() - 5 * 60_000)
+          : new Date(now.getTime() - 2 * 60 * 60_000),
+      }).returning();
+      copies.push(copy);
+    }
+
+    const attemptedDeletes: string[] = [];
+    const failed = await cleanupExpiredR2StagingUploads({
+      now,
+      deleteObject: async (key) => {
+        attemptedDeletes.push(key);
+        throw new Error("temporary R2 outage");
+      },
+    });
+    assert.deepEqual(failed, { inspected: 1, deleted: 0, failed: 1 });
+    assert.deepEqual(attemptedDeletes, [`staging/expired-${suffix}.jpg`]);
+
+    const [afterFailure] = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.id, copies[0].id));
+    assert.equal(afterFailure.state, "failed");
+    assert.equal(afterFailure.cleanupAttemptCount, 1);
+    assert.equal(afterFailure.nextRetryAt?.toISOString(), "2026-09-14T12:05:00.000Z");
+    assert.match(afterFailure.lastError ?? "", /temporary R2 outage/);
+
+    const beforeRetry = await cleanupExpiredR2StagingUploads({
+      now: new Date("2026-09-14T12:04:59.000Z"),
+      deleteObject: async () => {
+        throw new Error("must not retry early");
+      },
+    });
+    assert.equal(beforeRetry.inspected, 0);
+
+    const deletedKeys: string[] = [];
+    const retried = await cleanupExpiredR2StagingUploads({
+      now: new Date("2026-09-14T12:05:00.000Z"),
+      deleteObject: async (key) => {
+        deletedKeys.push(key);
+      },
+    });
+    assert.deepEqual(retried, { inspected: 1, deleted: 1, failed: 0 });
+    assert.deepEqual(deletedKeys, [`staging/expired-${suffix}.jpg`]);
+
+    const stored = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.destination, "r2"));
+    const testCopies = stored.filter((copy) => copies.some((item) => item.id === copy.id));
+    assert.equal(testCopies.find((copy) => copy.id === copies[0].id)?.state, "pending");
+    assert.equal(testCopies.find((copy) => copy.id === copies[0].id)?.stagingObjectKey, null);
+    assert.equal(testCopies.find((copy) => copy.id === copies[1].id)?.state, "uploading");
+    assert.equal(testCopies.find((copy) => copy.id === copies[2].id)?.objectKey, `final/ready-${suffix}.jpg`);
+
+    await db
+      .update(photoStorageCopiesTable)
+      .set({
+        state: "cleaning",
+        stagingObjectKey: `staging/reclaimed-${suffix}.jpg`,
+        lastAttemptAt: new Date(now.getTime() - 2 * 60 * 60_000),
+        updatedAt: new Date(now.getTime() - 20 * 60_000),
+      })
+      .where(eq(photoStorageCopiesTable.id, copies[0].id));
+    const reclaimedKeys: string[] = [];
+    const reclaimed = await cleanupExpiredR2StagingUploads({
+      now,
+      deleteObject: async (key) => {
+        reclaimedKeys.push(key);
+      },
+    });
+    assert.deepEqual(reclaimed, { inspected: 1, deleted: 1, failed: 0 });
+    assert.deepEqual(reclaimedKeys, [`staging/reclaimed-${suffix}.jpg`]);
+
+    await db
+      .update(photoStorageCopiesTable)
+      .set({
+        state: "failed",
+        stagingObjectKey: `staging/retry-${suffix}.jpg`,
+        fileSize: 1,
+        sha256: "a".repeat(64),
+        lastError: "verification mismatch",
+      })
+      .where(eq(photoStorageCopiesTable.id, copies[1].id));
+    const [activePhoto] = await db
+      .select()
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, copies[1].studentPhotoId!));
+    const uploadRetry = await createR2CopyUpload({
+      source: {
+        kind: "student",
+        id: activePhoto.id,
+        projectId: project.id,
+        studentId: activePhoto.studentId,
+      },
+      originalFilename: activePhoto.fileName,
+      mimeType: "image/jpeg",
+      fileSize: 1,
+      sha256: "a".repeat(64),
+    });
+    assert.equal(uploadRetry?.objectKey, `staging/retry-${suffix}.jpg`);
+    const [retriedCopy] = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.id, copies[1].id));
+    assert.equal(retriedCopy.state, "uploading");
+    assert.equal(retriedCopy.stagingObjectKey, `staging/retry-${suffix}.jpg`);
+  } finally {
+    if (originalAccountId === undefined) delete process.env.R2_ACCOUNT_ID;
+    else process.env.R2_ACCOUNT_ID = originalAccountId;
+    if (originalAccessKey === undefined) delete process.env.R2_ACCESS_KEY_ID;
+    else process.env.R2_ACCESS_KEY_ID = originalAccessKey;
+    if (originalSecret === undefined) delete process.env.R2_SECRET_ACCESS_KEY;
+    else process.env.R2_SECRET_ACCESS_KEY = originalSecret;
+    if (originalBucket === undefined) delete process.env.R2_BUCKET_NAME;
+    else process.env.R2_BUCKET_NAME = originalBucket;
     if (studioId !== undefined) {
       await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
     }

@@ -11,4 +11,5 @@ export * from "./deliveries";
 export * from "./deliveryInvitations";
 export * from "./deliveryOrders";
 export * from "./photoStorageCopies";
+export { r2PhotoDeletionOutboxTable } from "./photoStorageCopies";
 export * from "./marketing";

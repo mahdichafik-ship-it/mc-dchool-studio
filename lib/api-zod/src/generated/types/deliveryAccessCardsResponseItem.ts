@@ -21,6 +21,9 @@ export type DeliveryAccessCardsResponseItem = {
   /** @nullable */
   departmentName?: string | null;
   accessCode?: string;
+  /** Absolute human-readable gallery URL without credentials */
   accessUrl?: string;
+  /** Absolute credential-bearing fragment URL encoded by the QR image */
+  qrUrl?: string;
   qrDataUrl?: string;
 };

@@ -33,6 +33,7 @@
 - [Project-type compatibility](project-type-compatibility.md) — corporate headshots reuse school data concepts internally; absent or unknown types must remain school-safe.
 - [Volume Capture delivery access](volume-capture-delivery-access.md) — private delivery uses guardian-friendly subject access codes, not child-managed accounts.
 - [Gallery publication boundary](gallery-publication-boundary.md) — publishing is the sole parent-sharing checkpoint; durable uploaded JPEGs need no second visibility flag.
+- [Prepublication access credentials](prepublication-access-credentials.md) — prepare stable delivery cards before photo day without publishing or changing capture QR behavior.
 - [Gallery star selection](gallery-star-selection.md) — back up every capture, but expose and sell only positively starred JPEGs; group photos follow the same rule.
 - [Stripe migration compatibility](stripe-migration-compatibility.md) — modern Stripe schemas may need migration-ledger reconciliation before legacy sync migrations can start safely.
 - [Stripe sandbox claiming](stripe-sandbox-claiming.md) — a healthy Replit Stripe connection can still require claiming the development sandbox in Stripe Dashboard.

@@ -12,15 +12,20 @@ import {
   deliveryGalleriesTable,
   deliveryInvitationAccessLinksTable,
   deliveryInvitationsTable,
+  deliveryOrdersTable,
   deliveryPriceSheetsTable,
   marketingContactsTable,
   pool,
   projectsTable,
+  studentPhotosTable,
   studioMembersTable,
   studiosTable,
   studentsTable,
 } from "@workspace/db";
 import deliveryRouter from "../src/routes/delivery";
+import projectsRouter from "../src/routes/projects";
+import classesRouter from "../src/routes/classes";
+import importRouter from "../src/routes/import";
 import { decryptStorageValue } from "../src/lib/storageCrypto";
 
 /**
@@ -38,6 +43,7 @@ const suffix = `${process.pid}-${Date.now()}`;
 const ownerUserId = `delivery-invitation-owner-${suffix}`;
 const viewerUserId = `delivery-invitation-viewer-${suffix}`;
 const platformOwnerUserId = `delivery-invitation-platform-${suffix}`;
+const otherStudioViewerUserId = `delivery-invitation-other-viewer-${suffix}`;
 process.env.PLATFORM_OWNER_USER_ID = platformOwnerUserId;
 const app = express();
 let server: Server;
@@ -48,6 +54,7 @@ let studioId: number;
 let otherStudioId: number;
 let fakeSequence = 0;
 let fakeMode: "success" | "reject" | "server_error" | "incomplete" | "network" = "success";
+let apiProjectSequence = 0;
 const providerIdempotencyCache = new Map<string, { status: number; payload: unknown }>();
 const requests: Array<{
   batch: Array<Record<string, unknown>>;
@@ -64,6 +71,9 @@ app.use((req, _res, next) => {
   (req as any).auth = authHandler;
   next();
 });
+app.use("/api/projects", projectsRouter);
+app.use("/api/projects/:projectId/classes", classesRouter);
+app.use("/api/projects/:projectId/import", importRouter);
 app.use("/api", deliveryRouter);
 
 type SubjectInput = {
@@ -146,10 +156,15 @@ const offerJson = JSON.stringify({
   }],
 });
 
-async function createGallery(projectType: "school" | "corporate", subjects: SubjectInput[]) {
+async function createGallery(
+  projectType: "school" | "corporate",
+  subjects: SubjectInput[],
+  targetStudioId = studioId,
+  projectOwner = ownerUserId,
+) {
   const project = (await db.insert(projectsTable).values({
-    userId: ownerUserId,
-    studioId,
+    userId: projectOwner,
+    studioId: targetStudioId,
     projectType,
     schoolName: `${projectType} Invitation Project ${suffix}`,
   }).returning({ id: projectsTable.id }))[0];
@@ -167,7 +182,7 @@ async function createGallery(projectType: "school" | "corporate", subjects: Subj
     secondaryEmail: subject.secondaryEmail ?? null,
   })));
   const priceSheet = (await db.insert(deliveryPriceSheetsTable).values({
-    studioId,
+    studioId: targetStudioId,
     name: `Invitation prices ${suffix}-${project.id}`,
     offersJson: offerJson,
   }).returning({ id: deliveryPriceSheetsTable.id }))[0];
@@ -182,6 +197,55 @@ async function createGallery(projectType: "school" | "corporate", subjects: Subj
 
 async function publish(projectId: number, userId = ownerUserId): Promise<Response> {
   return request(userId, `/api/projects/${projectId}/delivery/publish`, { method: "POST" });
+}
+
+async function prepare(projectId: number, userId = ownerUserId): Promise<Response> {
+  return request(userId, `/api/projects/${projectId}/delivery/access-cards/prepare`, { method: "POST" });
+}
+
+function importSheet(className: string, rows: string[][]) {
+  return {
+    sheetName: className,
+    className,
+    firstNameColumn: "First",
+    lastNameColumn: "Last",
+    studentIdColumn: "Roster ID",
+    emailColumn: null,
+    secondaryEmailColumn: null,
+    phoneColumn: null,
+    jobTitleColumn: null,
+    officeLocationColumn: null,
+    photoSessionColumn: null,
+    headers: ["First", "Last", "Roster ID"],
+    rows,
+  };
+}
+
+async function createProjectThroughApi(projectType: "school" | "corporate" = "school") {
+  const priceSheet = (await db.insert(deliveryPriceSheetsTable).values({
+    studioId,
+    name: `API lifecycle prices ${suffix}-${++apiProjectSequence}`,
+    offersJson: offerJson,
+  }).returning({ id: deliveryPriceSheetsTable.id }))[0];
+  const response = await request(ownerUserId, "/api/projects", {
+    method: "POST",
+    body: JSON.stringify({
+      projectType,
+      schoolName: `API lifecycle ${suffix}-${priceSheet.id}`,
+      priceSheetId: priceSheet.id,
+    }),
+  });
+  assert.equal(response.status, 201);
+  return json<{ id: number; priceSheetId: number }>(response);
+}
+
+async function importRosterThroughApi(projectId: number, className: string, rows: string[][]) {
+  const response = await request(ownerUserId, `/api/projects/${projectId}/import/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ sheets: [importSheet(className, rows)] }),
+  });
+  assert.equal(response.status, 200);
+  return response;
 }
 
 async function invitationRows(galleryId: number) {
@@ -235,6 +299,12 @@ before(async () => {
     userId: platformOwnerUserId,
     email: `${platformOwnerUserId}@member.local`,
     role: "owner",
+  });
+  await db.insert(studioMembersTable).values({
+    studioId: otherStudioId,
+    userId: otherStudioViewerUserId,
+    email: `${otherStudioViewerUserId}@member.local`,
+    role: "viewer",
   });
 
   server = createServer(app);
@@ -479,4 +549,271 @@ test("development, incomplete configuration, and onboarding sender never contact
   process.env.NODE_ENV = "test";
   process.env.RESEND_API_KEY = "re_test_delivery_invitation";
   process.env.RESEND_FROM_EMAIL = "Volume Capture <test@volume.example>";
+});
+
+test("Release 6 prepares draft cards atomically, preserves credentials, isolates studios, and publishes without changing them", async () => {
+  process.env.NODE_ENV = "test";
+  process.env.PUBLIC_APP_URL = "https://gallery.test";
+  process.env.RESEND_API_BASE_URL = resendBaseUrl;
+  fakeMode = "success";
+
+  const gallery = await createGallery("school", [
+    { firstName: "Prepared", lastName: "Student", email: `prepared-${suffix}@example.com` },
+  ]);
+  const otherStudioGallery = await createGallery("school", [
+    { firstName: "Other", lastName: "Studio", email: `other-${suffix}@example.com` },
+  ], otherStudioId, platformOwnerUserId);
+
+  const unauthorized = await prepare(gallery.projectId, viewerUserId);
+  assert.equal(unauthorized.status, 404, "view-only members cannot prepare cards");
+  const crossStudio = await prepare(gallery.projectId, otherStudioViewerUserId);
+  assert.equal(crossStudio.status, 404, "another studio cannot prepare this project");
+  const crossStudioOwner = await prepare(otherStudioGallery.projectId, ownerUserId);
+  assert.equal(crossStudioOwner.status, 404, "this studio cannot prepare another studio project");
+
+  const beforePhotos = await db.select().from(studentPhotosTable).where(eq(studentPhotosTable.projectId, gallery.projectId));
+  const beforeOrders = await db.select().from(deliveryOrdersTable).where(eq(deliveryOrdersTable.galleryId, gallery.galleryId));
+  const beforeAttempts = await accessRows(gallery.galleryId);
+  const firstPrepare = await prepare(gallery.projectId);
+  assert.equal(firstPrepare.status, 200);
+  const firstBody = await json<{
+    gallery: { status: string };
+    preparedCount: number;
+    studentCount: number;
+    cards: Array<{ studentId: number; accessCode: string; accessUrl: string; qrUrl: string; qrDataUrl: string }>;
+  }>(firstPrepare);
+  assert.equal(firstBody.gallery.status, "draft");
+  assert.equal(firstBody.preparedCount, 1);
+  assert.equal(firstBody.studentCount, 1);
+  assert.equal((await invitationRows(gallery.galleryId)).length, 0, "preparation does not enqueue invitations");
+  assert.deepEqual(await db.select().from(studentPhotosTable).where(eq(studentPhotosTable.projectId, gallery.projectId)), beforePhotos);
+  assert.deepEqual(await db.select().from(deliveryOrdersTable).where(eq(deliveryOrdersTable.galleryId, gallery.galleryId)), beforeOrders);
+  const firstRow = (await accessRows(gallery.galleryId))[0];
+  assert(firstRow);
+  assert.equal(firstRow.failedAttempts, 0);
+  assert.equal(firstRow.lockedUntil, null);
+  assert.equal((await db.select().from(marketingContactsTable).where(eq(marketingContactsTable.studioId, studioId))).some(
+    (contact) => contact.email === `prepared-${suffix}@example.com`,
+  ), false, "preparation does not create marketing consent");
+
+  const storedCredential = {
+    hash: firstRow.accessCodeHash,
+    encrypted: firstRow.accessCodeEncrypted,
+    last4: firstRow.accessCodeLast4,
+    code: decryptStorageValue<string>(firstRow.accessCodeEncrypted),
+  };
+  assert.equal(firstBody.cards[0]?.accessCode, storedCredential.code);
+  assert.match(firstBody.cards[0]?.accessUrl ?? "", /^https:\/\/gallery\.test\/delivery\//);
+  assert.equal(firstBody.cards[0]?.accessUrl.includes(storedCredential.code), false);
+  assert.equal(firstBody.cards[0]?.qrUrl, `https://gallery.test/delivery/${gallery.slug}#code=${storedCredential.code}`);
+  assert.equal(firstBody.cards[0]?.qrUrl.includes("?code="), false);
+  assert.match(firstBody.cards[0]?.qrDataUrl ?? "", /^data:image\/png;base64,/);
+
+  const concurrent = await Promise.all([prepare(gallery.projectId), prepare(gallery.projectId)]);
+  const concurrentBodies = await Promise.all(concurrent.map((response) => json<typeof firstBody>(response)));
+  assert.deepEqual(
+    concurrentBodies.map((body) => body.cards[0]?.accessCode),
+    [storedCredential.code, storedCredential.code],
+    "concurrent preparation returns the persisted winner to both callers",
+  );
+  const secondRow = (await accessRows(gallery.galleryId))[0];
+  assert.deepEqual({
+    hash: secondRow?.accessCodeHash,
+    encrypted: secondRow?.accessCodeEncrypted,
+    last4: secondRow?.accessCodeLast4,
+  }, { hash: storedCredential.hash, encrypted: storedCredential.encrypted, last4: storedCredential.last4 });
+
+  const [studentClass] = await db.select().from(classesTable).where(eq(classesTable.projectId, gallery.projectId)).limit(1);
+  const [student] = await db.select().from(studentsTable).where(eq(studentsTable.projectId, gallery.projectId)).limit(1);
+  assert(studentClass && student);
+  await db.update(classesTable).set({ className: "Updated Class" }).where(eq(classesTable.id, studentClass.id));
+  await db.update(studentsTable).set({ firstName: "Updated", lastName: "Roster" }).where(eq(studentsTable.id, student.id));
+  const [newStudent] = await db.insert(studentsTable).values({
+    projectId: gallery.projectId,
+    classId: studentClass.id,
+    firstName: "Added",
+    lastName: "Student",
+    generatedStudentId: `DELIVERY-INV-ADDED-${suffix}`,
+  }).returning();
+  const rosterUpdate = await prepare(gallery.projectId);
+  assert.equal(rosterUpdate.status, 200);
+  const rosterBody = await json<typeof firstBody>(rosterUpdate);
+  assert.equal(rosterBody.cards.find((card) => card.studentId === student.id)?.accessCode, storedCredential.code);
+  const addedCode = rosterBody.cards.find((card) => card.studentId === newStudent.id)?.accessCode;
+  assert(addedCode && addedCode !== storedCredential.code);
+
+  const [otherStudent] = await db.select().from(studentsTable).where(eq(studentsTable.projectId, otherStudioGallery.projectId)).limit(1);
+  assert(otherStudent);
+  const otherPrepare = await prepare(otherStudioGallery.projectId, platformOwnerUserId);
+  assert.equal(otherPrepare.status, 200);
+  const otherBody = await json<typeof firstBody>(otherPrepare);
+  assert.notEqual(otherBody.cards[0]?.accessCode, storedCredential.code, "credentials never cross project or studio boundaries");
+
+  await db.delete(studentsTable).where(eq(studentsTable.id, newStudent.id));
+  assert.equal((await accessRows(gallery.galleryId)).some((access) => access.studentId === newStudent.id), false);
+  const prePublishRows = await accessRows(gallery.galleryId);
+  const prePublishAccess = prePublishRows.find((access) => access.studentId === student.id);
+  assert(prePublishAccess);
+  const prePublishResponse = await request("public", `/api/delivery/${gallery.slug}/access`, {
+    method: "POST",
+    body: JSON.stringify({ code: storedCredential.code, email: `prepared-${suffix}@example.com` }),
+  });
+  assert.equal(prePublishResponse.status, 404, "draft access does not validate credentials");
+  const afterDraftAttempt = (await accessRows(gallery.galleryId)).find((access) => access.studentId === student.id);
+  assert.equal(afterDraftAttempt?.failedAttempts, prePublishAccess.failedAttempts);
+  assert.equal(afterDraftAttempt?.lockedUntil, prePublishAccess.lockedUntil);
+
+  await db.insert(studentPhotosTable).values([
+    {
+      projectId: gallery.projectId, studentId: student.id, fileName: "eligible.jpg",
+      fileUrl: "/objects/eligible.jpg", durableObjectPath: "/objects/eligible.jpg",
+      mimeType: "image/jpeg", rating: 1, shareWithParents: true,
+    },
+    {
+      projectId: gallery.projectId, studentId: student.id, fileName: "hidden.jpg",
+      fileUrl: "/objects/hidden.jpg", durableObjectPath: "/objects/hidden.jpg",
+      mimeType: "image/jpeg", rating: 0, shareWithParents: true,
+    },
+  ]);
+  assert.equal((await publish(gallery.projectId)).status, 200);
+  const publishedRows = await accessRows(gallery.galleryId);
+  const publishedAccess = publishedRows.find((access) => access.studentId === student.id);
+  assert(publishedAccess);
+  assert.deepEqual({
+    hash: publishedAccess.accessCodeHash,
+    encrypted: publishedAccess.accessCodeEncrypted,
+    last4: publishedAccess.accessCodeLast4,
+    code: decryptStorageValue<string>(publishedAccess.accessCodeEncrypted),
+  }, storedCredential);
+  assert.equal((await invitationRows(gallery.galleryId)).length, 1, "publication owns invitation enqueue/send");
+
+  const accessResponse = await request("public", `/api/delivery/${gallery.slug}/access`, {
+    method: "POST",
+    body: JSON.stringify({ code: storedCredential.code, email: `prepared-${suffix}@example.com` }),
+  });
+  assert.equal(accessResponse.status, 200);
+  const accessToken = (await json<{ token: string }>(accessResponse)).token;
+  const contentResponse = await request("public", `/api/delivery/${gallery.slug}/gallery`, {
+    headers: { "x-delivery-token": accessToken },
+  });
+  assert.equal(contentResponse.status, 200);
+  const content = await json<{ photos: Array<{ fileName: string }> }>(contentResponse);
+  assert.deepEqual(content.photos.map((photo) => photo.fileName), ["eligible.jpg"]);
+
+  const revoked = await request(ownerUserId, `/api/projects/${gallery.projectId}/delivery/revoke`, { method: "POST" });
+  assert.equal(revoked.status, 200);
+  const revokedAccess = await request("public", `/api/delivery/${gallery.slug}/access`, {
+    method: "POST",
+    body: JSON.stringify({ code: storedCredential.code, email: `prepared-${suffix}@example.com` }),
+  });
+  assert.equal(revokedAccess.status, 404);
+});
+
+test("Release 6 fresh lifecycle bootstraps one gallery through real project/import APIs", async () => {
+  process.env.NODE_ENV = "test";
+  process.env.PUBLIC_APP_URL = "https://gallery.test";
+  const project = await createProjectThroughApi();
+  // Normal project creation creates a draft gallery. Removing it models a
+  // legacy project without changing the project through a test-only shortcut.
+  await db.delete(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, project.id));
+  await importRosterThroughApi(project.id, "Original Class", [["Ada", "Lovelace", "EXT-RELEASE6-1"], ["Grace", "Hopper", "EXT-RELEASE6-2"]]);
+
+  const [first, second] = await Promise.all([prepare(project.id), prepare(project.id)]);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  const firstBody = await json<{
+    gallery: { id: number; status: string; slug: string };
+    preparedCount: number;
+    cards: Array<{ studentId: number; accessCode: string; qrUrl: string }>;
+  }>(first);
+  const secondBody = await json<typeof firstBody>(second);
+  assert.equal(firstBody.gallery.status, "draft");
+  assert.equal(firstBody.preparedCount, 2);
+  assert.deepEqual(
+    firstBody.cards.map((card) => ({ studentId: card.studentId, accessCode: card.accessCode, qrUrl: card.qrUrl }))
+      .sort((a, b) => a.studentId - b.studentId),
+    secondBody.cards.map((card) => ({ studentId: card.studentId, accessCode: card.accessCode, qrUrl: card.qrUrl }))
+      .sort((a, b) => a.studentId - b.studentId),
+  );
+  const galleries = await db.select().from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, project.id));
+  assert.equal(galleries.length, 1);
+  const accesses = await accessRows(galleries[0]!.id);
+  assert.equal(accesses.length, 2);
+
+  const originalRows = new Map((await db.select().from(studentsTable).where(eq(studentsTable.projectId, project.id)))
+    .map((student) => [student.generatedStudentId, student]));
+  const originalCredentials = new Map(accesses.map((access) => [
+    access.studentId,
+    {
+      hash: access.accessCodeHash,
+      encrypted: access.accessCodeEncrypted,
+      last4: access.accessCodeLast4,
+    },
+  ]));
+  await importRosterThroughApi(project.id, "Moved Class", [["Ada Updated", "Lovelace", "EXT-RELEASE6-1"], ["Grace", "Hopper", "EXT-RELEASE6-2"]]);
+  const reprepare = await prepare(project.id);
+  assert.equal(reprepare.status, 200);
+  const afterImport = await accessRows(galleries[0]!.id);
+  for (const access of afterImport) {
+    assert.deepEqual({
+      hash: access.accessCodeHash,
+      encrypted: access.accessCodeEncrypted,
+      last4: access.accessCodeLast4,
+    }, originalCredentials.get(access.studentId));
+  }
+  const movedStudents = await db.select({
+    student: studentsTable,
+    className: classesTable.className,
+  }).from(studentsTable).innerJoin(classesTable, eq(studentsTable.classId, classesTable.id))
+    .where(eq(studentsTable.projectId, project.id));
+  assert.equal(movedStudents.length, originalRows.size);
+  assert.equal(movedStudents.every((row) => row.className === "Moved Class"), true);
+  assert.equal(movedStudents.find((row) => row.student.generatedStudentId === "EXT-RELEASE6-1")?.student.firstName, "Ada Updated");
+
+  const otherProject = await createProjectThroughApi();
+  await db.delete(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, otherProject.id));
+  await importRosterThroughApi(otherProject.id, "Other Project Class", [["Ada", "Lovelace", "EXT-RELEASE6-1"]]);
+  const otherPrepare = await prepare(otherProject.id);
+  assert.equal(otherPrepare.status, 200);
+  const otherGallery = (await db.select().from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, otherProject.id)))[0];
+  assert(otherGallery);
+  const otherAccess = (await accessRows(otherGallery.id))[0];
+  assert(otherAccess);
+  const movedAccess = (await accessRows(galleries[0]!.id)).find((access) => access.studentId === movedStudents[0]!.student.id);
+  assert(movedAccess);
+  assert.notEqual(otherAccess.id, movedAccess.id);
+  assert.notEqual(otherAccess.studentId, movedAccess.studentId, "the same external roster ID remains project-scoped");
+  assert.notEqual(otherAccess.accessCodeHash, movedAccess.accessCodeHash, "the other project receives its own credential");
+
+  const revokedGallery = await db.insert(deliveryGalleriesTable).values({
+    projectId: otherProject.id,
+    studioId,
+    slug: `revoked-${suffix}-${apiProjectSequence}`,
+    status: "revoked",
+  }).onConflictDoNothing().returning({ id: deliveryGalleriesTable.id });
+  assert.equal(revokedGallery.length, 0, "the existing draft gallery remains the sole gallery");
+  await db.update(deliveryGalleriesTable).set({ status: "revoked" }).where(eq(deliveryGalleriesTable.id, otherGallery.id));
+  const revokedPrepare = await prepare(otherProject.id);
+  assert.equal(revokedPrepare.status, 409);
+});
+
+test("access-card URLs reject invalid or non-HTTPS production configuration clearly", async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
+  try {
+    process.env.NODE_ENV = "production";
+    process.env.PUBLIC_APP_URL = "http://spoofed.example";
+    const gallery = await createGallery("school", [
+      { firstName: "URL", lastName: "Validation", email: `url-validation-${suffix}@example.com` },
+    ]);
+    const response = await request(ownerUserId, `/api/projects/${gallery.projectId}/delivery/access-cards`);
+    assert.equal(response.status, 500);
+    const body = await json<{ error: string }>(response);
+    assert.match(body.error, /HTTPS/i);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
+    else process.env.PUBLIC_APP_URL = previousPublicAppUrl;
+  }
 });

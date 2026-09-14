@@ -2018,10 +2018,52 @@ export const ListDeliveryAccessCardsResponseItem = zod.object({
   "className": zod.string().nullish(),
   "departmentName": zod.string().nullish(),
   "accessCode": zod.string().optional(),
-  "accessUrl": zod.string().optional(),
+  "accessUrl": zod.string().optional().describe('Absolute human-readable gallery URL without credentials'),
+  "qrUrl": zod.string().optional().describe('Absolute credential-bearing fragment URL encoded by the QR image'),
   "qrDataUrl": zod.string().optional()
 })
 export const ListDeliveryAccessCardsResponse = zod.array(ListDeliveryAccessCardsResponseItem)
+
+
+/**
+ * Creates missing access credentials without publishing the gallery, sending invitations, or changing photo delivery state.
+ * @summary Prepare stable access credentials for the current project roster
+ */
+export const PrepareDeliveryAccessCardsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const prepareDeliveryAccessCardsResponsePreparedCountMin = 0;
+
+export const prepareDeliveryAccessCardsResponseStudentCountMin = 0;
+
+
+
+export const PrepareDeliveryAccessCardsResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "status": zod.enum(['draft', 'published', 'revoked'])
+}),
+  "preparedCount": zod.number().min(prepareDeliveryAccessCardsResponsePreparedCountMin),
+  "studentCount": zod.number().min(prepareDeliveryAccessCardsResponseStudentCountMin),
+  "cards": zod.array(zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
+  "studentId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "subjectId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "generatedStudentId": zod.string().optional(),
+  "className": zod.string().nullish(),
+  "departmentName": zod.string().nullish(),
+  "accessCode": zod.string().optional(),
+  "accessUrl": zod.string().optional().describe('Absolute human-readable gallery URL without credentials'),
+  "qrUrl": zod.string().optional().describe('Absolute credential-bearing fragment URL encoded by the QR image'),
+  "qrDataUrl": zod.string().optional()
+})),
+  "message": zod.string()
+})
 
 
 export const ListDeliveryStripeCatalogParams = zod.object({

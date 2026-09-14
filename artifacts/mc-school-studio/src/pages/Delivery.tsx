@@ -27,6 +27,7 @@ import {
   shouldClearDeliveryAccess,
   type LocalBasketItem,
 } from "../lib/deliveryOperational";
+import { parseDeliveryAccessCode } from "../lib/deliveryAccessCard";
 
 // Local Basket Item representation
 type DeliveryNotice =
@@ -136,7 +137,7 @@ export default function Delivery() {
     setNotice(null);
 
     const query = new URLSearchParams(window.location.search);
-    const initialCode = query.get("code");
+    const initialCode = parseDeliveryAccessCode(window.location.href);
     if (initialCode) setCode(initialCode);
     
     if (query.get("paid") === "1") {
@@ -164,7 +165,7 @@ export default function Delivery() {
     }
   }, [slug]);
 
-  const { data: gallery, isLoading: galleryLoading, error: galleryError } = useGetDeliveryGallery(slug as string, {
+  const { data: gallery, isLoading: galleryLoading, error: galleryError, refetch: refetchGallery } = useGetDeliveryGallery(slug as string, {
     query: { enabled: !!slug, queryKey: getGetDeliveryGalleryQueryKey(slug as string) }
   });
 
@@ -468,7 +469,15 @@ export default function Delivery() {
            <div className="mb-4 flex justify-end"><LanguageSelector /></div>
           <LockKeyhole className="mx-auto size-10 text-slate-400" />
            <h1 className="mt-4 text-xl font-semibold text-slate-900">{t("unavailable")}</h1>
-           <p className="mt-2 text-sm text-slate-500">{t("unavailableText")}</p>
+           <p data-testid="text-delivery-unavailable" className="mt-2 text-sm text-slate-500">Your gallery is not available yet. Keep this card and return after the photographs have been published.</p>
+           <button
+             type="button"
+             data-testid="button-refresh-delivery"
+             onClick={() => void refetchGallery()}
+             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+           >
+             <RefreshCw className="size-4" /> {t("refresh")}
+           </button>
         </div>
       </div>
     );

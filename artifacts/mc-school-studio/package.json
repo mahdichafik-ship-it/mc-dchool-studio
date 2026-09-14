@@ -9,6 +9,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "test:desktop-architecture": "node --experimental-strip-types --test src/lib/desktopArchitecture.test.ts",
     "test:delivery-operational": "node --experimental-strip-types --test src/lib/deliveryOperational.test.ts",
+    "test:delivery-access-card": "node --experimental-strip-types --test src/lib/deliveryAccessCard.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

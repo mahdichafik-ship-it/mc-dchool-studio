@@ -128,6 +128,37 @@ function deliveryOrigin(req: Request): string {
   return `${forwardedProto || req.protocol}://${forwardedHost || req.get("host")}`;
 }
 
+function publicAppUrl(): string {
+  const configured = process.env.PUBLIC_APP_URL?.trim();
+  const isProduction = process.env.NODE_ENV === "production";
+  const raw = configured || (
+    !isProduction && process.env.REPLIT_DEV_DOMAIN?.trim()
+      ? `https://${process.env.REPLIT_DEV_DOMAIN.trim().replace(/^https?:\/\//i, "")}`
+      : !isProduction && process.env.NODE_ENV === "test"
+        ? "http://localhost:3000"
+        : ""
+  );
+  if (!raw) {
+    throw new Error("PUBLIC_APP_URL must be configured with a valid HTTPS URL in production");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error("PUBLIC_APP_URL must be a valid absolute URL");
+  }
+  if (!parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error("PUBLIC_APP_URL must be an absolute URL without credentials, query, or fragment");
+  }
+  if (isProduction && parsed.protocol !== "https:") {
+    throw new Error("PUBLIC_APP_URL must use HTTPS in production");
+  }
+  if (!isProduction && !["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("PUBLIC_APP_URL must use HTTP or HTTPS outside production");
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+}
+
 function tokenSecret(): string {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) {
@@ -1428,7 +1459,12 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
       updatedAt: now,
     }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
     if (students.length > 0) {
-      await tx.insert(deliveryAccessesTable).values(students.map((student) => {
+      const existing = await tx.select({ studentId: deliveryAccessesTable.studentId })
+        .from(deliveryAccessesTable)
+        .where(eq(deliveryAccessesTable.galleryId, published.id));
+      const existingStudentIds = new Set(existing.map((access) => access.studentId));
+      const missingStudents = students.filter((student) => !existingStudentIds.has(student.id));
+      if (missingStudents.length > 0) await tx.insert(deliveryAccessesTable).values(missingStudents.map((student) => {
         const code = makeCode();
         return {
           galleryId: published.id,
@@ -1469,6 +1505,146 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     publicUrl: `/delivery/${gallery.slug}`,
     message: "Delivery is published. Download the access-card list to share each private code.",
     invitationSummary,
+  });
+});
+
+async function prepareDeliveryAccesses(galleryId: number, projectId: number): Promise<void> {
+  await db.transaction(async (tx) => {
+    const students = await tx.select({ id: studentsTable.id })
+      .from(studentsTable)
+      .where(eq(studentsTable.projectId, projectId));
+    if (students.length === 0) return;
+    const existing = await tx.select({ studentId: deliveryAccessesTable.studentId })
+      .from(deliveryAccessesTable)
+      .where(eq(deliveryAccessesTable.galleryId, galleryId));
+    const existingStudentIds = new Set(existing.map((access) => access.studentId));
+    const missingStudents = students.filter((student) => !existingStudentIds.has(student.id));
+    if (missingStudents.length > 0) {
+      await tx.insert(deliveryAccessesTable).values(missingStudents.map((student) => {
+        const code = makeCode();
+        return {
+          galleryId,
+          studentId: student.id,
+          accessCodeHash: hashCode(code),
+          accessCodeEncrypted: encryptStorageValue(code),
+          accessCodeLast4: code.slice(-4),
+        };
+      })).onConflictDoNothing();
+    }
+  });
+}
+
+async function ensureDeliveryGalleryForPreparation(projectId: number) {
+  return db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(deliveryGalleriesTable)
+      .where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
+    if (existing) return existing;
+    const [project] = await tx.select({
+      studioId: projectsTable.studioId,
+    }).from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+    if (!project) return null;
+    await tx.insert(deliveryGalleriesTable).values({
+      projectId,
+      studioId: project.studioId,
+      slug: `vc-${randomBytes(8).toString("hex")}`,
+      status: "draft",
+    }).onConflictDoNothing();
+    const [created] = await tx.select().from(deliveryGalleriesTable)
+      .where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
+    return created ?? null;
+  });
+}
+
+async function deliveryAccessCards(
+  gallery: typeof deliveryGalleriesTable.$inferSelect,
+  projectType: DeliveryProjectType,
+  projectName: string | null,
+) {
+  const terminology = deliveryTerminology(projectType);
+  const rows = await db
+    .select({ access: deliveryAccessesTable, student: studentsTable, className: classesTable.className })
+    .from(deliveryAccessesTable)
+    .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
+    .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
+    .where(and(eq(deliveryAccessesTable.galleryId, gallery.id), isNull(deliveryAccessesTable.revokedAt)));
+  const origin = publicAppUrl();
+  return Promise.all(rows.map(async ({ access, student, className }) => {
+    const accessCode = decryptStorageValue<string>(access.accessCodeEncrypted);
+    const accessUrl = `${origin}/delivery/${gallery.slug}`;
+    const qrUrl = `${accessUrl}#code=${encodeURIComponent(accessCode)}`;
+    return {
+      firstName: student.firstName,
+      lastName: student.lastName,
+      subjectLabel: terminology.subjectLabel,
+      groupLabel: terminology.groupLabel,
+      companyName: projectType === "corporate" ? projectName : null,
+      studentId: student.id,
+      subjectId: student.id,
+      generatedStudentId: student.generatedStudentId,
+      className,
+      departmentName: className,
+      accessCode,
+      accessUrl,
+      qrUrl,
+      qrDataUrl: await QRCode.toDataURL(qrUrl, {
+        errorCorrectionLevel: "M",
+        margin: 2,
+        width: 320,
+      }),
+    };
+  }));
+}
+
+router.post("/projects/:projectId/delivery/access-cards/prepare", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const userId = getUserId(req);
+  if (!Number.isInteger(projectId) || !(await canAccessProject(userId, projectId, "manage"))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  try {
+    publicAppUrl();
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Invalid public application URL" });
+    return;
+  }
+  const gallery = await ensureDeliveryGalleryForPreparation(projectId);
+  if (!gallery) {
+    res.status(404).json({ error: "Delivery gallery not found" });
+    return;
+  }
+  if (gallery.status === "revoked") {
+    res.status(409).json({ error: "Delivery gallery is revoked", code: "DELIVERY_GALLERY_REVOKED" });
+    return;
+  }
+
+  // The transaction only inserts missing rows. The response is built from a
+  // fresh read below, so a losing concurrent generator is never returned.
+  await prepareDeliveryAccesses(gallery.id, projectId);
+  const [studentCount] = await db.select({ count: sql<number>`count(*)` })
+    .from(studentsTable).where(eq(studentsTable.projectId, projectId));
+  const [preparedCount] = await db.select({ count: sql<number>`count(*)` })
+    .from(deliveryAccessesTable)
+    .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
+    .where(and(
+      eq(deliveryAccessesTable.galleryId, gallery.id),
+      eq(studentsTable.projectId, projectId),
+      isNull(deliveryAccessesTable.revokedAt),
+    ));
+  const [project] = await db.select({ projectType: projectsTable.projectType, schoolName: projectsTable.schoolName })
+    .from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+  const projectType: DeliveryProjectType = project?.projectType === "corporate" ? "corporate" : "school";
+  const cards = await deliveryAccessCards(gallery, projectType, project?.schoolName ?? null);
+  res.json({
+    gallery: {
+      id: gallery.id,
+      slug: gallery.slug,
+      status: gallery.status,
+    },
+    preparedCount: Number(preparedCount?.count ?? 0),
+    studentCount: Number(studentCount?.count ?? 0),
+    cards,
+    message: "Access cards prepared. Preparation does not publish the gallery.",
   });
 });
 
@@ -1521,6 +1697,12 @@ router.get("/projects/:projectId/delivery/access-cards", requireAuth, async (req
     res.status(404).json({ error: "Project not found" });
     return;
   }
+  try {
+    publicAppUrl();
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Invalid public application URL" });
+    return;
+  }
   const [gallery] = await db.select().from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
   if (!gallery) {
     res.status(404).json({ error: "Publish the delivery gallery first" });
@@ -1531,40 +1713,7 @@ router.get("/projects/:projectId/delivery/access-cards", requireAuth, async (req
     .where(eq(projectsTable.id, projectId))
     .limit(1);
   const projectType: DeliveryProjectType = project?.projectType === "corporate" ? "corporate" : "school";
-  const terminology = deliveryTerminology(projectType);
-  const rows = await db
-    .select({ access: deliveryAccessesTable, student: studentsTable, className: classesTable.className })
-    .from(deliveryAccessesTable)
-    .innerJoin(studentsTable, eq(deliveryAccessesTable.studentId, studentsTable.id))
-    .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
-    .where(and(eq(deliveryAccessesTable.galleryId, gallery.id), isNull(deliveryAccessesTable.revokedAt)));
-
-  const forwardedProtocol = String(req.get("x-forwarded-proto") ?? "").split(",")[0].trim();
-  const forwardedHost = String(req.get("x-forwarded-host") ?? "").split(",")[0].trim();
-  const origin = `${forwardedProtocol || req.protocol}://${forwardedHost || req.get("host")}`;
-  res.json(await Promise.all(rows.map(async ({ access, student, className }) => {
-    const accessCode = decryptStorageValue<string>(access.accessCodeEncrypted);
-    const accessUrl = `/delivery/${gallery.slug}?code=${encodeURIComponent(accessCode)}`;
-    return {
-      firstName: student.firstName,
-      lastName: student.lastName,
-      subjectLabel: terminology.subjectLabel,
-      groupLabel: terminology.groupLabel,
-      companyName: projectType === "corporate" ? project?.schoolName : null,
-      studentId: student.id,
-      subjectId: student.id,
-      generatedStudentId: student.generatedStudentId,
-      className,
-      departmentName: className,
-      accessCode,
-      accessUrl,
-      qrDataUrl: await QRCode.toDataURL(`${origin}${accessUrl}`, {
-        errorCorrectionLevel: "M",
-        margin: 2,
-        width: 320,
-      }),
-    };
-  })));
+  res.json(await deliveryAccessCards(gallery, projectType, project?.schoolName ?? null));
 });
 
 function priceSheetResponse(sheet: typeof deliveryPriceSheetsTable.$inferSelect) {

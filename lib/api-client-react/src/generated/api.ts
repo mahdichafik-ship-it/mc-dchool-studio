@@ -26,6 +26,7 @@ import type {
   ClassInput,
   ClassPatch,
   DashboardStats,
+  DeliveryAccessCardsPrepareResponse,
   DeliveryAccessCardsResponse,
   DeliveryAccessInput,
   DeliveryAccessMutationResponse,
@@ -4895,6 +4896,78 @@ export function useListDeliveryAccessCards<TData = Awaited<ReturnType<typeof lis
 
 
 
+
+export const getPrepareDeliveryAccessCardsUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/access-cards/prepare`
+}
+
+/**
+ * Creates missing access credentials without publishing the gallery, sending invitations, or changing photo delivery state.
+ * @summary Prepare stable access credentials for the current project roster
+ */
+export const prepareDeliveryAccessCards = async (projectId: number, options?: RequestInit): Promise<DeliveryAccessCardsPrepareResponse> => {
+
+  return customFetch<DeliveryAccessCardsPrepareResponse>(getPrepareDeliveryAccessCardsUrl(projectId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPrepareDeliveryAccessCardsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof prepareDeliveryAccessCards>>, TError,{projectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof prepareDeliveryAccessCards>>, TError,{projectId: number}, TContext> => {
+
+const mutationKey = ['prepareDeliveryAccessCards'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof prepareDeliveryAccessCards>>, {projectId: number}> = (props) => {
+          const {projectId} = props ?? {};
+
+          return  prepareDeliveryAccessCards(projectId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PrepareDeliveryAccessCardsMutationResult = NonNullable<Awaited<ReturnType<typeof prepareDeliveryAccessCards>>>
+
+    export type PrepareDeliveryAccessCardsMutationError = ErrorType<void>
+
+    /**
+ * @summary Prepare stable access credentials for the current project roster
+ */
+export const usePrepareDeliveryAccessCards = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof prepareDeliveryAccessCards>>, TError,{projectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof prepareDeliveryAccessCards>>,
+        TError,
+        {projectId: number},
+        TContext
+      > => {
+      return useMutation(getPrepareDeliveryAccessCardsMutationOptions(options));
+    }
 
 export const getListDeliveryStripeCatalogUrl = (projectId: number,) => {
 

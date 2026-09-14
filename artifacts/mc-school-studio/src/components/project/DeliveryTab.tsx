@@ -12,12 +12,17 @@ import {
   usePublishDelivery,
   useRevokeDelivery,
   useListDeliveryAccessCards,
+  usePrepareDeliveryAccessCards,
+  getListDeliveryAccessCardsQueryKey,
+  getGetDeliverySettingsQueryKey,
+  useRegenerateDeliveryAccess,
   useListDeliveryOrders,
   useUpdateDeliveryFulfillment,
   useUpdateDeliveryPayment,
   useListStudioPriceSheets,
 } from "@workspace/api-client-react";
 import { format } from "date-fns";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   deliveryAccessCardTerminology,
   printableDeliveryAccessUrl,
@@ -408,12 +413,44 @@ function OverviewTab({ projectId }: { projectId: number }) {
 }
 
 function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { projectId: number; projectName?: string; isCorporate?: boolean; branding: StudioBranding }) {
-  const { data: cards, isLoading } = useListDeliveryAccessCards(projectId);
+  const queryClient = useQueryClient();
+  const { data: cards, isLoading, refetch: refetchCards } = useListDeliveryAccessCards(projectId);
+  const prepareMutation = usePrepareDeliveryAccessCards();
+  const regenerateMutation = useRegenerateDeliveryAccess();
+  const [preparation, setPreparation] = useState<{ preparedCount: number; studentCount: number; message: string } | null>(null);
   const [printLoading, setPrintLoading] = useState(false);
   const [search, setSearch] = useState("");
   const { subjectLabel, groupLabel } = deliveryAccessCardTerminology(
     isCorporate ? "corporate" : "school",
   );
+
+  const preparedCount = preparation?.preparedCount ?? cards?.length ?? 0;
+  const studentCount = preparation?.studentCount ?? preparedCount;
+  const handlePrepare = () => {
+    prepareMutation.mutate({ projectId }, {
+      onSuccess: (result) => {
+        setPreparation({
+          preparedCount: result.preparedCount,
+          studentCount: result.studentCount,
+          message: result.message,
+        });
+        void queryClient.invalidateQueries({ queryKey: getListDeliveryAccessCardsQueryKey(projectId) });
+        void queryClient.invalidateQueries({ queryKey: getGetDeliverySettingsQueryKey(projectId) });
+        void refetchCards();
+      },
+    });
+  };
+  const handleRegenerate = (studentId: number) => {
+    if (!window.confirm("Regenerating this access code immediately invalidates the existing code and any active gallery sessions for this subject. Continue?")) return;
+    regenerateMutation.mutate({ projectId, studentId }, {
+      onSuccess: () => {
+        setPreparation(null);
+        void queryClient.invalidateQueries({ queryKey: getListDeliveryAccessCardsQueryKey(projectId) });
+        void queryClient.invalidateQueries({ queryKey: getGetDeliverySettingsQueryKey(projectId) });
+        void refetchCards();
+      },
+    });
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading access cards...</div>;
@@ -522,10 +559,31 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
+      <div className="flex flex-col gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-semibold text-teal-950">Access card preparation</h3>
+          <p data-testid="status-access-card-preparation" className="mt-1 text-sm text-teal-800">
+            {preparedCount} of {studentCount} current {subjectLabel.toLowerCase()} access cards prepared.
+            Preparation does not publish the gallery.
+          </p>
+          {preparation?.message && <p data-testid="text-access-card-preparation-message" className="mt-1 text-xs text-teal-700">{preparation.message}</p>}
+        </div>
+        <button
+          type="button"
+          data-testid="button-prepare-access-cards"
+          onClick={handlePrepare}
+          disabled={prepareMutation.isPending}
+          className="flex shrink-0 items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+        >
+          {prepareMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <LockKeyhole className="size-4" />}
+          {prepareMutation.isPending ? "Preparing..." : "Prepare Access Cards"}
+        </button>
+      </div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="relative max-w-sm w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
           <input
+             data-testid="input-search-access-cards"
             type="text"
             placeholder="Search subjects or codes..."
             value={search}
@@ -534,6 +592,8 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
           />
         </div>
         <button
+           type="button"
+           data-testid="button-print-access-cards"
           onClick={handlePrint}
           disabled={printLoading || filteredCards.length === 0}
           className="flex items-center justify-center gap-2 rounded-lg bg-white border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
@@ -572,7 +632,9 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
             {card.accessUrl && (
               <div className="border-t border-slate-100 bg-slate-50 p-3 flex justify-between items-center">
                 <span className="truncate text-xs text-slate-500 pr-4">Direct link ready</span>
-                <button
+                   <button
+                     type="button"
+                     data-testid={`button-copy-access-card-link-${card.studentId}`}
                   onClick={() => {
                     navigator.clipboard.writeText(card.accessUrl!);
                     alert("Link copied!");
@@ -581,6 +643,16 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
                 >
                   <Copy className="size-3" /> Copy Link
                 </button>
+                 <button
+                   type="button"
+                   data-testid={`button-regenerate-access-card-${card.studentId}`}
+                   title="Warning: this invalidates the current code and active gallery sessions"
+                   onClick={() => handleRegenerate(card.studentId)}
+                   disabled={regenerateMutation.isPending}
+                   className="ml-2 flex shrink-0 items-center gap-1.5 rounded bg-white px-2 py-1 text-xs font-medium text-amber-700 border border-amber-200 hover:bg-amber-50 disabled:opacity-50"
+                 >
+                   <AlertCircle className="size-3" /> Regenerate
+                 </button>
               </div>
             )}
           </div>

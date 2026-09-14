@@ -1119,11 +1119,39 @@ export type DeliveryAccessCardsResponseItem = {
   /** @nullable */
   departmentName?: string | null;
   accessCode?: string;
+  /** Absolute human-readable gallery URL without credentials */
   accessUrl?: string;
+  /** Absolute credential-bearing fragment URL encoded by the QR image */
+  qrUrl?: string;
   qrDataUrl?: string;
 };
 
 export type DeliveryAccessCardsResponse = DeliveryAccessCardsResponseItem[];
+
+export type DeliveryAccessCardsPrepareResponseGalleryStatus = typeof DeliveryAccessCardsPrepareResponseGalleryStatus[keyof typeof DeliveryAccessCardsPrepareResponseGalleryStatus];
+
+
+export const DeliveryAccessCardsPrepareResponseGalleryStatus = {
+  draft: 'draft',
+  published: 'published',
+  revoked: 'revoked',
+} as const;
+
+export type DeliveryAccessCardsPrepareResponseGallery = {
+  id: number;
+  slug: string;
+  status: DeliveryAccessCardsPrepareResponseGalleryStatus;
+};
+
+export interface DeliveryAccessCardsPrepareResponse {
+  gallery: DeliveryAccessCardsPrepareResponseGallery;
+  /** @minimum 0 */
+  preparedCount: number;
+  /** @minimum 0 */
+  studentCount: number;
+  cards: DeliveryAccessCardsResponse;
+  message: string;
+}
 
 export type DeliveryOrdersResponseOrdersItem = { [key: string]: unknown };
 

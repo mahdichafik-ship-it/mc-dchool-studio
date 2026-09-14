@@ -1,0 +1,142 @@
+Approved. Proceed with Release 6 — Pre-Photo-Day Access Cards, incorporating all five clarifications you proposed.
+
+Release 6 objective
+
+Allow stable parent/customer delivery credentials and printable access cards to be prepared after roster import and before photo day, without publishing the gallery.
+
+Credentials remain stable until explicitly revoked or regenerated.
+
+Required behavior
+
+1. Credential stability
+
+Prepared credentials remain unchanged through:
+
+* repeated preparation;
+* roster re-import;
+* student information updates;
+* within-project class moves;
+* capture;
+* upload;
+* review;
+* gallery publication.
+
+They change only through an explicit authorized revoke/regenerate operation. Warn the user that regeneration invalidates previously printed cards.
+
+2. Atomic preparation
+
+Concurrent preparation requests must converge on one access record and one credential per gallery/student.
+
+A losing concurrent request must read and return the winning stored record. It must never return or generate a different replacement credential.
+
+3. Strict prepublication behavior
+
+Before publication, scanning/opening a Delivery QR may return only a generic unavailable state:
+
+“Your gallery is not available yet. Keep this card and return after the photographs have been published.”
+
+Before publication, do NOT reveal:
+
+* whether the submitted access code is valid;
+* student/employee identity;
+* class/department;
+* project/school/company details;
+* photo counts;
+* products;
+* prices;
+* publication schedule.
+
+Do not issue gallery/media tokens and do not increment access-code failure counters.
+
+No automatic polling is necessary. A refresh action is sufficient.
+
+4. URL contract
+
+Newly prepared Delivery QR codes use:
+
+https://PUBLIC_APP_URL/delivery/<gallery-slug>#code=<PRIVATE_CODE>
+
+The QR contains the automatic-access fragment URL.
+
+The human-readable card displays separately:
+
+https://PUBLIC_APP_URL/delivery/<gallery-slug>
+
+and the private access code.
+
+Use the trusted canonical PUBLIC_APP_URL. Do not construct public card URLs from request-controlled Host or forwarded headers.
+
+Existing query-based Delivery links must remain backward compatible.
+
+Existing photographer Capture QR payloads must remain completely unchanged.
+
+5. Student removal/movement
+
+Follow the existing roster-removal policy when a student disappears from a later import. Never silently transfer an existing credential to another student.
+
+Within-project class moves preserve the credential.
+
+Cross-project moves must never carry the delivery credential into the other project. A student in another project requires the appropriate new project-specific credential.
+
+Explicit deletion must follow the existing relationship/revocation behavior and must not leave inappropriate usable access behind.
+
+Preserve Releases 1–5
+
+Regression-test Release 6 against the security, gallery, transactional-email, desktop and operational-quality behavior established in Releases 1–5.
+
+In particular:
+
+Prepare Access Cards must NOT:
+
+* publish the gallery;
+* expose photographs;
+* create gallery/media sessions;
+* send invitation emails;
+* affect marketing consent;
+* affect payments/orders;
+* alter Capture QR behavior;
+* rotate existing credentials.
+
+Publication must reuse prepared credentials and only backfill missing credentials.
+
+Critical end-to-end acceptance test
+
+Prove:
+
+Create project → import roster → prepare cards → record credentials → prepare again → unchanged → roster update/re-import → unchanged → within-project class move → unchanged → capture/upload/review → publish → unchanged → use the ORIGINAL pre-photo-day card → successfully access only eligible published photographs.
+
+Also test:
+
+* concurrent preparation;
+* new student after initial preparation;
+* removed/deleted student;
+* cross-project isolation;
+* cross-studio authorization;
+* prepublication scanning;
+* legacy query-based links;
+* new fragment-based QR;
+* invitation behavior after publication;
+* school and corporate terminology/behavior where applicable.
+
+Confirm during implementation whether a database migration is actually necessary. Do not add schema solely for convenience.
+
+Do not build the final card designer.
+
+Do not modify desktop behavior.
+
+Do not implement Windows.
+
+Do not publish production.
+
+When complete, provide the Release 6 audit, including:
+
+* exact implementation;
+* API/frontend/schema changes;
+* all tests/results;
+* security/privacy review;
+* regression results against Releases 1–5;
+* credential lifecycle/concurrency results;
+* remaining limitations;
+* launch blockers, if any.
+
+Stop after Release 6. Do not begin the final comprehensive launch audit until Release 6 has been reviewed and approved.

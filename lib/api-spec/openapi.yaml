@@ -1089,6 +1089,16 @@ paths:
       tags: [delivery]
       parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
       responses: { "200": { description: Access cards, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessCardsResponse" } } } } }
+  /projects/{projectId}/delivery/access-cards/prepare:
+    post:
+      operationId: prepareDeliveryAccessCards
+      tags: [delivery]
+      summary: Prepare stable access credentials for the current project roster
+      description: Creates missing access credentials without publishing the gallery, sending invitations, or changing photo delivery state.
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Access-card preparation status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessCardsPrepareResponse" } } } }
+        "404": { description: Project or delivery gallery not found }
   /projects/{projectId}/delivery/catalog:
     get:
       operationId: listDeliveryStripeCatalog
@@ -2203,8 +2213,24 @@ components:
           className: { type: ["string", "null"] }
           departmentName: { type: ["string", "null"] }
           accessCode: { type: string }
-          accessUrl: { type: string }
+          accessUrl: { type: string, description: Absolute human-readable gallery URL without credentials }
+          qrUrl: { type: string, description: Absolute credential-bearing fragment URL encoded by the QR image }
           qrDataUrl: { type: string }
+    DeliveryAccessCardsPrepareResponse:
+      type: object
+      required: [gallery, preparedCount, studentCount, cards, message]
+      properties:
+        gallery:
+          type: object
+          required: [id, slug, status]
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            status: { type: string, enum: [draft, published, revoked] }
+        preparedCount: { type: integer, minimum: 0 }
+        studentCount: { type: integer, minimum: 0 }
+        cards: { $ref: "#/components/schemas/DeliveryAccessCardsResponse" }
+        message: { type: string }
     DeliveryOrdersResponse:
       type: object
       required: [orders]

@@ -23,6 +23,10 @@ const CLAIM_STALE_MS = 15 * 60 * 1000;
 type DeliveryTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type NotificationEvent = "order_received" | "payment_confirmed";
 
+export const deliveryOrderNotificationTestHooks: {
+  afterProviderAccepted?: (notificationId: number, providerId: string) => Promise<void> | void;
+} = {};
+
 export type DeliveryOrderNotificationSnapshot = {
   orderId: number;
   eventType: NotificationEvent;
@@ -364,6 +368,7 @@ export async function dispatchDeliveryOrderNotifications(
         [messageFor(snapshot)],
         `volume-capture-order-notification-v1-${item.id}-a${item.attempt}`,
       );
+      await deliveryOrderNotificationTestHooks.afterProviderAccepted?.(item.id, providerId);
       if (await markClaim(item, { status: "sent", providerId })) sent += 1;
     } catch (error) {
       const rejected = error instanceof ResendSendError && error.outcome === "rejected";

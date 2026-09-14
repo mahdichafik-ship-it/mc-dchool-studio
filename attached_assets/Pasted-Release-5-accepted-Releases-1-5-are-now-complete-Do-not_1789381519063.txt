@@ -1,0 +1,61 @@
+Release 5 accepted. Releases 1–5 are now complete.
+
+Do not implement any additional feature or remediation yet.
+
+Perform a FULL READ-ONLY FINAL LAUNCH AUDIT of the combined current development state after Releases 1–5.
+
+Re-evaluate every finding from the original full audit against the current codebase. Do not limit the review to the changes made in Releases 1–5.
+
+For every original finding, classify it as:
+CLOSED, OPEN — LAUNCH BLOCKER, OPEN — SAFE TO DEFER, or INTENTIONAL LIMITATION.
+
+Also actively search for regressions or new problems created by interactions between Releases 1–5.
+
+Pay particular attention to the complete real-world workflows:
+Studio creation → project → roster import → photographer assignment → desktop download/login → project synchronization → QR/student selection → JPEG/RAW capture → offline operation → reconnect/upload → web review → photo selection → gallery publication → access cards → transactional invitation → parent/corporate access → basket/order → Stripe/manual payment → paid download → order recovery.
+
+Test school and corporate workflows independently where behavior differs.
+
+Re-run all applicable API, web, desktop, shared-library, security, privacy, dependency, typecheck and production-build validation.
+
+For dependency advisories, distinguish between:
+
+* production/runtime exploitable;
+* desktop runtime;
+* build/tooling only;
+* transitive/unreachable;
+* scanner false positive.
+
+Do not simply report the raw advisory count as a launch blocker. Identify whether any specific advisory creates a realistic security problem in the currently shipped application.
+
+Also provide a separate PRODUCTION DEPLOYMENT CHECKLIST covering:
+
+* development-to-production database schema migration;
+* production environment variables;
+* trusted production origins/CORS;
+* PUBLIC_APP_URL;
+* Resend verified sender/domain;
+* controlled real transactional-email test;
+* Stripe production configuration and webhook;
+* GitHub desktop release metadata;
+* building/signing/notarizing Apple Silicon and Intel packages containing Releases 1–5 desktop changes;
+* installer download/install/launch tests;
+* upgrade from the previous desktop version;
+* production gallery/access-card test;
+* production parent/corporate invitation test;
+* production order/payment/recovery test.
+
+Windows is intentionally out of scope and planned for later this year. Its absence is not a launch defect.
+
+Do not change code, schema, configuration, environment variables, production, GitHub releases or tags during this audit.
+
+At the end provide exactly one launch verdict:
+READY FOR CONTROLLED PRODUCTION DEPLOYMENT
+or
+NOT READY FOR PRODUCTION DEPLOYMENT.
+
+If the verdict is NOT READY, identify only the concrete issues that must be resolved before deployment.
+
+Stop after the audit.
+
+After we receive that, don’t let Replit publish immediately. Send the complete final audit to me first.

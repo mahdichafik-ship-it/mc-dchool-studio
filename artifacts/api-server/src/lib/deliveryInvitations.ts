@@ -56,7 +56,7 @@ function escapeHtml(value: string): string {
 export async function enqueueDeliveryInvitations(
   tx: DeliveryTransaction,
   galleryId: number,
-  students: Student[],
+  students: Array<Pick<Student, "id" | "email" | "secondaryEmail">>,
 ): Promise<void> {
   const recipientStudents = new Map<string, Set<number>>();
   for (const student of students) {

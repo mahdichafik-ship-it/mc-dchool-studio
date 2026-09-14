@@ -25,7 +25,7 @@ import {
   studiosTable,
 } from "@workspace/db";
 import { photoStorageCopiesTable } from "@workspace/db/schema";
-import { and, asc, eq, exists, gt, ilike, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, gt, ilike, inArray, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject, getStudioMember, isStudioManagerForProject } from "../lib/studioAccess";
@@ -1450,11 +1450,22 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     res.status(409).json({ error: "Select a price sheet before publishing the gallery", code: "PRICE_SHEET_REQUIRED" });
     return;
   }
-  const [selectedPriceSheet] = await db.select().from(deliveryPriceSheetsTable).where(and(
-    eq(deliveryPriceSheetsTable.id, gallery.priceSheetId),
-    eq(deliveryPriceSheetsTable.studioId, project.studioId!),
-  )).limit(1);
-  if (!selectedPriceSheet || parseOffers(selectedPriceSheet.offersJson).length === 0) {
+  const [selectedPriceSheet] = gallery.status === "published"
+    ? [null]
+    : await db.select().from(deliveryPriceSheetsTable).where(and(
+      eq(deliveryPriceSheetsTable.id, gallery.priceSheetId),
+      eq(deliveryPriceSheetsTable.studioId, project.studioId!),
+    )).limit(1);
+  const priceSheetSnapshot = gallery.status === "published"
+    ? gallery.priceSheetJson
+    : selectedPriceSheet?.offersJson;
+  let priceSheetIsValid = false;
+  try {
+    priceSheetIsValid = Boolean(priceSheetSnapshot && parseOffers(priceSheetSnapshot).length > 0);
+  } catch {
+    priceSheetIsValid = false;
+  }
+  if (!priceSheetIsValid) {
     res.status(409).json({ error: "The selected price sheet is unavailable or has no products", code: "PRICE_SHEET_INVALID" });
     return;
   }
@@ -1499,15 +1510,30 @@ router.post("/projects/:projectId/delivery/publish", requireAuth, async (req, re
     return;
   }
 
-  const students = await db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId));
+  const students = await db.select({
+    id: studentsTable.id,
+    email: studentsTable.email,
+    secondaryEmail: studentsTable.secondaryEmail,
+  }).from(studentsTable).where(eq(studentsTable.projectId, projectId));
   const now = new Date();
   gallery = await db.transaction(async (tx) => {
-    const [published] = await tx.update(deliveryGalleriesTable).set({
-      status: "published",
-      priceSheetJson: selectedPriceSheet.offersJson,
-      publishedAt: sql`coalesce(${deliveryGalleriesTable.publishedAt}, ${now})`,
-      updatedAt: now,
-    }).where(eq(deliveryGalleriesTable.id, gallery.id)).returning();
+    let published = gallery.status === "published" ? gallery : null;
+    if (!published) {
+      [published] = await tx.update(deliveryGalleriesTable).set({
+        status: "published",
+        priceSheetJson: priceSheetSnapshot,
+        publishedAt: sql`coalesce(${deliveryGalleriesTable.publishedAt}, ${now})`,
+        updatedAt: now,
+      }).where(and(
+        eq(deliveryGalleriesTable.id, gallery.id),
+        ne(deliveryGalleriesTable.status, "published"),
+      )).returning();
+      if (!published) {
+        [published] = await tx.select().from(deliveryGalleriesTable)
+          .where(eq(deliveryGalleriesTable.id, gallery.id)).limit(1);
+      }
+    }
+    if (!published) throw new Error("Delivery gallery disappeared during publication");
     if (students.length > 0) {
       const existing = await tx.select({ studentId: deliveryAccessesTable.studentId })
         .from(deliveryAccessesTable)
@@ -1934,8 +1960,7 @@ router.patch("/projects/:projectId/delivery", requireAuth, async (req, res): Pro
   }
   if (
     gallery.status === "published"
-    && body.priceSheetId !== undefined
-    && Number(body.priceSheetId) !== gallery.priceSheetId
+    && (body.priceSheetId !== undefined || body.offers !== undefined || body.priceSheetJson !== undefined)
   ) {
     res.status(409).json({ error: "Revoke the published gallery before changing its price sheet" });
     return;

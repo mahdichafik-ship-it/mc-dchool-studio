@@ -1424,7 +1424,7 @@ export const CreateDeliveryOrderResponse = zod.object({
   "publicReference": zod.string(),
   "recoveryUrl": zod.string().nullish(),
   "recoveryToken": zod.string().nullish().describe('Returned only when the order is first created; never persisted in plaintext'),
-  "checkoutAttemptStatus": zod.enum(['not_started', 'created', 'uncertain', 'failed'])
+  "checkoutAttemptStatus": zod.enum(['not_started', 'started', 'created', 'uncertain', 'failed'])
 })
 
 
@@ -2143,8 +2143,97 @@ export const ListDeliveryOrdersParams = zod.object({
   "projectId": zod.coerce.number()
 })
 
+export const listDeliveryOrdersResponseOrdersItemNotificationsOrderReceivedAttemptsMin = 0;
+
+export const listDeliveryOrdersResponseOrdersItemNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
 export const ListDeliveryOrdersResponse = zod.object({
-  "orders": zod.array(zod.record(zod.string(), zod.unknown()))
+  "orders": zod.array(zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(listDeliveryOrdersResponseOrdersItemNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(listDeliveryOrdersResponseOrdersItemNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+}))
+})
+
+
+/**
+ * @summary Get manager-only delivery operation health
+ */
+export const GetDeliveryOperationsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const getDeliveryOperationsResponseInvitationsPendingMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsSendingMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsSentMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsFailedMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsNeedsReviewMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsPendingMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsSendingMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsSentMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsFailedMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsNeedsReviewMin = 0;
+
+export const getDeliveryOperationsResponseIssuesInvitationsMin = 0;
+
+export const getDeliveryOperationsResponseIssuesOrderNotificationsMin = 0;
+
+
+
+export const GetDeliveryOperationsResponse = zod.object({
+  "invitations": zod.object({
+  "pending": zod.number().min(getDeliveryOperationsResponseInvitationsPendingMin),
+  "sending": zod.number().min(getDeliveryOperationsResponseInvitationsSendingMin),
+  "sent": zod.number().min(getDeliveryOperationsResponseInvitationsSentMin),
+  "failed": zod.number().min(getDeliveryOperationsResponseInvitationsFailedMin),
+  "needsReview": zod.number().min(getDeliveryOperationsResponseInvitationsNeedsReviewMin)
+}),
+  "orderNotifications": zod.object({
+  "pending": zod.number().min(getDeliveryOperationsResponseOrderNotificationsPendingMin),
+  "sending": zod.number().min(getDeliveryOperationsResponseOrderNotificationsSendingMin),
+  "sent": zod.number().min(getDeliveryOperationsResponseOrderNotificationsSentMin),
+  "failed": zod.number().min(getDeliveryOperationsResponseOrderNotificationsFailedMin),
+  "needsReview": zod.number().min(getDeliveryOperationsResponseOrderNotificationsNeedsReviewMin)
+}),
+  "issues": zod.object({
+  "invitations": zod.number().min(getDeliveryOperationsResponseIssuesInvitationsMin),
+  "orderNotifications": zod.number().min(getDeliveryOperationsResponseIssuesOrderNotificationsMin)
+})
 })
 
 
@@ -2153,9 +2242,54 @@ export const GetStudioDeliveryOrderParams = zod.object({
   "orderId": zod.coerce.number()
 })
 
+export const getStudioDeliveryOrderResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
+
+export const getStudioDeliveryOrderResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
 export const GetStudioDeliveryOrderResponse = zod.object({
-  "order": zod.record(zod.string(), zod.unknown()),
-  "items": zod.array(zod.record(zod.string(), zod.unknown()))
+  "order": zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(getStudioDeliveryOrderResponseOrderNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(getStudioDeliveryOrderResponseOrderNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+}),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "photoId": zod.number().nullable(),
+  "offerId": zod.string(),
+  "productName": zod.string(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "includesDigitalDownloads": zod.boolean(),
+  "printSize": zod.string().nullable(),
+  "quantity": zod.number(),
+  "unitAmount": zod.number(),
+  "currency": zod.string()
+}))
 })
 
 
@@ -2168,8 +2302,42 @@ export const UpdateDeliveryFulfillmentBody = zod.object({
   "fulfillmentStatus": zod.enum(['not_required', 'paid', 'preparing', 'printed', 'ready', 'dispatched', 'delivered'])
 })
 
+export const updateDeliveryFulfillmentResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
+
+export const updateDeliveryFulfillmentResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
 export const UpdateDeliveryFulfillmentResponse = zod.object({
-  "order": zod.record(zod.string(), zod.unknown())
+  "order": zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryFulfillmentResponseOrderNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryFulfillmentResponseOrderNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+})
 })
 
 
@@ -2182,8 +2350,59 @@ export const UpdateDeliveryPaymentBody = zod.object({
   "status": zod.enum(['pending', 'paid', 'cancelled', 'refunded'])
 })
 
+export const updateDeliveryPaymentResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
+
+export const updateDeliveryPaymentResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
 export const UpdateDeliveryPaymentResponse = zod.object({
-  "order": zod.record(zod.string(), zod.unknown())
+  "order": zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryPaymentResponseOrderNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryPaymentResponseOrderNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+})
+})
+
+
+/**
+ * @summary Retry definitively failed order notifications
+ */
+export const RetryFailedDeliveryOrderNotificationsParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "orderId": zod.coerce.number()
+})
+
+export const RetryFailedDeliveryOrderNotificationsResponse = zod.object({
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number()
 })
 
 

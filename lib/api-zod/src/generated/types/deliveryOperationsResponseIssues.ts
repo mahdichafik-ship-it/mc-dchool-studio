@@ -6,4 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type DeliveryOrdersResponseOrdersItem = { [key: string]: unknown };
+export type DeliveryOperationsResponseIssues = {
+  /** @minimum 0 */
+  invitations: number;
+  /** @minimum 0 */
+  orderNotifications: number;
+};

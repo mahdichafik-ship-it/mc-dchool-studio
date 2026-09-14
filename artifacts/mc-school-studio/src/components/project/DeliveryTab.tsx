@@ -20,6 +20,13 @@ import {
   useUpdateDeliveryFulfillment,
   useUpdateDeliveryPayment,
   useListStudioPriceSheets,
+  useRetryFailedDeliveryOrderNotifications,
+  getListDeliveryOrdersQueryKey,
+  getGetStudioDeliveryOrderQueryKey,
+  useGetDeliveryOperations,
+  getGetDeliveryOperationsQueryKey,
+  type DeliveryOperationsResponse,
+  type DeliveryOrderSafe,
 } from "@workspace/api-client-react";
 import { format } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
@@ -27,6 +34,15 @@ import {
   deliveryAccessCardTerminology,
   printableDeliveryAccessUrl,
 } from "@/lib/deliveryAccessCard";
+import {
+  canRetryFailedOrderNotifications,
+  getDeliveryNotificationState,
+  isDeliveryManager,
+  notificationStatusPresentation,
+  safeNotificationTimestamp,
+  deliveryOperationsStatusRows,
+  type DeliveryNotificationEvent,
+} from "@/lib/deliveryOperational";
 
 type StudioBranding = {
   name: string;
@@ -125,13 +141,24 @@ export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId
 }
 
 function OverviewTab({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient();
   const { data: settings, isLoading: settingsLoading, refetch: refetchSettings } = useGetDeliverySettings(projectId);
   const { data: priceSheets, isLoading: sheetsLoading } = useListStudioPriceSheets();
   const publishMutation = usePublishDelivery({
-    mutation: { onSuccess: () => refetchSettings() }
+    mutation: {
+      onSuccess: () => {
+        void refetchSettings();
+        void queryClient.invalidateQueries({ queryKey: getGetDeliveryOperationsQueryKey(projectId) });
+      },
+    }
   });
   const revokeMutation = useRevokeDelivery({
-    mutation: { onSuccess: () => refetchSettings() }
+    mutation: {
+      onSuccess: () => {
+        void refetchSettings();
+        void queryClient.invalidateQueries({ queryKey: getGetDeliveryOperationsQueryKey(projectId) });
+      },
+    }
   });
   const updateSettingsMutation = useUpdateDeliverySettings();
 
@@ -436,6 +463,7 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
         });
         void queryClient.invalidateQueries({ queryKey: getListDeliveryAccessCardsQueryKey(projectId) });
         void queryClient.invalidateQueries({ queryKey: getGetDeliverySettingsQueryKey(projectId) });
+        void queryClient.invalidateQueries({ queryKey: getGetDeliveryOperationsQueryKey(projectId) });
         void refetchCards();
       },
     });
@@ -447,6 +475,7 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
         setPreparation(null);
         void queryClient.invalidateQueries({ queryKey: getListDeliveryAccessCardsQueryKey(projectId) });
         void queryClient.invalidateQueries({ queryKey: getGetDeliverySettingsQueryKey(projectId) });
+        void queryClient.invalidateQueries({ queryKey: getGetDeliveryOperationsQueryKey(projectId) });
         void refetchCards();
       },
     });
@@ -669,24 +698,87 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
 }
 
 function OrdersTab({ projectId }: { projectId: number }) {
-  const { data, isLoading } = useListDeliveryOrders(projectId);
+  const queryClient = useQueryClient();
+  const { data, isLoading, isError, refetch } = useListDeliveryOrders(projectId);
   const updateFulfillment = useUpdateDeliveryFulfillment();
   const updatePayment = useUpdateDeliveryPayment();
+  const retryNotifications = useRetryFailedDeliveryOrderNotifications();
+  const [canManage, setCanManage] = useState(false);
+  const [memberLoading, setMemberLoading] = useState(true);
+  const operationsQuery = useGetDeliveryOperations(projectId, {
+    query: {
+      enabled: canManage && !memberLoading,
+      queryKey: getGetDeliveryOperationsQueryKey(projectId),
+    },
+  });
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/studio", { credentials: "include" })
+      .then(async (response) => response.ok
+        ? response.json() as Promise<{ member?: { role?: unknown; status?: unknown } }>
+        : null)
+      .then((context) => {
+        if (!active) return;
+        setCanManage(isDeliveryManager(context?.member));
+        setMemberLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCanManage(false);
+        setMemberLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   if (isLoading) {
-    return <div className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading orders...</div>;
+    return <div role="status" data-testid="status-orders-loading" className="flex items-center justify-center p-12 text-sm text-slate-500"><Loader2 className="mr-2 size-4 animate-spin" /> Loading orders...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="mx-auto max-w-5xl space-y-6">
+        {canManage && operationsQuery.data && <DeliveryOperationsSummary operations={operationsQuery.data} />}
+        <div role="alert" data-testid="alert-orders-error" className="flex flex-col items-center justify-center rounded-xl border border-red-200 bg-white p-12 text-center">
+          <AlertCircle className="mb-3 size-8 text-red-500" />
+          <h3 className="font-semibold text-slate-900">Unable to load orders</h3>
+          <p className="mt-1 text-sm text-slate-500">Please try again. Order details are not available right now.</p>
+          <button
+            type="button"
+            data-testid="button-retry-orders"
+            onClick={() => void refetch()}
+            className="mt-4 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const orders = data?.orders || [];
 
   if (orders.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
-        <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-slate-100">
-          <ShoppingBag className="size-6 text-slate-400" />
+      <div className="mx-auto max-w-5xl space-y-6">
+        {canManage && operationsQuery.isLoading && (
+          <div role="status" data-testid="status-delivery-operations-loading" className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+            <Loader2 className="mr-2 inline size-4 animate-spin" /> Loading operational summary…
+          </div>
+        )}
+        {canManage && operationsQuery.isError && (
+          <div role="alert" data-testid="alert-delivery-operations-error" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            Operational summary is temporarily unavailable.
+          </div>
+        )}
+        {canManage && operationsQuery.data && <DeliveryOperationsSummary operations={operationsQuery.data} />}
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
+          <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-slate-100">
+            <ShoppingBag className="size-6 text-slate-400" />
+          </div>
+          <h3 data-testid="text-orders-empty" className="font-semibold text-slate-900">No orders yet</h3>
+          <p className="mt-1 text-sm text-slate-500">Orders placed by customers will appear here.</p>
         </div>
-        <h3 className="font-semibold text-slate-900">No orders yet</h3>
-        <p className="mt-1 text-sm text-slate-500">Orders placed by customers will appear here.</p>
       </div>
     );
   }
@@ -708,64 +800,257 @@ function OrdersTab({ projectId }: { projectId: number }) {
     delivered: "bg-green-100 text-green-800 border-green-200",
   };
 
+  const invalidateOrders = (orderId?: number) => {
+    void queryClient.invalidateQueries({ queryKey: getListDeliveryOrdersQueryKey(projectId) });
+    void queryClient.invalidateQueries({ queryKey: getGetDeliveryOperationsQueryKey(projectId) });
+    if (orderId !== undefined) {
+      void queryClient.invalidateQueries({ queryKey: getGetStudioDeliveryOrderQueryKey(projectId, orderId) });
+    }
+  };
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
+      {canManage && (
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
+          Operational email status is visible only to studio owners and admins. Customer email delivery is retried only after a definitive failure.
+        </div>
+      )}
+      {canManage && operationsQuery.isLoading && (
+        <div role="status" data-testid="status-delivery-operations-loading" className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+          <Loader2 className="mr-2 inline size-4 animate-spin" /> Loading operational summary…
+        </div>
+      )}
+      {canManage && operationsQuery.isError && (
+        <div role="alert" data-testid="alert-delivery-operations-error" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Operational summary is temporarily unavailable. Order status remains available below.
+        </div>
+      )}
+      {canManage && operationsQuery.data && (
+        <DeliveryOperationsSummary operations={operationsQuery.data} />
+      )}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="px-4 py-3 font-semibold text-slate-900">Order ID</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">Date</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">Customer</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">Amount</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">Payment</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">Fulfillment</th>
+              <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Order ID</th>
+              <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Date</th>
+              <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Customer</th>
+              <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Amount</th>
+              <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Payment</th>
+              <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Fulfillment</th>
+              {canManage && <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Customer email</th>}
+              {canManage && <th scope="col" className="px-4 py-3 font-semibold text-slate-900">Action</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {orders.map((order: any) => (
-              <tr key={order.id} className="hover:bg-slate-50/50">
-                <td className="px-4 py-3 font-mono font-medium text-slate-900">#{order.id}</td>
-                <td className="px-4 py-3 text-slate-500">{format(new Date(order.createdAt), "MMM d, yyyy")}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium text-slate-900">{order.customerName}</div>
+            {orders.map((order: DeliveryOrderSafe) => (
+              <tr key={order.id} data-testid={`row-order-${order.id}`} className="hover:bg-slate-50/50">
+                <td data-testid={`text-order-id-${order.id}`} className="px-4 py-3 font-mono font-medium text-slate-900">#{order.publicReference || order.id}</td>
+                <td data-testid={`text-order-date-${order.id}`} className="px-4 py-3 text-slate-500">
+                  {safeNotificationTimestamp(order.createdAt)
+                    ? format(new Date(safeNotificationTimestamp(order.createdAt)!), "MMM d, yyyy")
+                    : "—"}
+                </td>
+                <td data-testid={`text-order-customer-${order.id}`} className="px-4 py-3">
+                  <div className="font-medium text-slate-900">{order.customerName || "—"}</div>
                   {order.customerEmail && <div className="text-xs text-slate-500">{order.customerEmail}</div>}
                 </td>
-                <td className="px-4 py-3 font-medium text-slate-900">
-                  {new Intl.NumberFormat(undefined, { style: "currency", currency: order.currency.toUpperCase() }).format(order.amountTotal / 100)}
+                <td data-testid={`text-order-amount-${order.id}`} className="px-4 py-3 font-medium text-slate-900">
+                  {typeof order.amountTotal === "number" && typeof order.currency === "string"
+                    ? new Intl.NumberFormat(undefined, { style: "currency", currency: order.currency.toUpperCase() }).format(order.amountTotal / 100)
+                    : "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <select
-                    value={order.status}
-                    onChange={(e) => updatePayment.mutate({ projectId, orderId: order.id, data: { status: e.target.value as any } })}
-                    className={`rounded-md border px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 ${statusColors[order.status] || statusColors.pending}`}
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="paid">Paid</option>
-                    <option value="cancelled">Cancelled</option>
-                    <option value="refunded">Refunded</option>
-                  </select>
+                  {canManage ? (
+                    <select
+                      data-testid={`select-order-payment-${order.id}`}
+                      aria-label={`Payment status for order ${order.publicReference || order.id}`}
+                      value={order.status}
+                      disabled={updatePayment.isPending}
+                      onChange={(e) => updatePayment.mutate(
+                        { projectId, orderId: order.id, data: { status: e.target.value as any } },
+                        { onSuccess: () => invalidateOrders(order.id) },
+                      )}
+                      className={`rounded-md border px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50 ${statusColors[order.status] || statusColors.pending}`}
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="paid">Paid</option>
+                      <option value="cancelled">Cancelled</option>
+                      <option value="refunded">Refunded</option>
+                    </select>
+                  ) : (
+                    <span data-testid={`status-order-payment-${order.id}`} className={`rounded-md border px-2 py-1 text-xs font-medium ${statusColors[order.status] || statusColors.pending}`}>
+                      {String(order.status || "pending").replace("_", " ")}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3">
-                  <select
-                    value={order.fulfillmentStatus}
-                    onChange={(e) => updateFulfillment.mutate({ projectId, orderId: order.id, data: { fulfillmentStatus: e.target.value as any } })}
-                    className={`rounded-md border px-2 py-1 text-xs font-medium capitalize focus:outline-none focus:ring-2 focus:ring-teal-500 ${fulfillmentColors[order.fulfillmentStatus] || fulfillmentColors.not_required}`}
-                  >
-                    <option value="not_required">Not Required</option>
-                    <option value="paid">Paid</option>
-                    <option value="preparing">Preparing</option>
-                    <option value="printed">Printed</option>
-                    <option value="ready">Ready</option>
-                    <option value="dispatched">Dispatched</option>
-                    <option value="delivered">Delivered</option>
-                  </select>
+                  {canManage ? (
+                    <select
+                      data-testid={`select-order-fulfillment-${order.id}`}
+                      aria-label={`Fulfillment status for order ${order.publicReference || order.id}`}
+                      value={order.fulfillmentStatus}
+                      disabled={updateFulfillment.isPending}
+                      onChange={(e) => updateFulfillment.mutate(
+                        { projectId, orderId: order.id, data: { fulfillmentStatus: e.target.value as any } },
+                        { onSuccess: () => invalidateOrders(order.id) },
+                      )}
+                      className={`rounded-md border px-2 py-1 text-xs font-medium capitalize focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50 ${fulfillmentColors[order.fulfillmentStatus] || fulfillmentColors.not_required}`}
+                    >
+                      <option value="not_required">Not Required</option>
+                      <option value="paid">Paid</option>
+                      <option value="preparing">Preparing</option>
+                      <option value="printed">Printed</option>
+                      <option value="ready">Ready</option>
+                      <option value="dispatched">Dispatched</option>
+                      <option value="delivered">Delivered</option>
+                    </select>
+                  ) : (
+                    <span data-testid={`status-order-fulfillment-${order.id}`} className={`rounded-md border px-2 py-1 text-xs font-medium capitalize ${fulfillmentColors[order.fulfillmentStatus] || fulfillmentColors.not_required}`}>
+                      {String(order.fulfillmentStatus || "not_required").replace("_", " ")}
+                    </span>
+                  )}
                 </td>
+                {canManage && <td className="px-4 py-3"><OrderNotificationStatus order={order} /></td>}
+                {canManage && (
+                  <td className="px-4 py-3">
+                    <OrderNotificationAction
+                      order={order}
+                      pending={retryNotifications.isPending}
+                      onRetry={(orderId) => retryNotifications.mutate({ projectId, orderId }, { onSuccess: () => invalidateOrders(orderId) })}
+                    />
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        </div>
+      </div>
+      {canManage && (updatePayment.isError || updateFulfillment.isError || retryNotifications.isError) && (
+        <p role="alert" data-testid="alert-orders-mutation-error" className="text-sm text-red-700">
+          The order update could not be saved. Please try again.
+        </p>
+      )}
+      {memberLoading && (
+        <p role="status" className="sr-only">Checking operational access…</p>
+      )}
+    </div>
+  );
+}
+
+function DeliveryOperationsSummary({ operations }: { operations: DeliveryOperationsResponse }) {
+  const rows = deliveryOperationsStatusRows(operations);
+  return (
+    <section aria-labelledby="delivery-operations-heading" data-testid="summary-delivery-operations" className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/50 px-4 py-3">
+        <h3 id="delivery-operations-heading" className="text-sm font-semibold text-slate-900">Operational summary</h3>
+        <p data-testid="text-delivery-operations-issues" className="text-xs text-slate-500">
+          Issues: {operations.issues.invitations} invitations · {operations.issues.orderNotifications} order notifications
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <caption className="sr-only">Invitation and order notification operational states</caption>
+          <thead className="border-b border-slate-100 text-slate-500">
+            <tr>
+              <th scope="col" className="px-4 py-2 font-medium">State</th>
+              <th scope="col" className="px-4 py-2 text-right font-medium">Invitations</th>
+              <th scope="col" className="px-4 py-2 text-right font-medium">Order notifications</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((row) => (
+              <tr key={row.key} data-testid={`row-delivery-operations-${row.key}`}>
+                <th scope="row" className="px-4 py-2 font-medium text-slate-700">{row.label}</th>
+                <td data-testid={`text-delivery-operations-invitations-${row.key}`} className="px-4 py-2 text-right text-slate-600">{row.invitations}</td>
+                <td data-testid={`text-delivery-operations-orders-${row.key}`} className="px-4 py-2 text-right text-slate-600">{row.orderNotifications}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+const notificationToneClasses: Record<string, string> = {
+  neutral: "border-slate-200 bg-slate-50 text-slate-600",
+  info: "border-blue-200 bg-blue-50 text-blue-700",
+  success: "border-teal-200 bg-teal-50 text-teal-700",
+  danger: "border-red-200 bg-red-50 text-red-700",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+};
+
+function OrderNotificationStatus({ order }: { order: DeliveryOrderSafe }) {
+  const orderId = order.id;
+  return (
+    <div data-testid={`status-order-notifications-${orderId}`} className="min-w-[150px] space-y-1">
+      <NotificationEventStatus order={order} orderId={orderId} event="order_received" label="Order received" />
+      <NotificationEventStatus order={order} orderId={orderId} event="payment_confirmed" label="Payment confirmed" />
+    </div>
+  );
+}
+
+function NotificationEventStatus({ order, orderId, event, label }: { order: DeliveryOrderSafe; orderId: number | string; event: DeliveryNotificationEvent; label: string }) {
+  const state = getDeliveryNotificationState(order, event);
+  const presentation = notificationStatusPresentation(state.status);
+  return (
+    <div className="flex items-center justify-between gap-2 text-[11px]">
+      <span className="text-slate-500">{label}</span>
+      <span
+        data-testid={`status-notification-${event}-${orderId}`}
+        role={state.status === "needs_review" ? "alert" : undefined}
+        title={state.status === "needs_review" ? "This notification will not be resent automatically." : undefined}
+        className={`rounded border px-1.5 py-0.5 font-medium ${notificationToneClasses[presentation.tone]}`}
+      >
+        {presentation.label}
+        {state.sentAt && (
+          <time className="ml-1 font-normal opacity-80" dateTime={state.sentAt}>
+            {format(new Date(state.sentAt), "MMM d, HH:mm")}
+          </time>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function OrderNotificationAction({
+  order,
+  pending,
+  onRetry,
+}: {
+  order: DeliveryOrderSafe;
+  pending: boolean;
+  onRetry: (orderId: number) => void;
+}) {
+  const states = (["order_received", "payment_confirmed"] as const)
+    .map((event) => getDeliveryNotificationState(order, event));
+  const hasNeedsReview = states.some((state) => state.status === "needs_review");
+  const canRetry = canRetryFailedOrderNotifications(states);
+  return (
+    <div className="min-w-[116px]">
+      {hasNeedsReview && (
+        <p data-testid={`warning-notification-review-${order.id}`} className="mb-1 text-[11px] text-amber-700">
+          Needs review; no automatic resend.
+        </p>
+      )}
+      {canRetry && (
+        <button
+          type="button"
+          data-testid={`button-retry-order-notifications-${order.id}`}
+          aria-label={`Retry failed customer emails for order ${order.id}`}
+          title="Retry definitively failed customer emails only"
+          disabled={pending}
+          onClick={() => onRetry(order.id)}
+          className="inline-flex items-center gap-1 rounded border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          {pending ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
+          Retry failed
+        </button>
+      )}
+      {!canRetry && !hasNeedsReview && <span className="text-xs text-slate-400">No action</span>}
     </div>
   );
 }

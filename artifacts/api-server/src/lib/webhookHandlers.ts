@@ -1,7 +1,12 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { db, deliveryOrdersTable, deliveryOrderItemsTable, deliveryGalleriesTable } from "@workspace/db";
 import { getStripeSync } from "./stripeClient";
 import { markContactOrder, normalizeMarketingEmail } from "./marketing";
+import {
+  dispatchDeliveryOrderNotifications,
+  enqueuePaymentConfirmedNotification,
+  finalizeDeliveryOrderNotification,
+} from "./deliveryOrderNotifications";
 
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string, managedWebhookUuid?: string): Promise<void> {
@@ -32,6 +37,7 @@ export class WebhookHandlers {
     const session = event.data.object;
     const orderId = Number(session.metadata?.orderId);
     if (!Number.isInteger(orderId) || !session.id) return;
+    const sessionId = session.id;
     const [existingOrder] = await db.select().from(deliveryOrdersTable)
       .where(eq(deliveryOrdersTable.id, orderId)).limit(1);
     if (!existingOrder || existingOrder.paymentMethod !== "stripe") return;
@@ -103,26 +109,49 @@ export class WebhookHandlers {
     const bindable = existingOrder.status === "pending"
       && (existingOrder.stripeCheckoutSessionId === session.id
         || (existingOrder.stripeCheckoutSessionId === null
-          && existingOrder.checkoutAttemptStatus === "uncertain"));
+          && (existingOrder.checkoutAttemptStatus === "started"
+            || existingOrder.checkoutAttemptStatus === "uncertain")));
     if (!bindable) return;
-    const updated = await db.update(deliveryOrdersTable).set({
-      stripeCheckoutSessionId: session.id,
-      status: "paid",
-      stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : null,
-      ...(normalizedEmail ? { customerEmail: normalizedEmail } : {}),
-      ...(details?.name ? { customerName: details.name } : {}),
-      ...(address ? { deliveryAddress: address } : {}),
-      fulfillmentStatus: hasPhysicalItem ? "paid" : "not_required",
-      amountTotal: existingOrder.amountTotal,
-      paidAt: new Date(),
-    }).where(and(
-      eq(deliveryOrdersTable.id, orderId),
-      eq(deliveryOrdersTable.paymentMethod, "stripe"),
-      eq(deliveryOrdersTable.status, "pending"),
-      ...(existingOrder.stripeCheckoutSessionId === null
-        ? [isNull(deliveryOrdersTable.stripeCheckoutSessionId), eq(deliveryOrdersTable.checkoutAttemptStatus, "uncertain")]
-        : [eq(deliveryOrdersTable.stripeCheckoutSessionId, session.id)]),
-    )).returning({ id: deliveryOrdersTable.id });
+    const updated = await db.transaction(async (tx) => {
+      const paidRows = await tx.update(deliveryOrdersTable).set({
+        stripeCheckoutSessionId: sessionId,
+        status: "paid",
+        stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : null,
+        ...(normalizedEmail ? { customerEmail: normalizedEmail } : {}),
+        ...(details?.name ? { customerName: details.name } : {}),
+        ...(address ? { deliveryAddress: address } : {}),
+        fulfillmentStatus: hasPhysicalItem ? "paid" : "not_required",
+        amountTotal: existingOrder.amountTotal,
+        paidAt: new Date(),
+      }).where(and(
+        eq(deliveryOrdersTable.id, orderId),
+        eq(deliveryOrdersTable.paymentMethod, "stripe"),
+        eq(deliveryOrdersTable.status, "pending"),
+        ...(existingOrder.stripeCheckoutSessionId === null
+        ? [
+          isNull(deliveryOrdersTable.stripeCheckoutSessionId),
+          or(
+            eq(deliveryOrdersTable.checkoutAttemptStatus, "started"),
+            eq(deliveryOrdersTable.checkoutAttemptStatus, "uncertain"),
+          ),
+        ]
+          : [eq(deliveryOrdersTable.stripeCheckoutSessionId, sessionId)]),
+      )).returning({ id: deliveryOrdersTable.id });
+      if (paidRows.length > 0) {
+        await finalizeDeliveryOrderNotification(tx, {
+          orderId,
+          eventType: "order_received",
+          status: "paid",
+          instructions: "Your payment was confirmed. The studio will prepare your order and update its status here.",
+        });
+        await enqueuePaymentConfirmedNotification(tx, {
+          orderId,
+          status: "paid",
+          instructions: "Your payment was confirmed. The studio will prepare your order and update its status here.",
+        });
+      }
+      return paidRows;
+    });
     if (!updated.length) return;
 
     const contact = normalizedEmail && gallery.studioId
@@ -131,5 +160,6 @@ export class WebhookHandlers {
     if (contact) {
       await db.update(deliveryOrdersTable).set({ contactId: contact.id }).where(eq(deliveryOrdersTable.id, orderId));
     }
+    await dispatchDeliveryOrderNotifications(orderId);
   }
 }

@@ -38,9 +38,11 @@ import type {
   DeliveryGallery,
   DeliveryInvitationRetryResponse,
   DeliveryMutationResponse,
+  DeliveryOperationsResponse,
   DeliveryOrderDetailResponse,
   DeliveryOrderInput,
   DeliveryOrderMutationResponse,
+  DeliveryOrderNotificationDispatchSummary,
   DeliveryOrderRecoveryResponse,
   DeliveryOrderResponse,
   DeliveryOrdersResponse,
@@ -5246,6 +5248,83 @@ export function useListDeliveryOrders<TData = Awaited<ReturnType<typeof listDeli
 
 
 
+export const getGetDeliveryOperationsUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/operations`
+}
+
+/**
+ * @summary Get manager-only delivery operation health
+ */
+export const getDeliveryOperations = async (projectId: number, options?: RequestInit): Promise<DeliveryOperationsResponse> => {
+
+  return customFetch<DeliveryOperationsResponse>(getGetDeliveryOperationsUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDeliveryOperationsQueryKey = (projectId: number,) => {
+    return [
+    `/api/projects/${projectId}/delivery/operations`
+    ] as const;
+    }
+
+
+export const getGetDeliveryOperationsQueryOptions = <TData = Awaited<ReturnType<typeof getDeliveryOperations>>, TError = ErrorType<void>>(projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDeliveryOperations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDeliveryOperationsQueryKey(projectId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDeliveryOperations>>> = ({ signal }) => getDeliveryOperations(projectId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: projectId !== null && projectId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDeliveryOperations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDeliveryOperationsQueryResult = NonNullable<Awaited<ReturnType<typeof getDeliveryOperations>>>
+export type GetDeliveryOperationsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get manager-only delivery operation health
+ */
+
+export function useGetDeliveryOperations<TData = Awaited<ReturnType<typeof getDeliveryOperations>>, TError = ErrorType<void>>(
+ projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDeliveryOperations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDeliveryOperationsQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetStudioDeliveryOrderUrl = (projectId: number,
     orderId: number,) => {
 
@@ -5456,6 +5535,79 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getUpdateDeliveryPaymentMutationOptions(options));
+    }
+
+export const getRetryFailedDeliveryOrderNotificationsUrl = (projectId: number,
+    orderId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/delivery/orders/${orderId}/notifications/retry`
+}
+
+/**
+ * @summary Retry definitively failed order notifications
+ */
+export const retryFailedDeliveryOrderNotifications = async (projectId: number,
+    orderId: number, options?: RequestInit): Promise<DeliveryOrderNotificationDispatchSummary> => {
+
+  return customFetch<DeliveryOrderNotificationDispatchSummary>(getRetryFailedDeliveryOrderNotificationsUrl(projectId,orderId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetryFailedDeliveryOrderNotificationsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryFailedDeliveryOrderNotifications>>, TError,{projectId: number;orderId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryFailedDeliveryOrderNotifications>>, TError,{projectId: number;orderId: number}, TContext> => {
+
+const mutationKey = ['retryFailedDeliveryOrderNotifications'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryFailedDeliveryOrderNotifications>>, {projectId: number;orderId: number}> = (props) => {
+          const {projectId,orderId} = props ?? {};
+
+          return  retryFailedDeliveryOrderNotifications(projectId,orderId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryFailedDeliveryOrderNotificationsMutationResult = NonNullable<Awaited<ReturnType<typeof retryFailedDeliveryOrderNotifications>>>
+
+    export type RetryFailedDeliveryOrderNotificationsMutationError = ErrorType<void>
+
+    /**
+ * @summary Retry definitively failed order notifications
+ */
+export const useRetryFailedDeliveryOrderNotifications = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryFailedDeliveryOrderNotifications>>, TError,{projectId: number;orderId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryFailedDeliveryOrderNotifications>>,
+        TError,
+        {projectId: number;orderId: number},
+        TContext
+      > => {
+      return useMutation(getRetryFailedDeliveryOrderNotificationsMutationOptions(options));
     }
 
 export const getExportDeliveryOrdersUrl = (projectId: number,) => {

@@ -42,6 +42,7 @@
 - [Cloud backup test isolation](cloud-backup-test-isolation.md) — a development database does not isolate connected cloud accounts; tests must replace external backup requesters.
 - [Delivery commerce entitlements](delivery-commerce-entitlements.md) — Volume Capture owns offers and orders; payment providers only settle them, while paid item snapshots control downloads.
 - [Order recovery idempotency](order-recovery-idempotency.md) — checkout retries reuse one durable order; uncertain Stripe sessions bind only through a complete authenticated event.
+- [Transactional order notifications](transactional-order-notifications.md) — order emails use an encrypted outbox; uncertain sends never auto-retry, and Stripe recovery reuses exact persisted attempts.
 - [Gallery media renewal](gallery-media-renewal.md) — private media URLs stay short-lived while active gallery sessions refresh them before expiry.
 - [Delivery access and payment availability](delivery-access-and-payment-availability.md) — one payment provider’s outage must not block galleries, orders, or other payment methods.
 - [Publish-time schema changes](publish-time-schema-changes.md) — production schema changes are applied by Replit Publish’s development-to-production diff, not custom app migrations or startup DDL.

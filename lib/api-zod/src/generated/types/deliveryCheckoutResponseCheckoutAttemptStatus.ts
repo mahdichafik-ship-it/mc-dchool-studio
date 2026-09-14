@@ -11,6 +11,7 @@ export type DeliveryCheckoutResponseCheckoutAttemptStatus = typeof DeliveryCheck
 
 export const DeliveryCheckoutResponseCheckoutAttemptStatus = {
   not_started: 'not_started',
+  started: 'started',
   created: 'created',
   uncertain: 'uncertain',
   failed: 'failed',

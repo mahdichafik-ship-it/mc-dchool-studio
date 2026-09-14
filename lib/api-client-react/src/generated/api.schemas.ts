@@ -960,6 +960,7 @@ export type DeliveryCheckoutResponseCheckoutAttemptStatus = typeof DeliveryCheck
 
 export const DeliveryCheckoutResponseCheckoutAttemptStatus = {
   not_started: 'not_started',
+  started: 'started',
   created: 'created',
   uncertain: 'uncertain',
   failed: 'failed',
@@ -1153,25 +1154,149 @@ export interface DeliveryAccessCardsPrepareResponse {
   message: string;
 }
 
-export type DeliveryOrdersResponseOrdersItem = { [key: string]: unknown };
+export type DeliveryOrderSafeStatus = typeof DeliveryOrderSafeStatus[keyof typeof DeliveryOrderSafeStatus];
+
+
+export const DeliveryOrderSafeStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  expired: 'expired',
+  refunded: 'refunded',
+  cancelled: 'cancelled',
+} as const;
+
+export type DeliveryOrderSafePaymentMethod = typeof DeliveryOrderSafePaymentMethod[keyof typeof DeliveryOrderSafePaymentMethod];
+
+
+export const DeliveryOrderSafePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export type DeliveryOrderNotificationSafeStateStatus = typeof DeliveryOrderNotificationSafeStateStatus[keyof typeof DeliveryOrderNotificationSafeStateStatus];
+
+
+export const DeliveryOrderNotificationSafeStateStatus = {
+  pending: 'pending',
+  sending: 'sending',
+  sent: 'sent',
+  failed: 'failed',
+  needs_review: 'needs_review',
+} as const;
+
+/**
+ * @nullable
+ */
+export type DeliveryOrderNotificationSafeState = {
+  status: DeliveryOrderNotificationSafeStateStatus;
+  /** @nullable */
+  sentAt: string | null;
+  /** @minimum 0 */
+  attempts: number;
+  retryAllowed: boolean;
+} | null;
+
+/**
+ * Manager-only safe delivery states; omitted from viewer responses.
+ */
+export type DeliveryOrderSafeNotifications = {
+  orderReceived?: DeliveryOrderNotificationSafeState | null;
+  paymentConfirmed?: DeliveryOrderNotificationSafeState | null;
+};
+
+export interface DeliveryOrderSafe {
+  id: number;
+  /** @nullable */
+  publicReference: string | null;
+  status: DeliveryOrderSafeStatus;
+  paymentMethod: DeliveryOrderSafePaymentMethod;
+  /** @nullable */
+  customerName: string | null;
+  /** @nullable */
+  customerEmail: string | null;
+  fulfillmentStatus: string;
+  deliveryMethod: string;
+  /** @nullable */
+  deliveryAddress: string | null;
+  amountTotal: number;
+  currency: string;
+  createdAt: string;
+  /** @nullable */
+  paidAt: string | null;
+  /** Manager-only safe delivery states; omitted from viewer responses. */
+  notifications?: DeliveryOrderSafeNotifications;
+}
 
 export interface DeliveryOrdersResponse {
-  orders: DeliveryOrdersResponseOrdersItem[];
+  orders: DeliveryOrderSafe[];
 }
 
-export type DeliveryOrderDetailResponseOrder = { [key: string]: unknown };
+export type DeliveryOrderItemSafeProductType = typeof DeliveryOrderItemSafeProductType[keyof typeof DeliveryOrderItemSafeProductType];
 
-export type DeliveryOrderDetailResponseItemsItem = { [key: string]: unknown };
+
+export const DeliveryOrderItemSafeProductType = {
+  digital: 'digital',
+  print: 'print',
+  pack: 'pack',
+} as const;
+
+export interface DeliveryOrderItemSafe {
+  id: number;
+  /** @nullable */
+  photoId: number | null;
+  offerId: string;
+  productName: string;
+  productType: DeliveryOrderItemSafeProductType;
+  includesDigitalDownloads: boolean;
+  /** @nullable */
+  printSize: string | null;
+  quantity: number;
+  unitAmount: number;
+  currency: string;
+}
 
 export interface DeliveryOrderDetailResponse {
-  order: DeliveryOrderDetailResponseOrder;
-  items: DeliveryOrderDetailResponseItemsItem[];
+  order: DeliveryOrderSafe;
+  items: DeliveryOrderItemSafe[];
 }
 
-export type DeliveryOrderMutationResponseOrder = { [key: string]: unknown };
-
 export interface DeliveryOrderMutationResponse {
-  order: DeliveryOrderMutationResponseOrder;
+  order: DeliveryOrderSafe;
+}
+
+export interface DeliveryOrderNotificationDispatchSummary {
+  claimed: number;
+  sent: number;
+  failed: number;
+  needsReview: number;
+  pending: number;
+}
+
+export type DeliveryOperationsResponseIssues = {
+  /** @minimum 0 */
+  invitations: number;
+  /** @minimum 0 */
+  orderNotifications: number;
+};
+
+export interface DeliveryOperationCounts {
+  /** @minimum 0 */
+  pending: number;
+  /** @minimum 0 */
+  sending: number;
+  /** @minimum 0 */
+  sent: number;
+  /** @minimum 0 */
+  failed: number;
+  /** @minimum 0 */
+  needsReview: number;
+}
+
+export interface DeliveryOperationsResponse {
+  invitations: DeliveryOperationCounts;
+  orderNotifications: DeliveryOperationCounts;
+  issues: DeliveryOperationsResponseIssues;
 }
 
 export interface PhotoShareInput {

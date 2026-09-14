@@ -31,9 +31,10 @@ export const deliveryOrdersTable = pgTable("delivery_orders", {
   idempotencyKey: text("idempotency_key"),
   requestFingerprint: text("request_fingerprint"),
   checkoutAttemptStatus: text("checkout_attempt_status", {
-    enum: ["not_started", "created", "uncertain", "failed"],
+    enum: ["not_started", "started", "created", "uncertain", "failed"],
   }).notNull().default("not_started"),
   checkoutAttemptError: text("checkout_attempt_error"),
+  checkoutParamsEncrypted: text("checkout_params_encrypted"),
   notificationStatus: text("notification_status", {
     enum: ["not_sent", "sent", "failed", "uncertain"],
   }).notNull().default("not_sent"),
@@ -59,5 +60,36 @@ export const deliveryOrderItemsTable = pgTable("delivery_order_items", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Order notifications are a small, order-specific outbox.  The business
+ * snapshot is immutable: changes to an order after enqueueing can never alter
+ * the message that was accepted for delivery.  Recovery capability is kept in
+ * a separate encrypted column so the order's one-way recovery hash remains
+ * the validation authority.
+ */
+export const deliveryOrderNotificationsTable = pgTable("delivery_order_notifications", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull().references(() => deliveryOrdersTable.id, { onDelete: "cascade" }),
+  eventType: text("event_type", { enum: ["order_received", "payment_confirmed"] }).notNull(),
+  status: text("status", { enum: ["pending", "sending", "sent", "failed", "needs_review"] })
+    .notNull().default("pending"),
+  snapshotEncrypted: text("snapshot_encrypted").notNull(),
+  snapshotHash: text("snapshot_hash").notNull(),
+  recoveryTokenEncrypted: text("recovery_token_encrypted").notNull(),
+  recoveryTokenHash: text("recovery_token_hash").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  claimToken: text("claim_token"),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  providerId: text("provider_id"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  snapshotReadyAt: timestamp("snapshot_ready_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("delivery_order_notifications_order_event_unique").on(table.orderId, table.eventType),
+]);
+
 export type DeliveryOrder = typeof deliveryOrdersTable.$inferSelect;
 export type DeliveryOrderItem = typeof deliveryOrderItemsTable.$inferSelect;
+export type DeliveryOrderNotification = typeof deliveryOrderNotificationsTable.$inferSelect;

@@ -5,8 +5,8 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { DeliveryOrdersResponseOrdersItem } from './deliveryOrdersResponseOrdersItem';
+import type { DeliveryOrderSafe } from './deliveryOrderSafe';
 
 export interface DeliveryOrdersResponse {
-  orders: DeliveryOrdersResponseOrdersItem[];
+  orders: DeliveryOrderSafe[];
 }

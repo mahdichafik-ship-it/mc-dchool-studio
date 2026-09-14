@@ -15,6 +15,7 @@ import {
   deliveryAccessesTable,
   deliveryGalleriesTable,
   deliveryOrderItemsTable,
+  deliveryOrderNotificationsTable,
   deliveryOrdersTable,
   marketingContactsTable,
   marketingVisitsTable,
@@ -24,6 +25,7 @@ import {
   groupsTable,
   photoStorageCopiesTable,
   pool,
+  projectAssignmentsTable,
   projectsTable,
   studentPhotosTable,
   studentsTable,
@@ -33,10 +35,14 @@ import {
 import deliveryRouter from "../src/routes/delivery";
 import photosRouter from "../src/routes/photos";
 import { ObjectStorageService } from "../src/lib/objectStorage";
-import { encryptStorageValue } from "../src/lib/storageCrypto";
+import { decryptStorageValue, encryptStorageValue } from "../src/lib/storageCrypto";
 import { setTestStripeClientFactory } from "../src/lib/stripeClient";
 import { setTestStripeSyncFactory } from "../src/lib/stripeClient";
 import { WebhookHandlers } from "../src/lib/webhookHandlers";
+import {
+  dispatchDeliveryOrderNotifications,
+  retryFailedDeliveryOrderNotifications,
+} from "../src/lib/deliveryOrderNotifications";
 
 process.env.SESSION_SECRET = "delivery-r2-test-secret-that-is-at-least-32-bytes";
 process.env.R2_ACCOUNT_ID = "delivery-r2-test-account";
@@ -189,10 +195,14 @@ let stripeCreateCalls = 0;
 let stripeRetrieveCalls = 0;
 const stripeSessions = new Map<string, { id: string; url: string }>();
 const stripeCreateParams: Array<{ success_url?: string; cancel_url?: string }> = [];
+const stripeCreateParamSnapshots: unknown[] = [];
+const stripeCreateIdempotencyKeys: string[] = [];
+const stripeObservedAttemptStatuses: string[] = [];
+let stripeFactoryThrows = false;
 let acceptedStripeSession: { id: string; url: string } | null = null;
 let resendServer: Server;
 let resendBaseUrl: string;
-let resendMode: "success" | "rejected" | "unknown" | "incomplete" = "success";
+let resendMode: "success" | "rejected" | "unknown" | "incomplete" | "network" = "success";
 const resendRequests: Array<{ idempotencyKey: string; body: string }> = [];
 let resendSawCommittedOrder = false;
 
@@ -201,6 +211,7 @@ const originalObjectStorageGet = ObjectStorageService.prototype.getObjectEntityF
 
 before(async () => {
   setTestStripeClientFactory(async () => ({
+    ...(stripeFactoryThrows ? (() => { throw new Error("Stripe client unavailable before Checkout call"); })() : {}),
     prices: {
       list: async () => ({ data: [] }),
     },
@@ -208,8 +219,18 @@ before(async () => {
       sessions: {
         create: async (params: { success_url?: string; cancel_url?: string }, options: { idempotencyKey?: string }) => {
           stripeCreateCalls += 1;
+          const orderId = Number((params as { metadata?: { orderId?: string } }).metadata?.orderId);
+          if (Number.isInteger(orderId)) {
+            const [attempt] = await db.select({ status: deliveryOrdersTable.checkoutAttemptStatus })
+              .from(deliveryOrdersTable).where(eq(deliveryOrdersTable.id, orderId));
+            if (attempt) stripeObservedAttemptStatuses.push(attempt.status);
+          }
           stripeCreateParams.push(params);
+          stripeCreateParamSnapshots.push(JSON.parse(JSON.stringify(params)));
           const idempotencyKey = options.idempotencyKey ?? "missing";
+          stripeCreateIdempotencyKeys.push(idempotencyKey);
+          const existingSession = stripeSessions.get(idempotencyKey);
+          if (existingSession) return existingSession;
           const session = { id: `cs_test_${stripeCreateCalls}`, url: `https://checkout.test/${stripeCreateCalls}` };
           stripeSessions.set(idempotencyKey, session);
           if (stripeMode === "accept_then_timeout") {
@@ -259,6 +280,10 @@ before(async () => {
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", async () => {
       const body = Buffer.concat(chunks).toString("utf8");
+      if (resendMode === "network") {
+        request.socket.destroy();
+        return;
+      }
       resendRequests.push({
         idempotencyKey: request.headers["idempotency-key"]?.toString() ?? "",
         body,
@@ -875,7 +900,17 @@ test("manual checkout replays idempotently and rejects changed payloads", async 
   assert.equal(resendRequests.length, emailCountBefore + 1);
   const notification = resendRequests.at(-1);
   assert(notification);
-  assert.equal(notification.idempotencyKey, `volume-capture-order-${firstBody.orderId}-v1`);
+  const [notificationRow] = await db.select({ id: deliveryOrderNotificationsTable.id })
+    .from(deliveryOrderNotificationsTable).where(and(
+      eq(deliveryOrderNotificationsTable.orderId, firstBody.orderId),
+      eq(deliveryOrderNotificationsTable.eventType, "order_received"),
+    ));
+  assert(notificationRow);
+  assert.equal(
+    notification.idempotencyKey,
+    `volume-capture-order-notification-v1-${notificationRow.id}-a1`,
+    "the durable outbox row, not the order id alone, scopes provider idempotency",
+  );
   assert.match(notification.body, /Digital photo/);
   assert.match(notification.body, /#recoveryToken=/);
   assert.doesNotMatch(notification.body, /[?&]recoveryToken=/);
@@ -1355,11 +1390,44 @@ test("ambiguous Stripe create is durable and replay never creates another provid
     body: JSON.stringify(payload),
   });
   assert.equal(replay.status, 200);
-  const replayBody = await replay.json() as { orderId: number; checkoutAttemptStatus: string };
+  const replayBody = await replay.json() as { orderId: number; checkoutAttemptStatus: string; checkoutUrl: string | null };
   assert.equal(replayBody.orderId, firstBody.orderId);
-  assert.equal(replayBody.checkoutAttemptStatus, "uncertain");
-  assert.equal(stripeCreateCalls, createsAfterFirst);
+  assert.equal(replayBody.checkoutAttemptStatus, "created");
+  assert.equal(
+    replayBody.checkoutUrl,
+    stripeSessions.get(`delivery-order-${firstBody.orderId}-${idempotencyKey}`)?.url,
+  );
+  assert.equal(stripeCreateIdempotencyKeys.at(-1), stripeCreateIdempotencyKeys.at(-2));
+  assert.deepEqual(stripeCreateParamSnapshots.at(-1), stripeCreateParamSnapshots.at(-2));
+  assert.equal(stripeCreateCalls, createsAfterFirst + 1, "replay may reissue the call, but Stripe idempotency returns the same session");
   assert.equal(resendRequests.length, emailCountBefore + 1);
+
+  for (const legacyStatus of ["uncertain", "started"] as const) {
+    stripeMode = "success";
+    const legacyKey = `stripe-legacy-null-params-${legacyStatus}-${suffix}`;
+    const legacyResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...payload, idempotencyKey: legacyKey, customerEmail: `${legacyStatus}-${suffix}@example.com` }),
+    });
+    assert.equal(legacyResponse.status, 200);
+    const legacyBody = await legacyResponse.json() as { orderId: number };
+    await db.update(deliveryOrdersTable).set({
+      checkoutAttemptStatus: legacyStatus,
+      checkoutParamsEncrypted: null,
+      stripeCheckoutSessionId: null,
+    }).where(eq(deliveryOrdersTable.id, legacyBody.orderId));
+    const beforeLegacyReplay = stripeCreateCalls;
+    const legacyReplay = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...payload, idempotencyKey: legacyKey, customerEmail: `${legacyStatus}-${suffix}@example.com` }),
+    });
+    assert.equal(legacyReplay.status, 200);
+    const legacyReplayBody = await legacyReplay.json() as { checkoutAttemptStatus: string };
+    assert.equal(legacyReplayBody.checkoutAttemptStatus, legacyStatus);
+    assert.equal(stripeCreateCalls, beforeLegacyReplay, "legacy null-parameter rows must never guess a provider request");
+  }
 
   for (const [failureMode, suffixLabel] of [["server_error", "5xx"], ["incomplete", "incomplete"]] as const) {
     stripeMode = failureMode;
@@ -1458,6 +1526,421 @@ test("enforces current group membership without deleting purchased photo identit
   assert.equal(restoredResponse.status, 200);
   const restored = await restoredResponse.json() as { photos: Array<{ id: number; fileName: string }> };
   assert(restored.photos.some((photo) => photo.id === readyGroupPhotoId));
+});
+
+test("Release 8 order outbox snapshots enqueue atomically and payment confirmation is idempotent", async () => {
+  resendMode = "success";
+  const key = `release8-atomic-${suffix}`;
+  const response = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: paidAccessToken,
+      idempotencyKey: key,
+      offerId: "digital-single",
+      photoIds: [readyStudentPhotoId],
+      quantity: 1,
+      customerName: "Release Eight",
+      customerEmail: `release8-atomic-${suffix}@example.com`,
+      paymentMethod: "establishment",
+      deliveryMethod: "digital",
+    }),
+  });
+  assert.equal(response.status, 200);
+  const created = await response.json() as { orderId: number };
+  const notifications = await db.select().from(deliveryOrderNotificationsTable)
+    .where(eq(deliveryOrderNotificationsTable.orderId, created.orderId));
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0]?.eventType, "order_received");
+  assert.equal(notifications[0]?.status, "sent");
+  assert(notifications[0]?.snapshotEncrypted);
+  assert.equal(notifications[0]?.snapshotEncrypted.includes("Release Eight"), false);
+  const snapshot = decryptStorageValue<{ orderId: number; eventType: string; recipientEmail: string }>(
+    notifications[0]!.snapshotEncrypted,
+  );
+  assert.equal(snapshot.orderId, created.orderId);
+  assert.equal(snapshot.eventType, "order_received");
+  assert.equal(snapshot.recipientEmail, `release8-atomic-${suffix}@example.com`);
+
+  const paymentResponses = await Promise.all([
+    fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/payment`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "paid" }),
+    }),
+    fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/payment`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "paid" }),
+    }),
+  ]);
+  assert.deepEqual(paymentResponses.map((item) => item.status).sort(), [200, 200]);
+  const paidEvents = await db.select().from(deliveryOrderNotificationsTable).where(and(
+    eq(deliveryOrderNotificationsTable.orderId, created.orderId),
+    eq(deliveryOrderNotificationsTable.eventType, "payment_confirmed"),
+  ));
+  assert.equal(paidEvents.length, 1, "concurrent manual confirmations enqueue exactly one paid event");
+});
+
+test("Release 8 Stripe duplicate webhook and retry remain exactly once", async () => {
+  stripeMode = "success";
+  resendMode = "success";
+  acceptedStripeSession = null;
+  stripeObservedAttemptStatuses.length = 0;
+  const key = `release8-stripe-duplicate-${suffix}`;
+  const payload = {
+    token: paidAccessToken,
+    idempotencyKey: key,
+    offerId: "digital-single",
+    photoIds: [readyStudentPhotoId],
+    quantity: 1,
+    customerName: "Stripe Duplicate",
+    customerEmail: `release8-stripe-duplicate-${suffix}@example.com`,
+    paymentMethod: "stripe",
+    deliveryMethod: "digital",
+  };
+  const createdResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(createdResponse.status, 200);
+  assert.equal(stripeObservedAttemptStatuses.at(-1), "started", "Stripe is called only after the durable started transition");
+  const created = await createdResponse.json() as { orderId: number };
+  const session = stripeSessions.get(`delivery-order-${created.orderId}-${key}`);
+  assert(session);
+  acceptedStripeSession = session;
+  const event = Buffer.from(JSON.stringify({
+    type: "checkout.session.completed",
+    data: { object: {
+      id: session.id,
+      metadata: { orderId: String(created.orderId), gallerySlug, projectId: String(projectId) },
+      payment_intent: "pi_release8_duplicate",
+      payment_status: "paid",
+      amount_total: 100,
+      currency: "usd",
+      customer_details: { email: payload.customerEmail, name: payload.customerName },
+    } },
+  }));
+  await Promise.all([
+    WebhookHandlers.processWebhook(event, "signed-test"),
+    WebhookHandlers.processWebhook(event, "signed-test"),
+  ]);
+  const paidEvents = await db.select().from(deliveryOrderNotificationsTable).where(and(
+    eq(deliveryOrderNotificationsTable.orderId, created.orderId),
+    eq(deliveryOrderNotificationsTable.eventType, "payment_confirmed"),
+  ));
+  assert.equal(paidEvents.length, 1);
+  const [order] = await db.select({ status: deliveryOrdersTable.status })
+    .from(deliveryOrdersTable).where(eq(deliveryOrdersTable.id, created.orderId));
+  assert.equal(order?.status, "paid");
+  const [receivedNotification] = await db.select({ id: deliveryOrderNotificationsTable.id })
+    .from(deliveryOrderNotificationsTable).where(and(
+      eq(deliveryOrderNotificationsTable.orderId, created.orderId),
+      eq(deliveryOrderNotificationsTable.eventType, "order_received"),
+    ));
+  assert(receivedNotification);
+  await db.update(deliveryOrderNotificationsTable).set({
+    status: "pending",
+    claimToken: null,
+    claimedAt: null,
+    sentAt: null,
+    providerId: null,
+  }).where(eq(deliveryOrderNotificationsTable.id, receivedNotification.id));
+  await dispatchDeliveryOrderNotifications(created.orderId);
+  assert.match(resendRequests.at(-1)?.body ?? "", /Complete payment using/i);
+  assert.doesNotMatch(resendRequests.at(-1)?.body ?? "", /Payment was confirmed/i);
+
+  stripeFactoryThrows = true;
+  const beforeCreate = stripeCreateCalls;
+  const crashKey = `release8-stripe-before-call-${suffix}`;
+  const crashPayload = { ...payload, idempotencyKey: crashKey, customerEmail: `release8-before-call-${suffix}@example.com` };
+  const crashResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(crashPayload),
+  });
+  stripeFactoryThrows = false;
+  assert.equal(crashResponse.status, 503);
+  assert.equal(stripeCreateCalls, beforeCreate, "a client failure occurs before the provider call");
+  const [crashed] = await db.select({
+    id: deliveryOrdersTable.id,
+    checkoutAttemptStatus: deliveryOrdersTable.checkoutAttemptStatus,
+  }).from(deliveryOrdersTable).where(and(
+    eq(deliveryOrdersTable.idempotencyKey, crashKey),
+    eq(deliveryOrdersTable.galleryId, galleryId),
+  ));
+  assert.equal(crashed?.checkoutAttemptStatus, "started", "restart/reconciliation must not blindly create another session");
+  const replayCrash = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(crashPayload),
+  });
+  assert.equal(replayCrash.status, 200);
+  const replayCrashBody = await replayCrash.json() as { orderId: number; checkoutAttemptStatus: string };
+  assert.equal(replayCrashBody.orderId, crashed?.id);
+  assert.equal(replayCrashBody.checkoutAttemptStatus, "created");
+  assert.equal(stripeCreateCalls, beforeCreate + 1);
+});
+
+test("Release 8 dispatchers fence concurrent claims and never resend stale sending", async () => {
+  resendMode = "success";
+  const key = `release8-claims-${suffix}`;
+  const response = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: paidAccessToken,
+      idempotencyKey: key,
+      offerId: "digital-single",
+      photoIds: [readyStudentPhotoId],
+      quantity: 1,
+      customerName: "Claim Fence",
+      customerEmail: `release8-claims-${suffix}@example.com`,
+      paymentMethod: "establishment",
+      deliveryMethod: "digital",
+    }),
+  });
+  const created = await response.json() as { orderId: number };
+  const [notification] = await db.select().from(deliveryOrderNotificationsTable)
+    .where(eq(deliveryOrderNotificationsTable.orderId, created.orderId));
+  assert(notification);
+  const before = resendRequests.length;
+  await db.update(deliveryOrderNotificationsTable).set({
+    status: "pending",
+    claimToken: null,
+    claimedAt: null,
+    sentAt: null,
+    providerId: null,
+    lastError: null,
+  }).where(eq(deliveryOrderNotificationsTable.id, notification.id));
+  await Promise.all([
+    dispatchDeliveryOrderNotifications(created.orderId),
+    dispatchDeliveryOrderNotifications(created.orderId),
+  ]);
+  assert.equal(resendRequests.length, before + 1, "FOR UPDATE SKIP LOCKED permits one provider call");
+  const [sent] = await db.select().from(deliveryOrderNotificationsTable)
+    .where(eq(deliveryOrderNotificationsTable.id, notification.id));
+  assert.equal(sent?.status, "sent");
+
+  // A fresh process/startup pass recovers durable pending work without
+  // needing any in-memory queue state.
+  await db.update(deliveryOrderNotificationsTable).set({
+    status: "pending",
+    claimToken: null,
+    claimedAt: null,
+    sentAt: null,
+    providerId: null,
+  }).where(eq(deliveryOrderNotificationsTable.id, notification.id));
+  await dispatchDeliveryOrderNotifications(created.orderId);
+  const [restarted] = await db.select({ status: deliveryOrderNotificationsTable.status })
+    .from(deliveryOrderNotificationsTable).where(eq(deliveryOrderNotificationsTable.id, notification.id));
+  assert.equal(restarted?.status, "sent");
+
+  await db.update(deliveryOrderNotificationsTable).set({
+    status: "sending",
+    claimToken: "old-worker-token",
+    claimedAt: new Date(Date.now() - 16 * 60 * 1000),
+  }).where(eq(deliveryOrderNotificationsTable.id, notification.id));
+  const beforeStale = resendRequests.length;
+  await dispatchDeliveryOrderNotifications(created.orderId);
+  const [review] = await db.select().from(deliveryOrderNotificationsTable)
+    .where(eq(deliveryOrderNotificationsTable.id, notification.id));
+  assert.equal(review?.status, "needs_review");
+  assert.equal(resendRequests.length, beforeStale, "stale sending is reconciled, never automatically resent");
+});
+
+test("Release 8 classifies network failures as needs_review and retries failed rows only", async () => {
+  const createOrder = async (key: string, email: string) => {
+    const response = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token: paidAccessToken,
+        idempotencyKey: key,
+        offerId: "digital-single",
+        photoIds: [readyStudentPhotoId],
+        quantity: 1,
+        customerName: "Retry Classification",
+        customerEmail: email,
+        paymentMethod: "establishment",
+        deliveryMethod: "digital",
+      }),
+    });
+    assert.equal(response.status, 200);
+    return response.json() as Promise<{ orderId: number }>;
+  };
+  resendMode = "rejected";
+  const failed = await createOrder(`release8-failed-${suffix}`, `release8-failed-${suffix}@example.com`);
+  resendMode = "network";
+  const uncertain = await createOrder(`release8-network-${suffix}`, `release8-network-${suffix}@example.com`);
+  const [failedRow] = await db.select().from(deliveryOrderNotificationsTable)
+    .where(and(eq(deliveryOrderNotificationsTable.orderId, failed.orderId), eq(deliveryOrderNotificationsTable.eventType, "order_received")));
+  const [uncertainRow] = await db.select().from(deliveryOrderNotificationsTable)
+    .where(and(eq(deliveryOrderNotificationsTable.orderId, uncertain.orderId), eq(deliveryOrderNotificationsTable.eventType, "order_received")));
+  assert.equal(failedRow?.status, "failed");
+  assert.equal(uncertainRow?.status, "needs_review");
+
+  const beforeRetry = resendRequests.length;
+  resendMode = "success";
+  const summary = await retryFailedDeliveryOrderNotifications(failed.orderId);
+  assert.equal(summary.sent, 1);
+  assert.equal(resendRequests.length, beforeRetry + 1);
+  const [retried] = await db.select({ status: deliveryOrderNotificationsTable.status })
+    .from(deliveryOrderNotificationsTable).where(eq(deliveryOrderNotificationsTable.id, failedRow!.id));
+  assert.equal(retried?.status, "sent");
+  const uncertainRetry = await retryFailedDeliveryOrderNotifications(uncertain.orderId);
+  assert.equal(uncertainRetry.claimed, 0, "needs_review cannot be explicitly retried");
+});
+
+test("Release 8 retry is manager-only and order DTOs exclude recovery/provider internals", async () => {
+  const viewerId = `delivery-r2-viewer-${suffix}`;
+  const assistantId = `delivery-r2-assistant-${suffix}`;
+  await db.insert(studioMembersTable).values({
+    studioId,
+    userId: viewerId,
+    email: `${viewerId}@member.local`,
+    role: "viewer",
+  }).onConflictDoNothing();
+  const [viewerMember] = await db.select({ id: studioMembersTable.id })
+    .from(studioMembersTable).where(and(
+      eq(studioMembersTable.studioId, studioId),
+      eq(studioMembersTable.userId, viewerId),
+    ));
+  assert(viewerMember);
+  await db.insert(projectAssignmentsTable).values({
+    projectId,
+    memberId: viewerMember.id,
+  }).onConflictDoNothing();
+  await db.insert(studioMembersTable).values({
+    studioId,
+    userId: assistantId,
+    email: `${assistantId}@member.local`,
+    role: "assistant",
+  }).onConflictDoNothing();
+  const [assistantMember] = await db.select({ id: studioMembersTable.id })
+    .from(studioMembersTable).where(and(
+      eq(studioMembersTable.studioId, studioId),
+      eq(studioMembersTable.userId, assistantId),
+    ));
+  assert(assistantMember);
+  await db.insert(projectAssignmentsTable).values({
+    projectId,
+    memberId: assistantMember.id,
+  }).onConflictDoNothing();
+  resendMode = "rejected";
+  const key = `release8-privacy-${suffix}`;
+  const createResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: paidAccessToken,
+      idempotencyKey: key,
+      offerId: "digital-single",
+      photoIds: [readyStudentPhotoId],
+      quantity: 1,
+      customerName: "Privacy DTO",
+      customerEmail: `release8-privacy-${suffix}@example.com`,
+      paymentMethod: "establishment",
+      deliveryMethod: "digital",
+    }),
+  });
+  const created = await createResponse.json() as { orderId: number };
+  const viewerRetry = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/notifications/retry`, {
+    method: "POST",
+    headers: { "x-test-user": viewerId },
+  });
+  assert.equal(viewerRetry.status, 404);
+  const crossStudioRetry = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/notifications/retry`, {
+    method: "POST",
+    headers: { "x-test-user": `release8-cross-studio-${suffix}` },
+  });
+  assert.equal(crossStudioRetry.status, 404);
+  resendMode = "success";
+  const managerRetry = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/notifications/retry`, {
+    method: "POST",
+  });
+  assert.equal(managerRetry.status, 200);
+  const operations = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/operations`);
+  assert.equal(operations.status, 200);
+  const operationsBody = await operations.json() as {
+    invitations: Record<string, unknown>;
+    orderNotifications: Record<string, unknown>;
+    issues: Record<string, unknown>;
+  };
+  assert.equal(typeof operationsBody.orderNotifications.failed, "number");
+  assert.equal("providerId" in operationsBody.orderNotifications, false);
+  const viewerOperations = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/operations`, {
+    headers: { "x-test-user": viewerId },
+  });
+  assert.equal(viewerOperations.status, 404);
+  const crossStudioOperations = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/operations`, {
+    headers: { "x-test-user": `release8-cross-studio-operations-${suffix}` },
+  });
+  assert.equal(crossStudioOperations.status, 404);
+  const assistantFulfillment = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/fulfillment`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-test-user": assistantId },
+    body: JSON.stringify({ fulfillmentStatus: "preparing" }),
+  });
+  assert.equal(assistantFulfillment.status, 200, "assistant retains the historical manage permission");
+  const assistantPayment = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/payment`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-test-user": assistantId },
+    body: JSON.stringify({ status: "paid" }),
+  });
+  assert.equal(assistantPayment.status, 200, "assistant retains the historical payment manage permission");
+  const priorPlatformOwner = process.env.PLATFORM_OWNER_USER_ID;
+  process.env.PLATFORM_OWNER_USER_ID = `delivery-r2-platform-owner-${suffix}`;
+  const platformRetry = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}/notifications/retry`, {
+    method: "POST",
+    headers: { "x-test-user": process.env.PLATFORM_OWNER_USER_ID },
+  });
+  assert.equal(platformRetry.status, 404);
+  const platformOperations = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/operations`, {
+    headers: { "x-test-user": process.env.PLATFORM_OWNER_USER_ID },
+  });
+  assert.equal(platformOperations.status, 404);
+  const platformList = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders`, {
+    headers: { "x-test-user": process.env.PLATFORM_OWNER_USER_ID },
+  });
+  assert.equal(platformList.status, 200);
+  const platformListBody = await platformList.json() as { orders: Array<Record<string, unknown>> };
+  const platformOrder = platformListBody.orders.find((order) => order.id === created.orderId);
+  assert(platformOrder);
+  assert.equal("notifications" in platformOrder, false);
+  const platformDetail = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}`, {
+    headers: { "x-test-user": process.env.PLATFORM_OWNER_USER_ID },
+  });
+  assert.equal(platformDetail.status, 200);
+  const platformDetailBody = await platformDetail.json() as { order: Record<string, unknown> };
+  assert.equal("notifications" in platformDetailBody.order, false);
+  if (priorPlatformOwner === undefined) delete process.env.PLATFORM_OWNER_USER_ID;
+  else process.env.PLATFORM_OWNER_USER_ID = priorPlatformOwner;
+
+  const list = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders`);
+  assert.equal(list.status, 200);
+  const listBody = await list.json() as { orders: Array<Record<string, unknown>> };
+  const listed = listBody.orders.find((order) => order.id === created.orderId);
+  assert(listed);
+  for (const forbidden of [
+    "accessId", "contactId", "stripeCheckoutSessionId", "stripePaymentIntentId",
+    "recoveryTokenHash", "idempotencyKey", "requestFingerprint", "notificationStatus",
+    "notificationProviderId", "notificationError", "checkoutAttemptError",
+  ]) assert.equal(forbidden in listed, false, forbidden);
+  const detail = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders/${created.orderId}`);
+  const detailBody = await detail.json() as { order: Record<string, unknown>; items: Array<Record<string, unknown>> };
+  assert.equal("recoveryTokenHash" in detailBody.order, false);
+  assert.equal("stripeCheckoutSessionId" in detailBody.order, false);
+  assert.equal("createdAt" in detailBody.items[0]!, false);
+  const viewerList = await fetch(`${baseUrl}/api/projects/${projectId}/delivery/orders`, {
+    headers: { "x-test-user": viewerId },
+  });
+  assert.equal(viewerList.status, 200);
+  const viewerListBody = await viewerList.json() as { orders: Array<Record<string, unknown>> };
+  const viewerOrder = viewerListBody.orders.find((order) => order.id === created.orderId);
+  assert(viewerOrder);
+  assert.equal("notifications" in viewerOrder, false, "viewer DTOs omit manager-only operational state");
 });
 
 test("rejects unauthorized and unpaid requests before either storage backend", async () => {

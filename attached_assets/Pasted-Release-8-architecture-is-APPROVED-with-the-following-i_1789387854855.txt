@@ -1,0 +1,125 @@
+Release 8 architecture is APPROVED with the following implementation decisions and amendments. Proceed with implementation, audit, and then STOP for review. Do not deploy production.
+
+Approved architecture
+
+1. Create dedicated delivery_order_notifications.
+2. Initial event kinds:
+    * order_received
+    * payment_confirmed
+3. Durable enqueue must be atomic with the corresponding business transaction.
+4. pending → sending → sent/failed/needs_review.
+5. Definitive failures may be explicitly retried by authorized Owner/Admin.
+6. needs_review must NEVER automatically resend.
+7. Owner/Admin operational visibility only.
+8. Narrow existing order API responses to explicit safe DTOs. Do not expose raw database rows/internal fields.
+9. Payment-confirmation email should include the existing recovery capability/link.
+10. Retain that recovery capability encrypted at rest while preserving the existing recovery hash as the validation mechanism.
+
+Payload amendment
+
+Do not make complete rendered HTML the primary durable representation unless technically necessary.
+
+Prefer an immutable business/message snapshot containing only the information necessary to reproduce the transactional message, such as recipient, public order reference, currency/amount, item snapshot, applicable payment information and event kind.
+
+Sensitive values must be encrypted using Volume Capture’s existing established encryption mechanism. Do not introduce custom cryptography.
+
+The recovery capability must never be stored plaintext.
+
+Do not expose encrypted payloads through APIs, logs, audit records or UI.
+
+Stripe hard-crash gap — INCLUDE IN R8
+
+The architecture review identified this existing window:
+
+Stripe may accept Checkout creation and the API process may terminate before the accepted session is persisted, leaving the order appearing as checkoutAttemptStatus=not_started.
+
+Close this gap narrowly as part of R8.
+
+Do NOT redesign Stripe/payment authorization.
+
+Before the external Checkout request, persist a durable attempt state sufficient to establish that Checkout creation has begun.
+
+If the process terminates after that point without a definitive persisted provider result, the order must become safely recoverable/reconcilable and must NOT blindly create another Checkout session.
+
+Preserve existing Stripe idempotency and uncertain-checkout principles.
+
+Add explicit crash/concurrency tests for:
+
+* crash before Stripe call;
+* crash after durable attempt transition but before Stripe call;
+* Stripe acceptance followed by process termination before session persistence;
+* timeout/network ambiguity;
+* restart/recovery;
+* concurrent checkout attempts;
+* repeated idempotent customer request.
+
+Never convert uncertainty into a second uncontrolled Stripe Checkout session.
+
+Dispatcher
+
+The dispatcher must remain bounded and safe with multiple API processes.
+
+Test at least two concurrent dispatchers against the same pending records.
+
+FOR UPDATE SKIP LOCKED plus claim-token fencing should guarantee one active claim per notification.
+
+Startup/periodic processing must have explicit batch limits. Do not build a generic queue framework.
+
+Historical orders
+
+Do NOT enqueue customer emails for historical not_sent orders during migration.
+
+Prefer Legacy status unavailable for pre-R8 records where reliable notification history cannot be established.
+
+Historical migration must never unexpectedly email an old customer.
+
+Payment-confirmation semantics
+
+Enqueue payment_confirmed only on the first authoritative transition to paid.
+
+Stripe duplicate webhooks, manual repeated confirmation or concurrent updates must not create duplicate confirmation events.
+
+A payment-confirmation email is transactional and must remain completely independent of marketing consent.
+
+Privacy
+
+Explicitly verify the narrowed order DTO does not expose:
+
+* recovery token/hash/encrypted capability;
+* encrypted outbox payload;
+* claim token;
+* request fingerprint;
+* internal idempotency information;
+* provider error bodies;
+* internal checkout diagnostics;
+* unnecessary provider identifiers.
+
+Cross-studio access must continue returning non-enumerating 404 behavior.
+
+Required final R8 audit
+
+In addition to the proposed tests, provide:
+
+* exact files changed;
+* exact schema migration;
+* outbox state-machine evidence;
+* Stripe crash-state evidence;
+* restart recovery evidence;
+* multi-dispatcher concurrency evidence;
+* duplicate webhook/manual-confirmation evidence;
+* explicit DTO before/after exposure review;
+* tenant/role authorization evidence;
+* malformed/uncertain Resend behavior;
+* Releases 1–7 full regression results;
+* fresh security/privacy/dependency scans;
+* production migration requirements;
+* rollback considerations;
+* any remaining limitations.
+
+Do not publish production.
+
+Do not work on Windows.
+
+Do not perform unrelated dependency upgrades/refactors/design work.
+
+Complete R8, run the full audit, report the results and STOP for approval.

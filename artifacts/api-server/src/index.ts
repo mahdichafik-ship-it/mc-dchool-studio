@@ -9,6 +9,7 @@ import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync, getUncachableStripeClient } from "./lib/stripeClient";
 import { ensureSingleManagedWebhook } from "./lib/managedStripeWebhook";
 import { pool } from "@workspace/db";
+import { dispatchDeliveryOrderNotifications } from "./lib/deliveryOrderNotifications";
 
 const rawPort = process.env["PORT"];
 
@@ -116,4 +117,16 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  // Order notifications are a focused outbox, not a general-purpose queue.
+  // Startup and periodic passes are bounded; uncertain/stale claims are
+  // reconciled by the dispatcher and are never automatically resent.
+  void dispatchDeliveryOrderNotifications().catch((error) => {
+    logger.warn({ err: error }, "Initial order notification dispatch failed");
+  });
+  const interval = setInterval(() => {
+    void dispatchDeliveryOrderNotifications().catch((error) => {
+      logger.warn({ err: error }, "Periodic order notification dispatch failed");
+    });
+  }, 60_000);
+  interval.unref();
 });

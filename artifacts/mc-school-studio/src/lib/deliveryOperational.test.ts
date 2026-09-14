@@ -3,9 +3,15 @@ import test from "node:test";
 import {
   getCommonMethods,
   checkoutTransition,
+  canRetryFailedOrderNotifications,
+  deliveryOperationsStatusRows,
+  getDeliveryNotificationState,
+  isDeliveryManager,
   mediaRefreshDelay,
+  notificationStatusPresentation,
   parseRecoveryCredentials,
   recoveryStatusLabel,
+  safeNotificationTimestamp,
   scheduleMediaRefresh,
   shouldClearDeliveryAccess,
 } from "./deliveryOperational.ts";
@@ -118,4 +124,70 @@ test("background media refresh errors preserve state except actual access expiry
   assert.equal(shouldClearDeliveryAccess({ status: 503 }), false);
   assert.equal(shouldClearDeliveryAccess(new Error("network")), false);
   assert.equal(shouldClearDeliveryAccess({ status: 401 }), true);
+});
+
+test("operational notification presentation has safe labels and timestamps", () => {
+  assert.deepEqual(notificationStatusPresentation("sent"), {
+    status: "sent",
+    label: "Sent",
+    tone: "success",
+  });
+  assert.equal(notificationStatusPresentation(undefined).status, "unavailable");
+  assert.equal(safeNotificationTimestamp("2027-01-01T00:00:00.000Z"), "2027-01-01T00:00:00.000Z");
+  assert.equal(safeNotificationTimestamp("not-a-date"), null);
+  assert.deepEqual(getDeliveryNotificationState({
+    notifications: {
+      orderReceived: { status: "sent", sentAt: "2027-01-01T00:00:00.000Z", attempts: 1, retryAllowed: false },
+    },
+  }, "order_received"), {
+    status: "sent",
+    sentAt: "2027-01-01T00:00:00.000Z",
+    retryAllowed: false,
+  });
+  assert.deepEqual(getDeliveryNotificationState({
+    notifications: {
+      paymentConfirmed: { status: "needs_review", sentAt: null, attempts: 2, retryAllowed: false },
+    },
+  }, "payment_confirmed"), {
+    status: "needs_review",
+    sentAt: null,
+    retryAllowed: false,
+  });
+  assert.deepEqual(getDeliveryNotificationState({}, "payment_confirmed"), {
+    status: "unavailable",
+    sentAt: null,
+    retryAllowed: false,
+  });
+});
+
+test("operations summary presents all invitation and order notification states", () => {
+  assert.deepEqual(deliveryOperationsStatusRows({
+    invitations: { pending: 1, sending: 2, sent: 3, failed: 4, needsReview: 5 },
+    orderNotifications: { pending: 6, sending: 7, sent: 8, failed: 9, needsReview: 10 },
+    issues: { invitations: 9, orderNotifications: 19 },
+  }), [
+    { key: "pending", label: "Pending", invitations: 1, orderNotifications: 6 },
+    { key: "sending", label: "Sending", invitations: 2, orderNotifications: 7 },
+    { key: "sent", label: "Sent", invitations: 3, orderNotifications: 8 },
+    { key: "failed", label: "Failed", invitations: 4, orderNotifications: 9 },
+    { key: "needsReview", label: "Needs review", invitations: 5, orderNotifications: 10 },
+  ]);
+});
+
+test("delivery operational visibility and retry are manager/failed-only", () => {
+  assert.equal(isDeliveryManager({ role: "owner", status: "active" }), true);
+  assert.equal(isDeliveryManager({ role: "admin", status: "active" }), true);
+  assert.equal(isDeliveryManager({ role: "assistant", status: "active" }), false);
+  assert.equal(isDeliveryManager({ role: "owner", status: "removed" }), false);
+  assert.equal(canRetryFailedOrderNotifications([
+    { status: "sent", retryAllowed: false },
+    { status: "pending", retryAllowed: false },
+  ]), false);
+  assert.equal(canRetryFailedOrderNotifications([
+    { status: "failed", retryAllowed: true },
+    { status: "needs_review", retryAllowed: false },
+  ]), true);
+  assert.equal(canRetryFailedOrderNotifications([
+    { status: "needs_review", retryAllowed: false },
+  ]), false);
 });

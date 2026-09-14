@@ -7,8 +7,10 @@ import {
   db,
   deliveryAccessesTable,
   deliveryGalleriesTable,
+  deliveryInvitationsTable,
   deliveryPriceSheetsTable,
   deliveryOrderItemsTable,
+  deliveryOrderNotificationsTable,
   deliveryOrdersTable,
   classesTable,
   captureFilesTable,
@@ -26,7 +28,7 @@ import { photoStorageCopiesTable } from "@workspace/db/schema";
 import { and, asc, eq, exists, gt, ilike, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { requireAuth, getUserId } from "../lib/auth";
-import { canAccessProject, getStudioMember } from "../lib/studioAccess";
+import { canAccessProject, getStudioMember, isStudioManagerForProject } from "../lib/studioAccess";
 import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
 import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { getR2Object } from "../lib/r2Storage";
@@ -45,13 +47,19 @@ import {
   retryFailedDeliveryInvitations,
 } from "../lib/deliveryInvitations";
 import { logger } from "../lib/logger";
-import { ResendSendError, sendResendEmailBatch } from "../lib/resendEmail";
 import {
   deliveryTerminology,
   normalizeDeliveryProjectType,
   type DeliveryProjectType,
 } from "../lib/deliveryTerminology";
 import { publicAppUrl } from "../lib/publicAppUrl";
+import {
+  dispatchDeliveryOrderNotifications,
+  enqueueDeliveryOrderNotification,
+  enqueuePaymentConfirmedNotification,
+  finalizeDeliveryOrderNotification,
+  retryFailedDeliveryOrderNotifications,
+} from "../lib/deliveryOrderNotifications";
 
 const router = Router();
 const DELIVERY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -109,12 +117,6 @@ function recoveryTokenMatches(token: string, storedHash: string | null): boolean
   const actual = Buffer.from(hashRecoveryToken(token), "hex");
   const expected = Buffer.from(storedHash, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-function escapeEmailHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[character] ?? character));
 }
 
 function isUniqueConstraintViolation(error: unknown): boolean {
@@ -419,56 +421,116 @@ function manualPaymentInstructions(
 
 async function dispatchOrderNotification(
   order: typeof deliveryOrdersTable.$inferSelect,
-  gallery: typeof deliveryGalleriesTable.$inferSelect,
-  itemSummary: string[],
-  recoveryUrl: string,
+  _gallery: typeof deliveryGalleriesTable.$inferSelect,
+  _itemSummary: string[],
+  _recoveryUrl: string,
 ): Promise<void> {
   if (!order.customerEmail) return;
-  const status = order.status === "pending" && order.checkoutAttemptStatus === "uncertain"
-    ? "payment needs review"
-    : order.status;
-  const instructions = order.paymentMethod === "stripe"
-    ? order.checkoutAttemptStatus === "uncertain"
-      ? "We could not confirm the online payment attempt yet. Please do not submit the order again; the studio will review it."
-      : "Complete payment using the secure checkout page. Your order status will update after payment is confirmed."
-    : manualPaymentInstructions(gallery, order.paymentMethod);
-  const summary = itemSummary.length > 0 ? itemSummary.map((item) => `- ${item}`).join("\n") : "- Order items";
-  const text = [
-    `Your photo order ${order.publicReference ?? "reference"} was received.`,
-    `Status: ${status}`,
-    `Amount: ${(order.amountTotal / 100).toFixed(2)} ${order.currency.toUpperCase()}`,
-    "",
-    "Items:",
-    summary,
-    "",
-    instructions,
-    "",
-    `View order status: ${recoveryUrl}`,
-  ].join("\n");
-  const htmlSummary = itemSummary.map((item) => `<li>${escapeEmailHtml(item)}</li>`).join("");
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a"><p>Your photo order <strong>${escapeEmailHtml(order.publicReference ?? "reference")}</strong> was received.</p><p><strong>Status:</strong> ${escapeEmailHtml(status)}<br><strong>Amount:</strong> ${escapeEmailHtml((order.amountTotal / 100).toFixed(2))} ${escapeEmailHtml(order.currency.toUpperCase())}</p><p><strong>Items</strong></p><ul>${htmlSummary || "<li>Order items</li>"}</ul><p>${escapeEmailHtml(instructions)}</p><p><a href="${escapeEmailHtml(recoveryUrl)}">View order status</a></p></div>`;
-  try {
-    const [providerId] = await sendResendEmailBatch([{
-      to: [order.customerEmail],
-      subject: `Photo order ${order.publicReference ?? "received"}`,
-      text,
-      html,
-      headers: {},
-    }], `volume-capture-order-${order.id}-v1`);
-    await db.update(deliveryOrdersTable).set({
-      notificationStatus: "sent",
-      notificationProviderId: providerId,
-      notificationError: null,
-    }).where(eq(deliveryOrdersTable.id, order.id));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Order email failed";
-    await db.update(deliveryOrdersTable).set({
-      notificationStatus: error instanceof ResendSendError && error.outcome === "unknown" ? "uncertain" : "failed",
-      notificationError: message.slice(0, 1_000),
-    }).where(eq(deliveryOrdersTable.id, order.id));
-    // A notification failure is operational state, not an order failure.
-    logger.warn({ err: error, orderId: order.id }, "Transactional order notification was not sent");
-  }
+  await dispatchDeliveryOrderNotifications(order.id);
+}
+
+type DurableStripeCheckoutParams = Stripe.Checkout.SessionCreateParams;
+
+function buildStripeCheckoutParams(input: {
+  orderId: number;
+  gallerySlug: string;
+  projectId: number;
+  customerEmail: string;
+  deliveryMethod: string;
+  pricedLines: Array<{ offer: { currency: string; unitAmount: number; name: string; description?: string | null }; orderQuantity: number }>;
+  origin: string;
+}): DurableStripeCheckoutParams {
+  return {
+    mode: "payment",
+    line_items: input.pricedLines.map(({ offer, orderQuantity }) => ({
+      price_data: {
+        currency: offer.currency,
+        unit_amount: offer.unitAmount,
+        product_data: {
+          name: offer.name,
+          ...(offer.description ? { description: offer.description } : {}),
+        },
+      },
+      quantity: orderQuantity,
+    })),
+    customer_creation: "always",
+    ...(input.customerEmail ? { customer_email: input.customerEmail } : {}),
+    ...(input.deliveryMethod === "shipping" ? {
+      shipping_address_collection: { allowed_countries: ["MA", "US", "CA", "GB", "AU", "NZ"] },
+    } : {}),
+    metadata: {
+      orderId: String(input.orderId),
+      gallerySlug: input.gallerySlug,
+      projectId: String(input.projectId),
+    },
+    success_url: `${input.origin}/delivery/${input.gallerySlug}?paid=1&order=${input.orderId}`,
+    cancel_url: `${input.origin}/delivery/${input.gallerySlug}?cancelled=1&order=${input.orderId}`,
+  };
+}
+
+async function performStripeCheckoutAttempt(
+  orderId: number,
+  idempotencyKey: string,
+  params: DurableStripeCheckoutParams,
+): Promise<{ status: "started" | "created" | "uncertain"; sessionId?: string; sessionUrl?: string; error?: string }> {
+  // Commit the provider-attempt boundary before invoking Stripe. This makes
+  // crash-before-call observable and recoverable by a later replay.
+  await db.update(deliveryOrdersTable).set({
+    checkoutAttemptStatus: "started",
+    checkoutAttemptError: null,
+  }).where(and(
+    eq(deliveryOrdersTable.id, orderId),
+    eq(deliveryOrdersTable.checkoutAttemptStatus, "not_started"),
+  ));
+  return db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(deliveryOrdersTable)
+      .where(eq(deliveryOrdersTable.id, orderId))
+      .for("update")
+      .limit(1);
+    if (!locked) return { status: "uncertain", error: "Order no longer exists" };
+    if (locked.checkoutAttemptStatus === "created" && locked.stripeCheckoutSessionId) {
+      return { status: "created", sessionId: locked.stripeCheckoutSessionId };
+    }
+    let stripe: Stripe;
+    try {
+      stripe = await getUncachableStripeClient();
+    } catch (error) {
+      // Keep started durable. A replay can safely retry with the same key.
+      return {
+        status: "started",
+        error: (error instanceof Error ? error.message : "Stripe client unavailable").slice(0, 1_000),
+      };
+    }
+    try {
+      const session = await stripe.checkout.sessions.create(params, { idempotencyKey });
+      if (!session?.id || !session.url) throw new Error("Stripe checkout response was incomplete");
+      await tx.update(deliveryOrdersTable).set({
+        stripeCheckoutSessionId: session.id,
+        checkoutAttemptStatus: "created",
+        checkoutAttemptError: null,
+      }).where(eq(deliveryOrdersTable.id, orderId));
+      await finalizeDeliveryOrderNotification(tx, {
+        orderId,
+        eventType: "order_received",
+        status: "pending",
+        instructions: "Complete payment using the secure checkout page. Your order status will update after payment is confirmed.",
+      });
+      return { status: "created", sessionId: session.id, sessionUrl: session.url };
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : "Stripe checkout attempt was inconclusive").slice(0, 1_000);
+      await tx.update(deliveryOrdersTable).set({
+        checkoutAttemptStatus: "uncertain",
+        checkoutAttemptError: message,
+      }).where(eq(deliveryOrdersTable.id, orderId));
+      await finalizeDeliveryOrderNotification(tx, {
+        orderId,
+        eventType: "order_received",
+        status: "payment needs review",
+        instructions: "We could not confirm the online payment attempt yet. Please do not submit the order again; the studio will review it.",
+      });
+      return { status: "uncertain", error: message };
+    }
+  });
 }
 
 async function getAccessForToken(galleryId: number, accessId: number) {
@@ -848,11 +910,30 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
         res.status(409).json({ error: "This checkout key was already used for a different order" });
         return;
       }
+      let replayAttempt: Awaited<ReturnType<typeof performStripeCheckoutAttempt>> | null = null;
+      if (replayedOrder.paymentMethod === "stripe"
+        && (replayedOrder.checkoutAttemptStatus === "started"
+          || replayedOrder.checkoutAttemptStatus === "uncertain")) {
+        if (replayedOrder.checkoutParamsEncrypted) {
+          const checkoutParams = decryptStorageValue<DurableStripeCheckoutParams>(
+            replayedOrder.checkoutParamsEncrypted,
+          );
+          replayAttempt = await performStripeCheckoutAttempt(
+            replayedOrder.id,
+            `delivery-order-${replayedOrder.id}-${idempotencyKey}`,
+            checkoutParams,
+          );
+          if (replayAttempt.status !== "started") {
+            await dispatchDeliveryOrderNotifications(replayedOrder.id);
+          }
+        }
+      }
       let checkoutUrl: string | null = null;
-      if (replayedOrder.stripeCheckoutSessionId) {
+      const replaySessionId = replayAttempt?.sessionId ?? replayedOrder.stripeCheckoutSessionId;
+      if (replaySessionId) {
         try {
           const stripe = await getUncachableStripeClient();
-          const session = await stripe.checkout.sessions.retrieve(replayedOrder.stripeCheckoutSessionId);
+          const session = await stripe.checkout.sessions.retrieve(replaySessionId);
           checkoutUrl = session.url;
         } catch {
           // The durable attempt state remains authoritative; do not create
@@ -868,7 +949,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
         paymentInstructions: replayedOrder.paymentMethod === "stripe"
           ? null
           : manualPaymentInstructions(row.gallery, replayedOrder.paymentMethod),
-        checkoutAttemptStatus: replayedOrder.checkoutAttemptStatus,
+        checkoutAttemptStatus: replayAttempt?.status ?? replayedOrder.checkoutAttemptStatus,
         recoveryUrl: null,
       });
       return;
@@ -880,6 +961,11 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
     const recoveryToken = randomBytes(32).toString("base64url");
     const publicReference = newPublicOrderReference();
     const recoveryExpiresAt = new Date(Date.now() + RECOVERY_TTL_MS);
+    const itemSummary = pricedLines.map(({ offer, photos: linePhotos, orderQuantity }) =>
+      `${offer.name} (${linePhotos.length} photo${linePhotos.length === 1 ? "" : "s"}${orderQuantity > 1 ? ` × ${orderQuantity}` : ""})`,
+    );
+    const recoveryOrigin = publicAppUrl();
+    const recoveryUrl = `${recoveryOrigin}/delivery/${encodeURIComponent(row.gallery.slug)}?orderRef=${encodeURIComponent(publicReference)}#recoveryToken=${encodeURIComponent(recoveryToken)}`;
     let order: typeof deliveryOrdersTable.$inferSelect;
     try {
       order = await db.transaction(async (tx) => {
@@ -905,6 +991,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
           requestFingerprint,
           checkoutAttemptStatus: "not_started",
           checkoutAttemptError: null,
+          checkoutParamsEncrypted: null,
           notificationStatus: "not_sent",
           notificationProviderId: null,
           notificationError: null,
@@ -919,7 +1006,39 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
             printSize: offer.printSize ?? null, quantity, unitAmount: offer.unitAmount, currency: offer.currency,
           }));
         });
+        if (created.paymentMethod === "stripe") {
+          await tx.update(deliveryOrdersTable).set({
+            checkoutParamsEncrypted: encryptStorageValue(buildStripeCheckoutParams({
+              orderId: created.id,
+              gallerySlug: row.gallery.slug,
+              projectId: row.gallery.projectId,
+              customerEmail: created.customerEmail ?? "",
+              deliveryMethod: created.deliveryMethod,
+              pricedLines,
+              origin: publicAppUrl(),
+            })),
+          }).where(eq(deliveryOrdersTable.id, created.id));
+        }
         await tx.insert(deliveryOrderItemsTable).values(orderItems);
+        if (created.customerEmail && created.publicReference) {
+          await enqueueDeliveryOrderNotification(tx, {
+            orderId: created.id,
+            eventType: "order_received",
+            recipientEmail: created.customerEmail,
+            publicReference: created.publicReference,
+            gallerySlug: row.gallery.slug,
+            amountTotal: created.amountTotal,
+            currency: created.currency,
+            status: created.status,
+            instructions: created.paymentMethod === "stripe"
+              ? "Complete payment using the secure checkout page. Your order status will update after payment is confirmed."
+              : manualPaymentInstructions(row.gallery, created.paymentMethod),
+            itemSummary,
+            recoveryUrl,
+            recoveryToken,
+            ...(created.paymentMethod === "stripe" ? { ready: false } : {}),
+          });
+        }
         return created;
       });
     } catch (error) {
@@ -934,11 +1053,25 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
         res.status(409).json({ error: "This checkout key was already used for a different order" });
         return;
       }
+      let winnerAttempt: Awaited<ReturnType<typeof performStripeCheckoutAttempt>> | null = null;
+      if (winner.paymentMethod === "stripe"
+        && (winner.checkoutAttemptStatus === "started" || winner.checkoutAttemptStatus === "uncertain")) {
+        if (winner.checkoutParamsEncrypted) {
+          const checkoutParams = decryptStorageValue<DurableStripeCheckoutParams>(winner.checkoutParamsEncrypted);
+          winnerAttempt = await performStripeCheckoutAttempt(
+            winner.id,
+            `delivery-order-${winner.id}-${idempotencyKey}`,
+            checkoutParams,
+          );
+          if (winnerAttempt.status !== "started") await dispatchDeliveryOrderNotifications(winner.id);
+        }
+      }
       let checkoutUrl: string | null = null;
-      if (winner.stripeCheckoutSessionId) {
+      const winnerSessionId = winnerAttempt?.sessionId ?? winner.stripeCheckoutSessionId;
+      if (winnerSessionId) {
         try {
           const stripe = await getUncachableStripeClient();
-          checkoutUrl = (await stripe.checkout.sessions.retrieve(winner.stripeCheckoutSessionId)).url;
+          checkoutUrl = (await stripe.checkout.sessions.retrieve(winnerSessionId)).url;
         } catch {
           // Do not create another provider session while the winner is authoritative.
         }
@@ -952,17 +1085,12 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
         paymentInstructions: winner.paymentMethod === "stripe"
           ? null
           : manualPaymentInstructions(row.gallery, winner.paymentMethod),
-        checkoutAttemptStatus: winner.checkoutAttemptStatus,
+        checkoutAttemptStatus: winnerAttempt?.status ?? winner.checkoutAttemptStatus,
         recoveryUrl: null,
       });
       return;
     }
 
-    const itemSummary = pricedLines.map(({ offer, photos: linePhotos, orderQuantity }) =>
-      `${offer.name} (${linePhotos.length} photo${linePhotos.length === 1 ? "" : "s"}${orderQuantity > 1 ? ` × ${orderQuantity}` : ""})`,
-    );
-    const recoveryOrigin = publicAppUrl();
-    const recoveryUrl = `${recoveryOrigin}/delivery/${encodeURIComponent(row.gallery.slug)}?orderRef=${encodeURIComponent(publicReference)}#recoveryToken=${encodeURIComponent(recoveryToken)}`;
     if (paymentMethod !== "stripe") {
       await dispatchOrderNotification(order, row.gallery, itemSummary, recoveryUrl);
       res.json({
@@ -979,51 +1107,10 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       return;
     }
 
-    const stripe = await getUncachableStripeClient();
-    const origin = publicAppUrl();
-    let session;
-    try {
-      session = await stripe.checkout.sessions.create({
-        mode: "payment",
-        line_items: pricedLines.map(({ offer, orderQuantity }) => ({
-          price_data: {
-            currency: offer.currency,
-            unit_amount: offer.unitAmount,
-            product_data: {
-              name: offer.name,
-              ...(offer.description ? { description: offer.description } : {}),
-            },
-          },
-          quantity: orderQuantity,
-        })),
-        customer_creation: "always",
-        ...(customerEmail ? { customer_email: customerEmail } : {}),
-        ...(deliveryMethod === "shipping" ? {
-          shipping_address_collection: { allowed_countries: ["MA", "US", "CA", "GB", "AU", "NZ"] },
-        } : {}),
-        metadata: {
-          orderId: String(order.id),
-          gallerySlug: row.gallery.slug,
-          projectId: String(row.gallery.projectId),
-        },
-        success_url: `${origin}/delivery/${row.gallery.slug}?paid=1&order=${order.id}`,
-        cancel_url: `${origin}/delivery/${row.gallery.slug}?cancelled=1&order=${order.id}`,
-      }, {
-        idempotencyKey: `delivery-order-${order.id}-${idempotencyKey}`,
-      });
-      if (!session?.id || !session.url) {
-        throw new Error("Stripe checkout response was incomplete");
-      }
-    } catch (error) {
-      await db.update(deliveryOrdersTable).set({
-        checkoutAttemptStatus: "uncertain",
-        checkoutAttemptError: (error instanceof Error ? error.message : "Stripe checkout attempt was inconclusive").slice(0, 1_000),
-      })
-        .where(eq(deliveryOrdersTable.id, order.id));
-      await dispatchOrderNotification({
-        ...order,
-        checkoutAttemptStatus: "uncertain",
-      }, row.gallery, itemSummary, recoveryUrl);
+    const [durableOrder] = await db.select({
+      checkoutParamsEncrypted: deliveryOrdersTable.checkoutParamsEncrypted,
+    }).from(deliveryOrdersTable).where(eq(deliveryOrdersTable.id, order.id)).limit(1);
+    if (!durableOrder?.checkoutParamsEncrypted) {
       res.status(202).json({
         checkoutUrl: null,
         orderId: order.id,
@@ -1037,18 +1124,17 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       });
       return;
     }
-    const [readyOrder] = await db.update(deliveryOrdersTable).set({
-      stripeCheckoutSessionId: session.id,
-      checkoutAttemptStatus: "created",
-      checkoutAttemptError: null,
-    }).where(eq(deliveryOrdersTable.id, order.id)).returning();
-    await dispatchOrderNotification(readyOrder ?? {
-      ...order,
-      stripeCheckoutSessionId: session.id,
-      checkoutAttemptStatus: "created",
-    }, row.gallery, itemSummary, recoveryUrl);
-    res.json({
-      checkoutUrl: session.url,
+    const checkoutParams = decryptStorageValue<DurableStripeCheckoutParams>(
+      durableOrder.checkoutParamsEncrypted,
+    );
+    const attempt = await performStripeCheckoutAttempt(
+      order.id,
+      `delivery-order-${order.id}-${idempotencyKey}`,
+      checkoutParams,
+    );
+    if (attempt.status !== "started") await dispatchDeliveryOrderNotifications(order.id);
+    res.status(attempt.status === "started" ? 503 : attempt.status === "uncertain" ? 202 : 200).json({
+      checkoutUrl: attempt.sessionUrl ?? null,
       orderId: order.id,
       publicReference,
       recoveryUrl,
@@ -1056,7 +1142,7 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       status: order.status,
       paymentMethod,
       paymentInstructions: null,
-      checkoutAttemptStatus: "created",
+      checkoutAttemptStatus: attempt.status,
     });
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : "Checkout is not available yet" });
@@ -1943,6 +2029,73 @@ router.post("/projects/:projectId/delivery/revoke", requireAuth, async (req, res
   res.json({ gallery });
 });
 
+async function safeOrderDto(
+  order: typeof deliveryOrdersTable.$inferSelect,
+  includeNotificationOperations = false,
+) {
+  const safe = {
+    id: order.id,
+    publicReference: order.publicReference,
+    status: order.status,
+    paymentMethod: order.paymentMethod,
+    customerName: order.customerName,
+    customerEmail: order.customerEmail,
+    fulfillmentStatus: order.fulfillmentStatus,
+    deliveryMethod: order.deliveryMethod,
+    deliveryAddress: order.deliveryAddress,
+    amountTotal: order.amountTotal,
+    currency: order.currency,
+    createdAt: order.createdAt,
+    paidAt: order.paidAt,
+  };
+  if (!includeNotificationOperations) return safe;
+  const rows = await db.select({
+    eventType: deliveryOrderNotificationsTable.eventType,
+    status: deliveryOrderNotificationsTable.status,
+    attempts: deliveryOrderNotificationsTable.attempts,
+    sentAt: deliveryOrderNotificationsTable.sentAt,
+  }).from(deliveryOrderNotificationsTable)
+    .where(eq(deliveryOrderNotificationsTable.orderId, order.id));
+  const byEvent = new Map(rows.map((row) => [row.eventType, row]));
+  return {
+    ...safe,
+    notifications: {
+      orderReceived: notificationStateDto(byEvent.get("order_received")),
+      paymentConfirmed: notificationStateDto(byEvent.get("payment_confirmed")),
+    },
+  };
+}
+
+function notificationStateDto(
+  row: {
+    status: "pending" | "sending" | "sent" | "failed" | "needs_review";
+    attempts: number;
+    sentAt: Date | null;
+  } | undefined,
+) {
+  return row ? {
+    status: row.status,
+    sentAt: row.sentAt?.toISOString() ?? null,
+    attempts: row.attempts,
+    retryAllowed: row.status === "failed",
+  } : null;
+}
+
+function safeOrderItemDto(item: typeof deliveryOrderItemsTable.$inferSelect) {
+  return {
+    id: item.id,
+    photoId: item.photoId,
+    offerId: item.offerId,
+    productName: item.productName,
+    productType: item.productType,
+    includesDigitalDownloads: item.includesDigitalDownloads,
+    printSize: item.printSize,
+    quantity: item.quantity,
+    unitAmount: item.unitAmount,
+    currency: item.currency,
+  };
+}
+
 router.get("/projects/:projectId/delivery/orders", requireAuth, async (req, res): Promise<void> => {
   const projectId = Number(req.params.projectId);
   if (!Number.isInteger(projectId) || !(await canAccessProject(getUserId(req), projectId, "view"))) {
@@ -1951,7 +2104,58 @@ router.get("/projects/:projectId/delivery/orders", requireAuth, async (req, res)
   const [gallery] = await db.select({ id: deliveryGalleriesTable.id }).from(deliveryGalleriesTable)
     .where(eq(deliveryGalleriesTable.projectId, projectId)).limit(1);
   if (!gallery) { res.json({ orders: [] }); return; }
-  res.json({ orders: await db.select().from(deliveryOrdersTable).where(eq(deliveryOrdersTable.galleryId, gallery.id)) });
+  const includeNotificationOperations = await isStudioManagerForProject(getUserId(req), projectId);
+  const orders = await db.select().from(deliveryOrdersTable).where(eq(deliveryOrdersTable.galleryId, gallery.id));
+  res.json({
+    orders: await Promise.all(orders.map((order) => safeOrderDto(order, includeNotificationOperations))),
+  });
+});
+
+router.get("/projects/:projectId/delivery/operations", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isInteger(projectId)
+    || !(await isStudioManagerForProject(getUserId(req), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [gallery] = await db.select({ id: deliveryGalleriesTable.id })
+    .from(deliveryGalleriesTable)
+    .where(eq(deliveryGalleriesTable.projectId, projectId))
+    .limit(1);
+  if (!gallery) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const invitationRows = await db.select({
+    status: deliveryInvitationsTable.status,
+    count: sql<number>`count(*)`,
+  }).from(deliveryInvitationsTable)
+    .where(eq(deliveryInvitationsTable.galleryId, gallery.id))
+    .groupBy(deliveryInvitationsTable.status);
+  const orderNotificationRows = await db.select({
+    status: deliveryOrderNotificationsTable.status,
+    count: sql<number>`count(*)`,
+  }).from(deliveryOrderNotificationsTable)
+    .innerJoin(deliveryOrdersTable, eq(deliveryOrdersTable.id, deliveryOrderNotificationsTable.orderId))
+    .where(eq(deliveryOrdersTable.galleryId, gallery.id))
+    .groupBy(deliveryOrderNotificationsTable.status);
+  const counts = <T extends string>(rows: Array<{ status: T; count: number }>) => ({
+    pending: Number(rows.find((row) => row.status === "pending")?.count ?? 0),
+    sending: Number(rows.find((row) => row.status === "sending")?.count ?? 0),
+    sent: Number(rows.find((row) => row.status === "sent")?.count ?? 0),
+    failed: Number(rows.find((row) => row.status === "failed")?.count ?? 0),
+    needsReview: Number(rows.find((row) => row.status === "needs_review")?.count ?? 0),
+  });
+  const invitations = counts(invitationRows);
+  const orderNotifications = counts(orderNotificationRows);
+  res.json({
+    invitations,
+    orderNotifications,
+    issues: {
+      invitations: invitations.failed + invitations.needsReview,
+      orderNotifications: orderNotifications.failed + orderNotifications.needsReview,
+    },
+  });
 });
 
 router.get("/projects/:projectId/delivery/orders/:orderId", requireAuth, async (req, res): Promise<void> => {
@@ -1962,7 +2166,11 @@ router.get("/projects/:projectId/delivery/orders/:orderId", requireAuth, async (
     .where(and(eq(deliveryOrdersTable.id, orderId), eq(deliveryGalleriesTable.projectId, projectId))).limit(1);
   if (!order) { res.status(404).json({ error: "Order not found" }); return; }
   const items = await db.select().from(deliveryOrderItemsTable).where(eq(deliveryOrderItemsTable.orderId, orderId));
-  res.json({ order: order.order, items });
+  const includeNotificationOperations = await isStudioManagerForProject(getUserId(req), projectId);
+  res.json({
+    order: await safeOrderDto(order.order, includeNotificationOperations),
+    items: items.map(safeOrderItemDto),
+  });
 });
 
 router.patch("/projects/:projectId/delivery/orders/:orderId/fulfillment", requireAuth, async (req, res): Promise<void> => {
@@ -1981,7 +2189,7 @@ router.patch("/projects/:projectId/delivery/orders/:orderId/fulfillment", requir
   const [updated] = await db.update(deliveryOrdersTable).set({ fulfillmentStatus: req.body.fulfillmentStatus })
     .where(eq(deliveryOrdersTable.id, orderId)).returning();
   if (!updated) { res.status(404).json({ error: "Order not found" }); return; }
-  res.json({ order: updated });
+  res.json({ order: await safeOrderDto(updated) });
 });
 
 router.patch("/projects/:projectId/delivery/orders/:orderId/payment", requireAuth, async (req, res): Promise<void> => {
@@ -2004,18 +2212,54 @@ router.patch("/projects/:projectId/delivery/orders/:orderId/payment", requireAut
   const items = await db.select({ productType: deliveryOrderItemsTable.productType })
     .from(deliveryOrderItemsTable).where(eq(deliveryOrderItemsTable.orderId, orderId));
   const hasPhysicalItem = items.some((item) => item.productType === "print" || item.productType === "pack");
-  const [updated] = await db.update(deliveryOrdersTable).set({
-    status: status as "pending" | "paid" | "cancelled" | "refunded",
-    paidAt: status === "paid" ? (ownedOrder.order.paidAt ?? new Date()) : null,
-    ...(status === "paid" ? { fulfillmentStatus: hasPhysicalItem ? "paid" as const : "not_required" as const } : {}),
-  }).where(eq(deliveryOrdersTable.id, orderId)).returning();
+  const [updated] = await db.transaction(async (tx) => {
+    const [next] = await tx.update(deliveryOrdersTable).set({
+      status: status as "pending" | "paid" | "cancelled" | "refunded",
+      paidAt: status === "paid" ? (ownedOrder.order.paidAt ?? new Date()) : null,
+      ...(status === "paid" ? { fulfillmentStatus: hasPhysicalItem ? "paid" as const : "not_required" as const } : {}),
+    }).where(eq(deliveryOrdersTable.id, orderId)).returning();
+    if (next && status === "paid" && ownedOrder.order.status !== "paid") {
+      await enqueuePaymentConfirmedNotification(tx, {
+        orderId,
+        status: "paid",
+        instructions: "Your payment was confirmed. The studio will prepare your order and update its status here.",
+      });
+    }
+    return [next];
+  });
   if (!updated) { res.status(404).json({ error: "Order not found" }); return; }
   if (status === "paid" && updated.customerEmail) {
     const [gallery] = await db.select({ studioId: deliveryGalleriesTable.studioId, projectId: deliveryGalleriesTable.projectId })
       .from(deliveryGalleriesTable).where(eq(deliveryGalleriesTable.id, updated.galleryId)).limit(1);
     if (gallery?.studioId) await markContactOrder(gallery.studioId, updated.customerEmail, updated.contactId);
   }
-  res.json({ order: updated });
+  if (status === "paid" && ownedOrder.order.status !== "paid") {
+    await dispatchDeliveryOrderNotifications(orderId);
+  }
+  res.json({ order: await safeOrderDto(updated) });
+});
+
+router.post("/projects/:projectId/delivery/orders/:orderId/notifications/retry", requireAuth, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.projectId);
+  const orderId = Number(req.params.orderId);
+  if (!Number.isInteger(projectId) || !Number.isInteger(orderId)
+    || !await isStudioManagerForProject(getUserId(req), projectId)) {
+    res.status(404).json({ error: "Order not found" });
+    return;
+  }
+  const [order] = await db.select({ id: deliveryOrdersTable.id })
+    .from(deliveryOrdersTable)
+    .innerJoin(deliveryGalleriesTable, eq(deliveryOrdersTable.galleryId, deliveryGalleriesTable.id))
+    .where(and(
+      eq(deliveryOrdersTable.id, orderId),
+      eq(deliveryGalleriesTable.projectId, projectId),
+    ))
+    .limit(1);
+  if (!order) {
+    res.status(404).json({ error: "Order not found" });
+    return;
+  }
+  res.json(await retryFailedDeliveryOrderNotifications(order.id));
 });
 
 router.get("/projects/:projectId/delivery/orders/export.csv", requireAuth, async (req, res): Promise<void> => {

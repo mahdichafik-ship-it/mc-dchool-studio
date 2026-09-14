@@ -19,7 +19,14 @@ import {
   readableR2ObjectKey,
   verifyR2Copy,
 } from "../src/lib/r2UploadCopies";
-import { dispatchR2PhotoDeletions } from "../src/lib/r2PhotoDeletionOutbox";
+import {
+  dispatchR2PhotoDeletions,
+  enqueueR2PhotoDeletions,
+} from "../src/lib/r2PhotoDeletionOutbox";
+import {
+  r2LegacyPhotoVariantPrefix,
+  r2PhotoVariantPrefix,
+} from "../src/lib/photoVariants";
 
 const hierarchy = {
   studioId: 7,
@@ -246,7 +253,29 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
     });
     await verifierAPaused;
 
-    failNextStagingDelete = true;
+    const cleanupBoundaryAt = new Date(Date.now() + 21 * 60_000);
+    // Keep the staging cleanup record out of this dispatcher pass so this
+    // boundary test isolates the expired verified-candidate lease.
+    await db.update(r2PhotoDeletionOutboxTable).set({
+      nextRetryAt: new Date(cleanupBoundaryAt.getTime() + 60 * 60_000),
+    }).where(and(
+      eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
+      eq(r2PhotoDeletionOutboxTable.objectKey, stagingObjectKey),
+    ));
+    await dispatchR2PhotoDeletions({
+      now: cleanupBoundaryAt,
+      listVariantKeys: async () => [],
+      deleteObject: async (key) => {
+        deletedKeys.push(key);
+        objects.delete(key);
+      },
+    });
+    assert.equal(
+      objects.has(candidateKeys[0]),
+      false,
+      "cleanup may win once the candidate lease expires before promotion",
+    );
+
     const winningCopy = await verifyR2Copy(copy);
     assert.equal(candidateKeys.length, 2);
     assert.notEqual(candidateKeys[0], candidateKeys[1]);
@@ -258,7 +287,6 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
       /\/concurrent-[^/]+__[a-f0-9]{12}\.jpg$/,
     );
 
-    failNextCandidateDelete = true;
     releaseVerifierA();
     await assert.rejects(
       verifierA,
@@ -268,30 +296,13 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
         error.code === "R2_UPLOAD_NOT_VERIFIED",
     );
 
-    const [queuedCandidate] = await db.select()
+    const [cleanedCandidate] = await db.select()
       .from(r2PhotoDeletionOutboxTable)
       .where(and(
         eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
         eq(r2PhotoDeletionOutboxTable.objectKey, candidateKeys[0]),
       ));
-    assert.equal(queuedCandidate.state, "pending");
-    await dispatchR2PhotoDeletions({
-      now: new Date(Date.now() + 1_000),
-      listVariantKeys: async () => [],
-      deleteObject: async (key) => {
-        deletedKeys.push(key);
-        objects.delete(key);
-      },
-    });
-    assert.equal(objects.has(stagingObjectKey), true);
-    await dispatchR2PhotoDeletions({
-      now: new Date(Date.now() + 17 * 60_000),
-      listVariantKeys: async () => [],
-      deleteObject: async (key) => {
-        deletedKeys.push(key);
-        objects.delete(key);
-      },
-    });
+    assert.equal(cleanedCandidate.state, "deleted");
 
     const [storedCopy] = await db
       .select()
@@ -306,22 +317,11 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
     );
     assert.deepEqual(
       deletedKeys.filter((key) => candidateKeys.includes(key)),
-      [candidateKeys[0], candidateKeys[0]],
-      "the failed immediate cleanup and durable retry must target only the losing candidate",
+      [candidateKeys[0]],
+      "cleanup must delete only the losing candidate before promotion",
     );
     assert.ok(!deletedKeys.includes(winningCopy.objectKey));
     assert.equal(objects.has(stagingObjectKey), false);
-    const [cleanedCandidate] = await db.select()
-      .from(r2PhotoDeletionOutboxTable)
-      .where(eq(r2PhotoDeletionOutboxTable.id, queuedCandidate.id));
-    assert.equal(cleanedCandidate.state, "deleted");
-    const [cleanedStaging] = await db.select()
-      .from(r2PhotoDeletionOutboxTable)
-      .where(and(
-        eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
-        eq(r2PhotoDeletionOutboxTable.objectKey, stagingObjectKey),
-      ));
-    assert.equal(cleanedStaging.state, "deleted");
   } finally {
     globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(originalR2Environment)) {
@@ -333,6 +333,7 @@ test("a stale concurrent verifier cannot replace or delete the winning candidate
     }
   }
 });
+
 
 test("expired staging cleanup preserves active and verified objects and retries failures", async () => {
   const originalAccountId = process.env.R2_ACCOUNT_ID;
@@ -475,6 +476,11 @@ test("expired staging cleanup preserves active and verified objects and retries 
         lastError: "verification mismatch",
       })
       .where(eq(photoStorageCopiesTable.id, copies[1].id));
+    const [failedAttempt] = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.id, copies[1].id));
+    assert(failedAttempt?.stagingObjectKey);
     const [activePhoto] = await db
       .select()
       .from(studentPhotosTable)
@@ -491,13 +497,35 @@ test("expired staging cleanup preserves active and verified objects and retries 
       fileSize: 1,
       sha256: "a".repeat(64),
     });
-    assert.equal(uploadRetry?.objectKey, `staging/retry-${suffix}.jpg`);
+    assert(uploadRetry);
+    assert.notEqual(uploadRetry.objectKey, failedAttempt.stagingObjectKey);
+    assert.equal(uploadRetry.attemptKey, uploadRetry.objectKey);
     const [retriedCopy] = await db
       .select()
       .from(photoStorageCopiesTable)
       .where(eq(photoStorageCopiesTable.id, copies[1].id));
+    assert(retriedCopy);
     assert.equal(retriedCopy.state, "uploading");
-    assert.equal(retriedCopy.stagingObjectKey, `staging/retry-${suffix}.jpg`);
+    assert.equal(retriedCopy.stagingObjectKey, uploadRetry.objectKey);
+    const [oldAttemptCleanup] = await db
+      .select()
+      .from(r2PhotoDeletionOutboxTable)
+      .where(and(
+        eq(r2PhotoDeletionOutboxTable.storageCopyId, retriedCopy.id),
+        eq(r2PhotoDeletionOutboxTable.objectKey, failedAttempt.stagingObjectKey!),
+      ));
+    assert.equal(oldAttemptCleanup.state, "pending");
+    await assert.rejects(
+      verifyR2Copy(failedAttempt, failedAttempt.stagingObjectKey!),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "R2_UPLOAD_NOT_VERIFIED",
+    );
+    const [afterStaleVerification] = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.id, retriedCopy.id));
+    assert.equal(afterStaleVerification.stagingObjectKey, uploadRetry.objectKey);
   } finally {
     if (originalAccountId === undefined) delete process.env.R2_ACCOUNT_ID;
     else process.env.R2_ACCOUNT_ID = originalAccountId;
@@ -507,6 +535,218 @@ test("expired staging cleanup preserves active and verified objects and retries 
     else process.env.R2_SECRET_ACCESS_KEY = originalSecret;
     if (originalBucket === undefined) delete process.env.R2_BUCKET_NAME;
     else process.env.R2_BUCKET_NAME = originalBucket;
+    if (studioId !== undefined) {
+      await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
+    }
+  }
+});
+
+test("deletion keeps a live project's overlapping legacy variant namespace", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  let studioId: number | undefined;
+  let deletedPhotoId: number | undefined;
+
+  try {
+    const [studio] = await db.insert(studiosTable).values({
+      name: `R2 legacy isolation studio ${suffix}`,
+      createdByUserId: `r2-legacy-isolation-${suffix}`,
+    }).returning({ id: studiosTable.id });
+    studioId = studio.id;
+
+    const [deletedProject, liveProject] = await db.insert(projectsTable).values([
+      {
+        userId: `r2-legacy-isolation-${suffix}`,
+        studioId,
+        schoolName: `Deleted legacy project ${suffix}`,
+      },
+      {
+        userId: `r2-legacy-isolation-${suffix}`,
+        studioId,
+        schoolName: `Live legacy project ${suffix}`,
+      },
+    ]).returning({ id: projectsTable.id });
+    const [deletedClass, liveClass] = await db.insert(classesTable).values([
+      { projectId: deletedProject.id, className: "Deleted" },
+      { projectId: liveProject.id, className: "Live" },
+    ]).returning({ id: classesTable.id });
+    const [deletedStudent, liveStudent] = await db.insert(studentsTable).values([
+      {
+        projectId: deletedProject.id,
+        classId: deletedClass.id,
+        firstName: "Deleted",
+        lastName: "Student",
+        generatedStudentId: `deleted-${suffix}`,
+      },
+      {
+        projectId: liveProject.id,
+        classId: liveClass.id,
+        firstName: "Live",
+        lastName: "Student",
+        generatedStudentId: `live-${suffix}`,
+      },
+    ]).returning({ id: studentsTable.id });
+    const [deletedPhoto, livePhoto] = await db.insert(studentPhotosTable).values([
+      {
+        projectId: deletedProject.id,
+        studentId: deletedStudent.id,
+        fileName: "foo.jpg",
+        fileUrl: `/objects/deleted-${suffix}.jpg`,
+      },
+      {
+        projectId: liveProject.id,
+        studentId: liveStudent.id,
+        fileName: "foo__new.jpg",
+        fileUrl: `/objects/live-${suffix}.jpg`,
+      },
+    ]).returning({ id: studentPhotosTable.id });
+    deletedPhotoId = deletedPhoto.id;
+    const deletedKey = `legacy-isolation-${suffix}/foo.jpg`;
+    const liveKey = `legacy-isolation-${suffix}/foo__new.jpg`;
+    await db.insert(photoStorageCopiesTable).values([
+      {
+        studentPhotoId: deletedPhoto.id,
+        destination: "r2",
+        objectKey: deletedKey,
+        state: "ready",
+        sha256: "a".repeat(64),
+        verifiedAt: new Date(),
+      },
+      {
+        studentPhotoId: livePhoto.id,
+        destination: "r2",
+        objectKey: liveKey,
+        state: "ready",
+        sha256: "b".repeat(64),
+        verifiedAt: new Date(),
+      },
+    ]);
+
+    await db.transaction(async (tx) => {
+      await enqueueR2PhotoDeletions(tx, "student_photo", [deletedPhoto.id]);
+      await tx.delete(studentPhotosTable)
+        .where(eq(studentPhotosTable.id, deletedPhoto.id));
+    });
+
+    const liveVariant = `${r2PhotoVariantPrefix(liveKey)}thumbnail__live.jpg`;
+    const deletedKeys: string[] = [];
+    const listedPrefixes: string[] = [];
+    const dispatched = await dispatchR2PhotoDeletions({
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      deleteObject: async (key) => {
+        deletedKeys.push(key);
+      },
+      listVariantKeys: async (prefix) => {
+        listedPrefixes.push(prefix);
+        return prefix === r2LegacyPhotoVariantPrefix(deletedKey)
+          ? [liveVariant]
+          : [];
+      },
+    });
+
+    assert.equal(dispatched, 1);
+    assert.ok(listedPrefixes.includes(r2LegacyPhotoVariantPrefix(deletedKey)));
+    assert.deepEqual(
+      deletedKeys,
+      [deletedKey],
+      "a legacy prefix collision must not delete a variant owned by another project",
+    );
+  } finally {
+    if (deletedPhotoId !== undefined) {
+      await db.delete(r2PhotoDeletionOutboxTable)
+        .where(eq(r2PhotoDeletionOutboxTable.sourceId, deletedPhotoId));
+    }
+    if (studioId !== undefined) {
+      await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
+    }
+  }
+});
+
+test("R2 uploads reject a source paired with another project", async () => {
+  const originalR2Environment = {
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+    R2_BUCKET_NAME: process.env.R2_BUCKET_NAME,
+    R2_ENDPOINT: process.env.R2_ENDPOINT,
+  };
+  const suffix = `${process.pid}-${Date.now()}`;
+  let studioId: number | undefined;
+
+  process.env.R2_ACCOUNT_ID = "r2-source-isolation-account";
+  process.env.R2_ACCESS_KEY_ID = "r2-source-isolation-key";
+  process.env.R2_SECRET_ACCESS_KEY = "r2-source-isolation-secret";
+  process.env.R2_BUCKET_NAME = "r2-source-isolation-bucket";
+  process.env.R2_ENDPOINT = "https://r2-source-isolation.invalid";
+
+  try {
+    const [studio] = await db.insert(studiosTable).values({
+      name: `R2 source isolation studio ${suffix}`,
+      createdByUserId: `r2-source-isolation-${suffix}`,
+    }).returning({ id: studiosTable.id });
+    studioId = studio.id;
+    const [sourceProject, unrelatedProject] = await db.insert(projectsTable).values([
+      {
+        userId: `r2-source-isolation-${suffix}`,
+        studioId,
+        schoolName: `R2 source project ${suffix}`,
+      },
+      {
+        userId: `r2-source-isolation-${suffix}`,
+        studioId,
+        schoolName: `R2 unrelated project ${suffix}`,
+      },
+    ]).returning({ id: projectsTable.id });
+    const [sourceClass, unrelatedClass] = await db.insert(classesTable).values([
+      { projectId: sourceProject.id, className: "Source" },
+      { projectId: unrelatedProject.id, className: "Unrelated" },
+    ]).returning({ id: classesTable.id });
+    const [sourceStudent, unrelatedStudent] = await db.insert(studentsTable).values([
+      {
+        projectId: sourceProject.id,
+        classId: sourceClass.id,
+        firstName: "Source",
+        lastName: "Student",
+        generatedStudentId: `source-${suffix}`,
+      },
+      {
+        projectId: unrelatedProject.id,
+        classId: unrelatedClass.id,
+        firstName: "Unrelated",
+        lastName: "Student",
+        generatedStudentId: `unrelated-${suffix}`,
+      },
+    ]).returning({ id: studentsTable.id });
+    const [sourcePhoto] = await db.insert(studentPhotosTable).values({
+      projectId: sourceProject.id,
+      studentId: sourceStudent.id,
+      fileName: "source.jpg",
+      fileUrl: `/objects/source-${suffix}.jpg`,
+    }).returning({ id: studentPhotosTable.id });
+
+    await assert.rejects(
+      createR2CopyUpload({
+        source: {
+          kind: "student",
+          id: sourcePhoto.id,
+          projectId: unrelatedProject.id,
+          studentId: unrelatedStudent.id,
+        },
+        originalFilename: sourcePhoto.fileName,
+        mimeType: "image/jpeg",
+        fileSize: 1,
+        sha256: "c".repeat(64),
+      }),
+      /Could not resolve the student R2 object hierarchy/,
+    );
+    const copies = await db.select({ id: photoStorageCopiesTable.id })
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.studentPhotoId, sourcePhoto.id));
+    assert.equal(copies.length, 0, "a rejected cross-project request must not create a copy");
+  } finally {
+    for (const [key, value] of Object.entries(originalR2Environment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     if (studioId !== undefined) {
       await db.delete(studiosTable).where(eq(studiosTable.id, studioId));
     }

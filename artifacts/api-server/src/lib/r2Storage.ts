@@ -32,6 +32,17 @@ export interface R2PutUpload {
   expiresAt: string;
 }
 
+/**
+ * A short-lived browser-safe GET capability for one private object. The
+ * signing credentials are never included; only the AWS Signature V4 result is
+ * exposed in the URL.
+ */
+export interface R2GetDownload {
+  downloadUrl: string;
+  downloadMethod: "GET";
+  expiresAt: string;
+}
+
 export function getR2Config(
   env: NodeJS.ProcessEnv = process.env,
 ): R2Config | null {
@@ -165,6 +176,83 @@ export function createR2PutUpload(
       "Content-Type": options.contentType.trim(),
       "x-amz-meta-sha256": options.sha256.toLowerCase(),
     },
+    expiresAt: new Date(
+      now.getTime() + expiresInSeconds * 1_000,
+    ).toISOString(),
+  };
+}
+
+export function createR2GetDownload(
+  objectKey: string,
+  options: {
+    expiresInSeconds?: number;
+    now?: Date;
+    responseContentDisposition?: string;
+  } = {},
+  config = getR2Config(),
+): R2GetDownload {
+  if (!config) throw new Error("R2 is not configured");
+  // Unlike an upload, a read capability may need to expire with only a few
+  // seconds left in the caller's authorization window.
+  const requestedExpiry = options.expiresInSeconds ?? 300;
+  const expiresInSeconds = Math.max(
+    1,
+    Math.min(
+      900,
+      Number.isFinite(requestedExpiry) ? Math.floor(requestedExpiry) : 300,
+    ),
+  );
+  const now = options.now ?? new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const shortDate = amzDate.slice(0, 8);
+  const scope = `${shortDate}/${config.region}/s3/aws4_request`;
+  const base = new URL(config.endpoint);
+  const canonicalPath = `/${encodePath(config.bucket)}/${encodePath(objectKey)}`;
+  const signedHeaderNames = "host";
+  const queryEntries: Array<readonly [string, string]> = [
+    ["X-Amz-Algorithm", "AWS4-HMAC-SHA256"],
+    ["X-Amz-Credential", `${config.accessKeyId}/${scope}`],
+    ["X-Amz-Date", amzDate],
+    ["X-Amz-Expires", String(expiresInSeconds)],
+    ["X-Amz-SignedHeaders", signedHeaderNames],
+  ];
+  if (options.responseContentDisposition) {
+    queryEntries.push([
+      "response-content-disposition",
+      options.responseContentDisposition,
+    ]);
+  }
+  const canonicalQuery = queryEntries
+    .map(([key, value]) => `${awsEncode(key)}=${awsEncode(value)}`)
+    .sort()
+    .join("&");
+  const canonicalHeaders = `host:${base.host}\n`;
+  const canonicalRequest = [
+    "GET",
+    canonicalPath,
+    canonicalQuery,
+    canonicalHeaders,
+    signedHeaderNames,
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    sha256(canonicalRequest),
+  ].join("\n");
+  const signature = createHmac(
+    "sha256",
+    signingKey(config.secretAccessKey, shortDate, config.region),
+  )
+    .update(stringToSign)
+    .digest("hex");
+
+  return {
+    downloadUrl:
+      new URL(canonicalPath, `${config.endpoint}/`).toString() +
+      `?${canonicalQuery}&X-Amz-Signature=${signature}`,
+    downloadMethod: "GET",
     expiresAt: new Date(
       now.getTime() + expiresInSeconds * 1_000,
     ).toISOString(),

@@ -1,6 +1,5 @@
 import { Router } from "express";
 import QRCode from "qrcode";
-import { Readable } from "node:stream";
 import sharp from "sharp";
 import Stripe from "stripe";
 import {
@@ -31,7 +30,7 @@ import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject, getStudioMember, isStudioManagerForProject } from "../lib/studioAccess";
 import { decryptStorageValue, encryptStorageValue } from "../lib/storageCrypto";
 import { objectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { getR2Object } from "../lib/r2Storage";
+import { createR2GetDownload } from "../lib/r2Storage";
 import {
   ensureR2PhotoVariant,
   getVerifiedR2CopyForPhoto,
@@ -202,7 +201,11 @@ function validTokenTimes(payload: Record<string, unknown>, maxTtlSeconds: number
     && Number(payload.expiresAt) - Number(payload.issuedAt) <= maxTtlSeconds;
 }
 
-function verifyMediaToken(token: string, galleryId: number, photoId: number): { accessId: number; accessVersion: number } | null {
+function verifyMediaToken(token: string, galleryId: number, photoId: number): {
+  accessId: number;
+  accessVersion: number;
+  expiresAt: number;
+} | null {
   const payload = decodeVerifiedPayload(token);
   const keys = payload ? Object.keys(payload).sort().join(",") : "";
   if (!payload
@@ -214,10 +217,18 @@ function verifyMediaToken(token: string, galleryId: number, photoId: number): { 
     || !Number.isSafeInteger(payload.accessId)
     || !Number.isSafeInteger(payload.accessVersion)
     || !validTokenTimes(payload, 15 * 60)) return null;
-  return { accessId: Number(payload.accessId), accessVersion: Number(payload.accessVersion) };
+  return {
+    accessId: Number(payload.accessId),
+    accessVersion: Number(payload.accessVersion),
+    expiresAt: Number(payload.expiresAt),
+  };
 }
 
-function verifyToken(token: string, galleryId: number): { accessId: number; accessVersion: number } | null {
+function verifyToken(token: string, galleryId: number): {
+  accessId: number;
+  accessVersion: number;
+  expiresAt: number;
+} | null {
   const payload = decodeVerifiedPayload(token);
   const keys = payload ? Object.keys(payload).sort().join(",") : "";
   if (!payload
@@ -228,7 +239,11 @@ function verifyToken(token: string, galleryId: number): { accessId: number; acce
     || !Number.isSafeInteger(payload.accessId)
     || !Number.isSafeInteger(payload.accessVersion)
     || !validTokenTimes(payload, DELIVERY_TOKEN_TTL_SECONDS)) return null;
-  return { accessId: Number(payload.accessId), accessVersion: Number(payload.accessVersion) };
+  return {
+    accessId: Number(payload.accessId),
+    accessVersion: Number(payload.accessVersion),
+    expiresAt: Number(payload.expiresAt),
+  };
 }
 
 async function materializeCaptureJpegsForDelivery(projectId: number): Promise<number> {
@@ -426,7 +441,21 @@ async function dispatchOrderNotification(
   _recoveryUrl: string,
 ): Promise<void> {
   if (!order.customerEmail) return;
-  await dispatchDeliveryOrderNotifications(order.id);
+  await dispatchReadyOrderNotification(order.id);
+}
+
+/**
+ * A checkout can become visible to a simultaneous idempotency replay just as
+ * its transaction publishes the notification snapshot. A second, next-turn
+ * claim is bounded and harmless (the dispatcher has an exclusive claim), but
+ * closes that visibility window without making a pending notification depend
+ * on a later worker sweep.
+ */
+async function dispatchReadyOrderNotification(orderId: number): Promise<void> {
+  const first = await dispatchDeliveryOrderNotifications(orderId);
+  if (first.sent !== 0 || first.failed !== 0 || first.needsReview !== 0) return;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await dispatchDeliveryOrderNotifications(orderId);
 }
 
 type DurableStripeCheckoutParams = Stripe.Checkout.SessionCreateParams;
@@ -923,11 +952,13 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
             `delivery-order-${replayedOrder.id}-${idempotencyKey}`,
             checkoutParams,
           );
-          if (replayAttempt.status !== "started") {
-            await dispatchDeliveryOrderNotifications(replayedOrder.id);
-          }
         }
       }
+      // A concurrent request may have finalized the durable notification
+      // between this replay's state read and its checkout-attempt claim.
+      // Claiming is idempotent and skip-locked, so reconcile the ready row on
+      // every replay without risking a duplicate provider send.
+      await dispatchReadyOrderNotification(replayedOrder.id);
       let checkoutUrl: string | null = null;
       const replaySessionId = replayAttempt?.sessionId ?? replayedOrder.stripeCheckoutSessionId;
       if (replaySessionId) {
@@ -1063,9 +1094,12 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
             `delivery-order-${winner.id}-${idempotencyKey}`,
             checkoutParams,
           );
-          if (winnerAttempt.status !== "started") await dispatchDeliveryOrderNotifications(winner.id);
         }
       }
+      // The unique-key loser can observe an in-progress checkout attempt.
+      // Reconcile its durable notification after that observation; the
+      // notification dispatcher owns the exclusive send claim.
+      await dispatchReadyOrderNotification(winner.id);
       let checkoutUrl: string | null = null;
       const winnerSessionId = winnerAttempt?.sessionId ?? winner.stripeCheckoutSessionId;
       if (winnerSessionId) {
@@ -1132,7 +1166,10 @@ router.post("/delivery/:slug/orders", async (req, res): Promise<void> => {
       `delivery-order-${order.id}-${idempotencyKey}`,
       checkoutParams,
     );
-    if (attempt.status !== "started") await dispatchDeliveryOrderNotifications(order.id);
+    // The notification is durable and the dispatcher claims it exclusively.
+    // Always reconcile here rather than relying on this request's stale
+    // attempt result when identical checkouts overlap.
+    await dispatchReadyOrderNotification(order.id);
     res.status(attempt.status === "started" ? 503 : attempt.status === "uncertain" ? 202 : 200).json({
       checkoutUrl: attempt.sessionUrl ?? null,
       orderId: order.id,
@@ -1326,57 +1363,69 @@ router.get("/delivery/:slug/photos/:photoId/file", async (req, res): Promise<voi
     return;
   }
 
-  res.setHeader("Content-Type", photo.photo.mimeType || "image/jpeg");
-  res.setHeader("Content-Disposition", `${isPreview ? "inline" : "attachment"}; filename="${photo.photo.fileName.replace(/["\r\n]/g, "_")}"`);
-  res.setHeader(
-    "Cache-Control",
-    isPreview && typeof req.query.mediaToken === "string"
-      ? "public, max-age=900, s-maxage=900, immutable"
-      : "private, max-age=300",
-  );
+  const contentDisposition =
+    `${isPreview ? "inline" : "attachment"}; filename="${photo.photo.fileName.replace(/["\r\n]/g, "_")}"`;
 
-  // During the storage migration, a photo may already have a verified private
-  // R2 copy. Stream that copy through this authorized endpoint rather than
-  // returning an R2 URL (or exposing bucket credentials). Only fall back to
-  // Replit Object Storage when no verified copy exists yet.
+  // A verified R2 object is never proxied through the API. Authorization,
+  // current access state, subject ownership, and paid entitlement have all
+  // been checked above before this one-object, short-lived GET capability is
+  // issued. The browser follows the redirect and receives bytes from R2
+  // directly. Its lifetime is additionally capped by the delivery/media token
+  // that authorized this request, so a renewed gallery session gets renewed
+  // R2 URLs rather than extending an old session.
   const verifiedR2Copy = await getVerifiedR2CopyForPhoto(photo.photo);
   if (verifiedR2Copy) {
-    let r2Response: Response;
+    let variantKey: string;
     try {
       if (isPreview) {
         const variantKind = req.query.size === "thumbnail" ? "thumbnail" : "preview";
         const watermarkText = row.gallery.watermarkEnabled
           ? row.gallery.watermarkText?.trim() || row.studio?.name?.trim() || "Volume Capture"
           : undefined;
-        const variantKey = await ensureR2PhotoVariant(
+        variantKey = await ensureR2PhotoVariant(
           verifiedR2Copy,
           variantKind,
           watermarkText,
         );
-        r2Response = await getR2Object(variantKey);
       } else {
         // Paid downloads are derivatives too: apply the saved non-destructive
         // capture edit while keeping the verified camera original immutable.
-        const variantKey = await ensureR2PhotoVariant(
+        variantKey = await ensureR2PhotoVariant(
           verifiedR2Copy,
           isPrint ? "print" : "download",
         );
-        r2Response = await getR2Object(variantKey);
       }
     } catch {
       res.status(503).json({ error: "Photo file is temporarily unavailable" });
       return;
     }
-    if (!r2Response.body) {
-      res.status(503).json({ error: "Photo file is temporarily unavailable" });
+    const remainingSessionSeconds = verified.expiresAt - Math.floor(Date.now() / 1000);
+    if (remainingSessionSeconds < 1) {
+      res.status(401).json({ error: "Delivery access has expired" });
       return;
     }
-    const input = Readable.fromWeb(r2Response.body as globalThis.ReadableStream<Uint8Array>);
-    if (isPreview || isPrint) res.setHeader("Content-Type", "image/jpeg");
-    input.pipe(res);
+    const signedGet = createR2GetDownload(variantKey, {
+      expiresInSeconds: Math.min(300, remainingSessionSeconds),
+      responseContentDisposition: contentDisposition,
+    });
+    // Do not let a shared intermediary retain a redirect containing an active
+    // capability. The R2 response itself is served directly to the browser.
+    res.setHeader("Cache-Control", "private, no-store");
+    res.redirect(302, signedGet.downloadUrl);
     return;
   }
 
+  // During the migration a photo without a verified R2 copy continues to use
+  // the legacy private object store. This is the only path whose bytes cross
+  // the API.
+  res.setHeader("Content-Type", photo.photo.mimeType || "image/jpeg");
+  res.setHeader("Content-Disposition", contentDisposition);
+  res.setHeader(
+    "Cache-Control",
+    isPreview && typeof req.query.mediaToken === "string"
+      ? "public, max-age=900, s-maxage=900, immutable"
+      : "private, max-age=300",
+  );
   let objectFile;
   try {
     objectFile = await objectStorageService.getObjectEntityFile(photo.photo.durableObjectPath);

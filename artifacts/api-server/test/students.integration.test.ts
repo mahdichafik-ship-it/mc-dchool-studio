@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import test, { after, before } from "node:test";
 import express from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   classesTable,
   db,
@@ -400,7 +400,7 @@ test("allows the same case-insensitive ID in a different project", async () => {
   assert.equal(secondResponse.status, 201);
 });
 
-test("returns a safe conflict when concurrent imports allocate the same ID", async () => {
+test("keeps one row when concurrent imports race on the same ID", async () => {
   const generatedStudentId = `IMPORT-${suffix}`;
   const body = (firstName: string) => ({
     sheets: [{
@@ -425,9 +425,26 @@ test("returns a safe conflict when concurrent imports allocate the same ID", asy
       body: JSON.stringify(body("Two")),
     }),
   ]);
-  assert.deepEqual([first.status, second.status].sort(), [200, 409]);
-  const conflict = first.status === 409 ? first : second;
-  assert.equal((await conflict.json() as { code: string }).code, "STUDENT_ID_CONFLICT");
+  const statuses = [first.status, second.status].sort((left, right) => left - right);
+  // If one transaction inserts before the other reads, the second import
+  // legitimately reconciles the stable ID and returns 200. If both preflight
+  // before either insert commits, the unique index rejects one with 409.
+  assert.ok(
+    statuses.join(",") === "200,200" || statuses.join(",") === "200,409",
+    `unexpected concurrent import statuses: ${statuses.join(",")}`,
+  );
+  const conflict = [first, second].find((response) => response.status === 409);
+  if (conflict) {
+    assert.equal((await conflict.json() as { code: string }).code, "STUDENT_ID_CONFLICT");
+  }
+  const matchingStudents = await db
+    .select({ id: studentsTable.id })
+    .from(studentsTable)
+    .where(and(
+      eq(studentsTable.projectId, projectId),
+      sql`lower(${studentsTable.generatedStudentId}) = lower(${generatedStudentId})`,
+    ));
+  assert.equal(matchingStudents.length, 1);
 });
 
 test("returns a safe conflict for a desktop late-student ID collision", async () => {

@@ -18,7 +18,7 @@ import {
   groupCaptureFilesTable,
   groupsTable,
 } from "@workspace/db";
-import { eq, and, sql, inArray, isNull } from "drizzle-orm";
+import { eq, and, sql, inArray, isNull, ne } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { requireAuth, getUserId } from "../lib/auth";
 import { getDesktopConnection, refreshDesktopConnection, requireDesktopConnection } from "../lib/desktopAuth";
@@ -350,6 +350,27 @@ function removePhotoDeleteBackup(backup: PhotoDeleteBackup): void {
   fs.rmSync(backup.directory, { recursive: true, force: true });
 }
 
+async function hasPhotoFileOwner(
+  fileUrl: string,
+  excludedStudentPhotoId?: number,
+): Promise<boolean> {
+  const studentPhotoCondition = excludedStudentPhotoId === undefined
+    ? eq(studentPhotosTable.fileUrl, fileUrl)
+    : and(
+      eq(studentPhotosTable.fileUrl, fileUrl),
+      ne(studentPhotosTable.id, excludedStudentPhotoId),
+    );
+  const [[studentPhoto], [captureFile], [groupCaptureFile]] = await Promise.all([
+    db.select({ id: studentPhotosTable.id }).from(studentPhotosTable)
+      .where(studentPhotoCondition).limit(1),
+    db.select({ id: captureFilesTable.id }).from(captureFilesTable)
+      .where(eq(captureFilesTable.fileUrl, fileUrl)).limit(1),
+    db.select({ id: groupCaptureFilesTable.id }).from(groupCaptureFilesTable)
+      .where(eq(groupCaptureFilesTable.fileUrl, fileUrl)).limit(1),
+  ]);
+  return Boolean(studentPhoto || captureFile || groupCaptureFile);
+}
+
 function photoFileUrl(filePath: string): string {
   const relativePath = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
   return `/${relativePath}`;
@@ -451,14 +472,10 @@ export async function recoverPhotoDeleteBackups(): Promise<void> {
 
   for (const backup of backups) {
     try {
-      const [photo] = await db
-        .select()
-        .from(studentPhotosTable)
-        .where(eq(studentPhotosTable.fileUrl, backup.fileUrl))
-        .limit(1);
+      const hasOwner = await hasPhotoFileOwner(backup.fileUrl);
       const originalExists = fs.existsSync(backup.originalPath);
 
-      if (photo) {
+      if (hasOwner) {
         if (!originalExists) {
           fs.copyFileSync(backup.filePath, backup.originalPath, fs.constants.COPYFILE_EXCL);
           if (!fs.existsSync(backup.originalPath)) {
@@ -473,12 +490,7 @@ export async function recoverPhotoDeleteBackups(): Promise<void> {
       // there is no database row that points at this path, so a valid photo
       // can never be deleted as part of backup cleanup.
       if (originalExists) {
-        const [referencingPhoto] = await db
-          .select({ id: studentPhotosTable.id })
-          .from(studentPhotosTable)
-          .where(eq(studentPhotosTable.fileUrl, backup.fileUrl))
-          .limit(1);
-        if (!referencingPhoto) {
+        if (!(await hasPhotoFileOwner(backup.fileUrl))) {
           fs.unlinkSync(backup.originalPath);
         }
       }
@@ -2052,11 +2064,14 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
   }
 
   const filePath = resolveFilePath(photo.fileUrl);
-  const backup = createPhotoDeleteBackup(filePath);
+  // Keep mutable compensation state in an object: TypeScript does not model
+  // assignments made inside the asynchronous transaction callback when
+  // narrowing a local variable in the surrounding catch/finally paths.
+  const deleteState: { backup: PhotoDeleteBackup | null } = { backup: null };
   let preserveBackup = false;
 
   try {
-    await db.transaction(async (tx) => {
+    const deleted = await db.transaction(async (tx) => {
       const [lockedPhoto] = await tx
         .select({ id: studentPhotosTable.id })
         .from(studentPhotosTable)
@@ -2067,7 +2082,18 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
         ))
         .for("update");
       if (!lockedPhoto) {
-        throw new Error("Photo could not be deleted");
+        // Another authorized DELETE may have committed while this request was
+        // waiting for the row lock. It must be an idempotent success, not a
+        // compensation path that restores a backup made by this caller.
+        return false;
+      }
+      // Create a recovery copy only after ownership of this DELETE attempt is
+      // serialized by the row lock. Two simultaneous DELETEs can otherwise
+      // each make a backup; the loser could restore bytes after the winner
+      // committed its row deletion and file removal.
+      const sharedFile = await hasPhotoFileOwner(photo.fileUrl, photo.id);
+      if (!sharedFile && fs.existsSync(filePath)) {
+        deleteState.backup = createPhotoDeleteBackup(filePath);
       }
       await enqueueR2PhotoDeletions(tx, "student_photo", [photoId]);
       const [deleted] = await tx
@@ -2077,46 +2103,57 @@ router.delete("/:studentId/photos/:photoId", requireAuth, async (req, res) => {
       if (!deleted) {
         throw new Error("Photo could not be deleted");
       }
-      fs.unlinkSync(filePath);
+      if (deleteState.backup && !(await hasPhotoFileOwner(photo.fileUrl, photo.id))) {
+        fs.unlinkSync(filePath);
+      }
+      return true;
     });
+    if (!deleted) {
+      res.status(204).send();
+      return;
+    }
 
-    try {
-      removePhotoDeleteBackup(backup);
-    } catch (cleanupError) {
-      // The requested deletion has succeeded. Keep any surviving backup as
-      // cleanup debt rather than trying to roll back from a possibly partial
-      // recursive removal.
-      console.error("Could not clean up a completed photo deletion backup", {
-        error: cleanupError,
-        photoId,
-        backupPath: backup.filePath,
-      });
+    if (deleteState.backup) {
+      try {
+        removePhotoDeleteBackup(deleteState.backup);
+      } catch (cleanupError) {
+        // The requested deletion has succeeded. Keep any surviving backup as
+        // cleanup debt rather than trying to roll back from a possibly partial
+        // recursive removal.
+        console.error("Could not clean up a completed photo deletion backup", {
+          error: cleanupError,
+          photoId,
+          backupPath: deleteState.backup.filePath,
+        });
+      }
     }
   } catch (error) {
     // The database transaction rolls back both the source deletion and its
     // outbox item. Restore local bytes before releasing the recovery backup.
-    try {
-      restoreDeletedPhotoFile(filePath, backup);
-    } catch (restoreError) {
-      preserveBackup = true;
-      alertPhotoDeleteRecoveryRequired(
-        "backup_compensation_failed",
-        backup.filePath,
-        filePath,
-        restoreError,
-        backup.directory,
-      );
-    }
-    if (!preserveBackup) {
+    if (deleteState.backup) {
       try {
-        if (fs.existsSync(backup.directory)) {
-          removePhotoDeleteBackup(backup);
+        restoreDeletedPhotoFile(filePath, deleteState.backup);
+      } catch (restoreError) {
+        preserveBackup = true;
+        alertPhotoDeleteRecoveryRequired(
+          "backup_compensation_failed",
+          deleteState.backup.filePath,
+          filePath,
+          restoreError,
+          deleteState.backup.directory,
+        );
+      }
+    }
+    if (deleteState.backup && !preserveBackup) {
+      try {
+        if (fs.existsSync(deleteState.backup.directory)) {
+          removePhotoDeleteBackup(deleteState.backup);
         }
       } catch (cleanupError) {
         console.error("Could not clean up a photo deletion backup", {
           error: cleanupError,
           photoId,
-          backupPath: backup.filePath,
+          backupPath: deleteState.backup.filePath,
         });
       }
     }

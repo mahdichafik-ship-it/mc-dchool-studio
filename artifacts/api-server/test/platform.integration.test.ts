@@ -36,6 +36,7 @@ const platformOwnerId = process.env.PLATFORM_OWNER_USER_ID;
 const inviteeId = `studio-owner-${suffix}`;
 const otherUserId = `other-user-${suffix}`;
 const studioViewerId = `studio-viewer-${suffix}`;
+const onboardedViewerId = `onboarded-studio-viewer-${suffix}`;
 const inviteeEmail = `${inviteeId}@member.local`;
 
 let server: Server;
@@ -47,6 +48,7 @@ let isolatedStudioId: number;
 let isolatedProjectId: number;
 let concurrentInviteId: number;
 let concurrentStudioId: number;
+let viewerFixtureStudioId: number;
 const sentInviteEmails: PlatformInviteEmail[] = [];
 
 const app = express();
@@ -76,6 +78,18 @@ async function request(userId: string, pathname: string, init: RequestInit = {})
 }
 
 before(async () => {
+  const [viewerFixtureStudio] = await db.insert(studiosTable).values({
+    name: "Platform integration viewer fixture",
+    createdByUserId: otherUserId,
+  }).returning({ id: studiosTable.id });
+  viewerFixtureStudioId = viewerFixtureStudio.id;
+  await db.insert(studioMembersTable).values({
+    studioId: viewerFixtureStudioId,
+    userId: studioViewerId,
+    email: `${studioViewerId}@member.local`,
+    role: "viewer",
+  });
+
   server = createServer(app);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -90,6 +104,7 @@ after(async () => {
   if (concurrentStudioId) await db.delete(studiosTable).where(eq(studiosTable.id, concurrentStudioId));
   if (isolatedStudioId) await db.delete(studiosTable).where(eq(studiosTable.id, isolatedStudioId));
   if (onboardedStudioId) await db.delete(studiosTable).where(eq(studiosTable.id, onboardedStudioId));
+  if (viewerFixtureStudioId) await db.delete(studiosTable).where(eq(studiosTable.id, viewerFixtureStudioId));
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   await pool.end();
 });
@@ -371,11 +386,11 @@ test("keeps platform storage active while a studio-owned connection is pending",
 
   await db.insert(studioMembersTable).values({
     studioId: onboardedStudioId,
-    userId: studioViewerId,
-    email: `${studioViewerId}@member.local`,
+    userId: onboardedViewerId,
+    email: `${onboardedViewerId}@member.local`,
     role: "viewer",
   });
-  const forbidden = await request(studioViewerId, "/api/studio/branding", {
+  const forbidden = await request(onboardedViewerId, "/api/studio/branding", {
     method: "PATCH",
     body: JSON.stringify({
       name: "Viewer must not rename the studio",
@@ -457,7 +472,7 @@ test("lets studio managers save branding while keeping viewers read-only", async
   assert.equal(persistedBody.studio.tagline, "Portrait day, beautifully organized");
   assert.equal(persistedBody.studio.primaryColor, "#123456");
 
-  const forbidden = await request(studioViewerId, "/api/studio/branding", {
+  const forbidden = await request(onboardedViewerId, "/api/studio/branding", {
     method: "PATCH",
     body: JSON.stringify({
       name: "Viewer must not rename the studio",
@@ -617,7 +632,7 @@ test("never exposes or selects another studio's storage connection", async () =>
   );
   assert.doesNotMatch(JSON.stringify(separateBody), /encrypted-.*-credential/);
 
-  const viewer = await request(studioViewerId, "/api/studio");
+  const viewer = await request(onboardedViewerId, "/api/studio");
   assert.equal(viewer.status, 200);
   assert.deepEqual((await viewer.json() as { connections: unknown[] }).connections, []);
 });
@@ -638,7 +653,7 @@ test("lets studio managers keep or disconnect the platform backup without leavin
   assert.equal(disabledBody.activeStorageProvider, "google_drive");
   assert.equal(disabledBody.secondaryStorageProvider, null);
 
-  const viewerDenied = await request(studioViewerId, "/api/studio/storage/platform-backup", {
+  const viewerDenied = await request(onboardedViewerId, "/api/studio/storage/platform-backup", {
     method: "PATCH",
     body: JSON.stringify({ enabled: true }),
     headers: { "Content-Type": "application/json" },

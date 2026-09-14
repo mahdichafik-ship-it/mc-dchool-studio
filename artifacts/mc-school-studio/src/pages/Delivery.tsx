@@ -930,9 +930,10 @@ export default function Delivery() {
                   <div className="relative aspect-[4/5] bg-slate-100">
                     <img 
                       src={photo.fileUrl} 
-              alt={t("photoPreview")}
+                      alt={t("photoPreview")}
                       className="h-full w-full object-cover" 
                       loading="lazy"
+                      referrerPolicy="no-referrer"
                     />
                     
                     {!isPaid && (
@@ -1053,6 +1054,7 @@ export default function Delivery() {
                       key={photo.id} 
                       href={photo.downloadUrl} 
                       download={photo.fileName} 
+                       referrerPolicy="no-referrer"
                       data-testid={`link-download-${photo.id}`}
                       className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-teal-800 shadow-sm ring-1 ring-teal-200 transition-colors hover:bg-teal-50"
                     >

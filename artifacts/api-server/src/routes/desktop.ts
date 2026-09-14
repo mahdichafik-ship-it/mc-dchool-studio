@@ -86,6 +86,11 @@ router.post(
       res.status(400).json({ error: "Invalid storage copy identifier" });
       return;
     }
+    const attemptKey = req.get("X-MC-R2-Attempt")?.trim();
+    if (!attemptKey || attemptKey.length > 1_000) {
+      res.status(400).json({ error: "A valid R2 upload attempt is required" });
+      return;
+    }
     const [copy] = await db
       .select()
       .from(photoStorageCopiesTable)
@@ -110,7 +115,7 @@ router.post(
       return;
     }
     try {
-      const verified = await verifyR2Copy(copy);
+      const verified = await verifyR2Copy(copy, attemptKey);
       res.json({
         copy: {
           id: verified.id,

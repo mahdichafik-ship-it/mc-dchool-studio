@@ -7,7 +7,6 @@ import {
   deleteR2Object,
   getR2Object,
   headR2Object,
-  listR2ObjectKeys,
   putR2Buffer,
 } from "./r2Storage";
 import {
@@ -225,48 +224,4 @@ export async function prepareBaseR2PhotoVariants(original: PhotoStorageCopy): Pr
     ensureR2PhotoVariant(original, "thumbnail"),
     ensureR2PhotoVariant(original, "preview"),
   ]);
-}
-
-function variantPrefix(originalObjectKey: string): string {
-  const extension = extname(originalObjectKey);
-  const stem = basename(originalObjectKey, extension);
-  return `${dirname(originalObjectKey)}/.variants/${stem}__`;
-}
-
-export async function deleteDirectR2AssetsForPhoto(
-  photoId: number,
-): Promise<number[]> {
-  const copies = await db.select().from(photoStorageCopiesTable).where(and(
-    eq(photoStorageCopiesTable.studentPhotoId, photoId),
-    eq(photoStorageCopiesTable.destination, "r2"),
-  ));
-  const verifiedCopies = copies.filter((copy) => copy.verifiedAt !== null);
-  const cleanedCopyIds: number[] = [];
-
-  for (const copy of verifiedCopies) {
-    const now = new Date();
-    await db.update(photoStorageCopiesTable).set({
-      state: "cleaning",
-      cleanupAttemptCount: copy.cleanupAttemptCount + 1,
-      lastAttemptAt: now,
-      lastError: null,
-      updatedAt: now,
-    }).where(eq(photoStorageCopiesTable.id, copy.id));
-
-    try {
-      const variants = await listR2ObjectKeys(variantPrefix(copy.objectKey));
-      for (const objectKey of variants) await deleteR2Object(objectKey);
-      await deleteR2Object(copy.objectKey);
-      cleanedCopyIds.push(copy.id);
-    } catch (error) {
-      await db.update(photoStorageCopiesTable).set({
-        state: "failed",
-        lastError: error instanceof Error ? error.message.slice(0, 1_000) : "R2 deletion failed",
-        updatedAt: new Date(),
-      }).where(eq(photoStorageCopiesTable.id, copy.id));
-      throw error;
-    }
-  }
-
-  return cleanedCopyIds;
 }

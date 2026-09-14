@@ -8,3 +8,9 @@ Refresh the durable activity timestamp whenever a client retries an active direc
 **Why:** A presigned-URL retry can be active without changing upload state. Deleting by an old timestamp without a refreshed activity marker or compare-and-set claim can remove bytes while a desktop retry or verifier is using them.
 
 **How to apply:** Any new direct-upload retry path must refresh activity. Any cleanup or replacement path must claim the same row, state, staging key, and expiry condition before issuing a storage delete; verified final keys are never cleanup candidates.
+
+Failed attempts must receive fresh staging identities, and verification callers must supply the identity they uploaded to. Candidate promotion and candidate cleanup must serialize on the same durable claim.
+
+**Why:** A copy ID survives retries; without caller-bound attempt identity, delayed verification or a still-valid PUT from an old attempt can affect its replacement. Hashing alone does not fence cleanup before promotion.
+
+**How to apply:** Keep API and desktop verification contracts in lockstep, reject stale attempts before storage I/O, and test cleanup at the post-hash/pre-promotion boundary.

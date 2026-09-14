@@ -79,6 +79,7 @@ const r2Requests: Array<{ method: string; objectKey: string }> = [];
 const r2Bodies = new Map<string, Buffer>();
 const r2Failures = new Set<string>();
 let objectStorageReads = 0;
+let r2ClockMs: number | null = null;
 
 const app = express();
 app.use(express.json());
@@ -98,15 +99,116 @@ function hashCode(code: string): string {
   return createHash("sha256").update(code.trim().toUpperCase()).digest("hex");
 }
 
+function awsEncode(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+function parseAmzDate(value: string): number | null {
+  if (!/^\d{8}T\d{6}Z$/.test(value)) return null;
+  const timestamp = Date.UTC(
+    Number(value.slice(0, 4)),
+    Number(value.slice(4, 6)) - 1,
+    Number(value.slice(6, 8)),
+    Number(value.slice(9, 11)),
+    Number(value.slice(11, 13)),
+    Number(value.slice(13, 15)),
+  );
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+/**
+ * The fake R2 endpoint validates browser-facing query signatures separately
+ * from the API's signed-header requests. It also uses a controllable clock so
+ * expiry behavior is exercised without contacting real R2 or waiting minutes.
+ */
+function validatePresignedR2Get(url: URL): Response | null {
+  if (url.searchParams.get("X-Amz-Algorithm") !== "AWS4-HMAC-SHA256") {
+    return new Response("missing presign algorithm", { status: 403 });
+  }
+  const credential = url.searchParams.get("X-Amz-Credential") ?? "";
+  const amzDate = url.searchParams.get("X-Amz-Date") ?? "";
+  const expires = Number(url.searchParams.get("X-Amz-Expires"));
+  const signedHeaders = url.searchParams.get("X-Amz-SignedHeaders");
+  const signature = url.searchParams.get("X-Amz-Signature") ?? "";
+  const signedAt = parseAmzDate(amzDate);
+  const expectedCredentialPrefix = `${process.env.R2_ACCESS_KEY_ID}/`;
+  if (
+    !credential.startsWith(expectedCredentialPrefix)
+    || !Number.isInteger(expires)
+    || expires < 1
+    || expires > 900
+    || signedHeaders !== "host"
+    || signedAt === null
+    || !/^[a-f0-9]{64}$/i.test(signature)
+  ) {
+    return new Response("invalid presign", { status: 403 });
+  }
+  if ((r2ClockMs ?? Date.now()) > signedAt + expires * 1_000) {
+    return new Response("expired presign", { status: 403 });
+  }
+
+  const scope = credential.slice(expectedCredentialPrefix.length);
+  const [date, region, service, terminal] = scope.split("/");
+  if (date !== amzDate.slice(0, 8) || service !== "s3" || terminal !== "aws4_request") {
+    return new Response("invalid presign scope", { status: 403 });
+  }
+  const canonicalQuery = Array.from(url.searchParams.entries())
+    .filter(([key]) => key !== "X-Amz-Signature")
+    .map(([key, value]) => `${awsEncode(key)}=${awsEncode(value)}`)
+    .sort()
+    .join("&");
+  const canonicalRequest = [
+    "GET",
+    url.pathname,
+    canonicalQuery,
+    `host:${url.host}\n`,
+    "host",
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    createHash("sha256").update(canonicalRequest).digest("hex"),
+  ].join("\n");
+  const dateKey = createHmac(
+    "sha256",
+    `AWS4${process.env.R2_SECRET_ACCESS_KEY}`,
+  ).update(date).digest();
+  const regionKey = createHmac("sha256", dateKey).update(region).digest();
+  const serviceKey = createHmac("sha256", regionKey).update("s3").digest();
+  const signingKey = createHmac("sha256", serviceKey).update("aws4_request").digest();
+  const expectedSignature = createHmac("sha256", signingKey)
+    .update(stringToSign)
+    .digest("hex");
+  return expectedSignature === signature
+    ? null
+    : new Response("invalid presign signature", { status: 403 });
+}
+
 async function requestPhoto(
   photoId: number,
   token: string,
   query = "download=1",
 ): Promise<Response> {
-  return fetch(
+  const response = await originalFetch(
     `${baseUrl}/api/delivery/${gallerySlug}/photos/${photoId}/file?${query}`,
-    { headers: { "x-delivery-token": token } },
+    { headers: { "x-delivery-token": token }, redirect: "manual" },
   );
+  if (response.status !== 302) return response;
+  const location = response.headers.get("location");
+  assert(location, "authorized R2 delivery must redirect to a signed object URL");
+  return fetch(location);
+}
+
+async function requestDeliveryMedia(url: string): Promise<Response> {
+  const response = await originalFetch(url, { redirect: "manual" });
+  if (response.status !== 302) return response;
+  const location = response.headers.get("location");
+  assert(location, "authorized R2 delivery must redirect to a signed object URL");
+  return fetch(location);
 }
 
 async function insertPhoto(
@@ -331,9 +433,14 @@ before(async () => {
     if (!url.startsWith(process.env.R2_ENDPOINT!)) {
       return originalFetch(input, init);
     }
-    const pathname = new URL(url).pathname.split("/").slice(2).join("/");
+    const parsedUrl = new URL(url);
+    const pathname = parsedUrl.pathname.split("/").slice(2).join("/");
     const objectKey = decodeURIComponent(pathname);
     const method = String(init?.method ?? "GET").toUpperCase();
+    if (method === "GET" && parsedUrl.searchParams.has("X-Amz-Algorithm")) {
+      const rejected = validatePresignedR2Get(parsedUrl);
+      if (rejected) return rejected;
+    }
     r2RequestedKeys.push(objectKey);
     r2Requests.push({ method, objectKey });
     if (r2Failures.has(objectKey)) {
@@ -634,6 +741,145 @@ test("selects a ready student R2 copy and keeps uploading/failed copies on Objec
   assert.equal(objectStorageReads, 2);
 });
 
+test("issues a short signed R2 GET only after delivery authorization and entitlement", async () => {
+  r2RequestedKeys.length = 0;
+  objectStorageReads = 0;
+  const response = await originalFetch(
+    `${baseUrl}/api/delivery/${gallerySlug}/photos/${readyStudentPhotoId}/file?download=1`,
+    { headers: { "x-delivery-token": paidAccessToken }, redirect: "manual" },
+  );
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const location = response.headers.get("location");
+  assert(location);
+  const signed = new URL(location);
+  assert.equal(signed.origin, process.env.R2_ENDPOINT);
+  assert.equal(signed.searchParams.get("X-Amz-Algorithm"), "AWS4-HMAC-SHA256");
+  assert.equal(signed.searchParams.get("X-Amz-Expires"), "300");
+  assert.equal(signed.searchParams.get("X-Amz-SignedHeaders"), "host");
+  assert.match(
+    signed.searchParams.get("response-content-disposition") ?? "",
+    /^attachment; filename="/,
+  );
+  assert.doesNotMatch(location, /delivery-r2-test-secret/);
+  assert.equal(objectStorageReads, 0);
+
+  const direct = await fetch(location);
+  assert.equal(direct.status, 200);
+  assert(r2RequestedKeys.some((key) => key.includes("__download__")));
+
+  const readsBeforeUnpaid = r2RequestedKeys.length;
+  const unpaid = await originalFetch(
+    `${baseUrl}/api/delivery/${gallerySlug}/photos/${unpaidPhotoId}/file?download=1`,
+    { headers: { "x-delivery-token": unpaidAccessToken }, redirect: "manual" },
+  );
+  assert.equal(unpaid.status, 402);
+  assert.equal(unpaid.headers.get("location"), null);
+  assert.equal(r2RequestedKeys.length, readsBeforeUnpaid);
+});
+
+test("gallery media redirects without proxying bytes and renews only for an active session", async () => {
+  r2RequestedKeys.length = 0;
+  r2Requests.length = 0;
+  objectStorageReads = 0;
+  const galleryResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/gallery`, {
+    headers: { "x-delivery-token": paidAccessToken },
+  });
+  assert.equal(galleryResponse.status, 200);
+  const gallery = await galleryResponse.json() as {
+    mediaExpiresAt: string;
+    photos: Array<{ id: number; fileUrl: string }>;
+  };
+  assert(Date.parse(gallery.mediaExpiresAt) > Date.now());
+  const listed = gallery.photos.find((photo) => photo.id === readyStudentPhotoId);
+  assert(listed);
+
+  const redirect = await originalFetch(`${baseUrl}${listed.fileUrl}`, {
+    redirect: "manual",
+  });
+  assert.equal(redirect.status, 302);
+  const location = redirect.headers.get("location");
+  assert(location);
+  const directObjectKey = decodeURIComponent(
+    new URL(location).pathname.split("/").slice(2).join("/"),
+  );
+  assert.equal(
+    r2Requests.some((request) =>
+      request.method === "GET" && request.objectKey === directObjectKey,
+    ),
+    false,
+    "the API must redirect rather than read the signed derivative bytes",
+  );
+  assert.equal(objectStorageReads, 0);
+  const direct = await fetch(location);
+  assert.equal(direct.status, 200);
+  assert.equal(
+    r2Requests.some((request) =>
+      request.method === "GET" && request.objectKey === directObjectKey,
+    ),
+    true,
+    "the browser's redirected request reads the R2 derivative directly",
+  );
+
+  const tampered = new URL(location);
+  tampered.searchParams.set("X-Amz-Signature", "0".repeat(64));
+  assert.equal(
+    (await fetch(tampered)).status,
+    403,
+    "R2 must reject a browser URL whose signed fields were altered",
+  );
+  const signedAt = parseAmzDate(new URL(location).searchParams.get("X-Amz-Date") ?? "");
+  const expires = Number(new URL(location).searchParams.get("X-Amz-Expires"));
+  assert(signedAt !== null && Number.isInteger(expires));
+
+  try {
+    // Advance only the fake R2 clock beyond this exact capability. The API's
+    // session remains active; this models a parent returning after a direct
+    // R2 link has expired rather than re-entering their card code.
+    r2ClockMs = signedAt + (expires + 1) * 1_000;
+    assert.equal(
+      (await fetch(location)).status,
+      403,
+      "an expired signed GET must be rejected by R2",
+    );
+
+    // `mediaExpiresAt` is renewed by refetching the gallery with the same
+    // active delivery session. Wait past the one-second token timestamp
+    // precision so the refreshed media capability is observably new.
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    const renewedGalleryResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/gallery`, {
+      headers: { "x-delivery-token": paidAccessToken },
+    });
+    assert.equal(renewedGalleryResponse.status, 200);
+    const renewedGallery = await renewedGalleryResponse.json() as {
+      mediaExpiresAt: string;
+      photos: Array<{ id: number; fileUrl: string }>;
+    };
+    const renewed = renewedGallery.photos.find((photo) => photo.id === readyStudentPhotoId);
+    assert(renewed);
+    assert.notEqual(
+      renewed.fileUrl,
+      listed.fileUrl,
+      "the same active session receives a newly issued gallery media URL",
+    );
+    assert(Date.parse(renewedGallery.mediaExpiresAt) > Date.now());
+
+    const renewedRedirect = await originalFetch(`${baseUrl}${renewed.fileUrl}`, {
+      redirect: "manual",
+    });
+    assert.equal(renewedRedirect.status, 302);
+    const renewedLocation = renewedRedirect.headers.get("location");
+    assert(renewedLocation);
+    assert.equal(
+      (await fetch(renewedLocation)).status,
+      200,
+      "the refreshed active-session capability remains usable at the advanced R2 clock",
+    );
+  } finally {
+    r2ClockMs = null;
+  }
+});
+
 test("streams the authorized studio original bytes while keeping previews derivative-only", async () => {
   r2RequestedKeys.length = 0;
   const originalResponse = await fetch(
@@ -687,7 +933,7 @@ test("paid print fulfillment exposes and consumes the edited print variant", asy
   assert(printUrl);
 
   r2Requests.length = 0;
-  const printResponse = await fetch(`${baseUrl}${printUrl}`);
+  const printResponse = await requestDeliveryMedia(`${baseUrl}${printUrl}`);
   assert.equal(printResponse.status, 200);
   assert.equal(printResponse.headers.get("content-type"), "image/jpeg");
   const printBytes = Buffer.from(await printResponse.arrayBuffer());
@@ -704,7 +950,7 @@ test("paid print fulfillment exposes and consumes the edited print variant", asy
   }).where(eq(capturesTable.id, readyCaptureId));
 });
 
-test("creates one persistent watermarked thumbnail and reuses it for later gallery views", async () => {
+test("uses one persistent watermarked thumbnail across gallery views", async () => {
   r2Requests.length = 0;
   const galleryResponse = await fetch(`${baseUrl}/api/delivery/${gallerySlug}/gallery`, {
     headers: { "x-delivery-token": paidAccessToken },
@@ -733,23 +979,25 @@ test("creates one persistent watermarked thumbnail and reuses it for later galle
   );
   assert.equal(expiredMedia.status, 401);
 
-  const first = await fetch(`${baseUrl}${listed.fileUrl}`);
+  const first = await requestDeliveryMedia(`${baseUrl}${listed.fileUrl}`);
   assert.equal(first.status, 200);
-  assert.equal(
-    first.headers.get("cache-control"),
-    "public, max-age=900, s-maxage=900, immutable",
-  );
   const firstBytes = Buffer.from(await first.arrayBuffer());
   assert(firstBytes.length > 0);
   assert(firstBytes.length < readyStudentBytes.length);
   const variantPut = r2Requests.find((request) =>
     request.method === "PUT" && request.objectKey.includes("/.variants/")
   );
-  assert(variantPut, "the first gallery view should persist a derivative in R2");
-  assert.match(variantPut.objectKey, /thumbnail-watermarked/);
+  const existingThumbnail = Array.from(r2Bodies.keys()).find((key) =>
+    key.includes("/.variants/") && key.includes("thumbnail-watermarked"),
+  );
+  assert(
+    variantPut || existingThumbnail,
+    "a gallery view must use a persisted watermarked thumbnail in R2",
+  );
+  assert.match(variantPut?.objectKey ?? existingThumbnail ?? "", /thumbnail-watermarked/);
 
   const putCount = r2Requests.filter((request) => request.method === "PUT").length;
-  const second = await fetch(`${baseUrl}${listed.fileUrl}`);
+  const second = await requestDeliveryMedia(`${baseUrl}${listed.fileUrl}`);
   assert.equal(second.status, 200);
   assert.deepEqual(Buffer.from(await second.arrayBuffer()), firstBytes);
   assert.equal(

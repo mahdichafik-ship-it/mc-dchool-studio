@@ -243,6 +243,20 @@ async function claimBatch(now: Date) {
   });
 }
 
+async function variantHasLiveOwner(variantKey: string): Promise<boolean> {
+  // Legacy variants were named from a filename stem, so `portrait.jpg` and
+  // `portrait__retry.jpg` can have overlapping legacy prefixes. Do not infer
+  // ownership solely from the prefix being dispatched: every key must still be
+  // checked against every database-owned R2 original before it is removed.
+  const liveCopies = await db.select({ objectKey: photoStorageCopiesTable.objectKey })
+    .from(photoStorageCopiesTable)
+    .where(eq(photoStorageCopiesTable.destination, "r2"));
+  return liveCopies.some((copy) => (
+    variantKey.startsWith(r2PhotoVariantPrefix(copy.objectKey))
+    || variantKey.startsWith(r2LegacyPhotoVariantPrefix(copy.objectKey))
+  ));
+}
+
 export async function dispatchR2PhotoDeletions(options: {
   now?: Date;
   deleteObject?: (objectKey: string) => Promise<void>;
@@ -292,13 +306,7 @@ export async function dispatchR2PhotoDeletions(options: {
         const prefixes = [r2PhotoVariantPrefix(row.objectKey)];
         const legacyPrefix = r2LegacyPhotoVariantPrefix(row.objectKey);
         if (legacyPrefix !== prefixes[0]) {
-          const liveCopies = await db.select({ objectKey: photoStorageCopiesTable.objectKey })
-            .from(photoStorageCopiesTable)
-            .where(eq(photoStorageCopiesTable.destination, "r2"));
-          const legacyPrefixIsShared = liveCopies.some(
-            (copy) => r2LegacyPhotoVariantPrefix(copy.objectKey) === legacyPrefix,
-          );
-          if (!legacyPrefixIsShared) prefixes.push(legacyPrefix);
+          prefixes.push(legacyPrefix);
         }
         const seenVariantKeys = new Set<string>();
         for (const variantPrefix of prefixes) {
@@ -307,7 +315,10 @@ export async function dispatchR2PhotoDeletions(options: {
             if (!variantKey.startsWith(variantPrefix)) {
               throw new Error("R2 variant listing returned a key outside the photo namespace");
             }
-            if (!seenVariantKeys.has(variantKey)) {
+            if (
+              !seenVariantKeys.has(variantKey)
+              && !(await variantHasLiveOwner(variantKey))
+            ) {
               await deleteObject(variantKey);
               seenVariantKeys.add(variantKey);
             }

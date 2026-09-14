@@ -583,7 +583,10 @@ export async function completeR2Upload(
       `${apiUrl.replace(/\/+$/, '')}/api/desktop/storage-copies/${session.copyId}/r2/verify`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${connectionToken}` },
+        headers: {
+          Authorization: `Bearer ${connectionToken}`,
+          'X-MC-R2-Attempt': session.attemptKey || session.objectKey,
+        },
         signal: AbortSignal.timeout(30_000),
       },
     )

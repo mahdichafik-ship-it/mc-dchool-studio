@@ -55,6 +55,7 @@ export type R2ObjectHierarchy = {
 export interface R2CopyUpload extends R2PutUpload {
   copyId: number;
   objectKey: string;
+  attemptKey?: string;
   alreadyVerified: boolean;
 }
 
@@ -163,13 +164,14 @@ async function resolveObjectHierarchy(
         generatedStudentId: studentsTable.generatedStudentId,
       })
       .from(studentPhotosTable)
-      .innerJoin(studentsTable, eq(studentsTable.id, source.studentId))
+      .innerJoin(studentsTable, eq(studentsTable.id, studentPhotosTable.studentId))
       .innerJoin(projectsTable, eq(projectsTable.id, studentsTable.projectId))
       .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
       .innerJoin(classesTable, eq(classesTable.id, studentsTable.classId))
       .where(and(
         eq(studentPhotosTable.id, source.id),
         eq(studentPhotosTable.projectId, source.projectId),
+        eq(studentPhotosTable.studentId, source.studentId),
       ))
       .limit(1);
     if (!row) throw new Error("Could not resolve the student R2 object hierarchy");
@@ -198,13 +200,14 @@ async function resolveObjectHierarchy(
         generatedStudentId: studentsTable.generatedStudentId,
       })
       .from(captureFilesTable)
-      .innerJoin(capturesTable, eq(capturesTable.id, source.captureId))
+      .innerJoin(capturesTable, eq(capturesTable.id, captureFilesTable.captureId))
       .innerJoin(studentsTable, eq(studentsTable.id, capturesTable.studentId))
       .innerJoin(projectsTable, eq(projectsTable.id, capturesTable.projectId))
       .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
       .innerJoin(classesTable, eq(classesTable.id, studentsTable.classId))
       .where(and(
         eq(captureFilesTable.id, source.id),
+        eq(captureFilesTable.captureId, source.captureId),
         eq(capturesTable.projectId, source.projectId),
       ))
       .limit(1);
@@ -230,13 +233,14 @@ async function resolveObjectHierarchy(
       subjectId: groupsTable.id,
     })
     .from(groupCaptureFilesTable)
-    .innerJoin(groupCapturesTable, eq(groupCapturesTable.id, source.captureId))
+    .innerJoin(groupCapturesTable, eq(groupCapturesTable.id, groupCaptureFilesTable.captureId))
     .innerJoin(groupsTable, eq(groupsTable.id, groupCapturesTable.groupId))
     .innerJoin(projectsTable, eq(projectsTable.id, groupCapturesTable.projectId))
     .innerJoin(studiosTable, eq(studiosTable.id, projectsTable.studioId))
     .leftJoin(classesTable, eq(classesTable.id, groupsTable.classId))
     .where(and(
       eq(groupCaptureFilesTable.id, source.id),
+      eq(groupCaptureFilesTable.captureId, source.captureId),
       eq(groupCapturesTable.projectId, source.projectId),
     ))
     .limit(1);
@@ -291,6 +295,10 @@ export async function createR2CopyUpload(input: {
 }): Promise<R2CopyUpload | null> {
   const config = getR2Config();
   if (!config) return null;
+  // Validate the complete source relationship before inspecting an existing
+  // copy. Without this, an in-project source ID could be paired with another
+  // subject/capture ID and receive a URL for a copy it does not own.
+  const hierarchy = await resolveObjectHierarchy(input.source);
   const condition = sourceCondition(input.source);
   let [copy] = await db
     .select()
@@ -298,7 +306,6 @@ export async function createR2CopyUpload(input: {
     .where(condition)
     .limit(1);
   if (!copy) {
-    const hierarchy = await resolveObjectHierarchy(input.source);
     const collisionKey = `r2:${input.source.kind}:${input.source.id}`;
     const baseObjectKey = readableR2ObjectKey(
       hierarchy,
@@ -362,6 +369,7 @@ export async function createR2CopyUpload(input: {
     ),
     copyId: copy!.id,
     objectKey: stagingObjectKey,
+    attemptKey: stagingObjectKey,
     alreadyVerified: false,
   });
 
@@ -393,27 +401,35 @@ export async function createR2CopyUpload(input: {
   }
 
   if (copy.state === "failed" && copy.stagingObjectKey) {
-    const retryAt = new Date();
-    const [retried] = await db
-      .update(photoStorageCopiesTable)
-      .set({
-        state: "uploading",
-        attemptCount: copy.attemptCount + 1,
-        lastAttemptAt: retryAt,
-        nextRetryAt: null,
+    // A failed attempt's signed URL can still be valid. Never hand its
+    // staging key to a retry: that would let a stale desktop caller upload A
+    // into B's attempt. Persist cleanup for A before CAS-replacing it below.
+    const sourceType = input.source.kind === "student"
+      ? "student_photo"
+      : input.source.kind === "capture"
+        ? "capture_file"
+        : "group_capture_file";
+    await db.insert(r2PhotoDeletionOutboxTable).values({
+      storageCopyId: copy.id,
+      sourceType,
+      sourceId: input.source.id,
+      objectKey: copy.stagingObjectKey,
+      objectKind: "staging",
+      nextRetryAt: new Date(Date.now() + 16 * 60_000),
+    }).onConflictDoUpdate({
+      target: [
+        r2PhotoDeletionOutboxTable.storageCopyId,
+        r2PhotoDeletionOutboxTable.objectKey,
+      ],
+      set: {
+        state: "pending",
+        objectKind: "staging",
+        nextRetryAt: new Date(Date.now() + 16 * 60_000),
         lastError: null,
-        updatedAt: retryAt,
-      })
-      .where(and(
-        eq(photoStorageCopiesTable.id, copy.id),
-        eq(photoStorageCopiesTable.state, "failed"),
-        eq(photoStorageCopiesTable.stagingObjectKey, copy.stagingObjectKey),
-      ))
-      .returning();
-    if (!retried) {
-      throw new Error("R2 upload changed concurrently; retry with a fresh session");
-    }
-    return signedUpload(retried.stagingObjectKey!);
+        deletedAt: null,
+        updatedAt: new Date(),
+      },
+    });
   }
 
   const stagingObjectKey =
@@ -485,6 +501,7 @@ export async function createR2CopyUpload(input: {
     ),
     copyId: updated.id,
     objectKey: stagingObjectKey,
+    attemptKey: stagingObjectKey,
     alreadyVerified: false,
   };
 }
@@ -506,8 +523,15 @@ export interface VerifyR2CopyTestHooks {
 
 export async function verifyR2Copy(
   copy: PhotoStorageCopy,
-  testHooks: VerifyR2CopyTestHooks = {},
+  attemptKeyOrTestHooks: string | VerifyR2CopyTestHooks = {},
+  suppliedTestHooks: VerifyR2CopyTestHooks = {},
 ): Promise<PhotoStorageCopy> {
+  const attemptKey = typeof attemptKeyOrTestHooks === "string"
+    ? attemptKeyOrTestHooks
+    : undefined;
+  const testHooks = typeof attemptKeyOrTestHooks === "string"
+    ? suppliedTestHooks
+    : attemptKeyOrTestHooks;
   if (copy.destination !== "r2") {
     throw new Error("Storage copy is not an R2 destination");
   }
@@ -517,6 +541,11 @@ export async function verifyR2Copy(
     });
   }
   const stagingObjectKey = copy.stagingObjectKey;
+  if (attemptKey !== undefined && attemptKey !== stagingObjectKey) {
+    throw Object.assign(new Error("R2 upload attempt is no longer current"), {
+      code: "R2_UPLOAD_NOT_VERIFIED",
+    });
+  }
   const verificationStartedAt = new Date();
   const [claimedCopy] = await db
     .update(photoStorageCopiesTable)
@@ -692,40 +721,61 @@ export async function verifyR2Copy(
     size: candidateDigest.size,
   });
 
-  const [ready] = await db
-    .update(photoStorageCopiesTable)
-    .set({
-      state: "ready",
-      stagingObjectKey: null,
-      objectKey: candidateObjectKey,
-      providerObjectId: candidateObjectKey,
-      fileSize: candidateDigest.size,
-      mimeType: candidateMetadata.contentType ?? copy.mimeType,
-      sha256: candidateDigest.sha256,
-      etag: candidateMetadata.etag,
-      verifiedAt: new Date(),
-      nextRetryAt: null,
-      lastError: null,
-      updatedAt: new Date(),
-    })
-    .where(and(
-      eq(photoStorageCopiesTable.id, copy.id),
-      eq(photoStorageCopiesTable.state, "uploading"),
-      eq(photoStorageCopiesTable.stagingObjectKey, stagingObjectKey),
-    ))
-    .returning();
+  // Promotion and candidate cleanup are mutually exclusive. In particular,
+  // cleanup may claim an expired candidate while a slow verifier is hashing
+  // it. Lock the outbox row and only promote a candidate that is still
+  // pending; deleting that row in the same transaction fences a dispatcher
+  // from deleting the object after the copy points at it.
+  const ready = await db.transaction(async (tx) => {
+    const [candidate] = await tx
+      .select()
+      .from(r2PhotoDeletionOutboxTable)
+      .where(and(
+        eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
+        eq(r2PhotoDeletionOutboxTable.objectKey, candidateObjectKey),
+        eq(r2PhotoDeletionOutboxTable.objectKind, "candidate"),
+      ))
+      .for("update");
+    if (!candidate || candidate.state !== "pending") return undefined;
+
+    const [promoted] = await tx
+      .update(photoStorageCopiesTable)
+      .set({
+        state: "ready",
+        stagingObjectKey: null,
+        objectKey: candidateObjectKey,
+        providerObjectId: candidateObjectKey,
+        fileSize: candidateDigest.size,
+        mimeType: candidateMetadata.contentType ?? copy.mimeType,
+        sha256: candidateDigest.sha256,
+        etag: candidateMetadata.etag,
+        verifiedAt: new Date(),
+        nextRetryAt: null,
+        lastError: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(photoStorageCopiesTable.id, copy.id),
+        eq(photoStorageCopiesTable.state, "uploading"),
+        eq(photoStorageCopiesTable.stagingObjectKey, stagingObjectKey),
+      ))
+      .returning();
+    if (!promoted) return undefined;
+
+    await tx
+      .delete(r2PhotoDeletionOutboxTable)
+      .where(and(
+        eq(r2PhotoDeletionOutboxTable.id, candidate.id),
+        eq(r2PhotoDeletionOutboxTable.state, "pending"),
+      ));
+    return promoted;
+  });
   if (!ready) {
-    await cleanupCandidate();
     throw Object.assign(
-      new Error("A newer R2 upload attempt replaced this verification"),
+      new Error("R2 candidate cleanup or a newer upload attempt won the promotion race"),
       { code: "R2_UPLOAD_NOT_VERIFIED" },
     );
   }
-  await db.delete(r2PhotoDeletionOutboxTable).where(and(
-    eq(r2PhotoDeletionOutboxTable.storageCopyId, copy.id),
-    eq(r2PhotoDeletionOutboxTable.objectKey, candidateObjectKey),
-    eq(r2PhotoDeletionOutboxTable.objectKind, "candidate"),
-  ));
   await deleteR2Object(stagingObjectKey).catch(() => undefined);
   return ready;
 }

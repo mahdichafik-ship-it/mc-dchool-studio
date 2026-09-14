@@ -33,6 +33,7 @@ function validR2Session() {
   return {
     copyId: 7,
     objectKey: 'staging/photo.jpg',
+    attemptKey: 'staging/photo.jpg',
     uploadUrl: 'https://r2.example.test/upload',
     uploadMethod: 'PUT',
     uploadHeaders: {

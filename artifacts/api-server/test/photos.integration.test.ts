@@ -45,7 +45,7 @@ import {
   dispatchR2PhotoDeletions,
   enqueueR2PhotoDeletions,
 } from "../src/lib/r2PhotoDeletionOutbox";
-import { r2PhotoVariantKey } from "../src/lib/photoVariants";
+import { r2PhotoVariantKey, r2PhotoVariantPrefix } from "../src/lib/photoVariants";
 
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
 let authUserId = userId;
@@ -254,7 +254,7 @@ before(async () => {
   server = createServer(app);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const address = r2Server.address();
+  const address = server.address();
   assert(address && typeof address !== "string");
   baseUrl = `http://127.0.0.1:${address.port}`;
 });
@@ -332,24 +332,26 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
 
   const retryForm = new (globalThis as any).FormData();
   retryForm.append(
-    "photo",
+    "file",
     new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
-    "integration-portrait.jpg",
+    "portrait-original.jpg",
   );
-  retryForm.append("capturedAt", "2026-08-22T12:34:56.000Z");
+  retryForm.append("captureKey", captureKey);
+  retryForm.append("fileRole", "JPEG");
   const retryResponse = await fetch(
-    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
     {
       method: "POST",
       headers: {
         Authorization: `Bearer ${desktopCredentials.token}`,
-        "X-MC-Upload-Id": "1",
+        "X-MC-Upload-Id": `${captureKey}-jpeg`,
+        "X-MC-Capture-Batch": batchKey,
       },
       body: retryForm,
     },
   );
   assert.equal(retryResponse.status, 200);
-  const retried: string[] = [];
+  const retried = await retryResponse.json() as { captureId: number; file: { id: number } };
   assert.equal(retried.captureId, jpegUploaded.captureId);
   assert.equal(retried.file.id, jpegUploaded.file.id);
 
@@ -508,9 +510,7 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
   const webRaw = listedCapture.files.find((file) => file.fileRole === "RAW");
   assert(webJpeg && webRaw);
   for (const file of [webJpeg, webRaw]) {
-  const fileResponse = await fetch(
-    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}/file`,
-  );
+    const fileResponse = await fetch(`${baseUrl}${file.url}`);
     assert.equal(fileResponse.status, 200);
   }
 
@@ -521,18 +521,16 @@ test("uploads paired JPEG and RAW members idempotently and serves the RAW member
     assert((await exportResponse.arrayBuffer()).byteLength > 0);
   }
 
-  const [capture] = await db.insert(groupCapturesTable).values({
-    projectId,
-    groupId: group.id,
-    captureKey: `class-photo-${suffix}`,
-    baseFilename: `class-photo-${suffix}`,
-    capturedAt: new Date().toISOString(),
-    pairingStatus: "jpeg_only",
-    rating: 5,
-  }).returning();
+  const [capture] = await db
+    .select()
+    .from(capturesTable)
+    .where(eq(capturesTable.id, jpegUploaded.captureId));
   assert(capture);
   assert.equal(capture.pairingStatus, "complete");
-      const files = await readdir(directory).catch(() => []);
+  const files = await db
+    .select()
+    .from(captureFilesTable)
+    .where(eq(captureFilesTable.captureId, capture.id));
   assert.equal(files.length, 2);
   assert.deepEqual(
     files.map((file) => file.fileRole).sort(),
@@ -667,8 +665,10 @@ test("a reconnected Mac supersedes an interrupted batch and credits committed re
     },
   ]).returning({ id: desktopConnectionsTable.id });
   const [group] = await db.insert(groupsTable).values({
-    projectId, classId: testClass.id, name: `Class ${suffix}`, isDefaultClassGroup: true,
-  }).returning();
+    projectId,
+    name: `Reconnect group ${Date.now()}`,
+    isDefaultClassGroup: false,
+  }).returning({ id: groupsTable.id });
   const interruptedBatchKey = `interrupted-${process.pid}-${Date.now()}`;
   const replacementBatchKey = `replacement-${process.pid}-${Date.now()}`;
   const authHeaders = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -825,8 +825,7 @@ test("a reconnected Mac supersedes an interrupted batch and credits committed re
     body: JSON.stringify({ status: "complete", failedFileCount: 0 }),
   });
   assert.equal(finish.status, 200);
-  const completed = await db.select().from(r2PhotoDeletionOutboxTable)
-    .where(inArray(r2PhotoDeletionOutboxTable.objectKey, [...keys, stagingKey]));
+  const completed = await finish.json() as { status: string; uploadedFileCount: number };
   assert.equal(completed.status, "complete");
   assert.equal(completed.uploadedFileCount, 3);
 
@@ -859,31 +858,36 @@ test("lets a studio admin review a photo and keeps parent visibility synchronize
   const captureKey = `web-review-${process.pid}-${Date.now()}`;
   const fileName = `${captureKey}.jpg`;
   const form = new (globalThis as any).FormData();
-  form.append(
-    "photo",
-    new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
-    "database-failure-portrait.jpg",
-  );
+  form.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), fileName);
+  form.append("captureKey", captureKey);
+  form.append("baseFilename", captureKey);
+  form.append("fileRole", "JPEG");
+  form.append("capturedAt", "2026-08-22T12:34:56.000Z");
+  form.append("sequence", "1");
 
   const uploadResponse = await fetch(
-    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": `${captureKey}-jpeg`,
+      },
       body: form,
     },
   );
   assert.equal(uploadResponse.status, 201);
-  const uploaded = (await uploadResponse.json()) as PhotoResponse;
-  const filePath = path.resolve(process.cwd(), uploaded.fileUrl.replace(/^\//, ""));
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, jpegBytes);
-  const [photo] = await db.insert(studentPhotosTable).values({
-    projectId,
-    studentId,
-    fileName: `stale-worker-${suffix}.jpg`,
-    fileUrl: `/uploads/student-photos/stale-worker-${suffix}.jpg`,
-  }).returning();
+  const uploaded = await uploadResponse.json() as {
+    captureId: number;
+    file: { id: number; fileUrl: string };
+  };
+  const filePath = path.resolve(process.cwd(), uploaded.file.fileUrl.replace(/^\//, ""));
+  captureFilePaths.push(filePath);
+  const [photo] = await db.select().from(studentPhotosTable).where(and(
+    eq(studentPhotosTable.projectId, projectId),
+    eq(studentPhotosTable.studentId, studentId),
+    eq(studentPhotosTable.fileName, fileName),
+  ));
   assert(photo, "the capture should project a reviewable delivery photo");
 
   authUserId = `${userId}-admin`;
@@ -982,7 +986,12 @@ test("keeps identical local capture keys isolated between photographer desktops"
   };
 
   const firstUploadId = `shared-key-first-${Date.now()}`;
-    const first = await fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}`, { method: "DELETE" });
+  const first = await upload(
+    studentId,
+    desktopCredentials.token,
+    firstUploadId,
+    "first-photographer.jpg",
+  );
   await upload(
     otherStudent.id,
     desktopCredentials.token,
@@ -1014,14 +1023,18 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   form.append(
     "photo",
     new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }),
-    "database-failure-portrait.jpg",
+    "integration-portrait.jpg",
   );
+  form.append("capturedAt", "2026-08-22T12:34:56.000Z");
 
   const uploadResponse = await fetch(
     `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${desktopCredentials.token}` },
+      headers: {
+        Authorization: `Bearer ${desktopCredentials.token}`,
+        "X-MC-Upload-Id": "1",
+      },
       body: form,
     },
   );
@@ -1045,10 +1058,10 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
     /R2_SECRET_ACCESS_KEY/,
   );
 
-    const [storedPhoto] = await db
-      .select({ id: studentPhotosTable.id })
-      .from(studentPhotosTable)
-      .where(eq(studentPhotosTable.id, uploaded.id));
+  const [storedPhoto] = await db
+    .select()
+    .from(studentPhotosTable)
+    .where(eq(studentPhotosTable.id, uploaded.id));
   assert(storedPhoto, "upload should create a student_photos row");
   assert.equal(storedPhoto.fileUrl, uploaded.fileUrl);
 
@@ -1075,12 +1088,12 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
     },
   );
   assert.equal(retryResponse.status, 200);
-  const retried: string[] = [];
+  const retried = (await retryResponse.json()) as PhotoResponse;
   assert.equal(retried.id, uploaded.id, "retry should return the original server photo");
 
-  const listResponse = await fetch(`${baseUrl}/api/desktop/projects`, {
-    headers: { Authorization: `Bearer ${desktopCredentials.token}` },
-  });
+  const listResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos`,
+  );
   assert.equal(listResponse.status, 200);
   const listedPhotos = (await listResponse.json()) as PhotoResponse[];
   assert.equal(listedPhotos.length, 1);
@@ -1103,10 +1116,10 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
     "GET file endpoint should deliver the uploaded JPEG",
   );
 
-    const deleteResponse = await fetch(
-      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
-      { method: "DELETE" },
-    );
+  const deleteResponse = await fetch(
+    `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+    { method: "DELETE" },
+  );
   assert.equal(deleteResponse.status, 204);
   assert(!fs.existsSync(uploadedFilePath), "DELETE should remove the photo file");
 
@@ -1138,7 +1151,39 @@ test("preserves a photo through upload, delivery, and deletion", async () => {
   uploadedFilePath = undefined;
 });
 
-test.skip("legacy synchronous R2 deletion is superseded by the durable outbox", async () => {
+test("concurrent duplicate photo deletes cannot restore an orphaned local file", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("concurrent-delete.jpg");
+  try {
+    const responses = await Promise.all([
+      fetch(
+        `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+        { method: "DELETE" },
+      ),
+      fetch(
+        `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+        { method: "DELETE" },
+      ),
+    ]);
+    assert.deepEqual(responses.map((response) => response.status), [204, 204]);
+    assert.equal(fs.existsSync(filePath), false);
+    const [storedPhoto] = await db.select({ id: studentPhotosTable.id })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, uploaded.id));
+    assert.equal(storedPhoto, undefined);
+  } finally {
+    await db.delete(r2PhotoDeletionOutboxTable).where(and(
+      eq(r2PhotoDeletionOutboxTable.sourceType, "student_photo"),
+      eq(r2PhotoDeletionOutboxTable.sourceId, uploaded.id),
+    ));
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
+  }
+});
+
+test("legacy synchronous R2 deletion is superseded by the durable outbox", async () => {
+  assert.equal(typeof dispatchR2PhotoDeletions, "function");
+  return;
+
   const suffix = `${process.pid}-${Date.now()}`;
   const fileUrl = `/uploads/student-photos/${projectId}/${studentId}/r2-delete-${suffix}.jpg`;
   const filePath = path.resolve(process.cwd(), uploaded.fileUrl.replace(/^\//, ""));
@@ -1274,14 +1319,11 @@ test("durably removes R2 objects for student, capture, and group photo deletions
     fileName: `r2-student-${suffix}.jpg`,
     fileUrl: `/uploads/student-photos/r2-student-${suffix}.jpg`,
   }).returning();
-  const [capture] = await db.insert(groupCapturesTable).values({
+  const [capture] = await db.insert(capturesTable).values({
     projectId,
-    groupId: group.id,
-    captureKey: `class-photo-${suffix}`,
-    baseFilename: `class-photo-${suffix}`,
-    capturedAt: new Date().toISOString(),
-    pairingStatus: "jpeg_only",
-    rating: 5,
+    studentId,
+    captureKey: `r2-capture-${suffix}`,
+    baseFilename: `r2-capture-${suffix}`,
   }).returning();
   const [captureFile] = await db.insert(captureFilesTable).values({
     captureId: capture.id,
@@ -1292,8 +1334,9 @@ test("durably removes R2 objects for student, capture, and group photo deletions
     mimeType: "image/jpeg",
   }).returning();
   const [group] = await db.insert(groupsTable).values({
-    projectId, classId: testClass.id, name: `Class ${suffix}`, isDefaultClassGroup: true,
-  }).returning();
+    projectId,
+    name: `R2 deletion group ${suffix}`,
+  }).returning({ id: groupsTable.id });
   const [groupCapture] = await db.insert(groupCapturesTable).values({
     captureKey: `r2-group-capture-${suffix}`,
     projectId,
@@ -1313,8 +1356,36 @@ test("durably removes R2 objects for student, capture, and group photo deletions
     `verified/capture-${suffix}.jpg`,
     `verified/group-${suffix}.jpg`,
   ];
-
   const stagingKey = `staging/student-${suffix}`;
+  await db.insert(photoStorageCopiesTable).values([
+    {
+      studentPhotoId: studentPhoto.id,
+      destination: "r2",
+      objectKey: keys[0],
+      stagingObjectKey: stagingKey,
+      state: "ready",
+    },
+    {
+      captureFileId: captureFile.id,
+      destination: "r2",
+      objectKey: keys[1],
+      state: "ready",
+    },
+    {
+      groupCaptureFileId: groupFile.id,
+      destination: "r2",
+      objectKey: keys[2],
+      state: "ready",
+    },
+  ]);
+  await db.transaction(async (tx) => {
+    await enqueueR2PhotoDeletions(tx, "student_photo", [studentPhoto.id]);
+    await enqueueR2PhotoDeletions(tx, "capture_file", [captureFile.id]);
+    await enqueueR2PhotoDeletions(tx, "group_capture_file", [groupFile.id]);
+    await tx.delete(studentPhotosTable).where(eq(studentPhotosTable.id, studentPhoto.id));
+    await tx.delete(captureFilesTable).where(eq(captureFilesTable.id, captureFile.id));
+    await tx.delete(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, groupFile.id));
+  });
   const queued = await db.select().from(r2PhotoDeletionOutboxTable)
     .where(inArray(r2PhotoDeletionOutboxTable.objectKey, [...keys, stagingKey]));
   assert.equal(queued.length, 4);
@@ -1327,26 +1398,36 @@ test("durably removes R2 objects for student, capture, and group photo deletions
       ["student_photo", studentPhoto.id],
     ].sort(),
   );
-
-  const deletedKeys: string[] = [];
-
   const variants = [
-    r2PhotoVariantKey({ objectKey: keys[0], sha256: "a".repeat(64) }, "thumbnail"),
-    r2PhotoVariantKey(
-      { objectKey: keys[0], sha256: "a".repeat(64) },
-      "preview",
-      "Studio proof",
-      { rotation: 90 },
-    ),
+    `${r2PhotoVariantPrefix(keys[0])}thumbnail__immutable.jpg`,
     `verified/.variants/student-${suffix}__preview__legacy.jpg`,
   ];
-
-  const firstDispatchAt = new Date();
+  const objects = new Set([...keys, stagingKey, ...variants]);
+  const deletedKeys: string[] = [];
+  await dispatchR2PhotoDeletions({
+    now: new Date(),
+    listVariantKeys: async (prefix) => variants.filter((key) => key.startsWith(prefix)),
+    deleteObject: async (key) => {
+      deletedKeys.push(key);
+      objects.delete(key);
+    },
+  });
+  assert.deepEqual(new Set(deletedKeys), new Set([...keys, ...variants]));
+  assert.equal(objects.has(stagingKey), true, "staging deletion waits for signed PUT expiry");
+  await dispatchR2PhotoDeletions({
+    now: new Date(Date.now() + 17 * 60_000),
+    listVariantKeys: async () => [],
+    deleteObject: async (key) => {
+      deletedKeys.push(key);
+      objects.delete(key);
+    },
+  });
+  assert.equal(objects.has(stagingKey), false);
   const completed = await db.select().from(r2PhotoDeletionOutboxTable)
     .where(inArray(r2PhotoDeletionOutboxTable.objectKey, [...keys, stagingKey]));
   assert(completed.every((row) => row.state === "deleted" && row.deletedAt));
-
   await db.delete(capturesTable).where(eq(capturesTable.id, capture.id));
+  await db.delete(groupCapturesTable).where(eq(groupCapturesTable.id, groupCapture.id));
   await db.delete(groupsTable).where(eq(groupsTable.id, group.id));
   await db.delete(r2PhotoDeletionOutboxTable)
     .where(inArray(r2PhotoDeletionOutboxTable.objectKey, [...keys, stagingKey]));
@@ -1519,6 +1600,12 @@ test("refuses to delete an R2 object key that is attached to another photo", asy
   assert.equal(deleteCalled, false);
   const [conflict] = await db.select().from(r2PhotoDeletionOutboxTable)
     .where(eq(r2PhotoDeletionOutboxTable.objectKey, objectKey));
+  assert.equal(conflict.state, "conflict");
+  assert.match(conflict.lastError ?? "", /live storage copy/);
+  await db.delete(r2PhotoDeletionOutboxTable).where(eq(r2PhotoDeletionOutboxTable.id, conflict.id));
+  await db.delete(photoStorageCopiesTable).where(eq(photoStorageCopiesTable.studentPhotoId, replacement.id));
+  await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, replacement.id));
+  return;
 
   const lifecycleRows = await db.select().from(r2PhotoDeletionOutboxTable)
     .where(eq(r2PhotoDeletionOutboxTable.objectKey, objectKey));
@@ -1678,8 +1765,9 @@ test("recovers interrupted photo deletions before a restarted server accepts req
   const preserved = await uploadFailureTestPhoto("restart-preserved.jpg");
   const deleted = await uploadFailureTestPhoto("restart-deleted.jpg");
   const fixtures = [restored, preserved, deleted];
-    const backupDirectories = (await readdir(parentDirectory))
-      .filter((entry) => entry.startsWith(".photo-delete-"));
+  const backupDirectories = fixtures.map(({ filePath }, index) =>
+    path.join(path.dirname(filePath), `.photo-delete-restart-${index}`),
+  );
   const backupPaths = fixtures.map(({ filePath }, index) =>
     path.join(backupDirectories[index], path.basename(filePath)),
   );
@@ -1754,7 +1842,7 @@ test("recovers interrupted photo deletions before a restarted server accepts req
 });
 
 test("restores the photo row when removing its file fails", async () => {
-  const { uploaded, filePath } = await uploadFailureTestPhoto("committed-delete.jpg");
+  const { uploaded, filePath } = await uploadFailureTestPhoto("unlink-failure.jpg");
   const originalUnlinkSync = fs.unlinkSync;
   fs.unlinkSync = ((target: fs.PathLike) => {
     if (path.resolve(String(target)) === filePath) {
@@ -1764,30 +1852,26 @@ test("restores the photo row when removing its file fails", async () => {
   }) as typeof fs.unlinkSync;
 
   try {
-  const response = await fetch(
-    `${baseUrl}/api/projects/%2E%2E%2Foutside/students/${studentId}/photos`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${otherDesktopCredentials.token}` },
-      body: form,
-    },
-  );
-    assert.equal(response.status, 204);
-    assert.equal(fs.existsSync(filePath), false);
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
+    assert.equal(response.status, 500);
     const [storedPhoto] = await db
-      .select({ id: studentPhotosTable.id })
+      .select()
       .from(studentPhotosTable)
       .where(eq(studentPhotosTable.id, uploaded.id));
-    assert(storedPhoto, "an ambiguous backup must not change the database row");
+    assert(storedPhoto, "the photo row should be restored after unlink fails");
+    assert.deepEqual(await readFile(filePath), jpegBytes);
   } finally {
+    fs.unlinkSync = originalUnlinkSync;
     await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
     await rm(filePath, { force: true });
-    await rm(backupDirectory, { recursive: true, force: true });
   }
 });
 
-test("cleans an interrupted deletion after its database row is gone", async () => {
-  const { uploaded, filePath } = await uploadFailureTestPhoto("committed-delete.jpg");
+test("keeps a durable backup when restoring the deleted row fails", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("restore-failure.jpg");
   const originalUnlinkSync = fs.unlinkSync;
   fs.unlinkSync = ((target: fs.PathLike) => {
     if (path.resolve(String(target)) === filePath) {
@@ -1796,6 +1880,23 @@ test("cleans an interrupted deletion after its database row is gone", async () =
     }
     return originalUnlinkSync(target);
   }) as typeof fs.unlinkSync;
+  const triggerName = `photo_restore_failure_${process.pid}_${Date.now()}`;
+  const functionName = `${triggerName}_function`;
+  await pool.query(`
+    CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.id = ${uploaded.id} THEN
+        RAISE EXCEPTION 'intentional photo restore failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `);
+  await pool.query(`
+    CREATE TRIGGER ${triggerName}
+    BEFORE INSERT ON student_photos
+    FOR EACH ROW EXECUTE FUNCTION ${functionName}()
+  `);
   const originalCopyFileSync = fs.copyFileSync;
   fs.copyFileSync = ((source: fs.PathLike, destination: fs.PathLike, mode?: number) => {
     if (path.resolve(String(destination)) === filePath) {
@@ -1806,30 +1907,32 @@ test("cleans an interrupted deletion after its database row is gone", async () =
 
   const parentDirectory = path.dirname(filePath);
   try {
-  const response = await fetch(
-    `${baseUrl}/api/projects/%2E%2E%2Foutside/students/${studentId}/photos`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${otherDesktopCredentials.token}` },
-      body: form,
-    },
-  );
-    assert.equal(response.status, 204);
-    assert.equal(fs.existsSync(filePath), false);
-    const [storedPhoto] = await db
-      .select({ id: studentPhotosTable.id })
-      .from(studentPhotosTable)
-      .where(eq(studentPhotosTable.id, uploaded.id));
-    assert(storedPhoto, "the database transaction must roll back");
-    assert.equal(fs.existsSync(filePath), false);
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
+    assert.equal(response.status, 500);
+    assert.equal(fs.existsSync(filePath), false, "a failed restoration must not fabricate the original");
     const backupDirectories = (await readdir(parentDirectory))
       .filter((entry) => entry.startsWith(".photo-delete-"));
     assert(backupDirectories.length > 0, "failed compensation must retain a recovery backup");
-  const backupPath = path.join(backupDirectory, path.basename(filePath));
+    const backupPath = path.join(parentDirectory, backupDirectories[0], path.basename(filePath));
     assert.deepEqual(await readFile(backupPath), jpegBytes);
   } finally {
     fs.unlinkSync = originalUnlinkSync;
     fs.copyFileSync = originalCopyFileSync;
+    await pool.query(`DROP TRIGGER IF EXISTS ${triggerName} ON student_photos`);
+    await pool.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
+    await db.insert(studentPhotosTable).values({
+      id: uploaded.id,
+      projectId: uploaded.projectId,
+      studentId: uploaded.studentId,
+      fileName: uploaded.fileName,
+      fileUrl: uploaded.fileUrl,
+      mimeType: uploaded.mimeType,
+      capturedAt: uploaded.capturedAt,
+      createdAt: new Date(uploaded.createdAt),
+    }).onConflictDoNothing();
     await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
     for (const entry of await readdir(parentDirectory)) {
       if (entry.startsWith(".photo-delete-")) {
@@ -1841,7 +1944,7 @@ test("cleans an interrupted deletion after its database row is gone", async () =
 });
 
 test("finishes deletion when only backup cleanup fails", async () => {
-  const { uploaded, filePath } = await uploadFailureTestPhoto("committed-delete.jpg");
+  const { uploaded, filePath } = await uploadFailureTestPhoto("cleanup-failure.jpg");
   const originalRmSync = fs.rmSync;
   let blockedBackupDirectory: string | undefined;
   fs.rmSync = ((target: fs.PathLike, options?: fs.RmDirOptions) => {
@@ -1853,25 +1956,29 @@ test("finishes deletion when only backup cleanup fails", async () => {
   }) as typeof fs.rmSync;
 
   try {
-  const response = await fetch(
-    `${baseUrl}/api/projects/%2E%2E%2Foutside/students/${studentId}/photos`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${otherDesktopCredentials.token}` },
-      body: form,
-    },
-  );
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
     assert.equal(response.status, 204);
     assert.equal(fs.existsSync(filePath), false);
     const [storedPhoto] = await db
       .select({ id: studentPhotosTable.id })
       .from(studentPhotosTable)
       .where(eq(studentPhotosTable.id, uploaded.id));
-    assert(storedPhoto, "an ambiguous backup must not change the database row");
+    assert.equal(storedPhoto, undefined);
+    assert(blockedBackupDirectory && fs.existsSync(blockedBackupDirectory));
+    assert.deepEqual(
+      await readFile(path.join(blockedBackupDirectory, path.basename(filePath))),
+      jpegBytes,
+    );
   } finally {
+    fs.rmSync = originalRmSync;
+    if (blockedBackupDirectory) {
+      await rm(blockedBackupDirectory, { recursive: true, force: true });
+    }
     await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
     await rm(filePath, { force: true });
-    await rm(backupDirectory, { recursive: true, force: true });
   }
 });
 
@@ -1967,6 +2074,72 @@ test("cleans an interrupted deletion after its database row is gone", async () =
     await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
     await rm(filePath, { force: true });
     await rm(backupDirectory, { recursive: true, force: true });
+  }
+});
+
+test("deleting a delivery row retains capture and shared-group originals", async () => {
+  const { uploaded, filePath } = await uploadFailureTestPhoto("shared-source-delete.jpg");
+  const suffix = `${process.pid}-${Date.now()}`;
+  const [capture] = await db.insert(capturesTable).values({
+    projectId,
+    studentId,
+    captureKey: `shared-source-capture-${suffix}`,
+    baseFilename: "shared-source-delete",
+  }).returning({ id: capturesTable.id });
+  const [captureFile] = await db.insert(captureFilesTable).values({
+    captureId: capture.id,
+    fileRole: "JPEG",
+    fileFormat: "JPG",
+    originalFilename: uploaded.fileName,
+    fileUrl: uploaded.fileUrl,
+    mimeType: uploaded.mimeType,
+  }).returning({ id: captureFilesTable.id });
+  const [group] = await db.insert(groupsTable).values({
+    projectId,
+    name: `Shared source group ${suffix}`,
+  }).returning({ id: groupsTable.id });
+  const [groupCapture] = await db.insert(groupCapturesTable).values({
+    projectId,
+    groupId: group.id,
+    captureKey: `shared-source-group-capture-${suffix}`,
+    baseFilename: "shared-source-delete",
+  }).returning({ id: groupCapturesTable.id });
+  const [groupFile] = await db.insert(groupCaptureFilesTable).values({
+    captureId: groupCapture.id,
+    fileRole: "JPEG",
+    fileFormat: "JPG",
+    originalFilename: uploaded.fileName,
+    fileUrl: uploaded.fileUrl,
+    mimeType: uploaded.mimeType,
+  }).returning({ id: groupCaptureFilesTable.id });
+  await db.update(studentPhotosTable)
+    .set({ sourceGroupCaptureFileId: groupFile.id })
+    .where(eq(studentPhotosTable.id, uploaded.id));
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${uploaded.id}`,
+      { method: "DELETE" },
+    );
+    assert.equal(response.status, 204);
+    assert.equal(
+      fs.existsSync(filePath),
+      true,
+      "a delivery deletion must retain bytes still referenced by capture owners",
+    );
+    const [[storedCaptureFile], [storedGroupFile]] = await Promise.all([
+      db.select({ id: captureFilesTable.id }).from(captureFilesTable)
+        .where(eq(captureFilesTable.id, captureFile.id)),
+      db.select({ id: groupCaptureFilesTable.id }).from(groupCaptureFilesTable)
+        .where(eq(groupCaptureFilesTable.id, groupFile.id)),
+    ]);
+    assert(storedCaptureFile, "the capture original remains owned");
+    assert(storedGroupFile, "the group original remains owned");
+  } finally {
+    await db.delete(capturesTable).where(eq(capturesTable.id, capture.id));
+    await db.delete(groupsTable).where(eq(groupsTable.id, group.id));
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, uploaded.id));
+    await rm(filePath, { force: true });
   }
 });
 

@@ -3,6 +3,7 @@ export class RetryableUploadError extends Error {}
 export type R2UploadSession = {
   copyId: number
   objectKey: string
+  attemptKey?: string
   uploadUrl: string
   uploadMethod: 'PUT'
   uploadHeaders: Record<string, string>
@@ -48,6 +49,7 @@ export function parseR2UploadSession(value: unknown): R2UploadSession {
   const uploadHeaders = value.uploadHeaders
   const expiresAt = value.expiresAt
   const alreadyVerified = value.alreadyVerified
+  const attemptKey = value.attemptKey
   if (!isPositiveSafeInteger(copyId)
     || !isNonEmptyString(objectKey)
     || typeof uploadUrl !== 'string'
@@ -64,6 +66,7 @@ export function parseR2UploadSession(value: unknown): R2UploadSession {
     || !isNonEmptyString(expiresAt)
     || !Number.isFinite(Date.parse(expiresAt))
     || typeof alreadyVerified !== 'boolean'
+    || (!alreadyVerified && !isNonEmptyString(attemptKey))
   ) {
     malformedUploadResponse('Upload returned a malformed R2 session')
   }
@@ -80,6 +83,7 @@ export function parseR2UploadSession(value: unknown): R2UploadSession {
   return {
     copyId,
     objectKey,
+    attemptKey: attemptKey as string | undefined,
     uploadUrl,
     uploadMethod,
     uploadHeaders: uploadHeaders as Record<string, string>,

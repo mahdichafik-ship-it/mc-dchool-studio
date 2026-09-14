@@ -1,0 +1,206 @@
+Releases 1–8 are approved.
+
+I agree that task #131 — browser-safe order-notification testing should be performed next.
+
+However, do not treat #131 alone as a new feature release.
+
+We are defining:
+
+Release 9 — End-to-End Production Readiness
+
+Release 9 is primarily a verification and hardening release, not a predetermined feature release.
+
+We do NOT want to change working architecture merely for the sake of creating another release.
+
+The objective is to prove that the system built and hardened through Releases 1–8 works as one complete high-volume photography workflow.
+
+Gate 1 — Task #131
+
+Complete the already accepted browser-safe Release 8 fixture.
+
+Verify:
+
+* Owner/Admin operational summaries;
+* invitation status;
+* order-received notification status;
+* payment-confirmation notification status;
+* failed-only retry;
+* no retry for needs_review;
+* Viewer restrictions;
+* cross-studio restrictions;
+* no sensitive browser exposure;
+* absolutely no real Stripe or Resend side effects.
+
+Report the result.
+
+Do not change R8 behavior unless the fixture identifies an actual defect.
+
+Gate 2 — Audit the REAL end-to-end photography workflow
+
+Do not start by proposing new features.
+
+Trace the current implementation from source/database/API/web/desktop for the complete workflow:
+
+Project → roster → subject identity → QR/manual identification → pre-photo-day access card → photographer/project assignment → capture → JPEG/RAW pairing → local/offline persistence → restart → reconnect/upload → web review → selection → publication → original pre-photo-day credential → invitation → order/payment → download/recovery.
+
+Identify only genuine gaps, contradictions or unverified transitions.
+
+School scenario
+
+Model a realistic high-volume project, approximately:
+
+* 800 students;
+* 30 classes;
+* multiple photographers where supported;
+* JPEG + RAW;
+* offline periods;
+* multiple photographs per student;
+* pre-photo-day cards.
+
+Roster data must include realistic combinations of:
+
+* school/student ID when supplied;
+* first name;
+* last name;
+* class;
+* existing supported parent/contact fields;
+* some records without an organization-supplied ID.
+
+Verify what Volume Capture actually does when an external ID is absent. Do not redesign identity unless a real defect is found.
+
+Verify that roster re-import/correction/class movement does not break stable identity, Capture QR, Delivery credential or existing photo assignment.
+
+Corporate scenario
+
+Trace a realistic high-volume corporate project with:
+
+* employee/company ID where supplied;
+* generated stable identity where no company ID exists;
+* first name;
+* last name;
+* department;
+* role/job title;
+* email/contact information;
+* QR/manual identification;
+* multiple employees and departments;
+* capture/review/publication/delivery.
+
+Audit what is actually supported today.
+
+Specifically report whether Department and Role / Job Title exist as separate concepts throughout:
+
+* schema;
+* roster import;
+* API;
+* web;
+* desktop;
+* search/manual selection;
+* exports/delivery where applicable.
+
+Do not implement missing fields yet. Report the actual gap first.
+
+Identity verification
+
+Report exactly:
+
+* what ID identifies a student/employee internally;
+* what happens when the school/company supplies an ID;
+* what happens when it supplies no ID;
+* whether generated IDs remain stable;
+* how re-import matching works;
+* how QR identity relates to subject identity;
+* whether changing class/department preserves identity;
+* whether changing names/contact details preserves identity;
+* whether two projects can safely contain the same external ID without collision.
+
+Apple desktop verification
+
+Windows remains completely out of scope.
+
+R9 must concentrate on:
+
+* Apple Silicon;
+* Intel Mac.
+
+Trace/prove:
+
+* login;
+* project download;
+* roster;
+* QR scan;
+* manual person selection;
+* rapid person switching;
+* capture;
+* JPEG/RAW pairing;
+* burst handling;
+* offline capture;
+* Finish My Shoot;
+* application restart;
+* persisted local state;
+* reconnect;
+* upload progress;
+* failed upload recovery;
+* completion;
+* assignment/revocation behavior.
+
+Where an automated environment cannot prove packaged hardware behavior, explicitly mark it REQUIRES REAL-MAC ACCEPTANCE TEST rather than pretending it was verified.
+
+Scale
+
+Determine whether the existing implementation has an obvious correctness/performance problem at approximately 800–1,000 subjects.
+
+Do not optimize speculatively.
+
+Report actual bottlenecks found in queries, roster handling, desktop subject selection, capture assignment, upload or web review.
+
+Original audit reconciliation
+
+Reconcile the actual original 23 audit findings against Releases 1–8.
+
+Do not reconstruct or rename the findings.
+
+Use the original audit wording/history available in the project/conversation if accessible.
+
+For every original finding classify:
+
+* CLOSED
+* INTENTIONALLY DEFERRED
+* STILL OPEN
+* REQUIRES PRODUCTION/REAL-HARDWARE VERIFICATION
+
+Include which release addressed it and the evidence.
+
+Pay particular attention to remaining items including:
+
+* project-management scale/search/pagination/archive;
+* marketing campaign recipient limit;
+* dependency advisories;
+* mockup-sandbox typecheck conflict;
+* any remaining desktop hardening;
+* production configuration/migration requirements.
+
+Do NOT automatically fix a remaining item merely because it remains open.
+
+Release 9 rule
+
+Verification first. Changes only in response to demonstrated defects or clearly missing requirements in the real photography workflow.
+
+If a defect is found, report it before broadening scope.
+
+Do not perform generic refactors.
+
+Do not upgrade dependencies merely to reduce audit counts.
+
+Do not redesign project management.
+
+Do not redesign access cards.
+
+Do not work on Windows.
+
+Do not publish production.
+
+Preserve the R1–R8 known-good baseline of 152/152 API integration tests.
+
+First complete #131 and the read-only R9 gap/verification audit.
+
+Then STOP and report the findings before implementing any newly discovered product changes.

@@ -3,7 +3,7 @@ import {
   ArrowLeft, Folder, Play, Square, Search, Image, User,
   ChevronRight, ArrowRight, Camera, AlertCircle, ExternalLink, Download,
   Upload, CloudUpload, CheckCircle, XCircle, Loader,
-  RefreshCw, Star, Check, Plus, Pencil, Trash2, QrCode, RotateCw, Maximize2
+  RefreshCw, Star, Check, Plus, Pencil, Trash2, QrCode, RotateCw, Maximize2, FolderSync
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -52,6 +52,7 @@ import type {
   CaptureFraming,
   DroppedCaptureFileResult,
   DroppedCaptureProgressEvent,
+  FolderMigrationPreview,
 } from '@shared/types'
 
 interface Props {
@@ -137,6 +138,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [uploadQueue, setUploadQueue] = useState<LiveUploadQueueItem[]>([])
   const [deletingQueueItem, setDeletingQueueItem] = useState<string | null>(null)
   const [finishDialogOpen, setFinishDialogOpen] = useState(false)
+  const [folderMigrationRunning, setFolderMigrationRunning] = useState(false)
   const [photographerComment, setPhotographerComment] = useState('')
   const [uploadActionRunning, setUploadActionRunning] = useState(false)
   const [reviewSummary, setReviewSummary] = useState<{
@@ -540,6 +542,47 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     addToast({ type: 'success', title: 'Watch folder set', description: folder })
   }
 
+  async function handleConsolidateStudentFolders() {
+    if (folderMigrationRunning) return
+    setFolderMigrationRunning(true)
+    try {
+      const preview = await window.api.invoke('projects:previewFolderMigration', { projectId }) as FolderMigrationPreview
+      if (preview.legacyFolderCount === 0) {
+        addToast({
+          type: 'success',
+          title: 'Student folders are already consolidated',
+          description: 'No legacy ID_LastName_FirstName folders were found.',
+        })
+        return
+      }
+      const confirmed = window.confirm([
+        `Found ${preview.legacyFolderCount} legacy student folder${preview.legacyFolderCount === 1 ? '' : 's'} containing ${preview.fileCount} file${preview.fileCount === 1 ? '' : 's'}.`,
+        preview.conflictCount > 0
+          ? `${preview.conflictCount} existing destination file${preview.conflictCount === 1 ? '' : 's'} will be kept; conflicting copies get a -legacy suffix.`
+          : 'Photos, RAW files, and QR markers will be copied into the new FirstName_LastName_ID folders.',
+        'Original folders will not be deleted. Continue?',
+      ].join('\n\n'))
+      if (!confirmed) return
+      const result = await window.api.invoke('projects:migrateFolderMigration', {
+        projectId,
+        confirmed: true,
+      })
+      addToast({
+        type: 'success',
+        title: 'Student folders consolidated',
+        description: `${result.migratedFiles} copied, ${result.skippedFiles} already present. Original folders were preserved.`,
+      })
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not consolidate student folders',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setFolderMigrationRunning(false)
+    }
+  }
+
   async function handleToggleWatcher() {
     if (!project?.watchFolder) {
       addToast({ type: 'error', title: 'No watch folder', description: 'Set a watch folder first' })
@@ -926,6 +969,16 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           )}
 
            <div className="w-px h-6 bg-slate-800" />
+
+           <button
+             onClick={() => void handleConsolidateStudentFolders()}
+             disabled={folderMigrationRunning}
+             className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900 px-2.5 h-8 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:cursor-wait disabled:opacity-60"
+             title="Preview and consolidate legacy student folders"
+           >
+             <FolderSync className={cn("size-3.5", folderMigrationRunning && "animate-pulse")} />
+             {folderMigrationRunning ? 'Checking…' : 'Consolidate folders'}
+           </button>
 
            <button
              onClick={() => void openUploadDialog()}

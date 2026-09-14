@@ -55,6 +55,38 @@ export interface Student {
   updatedAt: string
 }
 
+export interface FolderMigrationStudent {
+  studentId: number
+  classId: number
+  studentName: string
+  legacyFolderPath: string | null
+  canonicalFolderPath: string
+  legacyFolderFound: boolean
+  canonicalFolderFound: boolean
+  fileCount: number
+  totalBytes: number
+  conflicts: number
+}
+
+export interface FolderMigrationPreview {
+  projectId: number
+  projectFolderPath: string
+  legacyFolderCount: number
+  fileCount: number
+  totalBytes: number
+  conflictCount: number
+  students: FolderMigrationStudent[]
+}
+
+export interface FolderMigrationResult {
+  projectId: number
+  legacyFolderCount: number
+  migratedFiles: number
+  skippedFiles: number
+  conflictCount: number
+  originalsPreserved: boolean
+}
+
 export interface StudentGroup {
   id: number
   cloudId?: number | null

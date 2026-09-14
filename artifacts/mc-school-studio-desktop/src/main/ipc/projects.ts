@@ -16,6 +16,10 @@ import { formatStudentFolderName } from '../lib/photoFileNaming'
 import { syncStudentCloudIdentity } from './upload'
 import { getSetting, setSetting } from './upload'
 import { getNewDefaultGroupMemberIds, serializeDefaultGroupRosterSnapshot } from '../lib/groupRoster'
+import {
+  migrateStudentFoldersAt,
+  previewStudentFolderMigration,
+} from '../lib/studentFolderMigration'
 
 function now() {
   return new Date().toISOString()
@@ -219,6 +223,31 @@ export function registerProjectHandlers() {
         .run()
     },
   )
+
+  ipcMain.handle('projects:previewFolderMigration', async (
+    _e,
+    { projectId }: { projectId: number },
+  ) => {
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (!project) throw new Error(`Project ${projectId} not found`)
+    const classes = db.select().from(classesTable).where(eq(classesTable.projectId, projectId)).all()
+    const students = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
+    return previewStudentFolderMigration({
+      projectId,
+      photosDir: getPhotosDir(),
+      project,
+      classes,
+      students,
+    })
+  })
+
+  ipcMain.handle('projects:migrateFolderMigration', async (
+    _e,
+    { projectId, confirmed }: { projectId: number; confirmed: boolean },
+  ) => {
+    if (confirmed !== true) throw new Error('Folder migration requires explicit confirmation.')
+    return migrateStudentFoldersAt(db, projectId, getPhotosDir())
+  })
 
   ipcMain.handle('projects:import', async (_e, { filePath }: { filePath: string }): Promise<ImportResult> => {
     const raw = readFileSync(filePath, 'utf-8')

@@ -738,6 +738,8 @@ paths:
           description: Platform owner access required
         "409":
           description: A pending invitation already exists
+        "502":
+          description: The invitation was created but email delivery failed or is not configured
 
   /platform/invites/{inviteId}:
     patch:
@@ -817,6 +819,8 @@ paths:
           description: The signed-in email does not match the invitation
         "404":
           description: Invitation not found
+        "410":
+          description: Invitation has expired
         "409":
           description: Invitation is no longer pending or the account belongs to another studio
 

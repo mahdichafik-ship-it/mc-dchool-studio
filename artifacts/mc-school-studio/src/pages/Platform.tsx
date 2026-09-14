@@ -112,9 +112,11 @@ export default function Platform() {
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) {
         setError(body.error ?? "Could not create the invitation.");
+        await load();
         return;
       }
       setEmail("");
+      toast({ title: "Invitation sent", description: `The onboarding email was sent to ${email}.` });
       await load();
     } finally {
       setSaving(false);
@@ -213,7 +215,7 @@ export default function Platform() {
           <p className="mt-1 text-sm text-teal-800">They will create their own studio page. Their projects and team stay separate from every other studio.</p>
           <form onSubmit={(event) => void createInvite(event)} className="mt-4 flex flex-col gap-3 sm:flex-row">
             <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@photostudio.com" className="h-10 flex-1 rounded-md border border-teal-300 bg-white px-3 text-sm text-slate-900" />
-            <button disabled={saving} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-60">{saving ? "Creating…" : "Create invitation"}</button>
+            <button disabled={saving} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-60">{saving ? <><Loader2 className="h-4 w-4 animate-spin" />Sending…</> : <><Mail className="h-4 w-4" />Send invitation</>}</button>
           </form>
           {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
         </section>
@@ -223,7 +225,7 @@ export default function Platform() {
           <div className="divide-y">
             {pendingInvites.map((invite) => (
               <div key={invite.id} className="flex flex-col gap-3 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0"><p className="font-medium text-slate-900">{invite.email}</p><p className="mt-1 text-xs text-slate-500">Send the secure link below. It can be used once.</p></div>
+                <div className="min-w-0"><p className="font-medium text-slate-900">{invite.email}</p><p className="mt-1 text-xs text-slate-500">Email sent. The secure link can be used once and expires after 7 days.</p></div>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input readOnly value={`${window.location.origin}${basePath}/studio-invite/${invite.code}`} aria-label={`Invitation link for ${invite.email}`} className="h-9 min-w-0 rounded-md border border-slate-300 bg-slate-50 px-3 text-xs text-slate-600 sm:w-80" />
                   <button type="button" onClick={() => void copyInvite(invite)} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"><Copy className="h-4 w-4" />{copiedId === invite.id ? "Copied" : "Copy link"}</button>

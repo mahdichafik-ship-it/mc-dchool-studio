@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import {
   db,
@@ -17,9 +17,13 @@ import {
 import { getUserId, requireAuth } from "../lib/auth";
 import { getUserEmail } from "../lib/studioAccess";
 import { isPlatformOwner, platformOwnerIsConfigured, requirePlatformOwner } from "../lib/platformAccess";
+import { logger } from "../lib/logger";
+import { sendPlatformInviteEmail, type PlatformInviteEmail } from "../lib/platformInviteEmail";
 
 const router = Router();
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const platformInviteLifetimeMs = 7 * 24 * 60 * 60 * 1000;
+let platformInviteEmailSender = sendPlatformInviteEmail;
 
 async function recordPlatformAction(
   actorUserId: string,
@@ -56,6 +60,29 @@ function studioIdParam(value: string | string[] | undefined): number | null {
 function inviteCode() {
   return randomBytes(32).toString("base64url");
 }
+
+function inviteExpiresAt(createdAt: Date): Date {
+  return new Date(createdAt.getTime() + platformInviteLifetimeMs);
+}
+
+function invitationBaseUrl(req: Request): string | null {
+  const configuredUrl = process.env.PUBLIC_APP_URL?.trim();
+  const requestOrigin = req.get("origin")?.trim();
+  const candidate = configuredUrl || requestOrigin;
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+export type PlatformRouterOptions = {
+  sendInviteEmail?: (email: PlatformInviteEmail) => Promise<void>;
+};
 
 function parseStudioUpdate(body: unknown): {
   description?: string | null;
@@ -472,6 +499,11 @@ router.patch("/studios/:studioId", requireAuth, requirePlatformOwner, async (req
   res.json(updated);
 });
 
+export function createPlatformRouter({ sendInviteEmail }: PlatformRouterOptions = {}) {
+  platformInviteEmailSender = sendInviteEmail ?? sendPlatformInviteEmail;
+  return router;
+}
+
 router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   if (!emailPattern.test(email)) {
@@ -485,8 +517,14 @@ router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Pro
     .where(and(eq(platformInvitesTable.email, email), eq(platformInvitesTable.status, "pending")))
     .limit(1);
   if (existing) {
-    res.status(409).json({ error: "A pending studio-owner invitation already exists for this email" });
-    return;
+    if (new Date() < inviteExpiresAt(existing.createdAt)) {
+      res.status(409).json({ error: "A pending studio-owner invitation already exists for this email" });
+      return;
+    }
+    await db
+      .update(platformInvitesTable)
+      .set({ status: "cancelled" })
+      .where(and(eq(platformInvitesTable.id, existing.id), eq(platformInvitesTable.status, "pending")));
   }
 
   const [invite] = await db
@@ -497,6 +535,32 @@ router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Pro
       invitedByUserId: getUserId(req),
     })
     .returning();
+
+  const baseUrl = invitationBaseUrl(req);
+  if (!baseUrl) {
+    logger.error(
+      { event: "platform_invite_email_failed", inviteId: invite.id, recipient: email, reason: "missing_public_app_url" },
+      "Could not deliver platform invitation email",
+    );
+    res.status(502).json({ error: "Invitation created, but email delivery is not configured. Copy the secure link below." });
+    return;
+  }
+
+  try {
+    await platformInviteEmailSender({
+      to: email,
+      invitationUrl: `${baseUrl}/studio-invite/${invite.code}`,
+      expiresAt: inviteExpiresAt(invite.createdAt),
+    });
+  } catch (error) {
+    logger.error(
+      { event: "platform_invite_email_failed", inviteId: invite.id, recipient: email, err: error },
+      "Could not deliver platform invitation email",
+    );
+    res.status(502).json({ error: "Invitation created, but the email could not be delivered. Copy the secure link below." });
+    return;
+  }
+
   await recordPlatformAction(getUserId(req), null, "studio_invite_created", "platform_invite", invite.id);
   res.status(201).json(invite);
 });
@@ -547,6 +611,14 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
   }
   if (invite.status !== "pending") {
     res.status(409).json({ error: `This invitation is already ${invite.status}` });
+    return;
+  }
+  if (new Date() >= inviteExpiresAt(invite.createdAt)) {
+    await db
+      .update(platformInvitesTable)
+      .set({ status: "cancelled" })
+      .where(and(eq(platformInvitesTable.id, invite.id), eq(platformInvitesTable.status, "pending")));
+    res.status(410).json({ error: "This invitation has expired. Ask the platform owner for a new invitation." });
     return;
   }
 

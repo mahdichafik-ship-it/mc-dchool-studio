@@ -13,7 +13,8 @@ import {
   studioStorageConnectionsTable,
   studiosTable,
 } from "@workspace/db";
-import platformRouter from "../src/routes/platform";
+import { createPlatformRouter } from "../src/routes/platform";
+import type { PlatformInviteEmail } from "../src/lib/platformInviteEmail";
 import projectsRouter from "../src/routes/projects";
 import studioRouter from "../src/routes/studio";
 import { decryptStorageValue, encryptStorageValue } from "../src/lib/storageCrypto";
@@ -38,6 +39,7 @@ let isolatedStudioId: number;
 let isolatedProjectId: number;
 let concurrentInviteId: number;
 let concurrentStudioId: number;
+const sentInviteEmails: PlatformInviteEmail[] = [];
 
 const app = express();
 app.use(express.json());
@@ -50,13 +52,18 @@ app.use((req, _res, next) => {
   (req as any).auth = authHandler;
   next();
 });
-app.use("/api/platform", platformRouter);
+app.use("/api/platform", createPlatformRouter({
+  sendInviteEmail: async (message) => {
+    sentInviteEmails.push(message);
+  },
+}));
 app.use("/api/projects", projectsRouter);
 app.use("/api/studio", studioRouter);
 
 async function request(userId: string, pathname: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("x-test-user", userId);
+  headers.set("origin", "https://studio.test");
   return fetch(`${baseUrl}${pathname}`, { ...init, headers });
 }
 
@@ -147,11 +154,18 @@ test("encrypts storage credentials with authenticated encryption", () => {
 test("creates one-time owner invites and onboards the invited account", async () => {
   const created = await request(platformOwnerId, "/api/platform/invites", {
     method: "POST",
-    body: JSON.stringify({ email: `different-owner-${suffix}@member.local` }),
+    body: JSON.stringify({ email: inviteeEmail }),
     headers: { "Content-Type": "application/json" },
   });
   assert.equal(created.status, 201);
-  const invite = await created.json() as { id: number; code: string };
+  const invite = await created.json() as { id: number; code: string; createdAt: string };
+  inviteId = invite.id;
+  inviteCode = invite.code;
+  assert.equal(sentInviteEmails.length, 1);
+  assert.equal(sentInviteEmails[0]?.to, inviteeEmail);
+  assert.match(sentInviteEmails[0]?.invitationUrl ?? "", /\/studio-invite\//);
+  assert.equal(sentInviteEmails[0]?.invitationUrl.includes(invite.code), true);
+  assert.equal(sentInviteEmails[0]?.expiresAt.getTime(), new Date(invite.createdAt).getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const afterCreate = await request(platformOwnerId, "/api/platform");
   const duplicate = await request(platformOwnerId, "/api/platform/invites", {
@@ -176,6 +190,7 @@ test("creates one-time owner invites and onboards the invited account", async ()
   });
   assert.equal(completed.status, 201);
   const studio = await completed.json() as { id: number; name: string };
+  onboardedStudioId = studio.id;
 
   const afterOnboarding = await request(platformOwnerId, "/api/platform");
   const repeated = await request(inviteeId, `/api/platform/invites/${inviteCode}/complete`, {
@@ -256,7 +271,7 @@ test("creates one-time owner invites and onboards the invited account", async ()
   const members = await db
     .select()
     .from(studioMembersTable)
-    .where(eq(studioMembersTable.studioId, concurrentStudioId));
+    .where(eq(studioMembersTable.studioId, onboardedStudioId));
   assert.deepEqual(members.map((member) => [member.userId, member.role]), [[inviteeId, "owner"]]);
 });
 

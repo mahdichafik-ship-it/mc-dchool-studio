@@ -10,6 +10,7 @@
     "test:desktop-architecture": "node --experimental-strip-types --test src/lib/desktopArchitecture.test.ts",
     "test:delivery-operational": "node --experimental-strip-types --test src/lib/deliveryOperational.test.ts",
     "test:delivery-access-card": "node --experimental-strip-types --test src/lib/deliveryAccessCard.test.ts",
+    "test:delivery-tab-browser": "node --test test/browser/delivery-tab.browser.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

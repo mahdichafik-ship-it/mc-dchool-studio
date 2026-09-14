@@ -74,9 +74,19 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
-export function DeliveryTab({ projectId, projectName, isCorporate }: { projectId: number; projectName?: string; isCorporate?: boolean }) {
+export function DeliveryTab({
+  projectId,
+  projectName,
+  isCorporate,
+  initialTab = "overview",
+}: {
+  projectId: number;
+  projectName?: string;
+  isCorporate?: boolean;
+  initialTab?: "overview" | "cards" | "orders";
+}) {
   const [branding, setBranding] = useState<StudioBranding>(fallbackBranding);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   // Fetch Studio Branding
   useEffect(() => {

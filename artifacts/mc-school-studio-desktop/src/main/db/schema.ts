@@ -1,9 +1,11 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
+import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const projectsTable = sqliteTable('projects', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   cloudId: integer('cloud_id'),
   schoolName: text('school_name').notNull(),
+  projectType: text('project_type').$type<'school' | 'corporate'>().notNull().default('school'),
   photoDate: text('photo_date'),
   address: text('address'),
   contactName: text('contact_name'),
@@ -12,6 +14,14 @@ export const projectsTable = sqliteTable('projects', {
   notes: text('notes'),
   watchFolder: text('watch_folder'),
   finishedAt: text('finished_at'),
+  syncStatus: text('sync_status')
+    .$type<'active' | 'finished_local' | 'syncing' | 'sync_failed' | 'synced'>()
+    .notNull()
+    .default('active'),
+  syncCompletedFiles: integer('sync_completed_files').notNull().default(0),
+  syncTotalFiles: integer('sync_total_files').notNull().default(0),
+  syncFailedFiles: integer('sync_failed_files').notNull().default(0),
+  syncError: text('sync_error'),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })
@@ -41,11 +51,21 @@ export const studentsTable = sqliteTable('students', {
   generatedStudentId: text('generated_student_id').notNull(),
   email: text('email'),
   phone: text('phone'),
+  secondaryEmail: text('secondary_email'),
+  jobTitle: text('job_title'),
+  officeLocation: text('office_location'),
+  photoSession: text('photo_session'),
+  captureNotes: text('capture_notes'),
   simpleQr: text('simple_qr'),
   jsonQr: text('json_qr'),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
-})
+}, (table) => [
+  uniqueIndex('students_project_generated_student_id_ci').on(
+    table.projectId,
+    sql`lower(${table.generatedStudentId})`,
+  ),
+])
 
 /** Editable photographer groups. A default group is created for each class. */
 export const groupsTable = sqliteTable('groups', {
@@ -79,6 +99,8 @@ export const groupCapturesTable = sqliteTable('group_captures', {
   baseFilename: text('base_filename').notNull(),
   capturedAt: text('captured_at').notNull(),
   pairingStatus: text('pairing_status').notNull().default('pending'),
+  rating: integer('rating').notNull().default(0),
+  reviewSyncPending: integer('review_sync_pending', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })
@@ -94,6 +116,7 @@ export const groupCaptureFilesTable = sqliteTable('group_capture_files', {
   fileSize: integer('file_size'),
   uploadStatus: text('upload_status').$type<'pending' | 'uploading' | 'done' | 'error' | null>(),
   fileUrl: text('file_url'),
+  galleryReady: integer('gallery_ready', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
 })
 
@@ -132,6 +155,9 @@ export const capturesTable = sqliteTable('captures', {
   favorite: integer('favorite', { mode: 'boolean' }).notNull().default(false),
   rejected: integer('rejected', { mode: 'boolean' }).notNull().default(false),
   selected: integer('selected', { mode: 'boolean' }).notNull().default(false),
+  rating: integer('rating').notNull().default(0),
+  colorLabel: text('color_label').$type<'none' | 'red' | 'yellow' | 'green' | 'blue' | 'purple'>().notNull().default('none'),
+  reviewSyncPending: integer('review_sync_pending', { mode: 'boolean' }).notNull().default(false),
   notes: text('notes'),
   shootSessionId: text('shoot_session_id'),
   cameraSerial: text('camera_serial'),
@@ -140,6 +166,13 @@ export const capturesTable = sqliteTable('captures', {
     .$type<'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'>()
     .notNull()
     .default('pending'),
+  cropX: integer('crop_x').notNull().default(0),
+  cropY: integer('crop_y').notNull().default(0),
+  cropScale: integer('crop_scale').notNull().default(100),
+  aspectRatio: text('aspect_ratio').notNull().default('original'),
+  straightenAngle: integer('straighten_angle').notNull().default(0),
+  rotation: integer('rotation').notNull().default(0),
+  reframePending: integer('reframe_pending', { mode: 'boolean' }).notNull().default(false),
   legacyPhotoId: integer('legacy_photo_id').references(() => photosTable.id, { onDelete: 'set null' }),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),

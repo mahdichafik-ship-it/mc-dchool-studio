@@ -1,0 +1,33 @@
+Before running the final audit, I need to clarify one important part of the school workflow concerning access cards.
+
+The access card is a pre-photo-day card. It must be generated and printable after the project is created and the school roster has been imported, not only when the gallery is published.
+
+The intended workflow is:
+
+Create project → Import roster → Generate student identities, QR codes and access credentials → Generate/print access cards → Give cards to the school/parents BEFORE photo day → Photo shoot → Upload/review/select → Publish gallery → Send transactional invitation email.
+
+Each student’s card should contain at minimum:
+
+* Student name
+* Class
+* School/project
+* Student-specific QR code
+* Private access code
+* Complete usable access URL
+
+The QR/access credentials generated at this stage should remain stable. The same physical card given to the parent before the shoot must work once the gallery is later published.
+
+Very important: generating the QR, access code and card must not publish the gallery. Before publication, no photographs should be accessible. Gallery publication must remain a separate explicit action.
+
+We will work on the actual visual design of the access cards later, including branding, photo-day information, available products/packages and other content. Do not build a card designer now.
+
+Before implementing anything, inspect the current architecture and tell me:
+
+1. Does the current system already support generating permanent QR/access credentials and cards before gallery publication?
+2. If not, what exactly needs to change?
+3. Can this be implemented safely as a contained lifecycle change without disturbing the gallery/security work completed in Releases 1–5?
+4. What database, API, frontend or compatibility changes would be required?
+5. What should a parent see if they scan the card before the photographs/gallery have been published?
+6. How will you guarantee that the same QR/code continues working after publication?
+
+Do not implement yet. Do not run the final audit yet. Give me the proposed solution first so we can review it.

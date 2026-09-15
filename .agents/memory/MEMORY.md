@@ -1,5 +1,7 @@
 - [Clerk route integration tests](clerk-route-integration-tests.md) — fake authenticated requests must preserve Clerk's branded auth contract and session token type.
 - [Desktop release signing](desktop-release-signing.md) — Tagged desktop releases fail closed so unsigned installers never reach photographers.
+- [Desktop release discovery](desktop-release-discovery.md) — web downloads resolve validated GitHub latest-release assets instead of duplicating versions or installer URLs.
+- [Desktop field acceptance](desktop-field-acceptance.md) — hosted signed-update smoke is not a substitute for recording real Intel and Apple-silicon photographer Mac results.
 - [Desktop browser pairing](desktop-browser-pairing.md) — Browser handoff requires a public production deployment; never add a shared private-deployment bypass to the Mac app.
 - [Desktop SQLite tests](desktop-sqlite-tests.md) — test desktop persistence through an injectable store because the workspace Node runtime lacks the native SQLite binding.
 - [Desktop retirement barrier](desktop-retirement-barrier.md) — persistently fence and drain capture work before erasing local data and acknowledging retirement.
@@ -10,7 +12,10 @@
 - [GitHub desktop release publishing](github-desktop-release-publishing.md) — this workspace’s Git remote lacks credentials; publish Mac tags through the installed GitHub integration.
 - [Capture review compatibility](capture-review-compatibility.md) — legacy JPEG actions must synchronize capture/file records or completeness becomes stale.
 - [Desktop cloud upload identity](desktop-cloud-upload-identity.md) — imported rosters must retain cloud IDs; legacy local projects need a safe identity repair before upload.
+- [Desktop upload idempotency](desktop-upload-idempotency.md) — replay keys must remain bound to their original project, student, and file role.
+- [Upload retry durability](upload-retry-durability.md) — retries use current bytes, bounded auto-recovery, isolated queues, and explicit batch accounting.
 - [Explicit project sync boundary](explicit-project-sync-boundary.md) — capture-time ingestion is local-only; cloud upload begins only from an explicit finish or retry action.
+- [Offline finish lifecycle](offline-finish-lifecycle.md) — finishing locally is durable and distinct from successful cloud synchronization.
 - [Local preview pipeline](local-preview-pipeline.md) — emit a source-local JPEG preview before managed copy and persistence, then reconcile it by a stable preview key.
 - [Lightweight preview artifacts](lightweight-preview-artifacts.md) — renderer preview URLs must resolve to reduced JPEGs, never full originals or full RAW decodes.
 - [Newest live preview scheduling](newest-live-preview-scheduling.md) — coalesce preview work before generation; persistence must remain FIFO and independent of dropped live-preview jobs.
@@ -20,9 +25,42 @@
 - [macOS smoke cleanup](macos-smoke-cleanup.md) — native packaged-app smoke teardown can briefly race with Electron user-data removal, especially on Apple silicon.
 - [Native macOS release builds](native-macos-release-builds.md) — build each thin Mac package on its matching CPU architecture before combining updater metadata.
 - [Apple notarization timeouts](apple-notarization-timeouts.md) — distinguish transient notary API polling timeouts from Intel architecture or packaged-launch failures.
-- [Studio storage fallback](studio-storage-fallback.md) — platform Drive stays active until a studio-owned provider is fully connected; provider requests never create a backup gap.
+- [Studio storage fallback](studio-storage-fallback.md) — platform backup starts enabled but becomes optional after a studio-owned provider is verified; at least one destination must remain active.
 - [Platform studio oversight](platform-studio-oversight.md) — owner-equivalent support access is explicit and audited; archive blocks access without deleting studio data.
 - [Collaborative capture batches](collaborative-capture-batches.md) — each photographer finishes a retry-stable batch inside one canonical cloud project.
 - [Photo group membership](photo-group-membership.md) — default class groups auto-follow roster growth without undoing manual member removals across web/desktop sync.
 - [Volume Capture rebrand compatibility](volume-capture-rebrand.md) — public branding changes without renaming legacy identifiers that protect upgrades and local capture data.
 - [Desktop late-student reconciliation](desktop-late-student-reconciliation.md) — students added during a shoot stay capture-ready offline and must reconcile to cloud identity before upload.
+- [Roster re-import identity](roster-reimport-identity.md) — reconcile within one project by stable IDs first and fail closed on cross-slot email ambiguity.
+- [Project-type compatibility](project-type-compatibility.md) — corporate headshots reuse school data concepts internally; absent or unknown types must remain school-safe.
+- [Volume Capture delivery access](volume-capture-delivery-access.md) — private delivery uses guardian-friendly subject access codes, not child-managed accounts.
+- [Gallery publication boundary](gallery-publication-boundary.md) — publishing is the sole parent-sharing checkpoint; durable uploaded JPEGs need no second visibility flag.
+- [Prepublication access credentials](prepublication-access-credentials.md) — prepare stable delivery cards before photo day without publishing or changing capture QR behavior.
+- [Gallery star selection](gallery-star-selection.md) — back up every capture, but expose and sell only positively starred JPEGs; group photos follow the same rule.
+- [Stripe migration compatibility](stripe-migration-compatibility.md) — modern Stripe schemas may need migration-ledger reconciliation before legacy sync migrations can start safely.
+- [Stripe sandbox claiming](stripe-sandbox-claiming.md) — a healthy Replit Stripe connection can still require claiming the development sandbox in Stripe Dashboard.
+- [Stripe managed webhook reuse](stripe-managed-webhook-reuse.md) — legacy sync bookkeeping exposes endpoint IDs under a different field; normalize before reuse and keep UUID routes active.
+- [Google Drive large uploads](google-drive-large-uploads.md) — send file bytes through resumable Google upload sessions, not large connector-proxy multipart bodies.
+- [Cloud backup test isolation](cloud-backup-test-isolation.md) — a development database does not isolate connected cloud accounts; tests must replace external backup requesters.
+- [Delivery commerce entitlements](delivery-commerce-entitlements.md) — Volume Capture owns offers and orders; payment providers only settle them, while paid item snapshots control downloads.
+- [Published price snapshots](published-price-snapshots.md) — repeated publication must preserve the gallery’s existing offer snapshot rather than reread a reusable sheet.
+- [Order recovery idempotency](order-recovery-idempotency.md) — checkout retries reuse one durable order; uncertain Stripe sessions bind only through a complete authenticated event.
+- [Transactional order notifications](transactional-order-notifications.md) — order emails use an encrypted outbox; uncertain sends never auto-retry, and Stripe recovery reuses exact persisted attempts.
+- [Gallery media renewal](gallery-media-renewal.md) — private media URLs stay short-lived while active gallery sessions refresh them before expiry.
+- [Delivery access and payment availability](delivery-access-and-payment-availability.md) — one payment provider’s outage must not block galleries, orders, or other payment methods.
+- [Publish-time schema changes](publish-time-schema-changes.md) — production schema changes are applied by Replit Publish’s development-to-production diff, not custom app migrations or startup DDL.
+- [Updater metadata propagation](updater-metadata-propagation.md) — a just-published Mac release can briefly serve the previous latest-mac.yml; rerun an otherwise healthy update smoke.
+- [Desktop capture-key scope](desktop-capture-key-scope.md) — desktop-local capture keys are connection-scoped because independent photographer databases can reuse local IDs.
+- [Student-targeted file drops](student-targeted-file-drops.md) — dropped JPEG/RAW files use a fixed student target, strict pairing ownership, and preload-only path capabilities.
+- [Manual subject authority](manual-subject-authority.md) — an explicit photographer selection controls assignment and renaming until cleared; QR may warn but cannot replace it.
+- [R2 verified upload promotion](r2-verified-upload-promotion.md) — presigned R2 PUTs require unique staging keys and server-only verified candidates to prevent replay and promotion races.
+- [Release smoke contract fixtures](release-smoke-contract-fixtures.md) — packaged-app smoke servers must return the same strict response shapes as production APIs.
+- [R2 photo variants](r2-photo-variants.md) — immutable keys bind optimized derivatives to original bytes, rendering settings, and watermark configuration.
+- [R2 staging cleanup](r2-staging-cleanup.md) — retries refresh attempt activity; cleanup atomically claims only expired database-owned staging keys before deletion.
+- [Desktop upload concurrency](desktop-upload-concurrency.md) — all desktop transfer paths share a three-file limit held through verification and persistence.
+- [Capture reframe editor](capture-reframe-editor.md) — focused non-destructive edits require desktop/cloud crop parity and a finish-time sync barrier.
+- [Gallery contact consent](gallery-contact-consent.md) — required access email identifies gallery visits but never implies promotional consent; campaign audiences fail closed.
+- [Transactional gallery invitations](transactional-gallery-invitations.md) — aggregate each gallery recipient’s subject codes, dispatch after publication commits, and quarantine uncertain provider outcomes.
+- [SheetJS upstream releases](sheetjs-upstream-releases.md) — maintained SheetJS builds come from the vendor CDN; npm-only scanners can misclassify fixed upstream versions.
+- [Capture batch supersession](capture-batch-supersession.md) — reconnect recovery uses a new explicit batch and transfers committed file membership only after the old connection is inactive.
+- [Electron Builder plist compatibility](electron-builder-plist-compatibility.md) — remediate xmldom through a compatible plist parent; forcing xmldom 0.9.12 breaks macOS packaging.

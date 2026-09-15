@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const studiosTable = pgTable("studios", {
   id: serial("id").primaryKey(),
@@ -16,7 +16,8 @@ export const studiosTable = pgTable("studios", {
   }).notNull().default("platform_google_drive"),
   storageStatus: text("storage_status", {
     enum: ["needs_setup", "using_platform", "connection_requested", "connected", "connection_error"],
-  }).notNull().default("needs_setup"),
+  }).notNull().default("using_platform"),
+  platformBackupEnabled: boolean("platform_backup_enabled").notNull().default(true),
   storageRequestedAt: timestamp("storage_requested_at", { withTimezone: true }),
   storageConnectedAt: timestamp("storage_connected_at", { withTimezone: true }),
   archivedAt: timestamp("archived_at", { withTimezone: true }),

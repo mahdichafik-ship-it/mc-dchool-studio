@@ -72,9 +72,14 @@ function qrScanVariants(image: Jimp): Jimp[] {
   return variants
 }
 
-export async function readQrFromImage(filePath: string): Promise<QrResult | null> {
+export async function readQrFromImage(
+  filePath: string,
+  sourceBuffer?: Buffer,
+): Promise<QrResult | null> {
   try {
-    const image = await Jimp.read(filePath)
+    const image = sourceBuffer
+      ? await Jimp.read(Buffer.from(sourceBuffer))
+      : await Jimp.read(filePath)
 
     for (const candidate of qrScanVariants(image)) {
       const result = decodeBitmap(candidate)

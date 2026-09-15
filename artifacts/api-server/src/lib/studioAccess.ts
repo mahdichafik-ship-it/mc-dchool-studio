@@ -160,3 +160,14 @@ export async function isStudioManager(userId: string) {
   const member = await ensureStudioForUser(userId);
   return member.status === "active" && (member.role === "owner" || member.role === "admin");
 }
+
+/** Manager access scoped to the requested project's studio.
+ * Unlike canAccessProject, this intentionally has no platform-owner bypass.
+ */
+export async function isStudioManagerForProject(userId: string, projectId: number) {
+  const member = await ensureStudioForUser(userId);
+  if (member.status !== "active" || (member.role !== "owner" && member.role !== "admin")) return false;
+  const [project] = await db.select({ studioId: projectsTable.studioId })
+    .from(projectsTable).where(eq(projectsTable.id, projectId)).limit(1);
+  return project?.studioId === member.studioId;
+}

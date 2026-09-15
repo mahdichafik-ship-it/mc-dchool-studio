@@ -1,21 +1,33 @@
 import { exiftool } from 'exiftool-vendored'
-import { copyFile, mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { extname, join } from 'node:path'
+import { extname, join, resolve } from 'node:path'
 import sharp from 'sharp'
 import { getPhotoSystemLayout } from './storageLayout.ts'
+import { assessImageContent } from './imageContent.ts'
+import {
+  getActiveLocalPreviewPaths,
+  LOCAL_PREVIEW_TTL_MS,
+} from './localPreviewRegistry.ts'
 
 export const LIVE_PREVIEW_EDGE = 1440
 export const LIVE_PREVIEW_QUALITY = 84
 
+export const LIVE_PREVIEW_CLEANUP_BATCH_SIZE = 32
 const RAW_EXTENSIONS = new Set([
   '.nef', '.nrw', '.cr2', '.cr3', '.arw', '.raf', '.orf', '.rw2', '.dng',
 ])
 const EMBEDDED_PREVIEW_TAGS = ['PreviewImage', 'JpgFromRaw', 'ThumbnailImage'] as const
 
+const PREVIEW_ARTIFACT_NAME = /^[0-9a-f]{32}\.jpg$/
 export interface LivePreviewOptions {
   cacheDir: string
   previewKey: string
+  /**
+   * Snapshot taken after the watched source passed stability checks. When
+   * present, no decoder or preview stage reopens the mutable source path.
+   */
+  sourceBuffer?: Buffer
 }
 
 function isRawFile(filePath: string): boolean {
@@ -30,12 +42,34 @@ export function getLivePreviewCacheDir(homeDir: string): string {
   return join(getPhotoSystemLayout(homeDir).cache, 'Previews')
 }
 
+export interface LivePreviewCleanupOptions {
+  now?: number
+  maxFiles?: number
+}
+
+export async function getCachedLivePreview(
+  previewKey: string,
+  cacheDir: string,
+): Promise<string | null> {
+  const previewPath = join(cacheDir, cacheName(previewKey))
+  return (await existingFileSize(previewPath)) ? previewPath : null
+}
+
 async function existingFileSize(filePath: string): Promise<number | null> {
   try {
     const result = await stat(filePath)
     return result.isFile() && result.size > 0 ? result.size : null
   } catch {
     return null
+  }
+}
+
+async function usablePreview(filePath: string): Promise<boolean> {
+  if (!(await existingFileSize(filePath))) return false
+  try {
+    return (await assessImageContent(await readFile(filePath))).usable
+  } catch {
+    return false
   }
 }
 
@@ -63,26 +97,61 @@ async function extractEmbeddedPreview(sourcePath: string, destinationPath: strin
  */
 export async function generateLivePreview(
   sourcePath: string,
-  { previewKey, cacheDir }: LivePreviewOptions,
+  options: LivePreviewOptions,
+): Promise<string | null> {
+  const destinationPath = join(options.cacheDir, cacheName(options.previewKey))
+  const active = previewJobs.get(destinationPath)
+  if (active) return active
+  const job = generateLivePreviewFromSource(sourcePath, options)
+  previewJobs.set(destinationPath, job)
+  try {
+    return await job
+  } finally {
+    if (previewJobs.get(destinationPath) === job) previewJobs.delete(destinationPath)
+    scheduleLivePreviewCacheCleanup(options.cacheDir)
+  }
+}
+
+const previewJobs = new Map<string, Promise<string | null>>()
+
+async function generateLivePreviewFromSource(
+  sourcePath: string,
+  { previewKey, cacheDir, sourceBuffer }: LivePreviewOptions,
 ): Promise<string | null> {
   const destinationPath = join(cacheDir, cacheName(previewKey))
   const embeddedPath = join(cacheDir, `.embedded-${cacheName(previewKey)}`)
-  let inputPath = sourcePath
+  const sourceCopyPath = join(cacheDir, `.source-${cacheName(previewKey)}${extname(sourcePath)}`)
+  let sourceBytes: Buffer | undefined
+  let inputBuffer: Buffer | undefined
 
   try {
     await mkdir(cacheDir, { recursive: true })
-    if (await existingFileSize(destinationPath)) return destinationPath
+    if (await usablePreview(destinationPath)) return destinationPath
+    await rm(destinationPath, { force: true }).catch(() => {})
 
     if (isRawFile(sourcePath)) {
-      const extracted = await extractEmbeddedPreview(sourcePath, embeddedPath)
+      // exiftool also gets a stable managed copy for RAW files. Sharp never
+      // receives either the camera path or the extraction path.
+      sourceBytes = Buffer.from(sourceBuffer ?? await readFile(sourcePath))
+      await writeFile(sourceCopyPath, sourceBytes)
+      const extracted = await extractEmbeddedPreview(sourceCopyPath, embeddedPath)
       if (!extracted) {
         console.warn(`[LivePreview] No embedded JPEG preview found for ${sourcePath}`)
         return null
       }
-      inputPath = embeddedPath
+      inputBuffer = await readFile(embeddedPath)
+    } else {
+      // Make a private copy even when a caller supplied a Buffer so a
+      // concurrently-running caller cannot mutate the decoder input.
+      inputBuffer = Buffer.from(sourceBuffer ?? await readFile(sourcePath))
     }
 
-    await sharp(inputPath, { failOn: 'none' })
+    const sourceAssessment = await assessImageContent(inputBuffer)
+    if (!sourceAssessment.usable) {
+      throw new Error(`Source image is not usable (${sourceAssessment.reason ?? 'uniform frame'})`)
+    }
+
+    const previewBytes = await sharp(inputBuffer, { failOn: 'warning' })
       .rotate()
       .resize({
         width: LIVE_PREVIEW_EDGE,
@@ -91,7 +160,13 @@ export async function generateLivePreview(
         withoutEnlargement: true,
       })
       .jpeg({ quality: LIVE_PREVIEW_QUALITY, mozjpeg: true })
-      .toFile(destinationPath)
+      .toBuffer()
+    await writeFile(destinationPath, previewBytes)
+
+    const previewAssessment = await assessImageContent(previewBytes)
+    if (!previewAssessment.usable) {
+      throw new Error(`Generated preview is not usable (${previewAssessment.reason ?? 'uniform frame'})`)
+    }
 
     return destinationPath
   } catch (error) {
@@ -99,8 +174,75 @@ export async function generateLivePreview(
     console.warn(`[LivePreview] Could not create preview for ${sourcePath}:`, error)
     return null
   } finally {
-    if (inputPath === embeddedPath) {
-      await rm(embeddedPath, { force: true }).catch(() => {})
+    await rm(embeddedPath, { force: true }).catch(() => {})
+    await rm(sourceCopyPath, { force: true }).catch(() => {})
+  }
+}
+
+/**
+ * Removes old generated preview artifacts without touching source files or
+ * previews that can still be requested through the local protocol.
+ *
+ * The deletion batch is deliberately small. This function is scheduled in
+ * the background and is never awaited by capture-time preview generation.
+ */
+export async function cleanupLivePreviewArtifacts(
+  cacheDir: string,
+  options: LivePreviewCleanupOptions = {},
+): Promise<number> {
+  const now = options.now ?? Date.now()
+  const maxFiles = Math.max(0, Math.floor(options.maxFiles ?? LIVE_PREVIEW_CLEANUP_BATCH_SIZE))
+  if (maxFiles === 0) return 0
+
+  let entries
+  try {
+    entries = await readdir(cacheDir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+
+  const cutoff = now - LOCAL_PREVIEW_TTL_MS
+  const activePaths = getActiveLocalPreviewPaths(now)
+  let removed = 0
+  for (const entry of entries) {
+    if (removed >= maxFiles) break
+    if (!entry.isFile() || !PREVIEW_ARTIFACT_NAME.test(entry.name)) continue
+
+    const filePath = resolve(cacheDir, entry.name)
+    if (activePaths.has(filePath)) continue
+
+    try {
+      const metadata = await stat(filePath)
+      if (metadata.mtimeMs > cutoff) continue
+      // Check again immediately before deletion in case a URL was issued
+      // while the filesystem metadata was being read.
+      if (getActiveLocalPreviewPaths(now).has(filePath)) continue
+      await rm(filePath, { force: true })
+      removed++
+    } catch {
+      // A concurrent preview write or another cleanup pass owns this file.
     }
   }
+  return removed
+}
+
+export const LIVE_PREVIEW_CLEANUP_DELAY_MS = 15_000
+
+const scheduledCleanup = new Map<string, ReturnType<typeof setTimeout>>()
+
+/**
+ * Schedules one deferred, deduplicated cleanup pass for a cache directory.
+ */
+export function scheduleLivePreviewCacheCleanup(cacheDir: string): void {
+  const normalizedCacheDir = resolve(cacheDir)
+  if (scheduledCleanup.has(normalizedCacheDir)) return
+
+  const timer = setTimeout(() => {
+    scheduledCleanup.delete(normalizedCacheDir)
+    void cleanupLivePreviewArtifacts(normalizedCacheDir).catch((error) => {
+      console.warn('[LivePreview] Could not clean preview cache:', error)
+    })
+  }, LIVE_PREVIEW_CLEANUP_DELAY_MS)
+  timer.unref()
+  scheduledCleanup.set(normalizedCacheDir, timer)
 }

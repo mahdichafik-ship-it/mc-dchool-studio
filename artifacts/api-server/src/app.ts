@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
@@ -12,14 +12,34 @@ import {
 import router from "./routes";
 import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger";
+import { WebhookHandlers } from "./lib/webhookHandlers";
+import { corsOrigin, requireTrustedMutationOrigin } from "./lib/trustedOrigins";
 
 const app = express();
+app.set("trust proxy", 1);
 
 app.use(pinoHttp({ logger }));
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(cors({ credentials: true, origin: true }));
+app.use(cors({ credentials: true, origin: corsOrigin }));
+app.use(requireTrustedMutationOrigin);
+
+app.post(["/api/stripe/webhook", "/api/stripe/webhook/:uuid"], express.raw({ type: "application/json" }), async (req, res) => {
+  const signature = req.headers["stripe-signature"];
+  if (!signature || Array.isArray(signature)) {
+    res.status(400).json({ error: "Missing Stripe signature" });
+    return;
+  }
+  try {
+    const managedWebhookUuid = Array.isArray(req.params.uuid) ? req.params.uuid[0] : req.params.uuid;
+    await WebhookHandlers.processWebhook(req.body as Buffer, signature, managedWebhookUuid);
+    res.json({ received: true });
+  } catch (error) {
+    logger.error({ err: error }, "Stripe webhook processing failed");
+    res.status(400).json({ error: "Webhook could not be processed" });
+  }
+});
 
 // Note: multer handles its own body parsing for multipart routes.
 // JSON/urlencoded parsers must come after the Clerk proxy but before routes.
@@ -36,6 +56,20 @@ app.use(
 );
 
 app.use("/api", router);
+
+const handleUnhandledRequestError: ErrorRequestHandler = (error, req, res, _next) => {
+  logger.error({
+    err: error,
+    method: req.method,
+    path: req.originalUrl,
+  }, "Unhandled request error");
+  res.status(500).json({
+    error: "The server could not complete this request. Please retry.",
+    code: "INTERNAL_SERVER_ERROR",
+  });
+};
+
+app.use(handleUnhandledRequestError);
 
 // Ensure uploads directory exists (files written here by the multer storage engine;
 // served exclusively via the authenticated /api/.../photos/:id/file proxy endpoint)

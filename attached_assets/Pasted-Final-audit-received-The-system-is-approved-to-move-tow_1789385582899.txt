@@ -1,0 +1,57 @@
+Final audit received. The system is approved to move toward controlled production deployment, but before deployment I want one narrowly scoped hardening release.
+
+Create Release 7 — Canonical Public URL Hardening.
+
+Do not implement any new product feature.
+
+The objective is to eliminate request-derived public URLs from security/payment-sensitive customer flows and use the validated canonical production PUBLIC_APP_URL consistently.
+
+Specifically:
+
+1. Stripe success/cancel callbacks
+
+Replace construction based on Host, X-Forwarded-Host, X-Forwarded-Proto, or request protocol with the same validated canonical production-origin mechanism established for Release 6.
+
+Stripe success_url and cancel_url must always resolve under the configured trusted PUBLIC_APP_URL.
+
+Hostile Host/forwarded-host values must not influence them.
+
+2. Transactional invitation URLs
+
+Move invitation public URL construction through the same strict canonical URL validation/helper.
+
+A malformed or unsafe production PUBLIC_APP_URL must fail closed rather than generate malformed customer links.
+
+3. Review other externally delivered public URLs
+
+Search specifically for customer-facing URLs constructed from request-controlled Host/protocol/forwarding headers.
+
+If the same issue exists in order-recovery links or other externally delivered Volume Capture URLs, migrate them to the same canonical helper where this can be done without changing product semantics.
+
+Do not broaden the release into unrelated refactoring.
+
+4. Preserve development behavior safely
+
+Development/test behavior may use explicitly trusted local/test origins as already supported, but production must require the validated HTTPS canonical URL.
+
+5. Regression tests
+
+Add tests proving:
+
+* hostile Host cannot change Stripe callbacks;
+* hostile X-Forwarded-Host cannot change Stripe callbacks;
+* hostile X-Forwarded-Proto cannot downgrade/change callbacks;
+* Stripe success/cancel remain under PUBLIC_APP_URL;
+* invitation links use the same canonical origin;
+* malformed production PUBLIC_APP_URL fails closed;
+* Release 6 Delivery QR/card URLs remain unchanged;
+* legacy delivery links continue working;
+* order/payment/webhook behavior is unchanged.
+
+Run the complete affected API/delivery/payment/invitation suites, typechecks, production builds and security/privacy checks.
+
+Do not publish production.
+
+Report a focused Release 7 audit and stop.
+
+After Release 7 is approved, we will proceed directly to controlled production deployment. Do not begin another feature release.

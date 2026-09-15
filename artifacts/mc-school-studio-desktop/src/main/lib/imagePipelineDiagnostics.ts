@@ -9,6 +9,14 @@ interface PipelineTrace {
   startedAt: number
   startedAtEpochMs: number
   filePath: string
+  burstIndex?: number
+  burstSize?: number
+  rendererQueue?: {
+    activePriority: string | null
+    pendingLive: boolean
+    galleryQueued: number
+    galleryMax: number
+  }
   marks: Map<ImagePipelineStage, { elapsedMs: number; details?: string }>
   waitingForPaint: boolean
   paintTimeout?: NodeJS.Timeout
@@ -77,6 +85,18 @@ export function markImagePipeline(
   console.info(`[ImagePipeline] ${traceId} ${stage} +${elapsedMs}ms${formatDetails(details)}`)
 }
 
+export function setImagePipelineBurstContext(
+  traceId: string | undefined,
+  burstIndex: number,
+  burstSize: number,
+): void {
+  if (!traceId || !diagnosticsEnabled()) return
+  const trace = traces.get(traceId)
+  if (!trace || !Number.isInteger(burstIndex) || !Number.isInteger(burstSize)) return
+  trace.burstIndex = burstIndex
+  trace.burstSize = burstSize
+}
+
 export function getImagePipelinePreviewContext(
   traceId: string | undefined,
 ): ImagePipelinePreviewContext | undefined {
@@ -108,6 +128,19 @@ export function markImagePipelineRendererStage(event: ImagePipelineRendererStage
   if (!trace) return
   const elapsedMs = Math.max(0, event.atEpochMs - trace.startedAtEpochMs)
   trace.marks.set(event.stage, { elapsedMs, details: event.details })
+  if (event.stage === 'image decode started' && event.details) {
+    const queue = event.details.match(
+      /active=(\w+)\s+pendingLive=(\d+)\s+galleryQueued=(\d+)\s+galleryMax=(\d+)/,
+    )
+    if (queue) {
+      trace.rendererQueue = {
+        activePriority: queue[1] === 'none' ? null : queue[1],
+        pendingLive: queue[2] === '1',
+        galleryQueued: Number(queue[3]),
+        galleryMax: Number(queue[4]),
+      }
+    }
+  }
   console.info(
     `[ImagePipeline] ${event.traceId} ${event.stage} +${elapsedMs.toFixed(1)}ms`
       + formatDetails(event.details),
@@ -149,11 +182,40 @@ function reportAndDeleteTrace(traceId: string): void {
   }
 
   const paintedAt = trace.marks.get('image pixels painted')?.elapsedMs
+  const burstIndex = trace.burstIndex
+  const burstSize = trace.burstSize
+  const burstMilestone = burstIndex === undefined || burstSize === undefined
+    ? undefined
+    : burstIndex === 1
+      ? 'image 1'
+      : burstIndex === 5
+        ? 'image 5'
+        : burstIndex === 10
+          ? 'image 10'
+          : burstIndex === burstSize
+            ? 'final image'
+            : undefined
   console.info(
     `[ImagePipeline] REPORT ${traceId} `
       + JSON.stringify({
         filePath: trace.filePath,
         totalToVisibleMs: paintedAt ?? null,
+        newestImageVisibleLatencyMs: paintedAt ?? null,
+        rendererDecodeQueue: trace.rendererQueue
+          ? {
+            ...trace.rendererQueue,
+            queueAccumulated: trace.rendererQueue.galleryMax > 0,
+          }
+          : null,
+        ...(burstIndex === undefined || burstSize === undefined
+          ? {}
+          : {
+            burst: {
+              imageIndex: burstIndex,
+              imageCount: burstSize,
+              milestone: burstMilestone ?? null,
+            },
+          }),
         cloudSynchronization: 'deferred by explicit project sync',
         slowest,
         stages,

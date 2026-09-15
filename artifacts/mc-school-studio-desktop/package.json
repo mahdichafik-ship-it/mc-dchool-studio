@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.48",
+  "version": "1.0.66",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "Volume Capture",
@@ -15,7 +15,17 @@
     "test:sequence": "node --experimental-strip-types --test test/photo-sequence.test.ts",
     "test:offline-flow": "node --experimental-strip-types --test test/offline-capture-flow.test.ts",
     "test:watcher": "node --experimental-strip-types --test test/watcher-photo-processing.test.ts",
+    "test:upload-retry": "node --experimental-strip-types --test test/upload-retry-schedule.test.ts",
+    "test:upload-concurrency": "node --experimental-strip-types --test test/upload-concurrency.test.ts",
+    "test:upload-response-validation": "node --experimental-strip-types --test test/upload-response-validation.test.ts",
+    "test:upload-transfer-timeout": "node --experimental-strip-types --test test/upload-transfer-timeout.test.ts",
+    "test:capture-upload-export": "node --experimental-loader ./test/resolve-ts-loader.mjs --experimental-strip-types --test test/capture-upload-export.test.ts",
+    "test:project-sync": "node --experimental-loader ./test/resolve-ts-loader.mjs --experimental-strip-types --test test/project-sync.test.ts",
+    "test:project-scale": "node --experimental-strip-types --test test/project-roster-scale.test.ts",
+    "test:roster-shortcuts": "node --experimental-strip-types --test test/roster-shortcuts.test.ts",
     "test:live-preview": "node --experimental-strip-types --test test/live-preview.test.ts",
+    "test:blank-portrait": "node --experimental-strip-types --test test/blank-portrait.test.ts",
+    "test:shoot-layout": "pnpm run build && node --experimental-strip-types --test test/shoot-workspace-layout.test.ts && node test/shoot-workspace-rendered-layout.mjs",
     "benchmark:image-ingestion": "node --experimental-strip-types test/image-ingestion-benchmark.ts",
     "test:retirement": "node --experimental-strip-types --test test/retirement.test.ts",
     "test:retirement-copy": "node --experimental-strip-types --test test/retirement-team-copy.test.ts",
@@ -24,6 +34,7 @@
     "test:updater": "node --test test/updater-metadata.test.mjs",
     "test:prune-mac-native": "node --test test/prune-mac-native-dependencies.test.mjs",
     "test:db-migration": "node --experimental-strip-types --test test/database-migration.test.ts",
+    "check:release-history": "node scripts/verify-release-history.mjs",
     "validate:updater": "node scripts/validate-updater-metadata.mjs",
     "prune:mac-native": "node scripts/prune-mac-native-dependencies.mjs",
     "dist:mac": "pnpm run build && electron-builder --mac --publish never",
@@ -53,8 +64,8 @@
     "@vitejs/plugin-react": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8",
+    "electron": "39.8.10",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^3.1.0",
     "lucide-react": "catalog:",
     "react": "catalog:",
@@ -62,6 +73,6 @@
     "tailwind-merge": "catalog:",
     "tailwindcss": "catalog:",
     "tw-animate-css": "^1.4.0",
-    "vite": "^5.4.21"
+    "vite": "^6.4.3"
   }
 }

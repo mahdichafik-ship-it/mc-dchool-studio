@@ -162,6 +162,11 @@ before(async () => {
       firstName: "Cross",
       lastName: "Studio",
       generatedStudentId: `CROSS${String(process.pid).slice(-3)}${Date.now().toString().slice(-4)}`,
+      secondaryEmail: "cross.secondary@example.com",
+      jobTitle: "Engineer",
+      officeLocation: "North office",
+      photoSession: "09:30",
+      captureNotes: "Face camera",
     })
     .returning({ id: studentsTable.id });
   crossStudioStudentId = crossStudioStudent.id;
@@ -547,8 +552,24 @@ test("lets a connected platform owner pull projects from every studio", async ()
     headers: { Authorization: `Bearer ${platformCredentials.token}` },
   });
   assert.equal(bundleResponse.status, 200);
-  const bundle = await readJson<{ project: { id: number } }>(bundleResponse);
+  const bundle = await readJson<{
+    project: { id: number };
+    students: Array<{
+      id: number;
+      secondaryEmail: string | null;
+      jobTitle: string | null;
+      officeLocation: string | null;
+      photoSession: string | null;
+      captureNotes: string | null;
+    }>;
+  }>(bundleResponse);
   assert.equal(bundle.project.id, crossStudioProjectId);
+  const bundledEmployee = bundle.students.find((student) => student.id === crossStudioStudentId);
+  assert.equal(bundledEmployee?.secondaryEmail, "cross.secondary@example.com");
+  assert.equal(bundledEmployee?.jobTitle, "Engineer");
+  assert.equal(bundledEmployee?.officeLocation, "North office");
+  assert.equal(bundledEmployee?.photoSession, "09:30");
+  assert.equal(bundledEmployee?.captureNotes, "Face camera");
 
   for (const endpoint of ["photos", "captures"]) {
     const uploadResponse = await fetch(

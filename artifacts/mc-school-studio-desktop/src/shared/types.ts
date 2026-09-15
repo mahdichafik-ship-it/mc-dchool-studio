@@ -2,6 +2,7 @@
 
 export interface Project {
   id: number
+  projectType: ProjectType
   schoolName: string
   photoDate: string | null
   address: string | null
@@ -11,11 +12,23 @@ export interface Project {
   notes: string | null
   watchFolder: string | null
   finishedAt: string | null
+  syncStatus: ProjectSyncStatus
+  syncCompletedFiles: number
+  syncTotalFiles: number
+  syncFailedFiles: number
+  syncError: string | null
   classCount: number
   studentCount: number
   photoCount: number
   createdAt: string
   updatedAt: string
+}
+
+export type ProjectType = 'school' | 'corporate'
+export type ProjectSyncStatus = 'active' | 'finished_local' | 'syncing' | 'sync_failed' | 'synced'
+
+export function normalizeProjectType(value: unknown): ProjectType {
+  return value === 'corporate' ? 'corporate' : 'school'
 }
 
 export interface Class {
@@ -35,11 +48,51 @@ export interface Student {
   firstName: string
   lastName: string
   generatedStudentId: string
+  email: string | null
+  phone: string | null
+  secondaryEmail: string | null
+  jobTitle: string | null
+  officeLocation: string | null
+  photoSession: string | null
+  captureNotes: string | null
   simpleQr: string | null
   jsonQr: string | null
   photoCount: number
   createdAt: string
   updatedAt: string
+}
+
+export interface FolderMigrationStudent {
+  studentId: number
+  classId: number
+  studentName: string
+  legacyFolderPath: string | null
+  canonicalFolderPath: string
+  legacyFolderFound: boolean
+  canonicalFolderFound: boolean
+  fileCount: number
+  totalBytes: number
+  conflicts: number
+  conflictFiles: string[]
+}
+
+export interface FolderMigrationPreview {
+  projectId: number
+  projectFolderPath: string
+  legacyFolderCount: number
+  fileCount: number
+  totalBytes: number
+  conflictCount: number
+  students: FolderMigrationStudent[]
+}
+
+export interface FolderMigrationResult {
+  projectId: number
+  legacyFolderCount: number
+  migratedFiles: number
+  skippedFiles: number
+  conflictCount: number
+  originalsPreserved: boolean
 }
 
 export interface StudentGroup {
@@ -63,6 +116,8 @@ export interface GroupCaptureFileReview {
   fileSize: number | null
   uploadStatus: UploadStatus
   fileUrl: string | null
+  galleryReady: boolean
+  previewUrl?: string
 }
 
 export interface GroupCaptureReview {
@@ -72,6 +127,7 @@ export interface GroupCaptureReview {
   baseFilename: string
   capturedAt: string
   pairingStatus: CapturePairingStatus
+  rating: number
   files: GroupCaptureFileReview[]
 }
 
@@ -138,6 +194,18 @@ export interface ImagePipelineRendererStage {
 }
 
 export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
+export type CaptureColorLabel = 'none' | 'red' | 'yellow' | 'green' | 'blue' | 'purple'
+export type CaptureAspectRatio = 'original' | '1:1' | '4:5' | '3:2' | '16:9'
+
+export interface CaptureFraming {
+  cropX: number
+  cropY: number
+  cropScale: number
+  aspectRatio: CaptureAspectRatio
+  straightenAngle: number
+  rotation: 0 | 90 | 180 | 270
+  pending: boolean
+}
 
 export interface CaptureFileReview {
   id: number
@@ -148,6 +216,7 @@ export interface CaptureFileReview {
   fileSize: number | null
   uploadStatus: UploadStatus
   fileUrl: string | null
+  previewUrl?: string
 }
 
 export interface CaptureReview {
@@ -161,11 +230,14 @@ export interface CaptureReview {
   favorite: boolean
   rejected: boolean
   selected: boolean
+  rating: number
+  colorLabel: CaptureColorLabel
   pairingStatus: CapturePairingStatus
   assignmentLocked: boolean
   files: CaptureFileReview[]
   thumbnailData: string | null
   legacyPhoto: Photo | null
+  framing: CaptureFraming
   previewPipeline?: ImagePipelinePreviewContext
 }
 
@@ -177,7 +249,6 @@ export interface QrMarkerReview {
   fileName: string
   capturedAt: string
   thumbnailData: string | null
-  previewUrl?: string
   createdAt: string
 }
 
@@ -208,6 +279,9 @@ export interface CaptureCompletenessSummary {
   jpegOnly: number
   rawOnly: number
   unpaired: number
+  jpegFiles: number
+  rawFiles: number
+  incompletePairs: number
 }
 
 export interface CaptureUpdatedEvent {
@@ -222,6 +296,34 @@ export interface ActiveCaptureTargetEvent {
   groupId?: number | null
   targetType?: 'student' | 'group' | 'none'
   source: 'manual' | 'qr' | 'none'
+}
+
+export type DroppedCaptureFileStatus = 'imported' | 'duplicate' | 'unsupported' | 'error'
+
+export interface DroppedCaptureFileResult {
+  filePath: string
+  fileName: string
+  status: DroppedCaptureFileStatus
+  reason?: string
+}
+
+export interface DroppedCaptureBatchResult {
+  projectId: number
+  studentId: number
+  total: number
+  imported: number
+  duplicates: number
+  skipped: number
+  errors: number
+  files: DroppedCaptureFileResult[]
+}
+
+export interface DroppedCaptureProgressEvent {
+  projectId: number
+  studentId: number
+  completed: number
+  total: number
+  result: DroppedCaptureFileResult
 }
 
 export type CaptureExportMode =
@@ -255,7 +357,7 @@ export interface CaptureExportResult {
 
 export interface ProjectSyncProgressEvent {
   projectId: number
-  phase: 'syncing' | 'finished' | 'error'
+  phase: 'syncing' | 'finished-locally' | 'finished' | 'error'
   completed: number
   total: number
   failed: number
@@ -269,6 +371,41 @@ export interface ProjectSyncResult {
   failed: number
   error?: string
   finishedAt?: string
+  localFinished?: boolean
+  syncStatus?: ProjectSyncStatus
+}
+
+export interface ProjectFinishOptions {
+  photographerComment?: string
+}
+
+export interface LiveUploadState {
+  projectId: number
+  enabled: boolean
+  running: boolean
+  cloudReady: boolean
+  pending: number
+  uploading: number
+  done: number
+  error: number
+  blocked: number
+  total: number
+  lastUploadedAt?: string
+  lastError?: string
+}
+
+export interface LiveUploadQueueItem {
+  key: string
+  kind: 'portrait' | 'group' | 'legacy'
+  fileName: string
+  fileRole: 'JPEG' | 'RAW'
+  subject: string
+  capturedAt: string
+  status: 'queued' | 'uploading' | 'failed' | 'preparing_gallery' | 'blocked'
+  blockedReason?: string
+  attempts: number
+  retryAt?: string
+  lastError?: string
 }
 
 export interface PhotoMatchedEvent {

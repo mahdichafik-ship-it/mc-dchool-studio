@@ -7,7 +7,9 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "test:integration": "node ./build.mjs && node ./build-test.mjs && node --test ./test/photos.integration.test.mjs ./test/access.integration.test.mjs ./test/platform.integration.test.mjs ./test/groupMembership.test.mjs",
+    "test:delivery": "NODE_ENV=test node ./build.mjs && NODE_ENV=test node ./build-test.mjs && NODE_ENV=test node --test ./test/deliveryOffers.integration.test.mjs ./test/deliveryR2.integration.test.mjs ./test/deliveryInvitations.integration.test.mjs ./test/deliveryOrderNotifications.integration.test.mjs",
+    "test:launch-rehearsal-130": "NODE_ENV=test node ./build.mjs && NODE_ENV=test node ./build-test.mjs && NODE_ENV=test node --test ./test/launchRehearsal130.integration.test.mjs",
+    "test:integration": "NODE_ENV=test node ./build.mjs && NODE_ENV=test node ./build-test.mjs && NODE_ENV=test node --test --test-concurrency=1 ./test/photos.integration.test.mjs ./test/access.integration.test.mjs ./test/platform.integration.test.mjs ./test/groupMembership.test.mjs ./test/googleDriveBackup.test.mjs ./test/managedStripeWebhook.test.mjs ./test/deliveryOffers.integration.test.mjs ./test/deliveryR2.integration.test.mjs ./test/r2Storage.test.mjs ./test/r2UploadCopies.test.mjs ./test/captureEdits.test.mjs ./test/marketing.integration.test.mjs ./test/deliveryInvitations.integration.test.mjs ./test/deliveryOrderNotifications.integration.test.mjs ./test/students.integration.test.mjs ./test/roster.integration.test.mjs ./test/securityMiddleware.test.mjs ./test/desktopRelease.test.mjs ./test/launchRehearsal130.integration.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -21,12 +23,13 @@
     "express": "^5.2.1",
     "http-proxy-middleware": "^4.2.0",
     "jszip": "^3.10.1",
-    "multer": "^2.2.0",
+    "multer": "^2.3.0",
     "pdfkit": "^0.19.1",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
     "qrcode": "^1.5.4",
-    "xlsx": "^0.18.5"
+    "sharp": "^0.35.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",

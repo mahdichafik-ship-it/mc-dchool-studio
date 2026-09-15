@@ -3,11 +3,68 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
+import {
+  advanceSequence,
+  createSequenceState,
+  resolveQueuedPortraitTarget,
+  sortCaptureFiles,
+  type CaptureFile,
+} from '../src/main/lib/photoSequence.ts'
 import type { WatchedPhotoStore } from '../src/main/lib/watchedPhotoProcessor.ts'
 import { processWatchedPhoto } from '../src/main/lib/watchedPhotoProcessor.ts'
 
 const jpegBytes = Buffer.from('sample-smart-shooter-jpeg')
 const timestamp = '2026-08-28T12:00:00.000Z'
+
+test('watcher burst lets a preceding QR marker govern only following queued portraits', () => {
+  const state = createSequenceState()
+  const burst: CaptureFile[] = [
+    {
+      filePath: '/watch/portrait-before.jpg',
+      fileName: 'portrait-before.jpg',
+      capturedAtMs: 3,
+      arrivalOrder: 1,
+      selectedStudentId: null,
+      assignmentSource: 'none',
+    },
+    {
+      filePath: '/watch/marker-a.jpg',
+      fileName: 'marker-a.jpg',
+      capturedAtMs: 1,
+      arrivalOrder: 0,
+      selectedStudentId: null,
+      assignmentSource: 'none',
+    },
+    {
+      filePath: '/watch/marker-b.jpg',
+      fileName: 'marker-b.jpg',
+      capturedAtMs: 5,
+      arrivalOrder: 2,
+      selectedStudentId: null,
+      assignmentSource: 'none',
+    },
+  ]
+
+  const ordered = sortCaptureFiles(burst)
+  assert.deepEqual(ordered.map((capture) => capture.fileName), [
+    'marker-a.jpg',
+    'portrait-before.jpg',
+    'marker-b.jpg',
+  ])
+
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: 11, reference: 'A' }),
+    { kind: 'marker', studentId: 11 },
+  )
+  const portraitTarget = resolveQueuedPortraitTarget(state, null, 'none')
+  assert.equal(portraitTarget, 11)
+
+  assert.deepEqual(
+    advanceSequence(state, { kind: 'marker', studentId: 22, reference: 'B' }),
+    { kind: 'marker', studentId: 22 },
+  )
+  assert.equal(portraitTarget, 11)
+})
 
 function createStore() {
   const projects = [
@@ -332,6 +389,35 @@ test('uses the selected student instead of a conflicting Smart Shooter filename'
       join(fixture.photosDir, 'Example School', 'Class 3', 'Dina_Zaki_AB12', 'Dina_Zaki_AB12.jpg'),
     )
     assert.equal(existsSync(fixture.sourcePath), true)
+  } finally {
+    cleanup(fixture.root)
+  }
+})
+
+test('keeps the explicit drop target when the active selection changes during processing', async () => {
+  const fixture = createFixture('DSC_8293.jpg')
+  const { store, photos } = createStore()
+  let activeSelection = 3
+
+  try {
+    const result = await processWatchedPhoto(1, fixture.sourcePath, {
+      store,
+      photosDir: fixture.photosDir,
+      readQr: async () => null,
+      targetStudentId: activeSelection,
+      onPreviewReady: async () => {
+        // Simulate the photographer selecting another roster row while the
+        // original drop is still being prepared.
+        activeSelection = 1
+        return null
+      },
+    })
+
+    assert.equal(result.kind, 'matched')
+    if (result.kind !== 'matched') return
+    assert.equal(result.student.id, 3)
+    assert.equal(photos[0]?.studentId, 3)
+    assert.equal(activeSelection, 1)
   } finally {
     cleanup(fixture.root)
   }

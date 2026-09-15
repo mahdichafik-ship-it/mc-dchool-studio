@@ -27,7 +27,9 @@ export type PhotoDeleteRecoveryAlert = {
     | "backup_directory_inspection_failed"
     | "backup_contents_ambiguous"
     | "backup_compensation_failed"
-    | "backup_reconciliation_failed";
+    | "backup_reconciliation_failed"
+    | "r2_delete_failed"
+    | "r2_deleted_database_delete_failed";
   backupPath: string;
   originalPath: string | null;
   error?: unknown;

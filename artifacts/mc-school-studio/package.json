@@ -7,6 +7,10 @@
     "dev": "vite --config vite.config.ts --host 0.0.0.0",
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
+    "test:desktop-architecture": "node --experimental-strip-types --test src/lib/desktopArchitecture.test.ts",
+    "test:delivery-operational": "node --experimental-strip-types --test src/lib/deliveryOperational.test.ts",
+    "test:delivery-access-card": "node --experimental-strip-types --test src/lib/deliveryAccessCard.test.ts",
+    "test:delivery-tab-browser": "node --test test/browser/delivery-tab.browser.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
@@ -79,6 +83,6 @@
     "@clerk/themes": "^2.4.57",
     "@types/jszip": "^3.4.1",
     "jszip": "^3.10.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }

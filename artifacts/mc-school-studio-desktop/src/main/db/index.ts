@@ -6,10 +6,11 @@ import { app } from 'electron'
 import { join } from 'path'
 import { mkdirSync } from 'fs'
 import * as schema from './schema'
-import { ensureCaptureTables, ensureLegacyColumns } from './migrations'
+import { ensureCaptureTables, ensureLegacyColumns, ensureStudentIdentityConstraint } from './migrations'
 import { ensurePhotoSystemLayout, getPhotoSystemLayout } from '../lib/storageLayout'
 
 let _db: ReturnType<typeof drizzle> | null = null
+let _sqlite: Database.Database | null = null
 
 export function getDb() {
   if (_db) return _db
@@ -25,11 +26,23 @@ export function getDb() {
   sqlite.pragma('foreign_keys = ON')
 
   _db = drizzle(sqlite, { schema })
+  _sqlite = sqlite
 
   // Create tables if they don't exist
   initializeSchema(sqlite)
 
   return _db
+}
+
+/**
+ * Close the desktop database connection. The desktop process normally keeps
+ * this connection for its lifetime; the explicit seam also lets integration
+ * tests model an app restart against the same SQLite file.
+ */
+export function closeDbForTests(): void {
+  _sqlite?.close()
+  _sqlite = null
+  _db = null
 }
 
 function initializeSchema(sqlite: Database.Database) {
@@ -38,6 +51,7 @@ function initializeSchema(sqlite: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cloud_id INTEGER,
       school_name TEXT NOT NULL,
+      project_type TEXT NOT NULL DEFAULT 'school',
       photo_date TEXT,
       address TEXT,
       contact_name TEXT,
@@ -46,6 +60,11 @@ function initializeSchema(sqlite: Database.Database) {
       notes TEXT,
       watch_folder TEXT,
       finished_at TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'active',
+      sync_completed_files INTEGER NOT NULL DEFAULT 0,
+      sync_total_files INTEGER NOT NULL DEFAULT 0,
+      sync_failed_files INTEGER NOT NULL DEFAULT 0,
+      sync_error TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -69,6 +88,11 @@ function initializeSchema(sqlite: Database.Database) {
       generated_student_id TEXT NOT NULL,
       email TEXT,
       phone TEXT,
+      secondary_email TEXT,
+      job_title TEXT,
+      office_location TEXT,
+      photo_session TEXT,
+      capture_notes TEXT,
       simple_qr TEXT,
       json_qr TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -100,6 +124,7 @@ function initializeSchema(sqlite: Database.Database) {
   // Upgrade databases created by older desktop releases without replacing
   // projects, rosters, or captured photos.
   ensureLegacyColumns(sqlite)
+  ensureStudentIdentityConstraint(sqlite)
   ensureCaptureTables(sqlite)
   ensurePhotoSystemLayout(getPhotoSystemLayout(app.getPath('home')))
 

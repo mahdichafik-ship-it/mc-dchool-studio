@@ -1,12 +1,20 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, ne, sql } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
-import { generateUniqueStudentId } from "../lib/studentId";
+import {
+  generateUniqueStudentId,
+  isStudentIdUniqueViolation,
+  studentIdKey,
+} from "../lib/studentId";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { canAccessProject } from "../lib/studioAccess";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
+import {
+  enqueueR2PhotoDeletionsForStudents,
+  lockProjectStudentIds,
+} from "../lib/r2PhotoDeletionOutbox";
 
 const router = Router({ mergeParams: true });
 
@@ -19,7 +27,20 @@ async function getExistingStudentIds(projectId: number): Promise<Set<string>> {
     .select({ generatedStudentId: studentsTable.generatedStudentId })
     .from(studentsTable)
     .where(eq(studentsTable.projectId, projectId));
-  return new Set(students.map((s) => s.generatedStudentId));
+  return new Set(students.map((s) => studentIdKey(s.generatedStudentId)));
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
+function validateEmail(value: string | null, fieldName: string): string | null {
+  if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    return `${fieldName} must be a valid email address`;
+  }
+  return null;
 }
 
 function formatStudent(
@@ -36,6 +57,11 @@ function formatStudent(
     generatedStudentId: s.generatedStudentId,
     email: s.email ?? null,
     phone: s.phone ?? null,
+    secondaryEmail: s.secondaryEmail ?? null,
+    jobTitle: s.jobTitle ?? null,
+    officeLocation: s.officeLocation ?? null,
+    photoSession: s.photoSession ?? null,
+    captureNotes: s.captureNotes ?? null,
     simpleQr: s.simpleQr,
     jsonQr: s.jsonQr,
     createdAt: s.createdAt.toISOString(),
@@ -76,10 +102,39 @@ router.post("/", requireAuth, async (req, res) => {
     return;
   }
 
-  const { classId, firstName, lastName, generatedStudentId, email, phone } = req.body;
+  const {
+    classId,
+    firstName,
+    lastName,
+    generatedStudentId,
+    email,
+    phone,
+    secondaryEmail,
+    jobTitle,
+    officeLocation,
+    photoSession,
+    captureNotes,
+  } = req.body;
 
-  if (!classId || !firstName || !lastName) {
+  const normalizedFirstName =
+    firstName !== undefined ? normalizeOptionalString(firstName) : undefined;
+  const normalizedLastName =
+    lastName !== undefined ? normalizeOptionalString(lastName) : undefined;
+  if (!classId || !normalizedFirstName || !normalizedLastName) {
     res.status(400).json({ error: "classId, firstName, and lastName are required" });
+    return;
+  }
+
+  const normalizedEmail = email !== undefined ? normalizeOptionalString(email) : undefined;
+  const normalizedSecondaryEmail =
+    secondaryEmail !== undefined ? normalizeOptionalString(secondaryEmail) : undefined;
+  const normalizedGeneratedStudentId =
+    generatedStudentId !== undefined ? normalizeOptionalString(generatedStudentId) : undefined;
+  const emailError =
+    validateEmail(normalizedEmail ?? null, "email") ??
+    validateEmail(normalizedSecondaryEmail ?? null, "secondaryEmail");
+  if (emailError) {
+    res.status(400).json({ error: emailError });
     return;
   }
 
@@ -94,23 +149,48 @@ router.post("/", requireAuth, async (req, res) => {
   }
 
   const existingIds = await getExistingStudentIds(projectId);
-  const studentId =
-    generatedStudentId && !existingIds.has(generatedStudentId)
-      ? generatedStudentId
-      : generateUniqueStudentId(existingIds);
+  if (normalizedGeneratedStudentId && existingIds.has(studentIdKey(normalizedGeneratedStudentId))) {
+    res.status(409).json({
+      error: "That Student ID/Employee ID is already used in this project.",
+      code: "STUDENT_ID_CONFLICT",
+    });
+    return;
+  }
+  const studentId = normalizedGeneratedStudentId ?? generateUniqueStudentId(existingIds);
 
-  const [student] = await db
-    .insert(studentsTable)
-    .values({
-      projectId,
-      classId,
-      firstName,
-      lastName,
-      generatedStudentId: studentId,
-      email: email ?? null,
-      phone: phone ?? null,
-    })
-    .returning();
+  let student: typeof studentsTable.$inferSelect | undefined;
+  try {
+    [student] = await db
+      .insert(studentsTable)
+      .values({
+        projectId,
+        classId,
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+        generatedStudentId: studentId,
+        email: normalizedEmail,
+        phone: normalizeOptionalString(phone),
+        secondaryEmail: normalizedSecondaryEmail,
+        jobTitle: normalizeOptionalString(jobTitle),
+        officeLocation: normalizeOptionalString(officeLocation),
+        photoSession: normalizeOptionalString(photoSession),
+        captureNotes: normalizeOptionalString(captureNotes),
+      })
+      .returning();
+  } catch (error) {
+    // The index, rather than this preflight, is the concurrency authority.
+    if (isStudentIdUniqueViolation(error)) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+    throw error;
+  }
+  if (!student) {
+    throw new Error("Student could not be created");
+  }
 
   res.status(201).json(formatStudent(student, cls.className));
   await reconcileDefaultGroups(projectId);
@@ -137,30 +217,123 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     return;
   }
 
-  const { firstName, lastName, generatedStudentId, classId, email, phone } = req.body;
+  const {
+    firstName,
+    lastName,
+    generatedStudentId,
+    classId,
+    email,
+    phone,
+    secondaryEmail,
+    jobTitle,
+    officeLocation,
+    photoSession,
+    captureNotes,
+  } = req.body;
 
-  const [updated] = await db
-    .update(studentsTable)
-    .set({
-      ...(firstName !== undefined && { firstName }),
-      ...(lastName !== undefined && { lastName }),
-      ...(generatedStudentId !== undefined && { generatedStudentId }),
-      ...(classId !== undefined && { classId }),
-      ...(email !== undefined && { email: email ?? null }),
-      ...(phone !== undefined && { phone: phone ?? null }),
-      // Regenerate QR if name or ID changed
-      ...(firstName !== undefined || lastName !== undefined || generatedStudentId !== undefined
-        ? { simpleQr: null, jsonQr: null }
-        : {}),
-      updatedAt: new Date(),
-    })
-    .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)))
-    .returning();
+  const normalizedEmail = email !== undefined ? normalizeOptionalString(email) : undefined;
+  const normalizedSecondaryEmail =
+    secondaryEmail !== undefined ? normalizeOptionalString(secondaryEmail) : undefined;
+  const normalizedGeneratedStudentId =
+    generatedStudentId !== undefined ? normalizeOptionalString(generatedStudentId) : undefined;
+  const normalizedFirstName =
+    firstName !== undefined ? normalizeOptionalString(firstName) : undefined;
+  const normalizedLastName =
+    lastName !== undefined ? normalizeOptionalString(lastName) : undefined;
+  if (normalizedFirstName === null || normalizedLastName === null) {
+    res.status(400).json({ error: "firstName and lastName cannot be blank" });
+    return;
+  }
+  const identityChanged =
+    (normalizedFirstName !== undefined && normalizedFirstName !== existing.firstName) ||
+    (normalizedLastName !== undefined && normalizedLastName !== existing.lastName) ||
+    (normalizedGeneratedStudentId !== undefined &&
+      normalizedGeneratedStudentId !== null &&
+      normalizedGeneratedStudentId !== existing.generatedStudentId);
+  const emailError =
+    validateEmail(normalizedEmail ?? null, "email") ??
+    validateEmail(normalizedSecondaryEmail ?? null, "secondaryEmail");
+  if (emailError) {
+    res.status(400).json({ error: emailError });
+    return;
+  }
 
-  const [cls] = await db
+  if (normalizedGeneratedStudentId) {
+    const [collision] = await db
+      .select({ id: studentsTable.id })
+      .from(studentsTable)
+      .where(and(
+        eq(studentsTable.projectId, projectId),
+        ne(studentsTable.id, studentId),
+        sql`lower(${studentsTable.generatedStudentId}) = lower(${normalizedGeneratedStudentId})`,
+      ));
+    if (collision) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+  }
+
+  let destinationClass: typeof classesTable.$inferSelect | undefined;
+  if (classId !== undefined) {
+    [destinationClass] = await db
+      .select()
+      .from(classesTable)
+      .where(and(eq(classesTable.id, Number(classId)), eq(classesTable.projectId, projectId)));
+    if (!destinationClass) {
+      res.status(400).json({ error: "Class not found in this project" });
+      return;
+    }
+  }
+
+  let updated: typeof studentsTable.$inferSelect | undefined;
+  try {
+    [updated] = await db
+      .update(studentsTable)
+      .set({
+        ...(normalizedFirstName !== undefined && { firstName: normalizedFirstName }),
+        ...(normalizedLastName !== undefined && { lastName: normalizedLastName }),
+        ...(normalizedGeneratedStudentId !== null &&
+          normalizedGeneratedStudentId !== undefined && {
+            generatedStudentId: normalizedGeneratedStudentId,
+          }),
+        ...(classId !== undefined && { classId }),
+        ...(email !== undefined && { email: normalizedEmail }),
+        ...(phone !== undefined && { phone: normalizeOptionalString(phone) }),
+        ...(secondaryEmail !== undefined && { secondaryEmail: normalizedSecondaryEmail }),
+        ...(jobTitle !== undefined && { jobTitle: normalizeOptionalString(jobTitle) }),
+        ...(officeLocation !== undefined && { officeLocation: normalizeOptionalString(officeLocation) }),
+        ...(photoSession !== undefined && { photoSession: normalizeOptionalString(photoSession) }),
+        ...(captureNotes !== undefined && { captureNotes: normalizeOptionalString(captureNotes) }),
+        // Regenerate QR if name or ID changed
+        ...(identityChanged
+          ? { simpleQr: null, jsonQr: null }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)))
+      .returning();
+  } catch (error) {
+    if (isStudentIdUniqueViolation(error)) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+    throw error;
+  }
+  if (!updated) {
+    res.status(404).json({ error: "Student not found" });
+    return;
+  }
+
+  const cls = destinationClass ?? (await db
     .select()
     .from(classesTable)
-    .where(eq(classesTable.id, updated.classId));
+    .where(and(eq(classesTable.id, updated.classId), eq(classesTable.projectId, projectId))))[0];
 
   res.json(formatStudent(updated, cls?.className ?? ""));
 });
@@ -176,9 +349,13 @@ router.delete("/:studentId", requireAuth, async (req, res) => {
     return;
   }
 
-  await db
-    .delete(studentsTable)
-    .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)));
+  await db.transaction(async (tx) => {
+    const scopedIds = await lockProjectStudentIds(tx, projectId, [studentId]);
+    if (scopedIds.length === 0) return;
+    await enqueueR2PhotoDeletionsForStudents(tx, scopedIds);
+    await tx.delete(studentsTable)
+      .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)));
+  });
 
   res.status(204).send();
 });
@@ -193,22 +370,25 @@ router.post("/bulk-delete", requireAuth, async (req, res) => {
     return;
   }
 
-  const { studentIds } = req.body;
+  const { studentIds } = req.body ?? {};
   if (!Array.isArray(studentIds) || studentIds.length === 0) {
     res.status(400).json({ error: "studentIds must be a non-empty array" });
     return;
   }
 
-  await db
-    .delete(studentsTable)
-    .where(
-      and(
+  const deletedCount = await db.transaction(async (tx) => {
+    const scopedIds = await lockProjectStudentIds(tx, projectId, studentIds);
+    if (scopedIds.length === 0) return 0;
+    await enqueueR2PhotoDeletionsForStudents(tx, scopedIds);
+    await tx.delete(studentsTable)
+      .where(and(
         eq(studentsTable.projectId, projectId),
-        inArray(studentsTable.id, studentIds),
-      ),
-    );
+        inArray(studentsTable.id, scopedIds),
+      ));
+    return scopedIds.length;
+  });
 
-  res.json({ deleted: studentIds.length });
+  res.json({ deleted: deletedCount });
 });
 
 // POST /api/projects/:projectId/students/generate-qr
@@ -221,57 +401,41 @@ router.post("/generate-qr", requireAuth, async (req, res) => {
     return;
   }
 
-  const [project] = await db
-    .select()
-    .from(projectsTable)
+  const [project] = await db.select().from(projectsTable)
     .where(eq(projectsTable.id, projectId));
-
   const { studentIds } = req.body ?? {};
 
-  let studentsToProcess;
-  if (Array.isArray(studentIds) && studentIds.length > 0) {
-    studentsToProcess = await db
-      .select({ student: studentsTable, className: classesTable.className })
+  const studentsToProcess = Array.isArray(studentIds) && studentIds.length > 0
+    ? await db.select({ student: studentsTable, className: classesTable.className })
       .from(studentsTable)
       .innerJoin(classesTable, eq(studentsTable.classId, classesTable.id))
-      .where(
-        and(
-          eq(studentsTable.projectId, projectId),
-          inArray(studentsTable.id, studentIds),
-        ),
-      );
-  } else {
-    // Generate for all students in project
-    studentsToProcess = await db
-      .select({ student: studentsTable, className: classesTable.className })
+      .where(and(eq(studentsTable.projectId, projectId), inArray(studentsTable.id, studentIds)))
+    : await db.select({ student: studentsTable, className: classesTable.className })
       .from(studentsTable)
       .innerJoin(classesTable, eq(studentsTable.classId, classesTable.id))
       .where(eq(studentsTable.projectId, projectId));
-  }
-
-  // Only regenerate students that are actually missing QR codes (unless specific IDs requested)
   const needsQr = Array.isArray(studentIds) && studentIds.length > 0
     ? studentsToProcess
-    : studentsToProcess.filter(r => !r.student.simpleQr);
+    : studentsToProcess.filter((row) => !row.student.simpleQr);
 
-  // Generate all QR codes in parallel (concurrency-limited to avoid OOM on huge classes)
   const BATCH = 50;
   let generated = 0;
   for (let i = 0; i < needsQr.length; i += BATCH) {
-    const batch = needsQr.slice(i, i + BATCH);
-    await Promise.all(
-      batch.map(async ({ student, className }) => {
-        const [simpleQr, jsonQr] = await Promise.all([
-          generateSimpleQr(student.firstName, student.lastName, student.generatedStudentId),
-          generateJsonQr(project.schoolName, className, student.firstName, student.lastName, student.generatedStudentId),
-        ]);
-        await db
-          .update(studentsTable)
-          .set({ simpleQr, jsonQr, updatedAt: new Date() })
-          .where(eq(studentsTable.id, student.id));
-        generated++;
-      }),
-    );
+    await Promise.all(needsQr.slice(i, i + BATCH).map(async ({ student, className }) => {
+      const [simpleQr, jsonQr] = await Promise.all([
+        generateSimpleQr(student.firstName, student.lastName, student.generatedStudentId),
+        generateJsonQr(
+          project.schoolName,
+          className,
+          student.firstName,
+          student.lastName,
+          student.generatedStudentId,
+        ),
+      ]);
+      await db.update(studentsTable).set({ simpleQr, jsonQr, updatedAt: new Date() })
+        .where(eq(studentsTable.id, student.id));
+      generated += 1;
+    }));
   }
 
   res.json({ generated });

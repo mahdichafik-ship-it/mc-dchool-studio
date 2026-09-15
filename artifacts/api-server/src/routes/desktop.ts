@@ -7,7 +7,8 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { captureBatchesTable, captureFilesTable, db, desktopAuthSessionsTable, desktopConnectionsTable, studentPhotosTable, studioMembersTable } from "@workspace/db";
+import { captureBatchesTable, captureFilesTable, capturesTable, db, desktopAuthSessionsTable, desktopConnectionsTable, studentPhotosTable, studioMembersTable } from "@workspace/db";
+import { photoStorageCopiesTable } from "@workspace/db/schema";
 import { projectsTable, classesTable, studentsTable } from "@workspace/db";
 import { and, count, eq, gt, inArray, sql } from "drizzle-orm";
 import {
@@ -23,11 +24,126 @@ import { getStudioMember } from "../lib/studioAccess";
 import { getUserId, requireAuth } from "../lib/auth";
 import { isPlatformOwner } from "../lib/platformAccess";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
+import { isStudentIdUniqueViolation } from "../lib/studentId";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
-import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable } from "@workspace/db";
+import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable, groupCapturesTable } from "@workspace/db";
+import { verifyR2Copy } from "../lib/r2UploadCopies";
+import { prepareBaseR2PhotoVariants } from "../lib/photoVariants";
+import { logger } from "../lib/logger";
+import { createDesktopReleaseHandler } from "../lib/desktopRelease";
 
 const router = Router();
 const desktopAuthLifetimeMs = 10 * 60 * 1000;
+
+// Public read-only distribution metadata. Keep this before authenticated
+// desktop routes: browsers need it before they have a desktop connection.
+router.get("/release", createDesktopReleaseHandler());
+
+async function storageCopyProjectId(
+  copy: typeof photoStorageCopiesTable.$inferSelect,
+): Promise<number | null> {
+  if (copy.studentPhotoId !== null) {
+    const [photo] = await db
+      .select({ projectId: studentPhotosTable.projectId })
+      .from(studentPhotosTable)
+      .where(eq(studentPhotosTable.id, copy.studentPhotoId))
+      .limit(1);
+    return photo?.projectId ?? null;
+  }
+  if (copy.captureFileId !== null) {
+    const [capture] = await db
+      .select({ projectId: capturesTable.projectId })
+      .from(captureFilesTable)
+      .innerJoin(
+        capturesTable,
+        eq(captureFilesTable.captureId, capturesTable.id),
+      )
+      .where(eq(captureFilesTable.id, copy.captureFileId))
+      .limit(1);
+    return capture?.projectId ?? null;
+  }
+  if (copy.groupCaptureFileId !== null) {
+    const [capture] = await db
+      .select({ projectId: groupCapturesTable.projectId })
+      .from(groupCaptureFilesTable)
+      .innerJoin(
+        groupCapturesTable,
+        eq(groupCaptureFilesTable.captureId, groupCapturesTable.id),
+      )
+      .where(eq(groupCaptureFilesTable.id, copy.groupCaptureFileId))
+      .limit(1);
+    return capture?.projectId ?? null;
+  }
+  return null;
+}
+
+router.post(
+  "/storage-copies/:copyId/r2/verify",
+  requireDesktopConnection,
+  async (req, res): Promise<void> => {
+    const copyId = Number(req.params.copyId);
+    if (!Number.isSafeInteger(copyId) || copyId <= 0) {
+      res.status(400).json({ error: "Invalid storage copy identifier" });
+      return;
+    }
+    const attemptKey = req.get("X-MC-R2-Attempt")?.trim();
+    if (!attemptKey || attemptKey.length > 1_000) {
+      res.status(400).json({ error: "A valid R2 upload attempt is required" });
+      return;
+    }
+    const [copy] = await db
+      .select()
+      .from(photoStorageCopiesTable)
+      .where(eq(photoStorageCopiesTable.id, copyId))
+      .limit(1);
+    const connection = getDesktopConnection(req);
+    const projectId = copy ? await storageCopyProjectId(copy) : null;
+    if (
+      !copy ||
+      projectId === null ||
+      !(await canAccessDesktopProject(
+        {
+          id: connection.memberId,
+          studioId: connection.studioId,
+          role: connection.memberRole,
+          userId: connection.memberUserId,
+        },
+        projectId,
+      ))
+    ) {
+      res.status(404).json({ error: "Storage copy not found" });
+      return;
+    }
+    try {
+      const verified = await verifyR2Copy(copy, attemptKey);
+      res.json({
+        copy: {
+          id: verified.id,
+          destination: verified.destination,
+          state: verified.state,
+          objectKey: verified.objectKey,
+          fileSize: verified.fileSize,
+          sha256: verified.sha256,
+          etag: verified.etag,
+          verifiedAt: verified.verifiedAt,
+        },
+      });
+      void prepareBaseR2PhotoVariants(verified).catch((error) => {
+        logger.error({ err: error, copyId: verified.id }, "R2 photo variant preparation failed");
+      });
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error
+          ? String(error.code)
+          : "R2_VERIFICATION_FAILED";
+      res.status(code === "R2_UPLOAD_NOT_VERIFIED" ? 409 : 503).json({
+        error:
+          error instanceof Error ? error.message : "R2 verification failed",
+        code,
+      });
+    }
+  },
+);
 
 function validCaptureBatchKey(value: unknown): value is string {
   return typeof value === "string" && /^[a-zA-Z0-9:_-]{8,200}$/.test(value);
@@ -207,9 +323,12 @@ router.post("/auth/refresh", requireDesktopConnection, async (req, res): Promise
 router.post("/projects/:projectId/capture-batches", requireDesktopConnection, async (req, res): Promise<void> => {
   const projectId = Number(req.params.projectId);
   const batchKey = req.body?.batchKey;
+  const supersedesBatchKey = req.body?.supersedesBatchKey;
   const expectedFileCount = Number(req.body?.expectedFileCount);
   const connection = getDesktopConnection(req);
-  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey) || !Number.isInteger(expectedFileCount) || expectedFileCount < 0) {
+  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey)
+    || (supersedesBatchKey !== undefined && (!validCaptureBatchKey(supersedesBatchKey) || supersedesBatchKey === batchKey))
+    || !Number.isInteger(expectedFileCount) || expectedFileCount < 0) {
     res.status(400).json({ error: "A valid project, batch key, and expected file count are required" });
     return;
   }
@@ -233,7 +352,72 @@ router.post("/projects/:projectId/capture-batches", requireDesktopConnection, as
     ))
     .limit(1);
   if (existing && existing.desktopConnectionId !== connection.connectionId) {
-    res.status(409).json({ error: "Capture batch belongs to another desktop connection" });
+    res.status(409).json({
+      error: "Capture batch belongs to another desktop connection",
+      code: "CAPTURE_BATCH_CONNECTION_CHANGED",
+    });
+    return;
+  }
+  if (supersedesBatchKey !== undefined) {
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${projectId}:${supersedesBatchKey}`}))`);
+      const [predecessor] = await tx.select().from(captureBatchesTable).where(and(
+        eq(captureBatchesTable.projectId, projectId),
+        eq(captureBatchesTable.batchKey, supersedesBatchKey),
+      )).limit(1);
+      if (!predecessor || predecessor.desktopConnectionId === connection.connectionId) {
+        return { error: "Interrupted capture batch is not owned by a previous connection" } as const;
+      }
+      const [replayed] = await tx.select().from(captureBatchesTable).where(and(
+        eq(captureBatchesTable.projectId, projectId),
+        eq(captureBatchesTable.batchKey, batchKey),
+        eq(captureBatchesTable.desktopConnectionId, connection.connectionId),
+        eq(captureBatchesTable.supersedesBatchId, predecessor.id),
+      )).limit(1);
+      if (replayed) return { batch: replayed, replayed: true } as const;
+      if (predecessor.status === "complete" || predecessor.status === "superseded") {
+        return { error: "This capture batch can no longer be superseded" } as const;
+      }
+      const [previousConnection] = await tx.select({ status: desktopConnectionsTable.status })
+        .from(desktopConnectionsTable)
+        .where(eq(desktopConnectionsTable.id, predecessor.desktopConnectionId))
+        .limit(1);
+      if (previousConnection?.status === "active") {
+        return { error: "The previous Mac is still active and must be disconnected before this batch can resume" } as const;
+      }
+      const [batch] = await tx.insert(captureBatchesTable).values({
+        batchKey,
+        projectId,
+        memberId: connection.memberId,
+        desktopConnectionId: connection.connectionId,
+        status: "uploading",
+        expectedFileCount,
+        failedFileCount: 0,
+        lastSyncAt: new Date(),
+        completedAt: null,
+        supersedesBatchId: predecessor.id,
+      }).returning();
+      await tx.update(captureBatchesTable).set({
+        status: "superseded",
+        supersededAt: new Date(),
+        lastSyncAt: new Date(),
+        completedAt: null,
+      }).where(eq(captureBatchesTable.id, predecessor.id));
+      return { batch, replayed: false } as const;
+    });
+    if ("error" in result) {
+      res.status(409).json({ error: result.error });
+      return;
+    }
+    res.status(result.replayed ? 200 : 201).json(result.batch);
+    return;
+  }
+  if (
+    existing
+    && existing.status === "complete"
+    && expectedFileCount <= existing.expectedFileCount
+  ) {
+    res.status(200).json(existing);
     return;
   }
   const [batch] = existing
@@ -270,8 +454,21 @@ router.patch("/projects/:projectId/capture-batches/:batchKey", requireDesktopCon
   const batchKey = req.params.batchKey;
   const failedFileCount = Number(req.body?.failedFileCount ?? 0);
   const requestedStatus = req.body?.status;
+  const handoffComment = req.body?.handoffComment;
+  const hasNonStandardHandoffField = ["comment", "handoffNotes", "handoff_note"]
+    .some((field) => req.body?.[field] !== undefined);
   const connection = getDesktopConnection(req);
-  if (!Number.isInteger(projectId) || !validCaptureBatchKey(batchKey) || !Number.isInteger(failedFileCount) || failedFileCount < 0 || !["failed", "complete"].includes(requestedStatus)) {
+  if (
+    !Number.isInteger(projectId)
+    || !validCaptureBatchKey(batchKey)
+    || !Number.isInteger(failedFileCount)
+    || failedFileCount < 0
+    || !["failed", "complete"].includes(requestedStatus)
+    || hasNonStandardHandoffField
+    || (handoffComment !== undefined
+      && handoffComment !== null
+      && (typeof handoffComment !== "string" || handoffComment.trim().length > 2000))
+  ) {
     res.status(400).json({ error: "Invalid capture batch update" });
     return;
   }
@@ -314,15 +511,19 @@ router.patch("/projects/:projectId/capture-batches/:batchKey", requireDesktopCon
   const status = requestedStatus === "complete" && failedFileCount === 0 && uploadedFileCount >= batch.expectedFileCount
     ? "complete"
     : "failed";
-  const [updated] = await db
-    .update(captureBatchesTable)
-    .set({
+  const update: Partial<typeof captureBatchesTable.$inferInsert> = {
       status,
       uploadedFileCount,
       failedFileCount,
       lastSyncAt: new Date(),
       completedAt: status === "complete" ? new Date() : null,
-    })
+      ...(handoffComment !== undefined && status === "complete"
+        ? { handoffComment: typeof handoffComment === "string" ? handoffComment.trim() || null : null }
+        : {}),
+    };
+  const [updated] = await db
+    .update(captureBatchesTable)
+    .set(update)
     .where(eq(captureBatchesTable.id, batch.id))
     .returning();
   res.json(updated);
@@ -508,6 +709,7 @@ router.get("/projects", requireDesktopConnection, async (req, res) => {
   const projects = await db
     .select({
       id: projectsTable.id,
+      projectType: projectsTable.projectType,
       schoolName: projectsTable.schoolName,
       photoDate: projectsTable.photoDate,
       address: projectsTable.address,
@@ -598,6 +800,7 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
     exportVersion: 1,
     project: {
       id: project.id,
+      projectType: project.projectType,
       schoolName: project.schoolName,
       photoDate: project.photoDate,
       address: project.address,
@@ -623,6 +826,11 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
       generatedStudentId: s.generatedStudentId,
       email: s.email ?? null,
       phone: s.phone ?? null,
+      secondaryEmail: s.secondaryEmail ?? null,
+      jobTitle: s.jobTitle ?? null,
+      officeLocation: s.officeLocation ?? null,
+      photoSession: s.photoSession ?? null,
+      captureNotes: s.captureNotes ?? null,
       simpleQr: s.simpleQr,
       jsonQr: s.jsonQr,
       createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt,
@@ -688,9 +896,20 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
     .from(studentsTable)
     .where(and(
       eq(studentsTable.projectId, projectId),
-      eq(studentsTable.generatedStudentId, generatedStudentId),
+      sql`lower(${studentsTable.generatedStudentId}) = lower(${generatedStudentId})`,
     ));
   if (existing) {
+    if (
+      existing.classId !== classId
+      || existing.firstName.normalize("NFKC").trim().toLocaleLowerCase() !== firstName.normalize("NFKC").trim().toLocaleLowerCase()
+      || existing.lastName.normalize("NFKC").trim().toLocaleLowerCase() !== lastName.normalize("NFKC").trim().toLocaleLowerCase()
+    ) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
     res.json({
       id: existing.id,
       classId: existing.classId,
@@ -708,18 +927,34 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
     generateSimpleQr(firstName, lastName, generatedStudentId),
     generateJsonQr(project.schoolName, cls.className, firstName, lastName, generatedStudentId),
   ]);
-  const [student] = await db
-    .insert(studentsTable)
-    .values({
-      projectId,
-      classId,
-      firstName,
-      lastName,
-      generatedStudentId,
-      simpleQr,
-      jsonQr,
-    })
-    .returning();
+  let student: typeof studentsTable.$inferSelect | undefined;
+  try {
+    [student] = await db
+      .insert(studentsTable)
+      .values({
+        projectId,
+        classId,
+        firstName,
+        lastName,
+        generatedStudentId,
+        simpleQr,
+        jsonQr,
+      })
+      .returning();
+  } catch (error) {
+    if (isStudentIdUniqueViolation(error)) {
+      res.status(409).json({
+        error: "That Student ID/Employee ID is already used in this project.",
+        code: "STUDENT_ID_CONFLICT",
+      });
+      return;
+    }
+    throw error;
+  }
+  if (!student) {
+    res.status(500).json({ error: "The student could not be created." });
+    return;
+  }
   await reconcileDefaultGroups(projectId);
 
   res.status(201).json({

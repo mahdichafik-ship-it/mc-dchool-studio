@@ -19,6 +19,16 @@ export interface Student {
   /** @nullable */
   phone?: string | null;
   /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
+  /** @nullable */
+  captureNotes?: string | null;
+  /** @nullable */
   simpleQr?: string | null;
   /** @nullable */
   jsonQr?: string | null;

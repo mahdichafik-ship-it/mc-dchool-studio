@@ -14,3 +14,9 @@ Unmatched-photo events must include the originating project context; otherwise a
 **Why:** The watcher can process several project folders at once, so a project-agnostic unmatched event either refreshes unrelated projects or leaves the affected project’s recoverable photo hidden.
 
 **How to apply:** Include the project identifier when emitting unmatched events and filter renderer subscriptions before reloading unmatched photos, project totals, or completeness summaries.
+
+Capture migration must first link a legacy JPEG to an existing same-event capture before inserting a compatibility capture.
+
+**Why:** Some releases can leave both a legacy `photos` row and a newer RAW/capture row for one shutter event; unconditional backfill creates duplicate review tiles.
+
+**How to apply:** Match project, student, basename, and capture timestamp during startup backfill, then derive the linked capture’s pairing status from its image files.

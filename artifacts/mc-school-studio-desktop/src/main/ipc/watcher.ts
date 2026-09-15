@@ -14,7 +14,7 @@ import {
   studentsTable,
   groupsTable,
 } from '../db/schema'
-import { getSetting } from './upload'
+import { getSetting, notifyLiveUploadJobQueued } from './upload'
 import {
   extractStudentReference,
   formatGroupPhotoName,
@@ -22,10 +22,10 @@ import {
   formatStudentPhotoName,
 } from '../lib/photoFileNaming'
 import { copyManagedCaptureFile } from '../lib/managedCaptureCopy'
-import { readQrFromImage } from '../lib/qrReader'
+import { readQrFromImage, type QrResult } from '../lib/qrReader'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { generateLivePreview, getLivePreviewCacheDir } from '../lib/livePreview'
-import { waitForStableFile } from '../lib/fileStability'
+import { readStableFile, waitForStableFile } from '../lib/fileStability'
 import {
   finishImagePipelineTrace,
   getImagePipelinePreviewContext,
@@ -33,6 +33,7 @@ import {
   markImagePipelinePreviewSuperseded,
   markImagePipelineRendererStage,
   retainImagePipelineTraceForPaint,
+  setImagePipelineBurstContext,
   startImagePipelineTrace,
 } from '../lib/imagePipelineDiagnostics'
 import {
@@ -40,13 +41,19 @@ import {
   clearManualStudent,
   createSequenceState,
   registerCapturePath,
+  resolveQueuedPortraitTarget,
+  snapshotCaptureTarget,
   setManualStudent,
   sortCaptureFiles,
+  OrderedCaptureQueue,
   type CaptureFile,
+  type CaptureAssignmentSource,
   type SequenceState,
 } from '../lib/photoSequence'
 import type {
   ActiveCaptureTargetEvent,
+  DroppedCaptureBatchResult,
+  DroppedCaptureFileResult,
   ImagePipelineRendererStage,
   Photo,
   Student,
@@ -63,6 +70,7 @@ import {
   recordQrMarker,
   recordRawCapture,
   recordGroupCapture,
+  findCapturePairAssignment,
 } from '../lib/captureRepository'
 import { getCaptureFileRole } from '../lib/capturePairing'
 import {
@@ -75,9 +83,9 @@ import { resolveWatchFolders } from '../lib/watchFolders'
 
 const FLUSH_DELAY_MS = 50
 interface WatchSession {
-  watcher: FSWatcher
+  watcher: FSWatcher | null
   pendingFiles: CaptureFile[]
-  pendingEnqueues: Set<Promise<void>>
+  pendingEnqueues: Set<Promise<unknown>>
   flushTimer: NodeJS.Timeout | null
   processing: Promise<void>
   persistence: Promise<void>
@@ -85,16 +93,60 @@ interface WatchSession {
   previewScheduler: NewestLivePreviewScheduler
   seenPaths: Set<string>
   sequenceState: SequenceState
+  nextArrivalOrder: number
+  orderedCaptures: OrderedCaptureQueue<CaptureFile>
+  awaitDurability: boolean
+}
+
+type CaptureProcessingStatus = 'imported' | 'duplicate' | 'unmatched'
+
+interface EnqueueCaptureOptions {
+  session?: WatchSession
+  selectedStudentId?: number | null
+  assignmentSource?: CaptureAssignmentSource
+  arrivalOrder?: number
+  selectedGroupId?: number | null
+  strictStudentOwnership?: boolean
+  processImmediately?: boolean
 }
 
 // Active watchers: projectId → watcher session
 const watchers = new Map<number, WatchSession>()
 const pendingManualTargets = new Map<number, number>()
 const pendingGroupTargets = new Map<number, number>()
+const activeDropBatches = new Set<Promise<DroppedCaptureBatchResult>>()
+const dropCapabilityTokens = new Map<number, string>()
+let dropBatchTail: Promise<void> = Promise.resolve()
 let desktopRetiring = false
+
+function createWatchSession(
+  watcher: FSWatcher | null,
+  sequenceState: SequenceState = createSequenceState(),
+  awaitDurability = false,
+): WatchSession {
+  return {
+    watcher,
+    pendingFiles: [],
+    pendingEnqueues: new Set(),
+    flushTimer: null,
+    processing: Promise.resolve(),
+    persistence: Promise.resolve(),
+    pendingPersistences: new Set(),
+    previewScheduler: new NewestLivePreviewScheduler(),
+    seenPaths: new Set(),
+    sequenceState,
+    nextArrivalOrder: 0,
+    orderedCaptures: new OrderedCaptureQueue<CaptureFile>(),
+    awaitDurability,
+  }
+}
 
 export async function stopAllWatchersForRetirement(): Promise<void> {
   desktopRetiring = true
+  // Drop ingestion uses isolated sessions rather than entries in `watchers`.
+  // Retirement must wait for those sessions too, otherwise the database and
+  // managed originals could be removed while a drop is still copying them.
+  await drainDroppedCaptureBatches()
   const sessions = [...watchers.values()]
   watchers.clear()
   for (const session of sessions) {
@@ -103,7 +155,12 @@ export async function stopAllWatchersForRetirement(): Promise<void> {
     session.pendingFiles = []
     await Promise.allSettled([...session.pendingEnqueues])
   }
-  await Promise.allSettled(sessions.map((session) => session.watcher.close()))
+  await Promise.allSettled(
+    sessions
+      .map((session) => session.watcher)
+      .filter((watcher): watcher is FSWatcher => watcher !== null)
+      .map((watcher) => watcher.close()),
+  )
   await Promise.allSettled(sessions.map((session) => session.processing))
   await Promise.allSettled(sessions.map((session) => session.persistence))
   await Promise.allSettled(sessions.flatMap((session) => [...session.pendingPersistences]))
@@ -120,10 +177,35 @@ export async function stopAllWatchersForShutdown(): Promise<void> {
   if (failures.length > 0) {
     throw new AggregateError(failures, 'One or more Watch Folder sessions failed to drain')
   }
+  await drainDroppedCaptureBatches()
 }
 
 export function enableWatchersAfterSignIn(): void {
   desktopRetiring = false
+}
+
+function queueDroppedCaptureBatch(
+  projectId: number,
+  studentId: number,
+  filePaths: string[],
+): Promise<DroppedCaptureBatchResult> {
+  // Serializing batches makes source-path dedupe and JPEG/RAW pairing
+  // deterministic when a photographer drops files again before the first
+  // batch has finished persisting.
+  const batch = dropBatchTail.then(() => ingestDroppedFiles(projectId, studentId, filePaths))
+  dropBatchTail = batch.then(
+    () => undefined,
+    () => undefined,
+  )
+  activeDropBatches.add(batch)
+  void batch.finally(() => activeDropBatches.delete(batch)).catch(() => {})
+  return batch
+}
+
+async function drainDroppedCaptureBatches(): Promise<void> {
+  while (activeDropBatches.size > 0) {
+    await Promise.allSettled([...activeDropBatches])
+  }
 }
 
 function getMainWindow(): BrowserWindow | null {
@@ -256,7 +338,7 @@ async function emitLocalPreview(
   projectId: number,
   capture: CaptureFile,
   student: typeof studentsTable.$inferSelect,
-  context: { filePath: string; fileName: string; capturedAt: string },
+  context: { filePath: string; fileName: string; capturedAt: string; sourceBuffer?: Buffer },
   previewPath: string,
 ): Promise<string | null> {
   const diagnosticId = capture.diagnosticId
@@ -302,7 +384,7 @@ async function prepareAndEmitLocalPreview(
   projectId: number,
   capture: CaptureFile,
   student: typeof studentsTable.$inferSelect,
-  context: { filePath: string; fileName: string; capturedAt: string },
+  context: { filePath: string; fileName: string; capturedAt: string; sourceBuffer?: Buffer },
 ): Promise<string | null> {
   const previewKey = capture.diagnosticId ?? `${projectId}:${capture.filePath}`
   markImagePipeline(
@@ -313,6 +395,7 @@ async function prepareAndEmitLocalPreview(
   const previewPath = await generateLivePreview(context.filePath, {
     previewKey,
     cacheDir: getLivePreviewCacheDir(app.getPath('home')),
+    sourceBuffer: context.sourceBuffer,
   })
   if (!previewPath) return null
   return emitLocalPreview(win, projectId, capture, student, context, previewPath)
@@ -324,7 +407,7 @@ function enqueueLocalPreview(
   projectId: number,
   capture: CaptureFile,
   student: typeof studentsTable.$inferSelect,
-  context: { filePath: string; fileName: string; capturedAt: string },
+  context: { filePath: string; fileName: string; capturedAt: string; sourceBuffer?: Buffer },
 ): null {
   // The trace must outlive the capture-processing loop because generation now
   // runs independently of persistence and may start after the loop advances.
@@ -351,6 +434,65 @@ function enqueueLocalPreview(
 
 type PendingMatchedPhoto = Extract<WatchedPhotoResult, { kind: 'matched-pending' }>
 
+async function handleQrMarker(
+  projectId: number,
+  capture: CaptureFile,
+  session: WatchSession,
+  db: ReturnType<typeof getDb>,
+  win: BrowserWindow | null,
+  qrResult: QrResult,
+): Promise<CaptureProcessingStatus> {
+  const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
+  const student = db
+    .select()
+    .from(studentsTable)
+    .where(eq(studentsTable.projectId, projectId))
+    .all()
+    .find((candidate) =>
+      candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
+
+  const decision = advanceSequence(session.sequenceState, {
+    kind: 'marker',
+    studentId: student?.id ?? null,
+    reference: qrResult.studentId,
+  })
+  if (decision.kind === 'review') {
+    recordUnmatched(db, win, projectId, capture, decision.reason)
+    emitActiveStudentChanged(projectId, null, 'none')
+    return 'unmatched'
+  }
+  if (!student) {
+    recordUnmatched(
+      db,
+      win,
+      projectId,
+      capture,
+      `QR marker "${qrResult.studentId}" does not match a student in this project`,
+    )
+    return 'unmatched'
+  }
+
+  const marker = await persistQrMarker(db, projectId, student, capture)
+  win?.webContents.send('photo:marker', {
+    markerId: marker.id,
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+    student: toStudentEvent(db, student),
+  })
+  emitActiveStudentChanged(projectId, student.id, 'qr')
+  console.log(`[Watcher] QR marker ${capture.fileName} → ${student.firstName} ${student.lastName}`)
+  return 'imported'
+}
+
+function createCaptureStore(
+  db: ReturnType<typeof getDb>,
+  capture: CaptureFile,
+) {
+  return createWatchedPhotoStore(db, capture.filePath, {
+    strictStudentOwnership: capture.strictStudentOwnership,
+  })
+}
+
 function enqueueMatchedPhotoPersistence(
   session: WatchSession,
   db: ReturnType<typeof getDb>,
@@ -358,30 +500,31 @@ function enqueueMatchedPhotoPersistence(
   projectId: number,
   capture: CaptureFile,
   result: PendingMatchedPhoto,
-): void {
-  const task = session.persistence
-    .then(async () => {
-      await session.previewScheduler.waitForIdle()
-      const photo = await result.persist()
-      await finishMatchedPhoto(
-        db,
-        win,
-        photo,
-        result.student,
-        capture.diagnosticId,
-        result.thumbnailData,
-        { skipPreviewGeneration: true },
-      )
-    })
-    .catch((error) => {
-      // The source remains untouched and can be retried after a removable or
-      // network-backed destination becomes available again.
-      session.seenPaths.delete(capture.filePath)
-      console.error(`[Watcher] Could not persist ${capture.filePath}; it will be retried`, error)
-    })
-  session.persistence = task
-  session.pendingPersistences.add(task)
-  void task.finally(() => session.pendingPersistences.delete(task)).catch(() => {})
+): Promise<void> {
+  const task = session.persistence.then(async () => {
+    await session.previewScheduler.waitForIdle()
+    const photo = await result.persist()
+    await finishMatchedPhoto(
+      db,
+      win,
+      photo,
+      result.student,
+      capture.diagnosticId,
+      result.thumbnailData,
+      { skipPreviewGeneration: true },
+    )
+    notifyLiveUploadJobQueued(projectId)
+  })
+  const handledTask = task.catch((error) => {
+    // The source remains untouched and can be retried after a removable or
+    // network-backed destination becomes available again.
+    session.seenPaths.delete(capture.filePath)
+    console.error(`[Watcher] Could not persist ${capture.filePath}; it will be retried`, error)
+  })
+  session.persistence = handledTask
+  session.pendingPersistences.add(handledTask)
+  void handledTask.finally(() => session.pendingPersistences.delete(handledTask)).catch(() => {})
+  return task
 }
 
 export function registerWatcherHandlers() {
@@ -395,6 +538,16 @@ export function registerWatcherHandlers() {
     }
     markImagePipelineRendererStage(stage)
     return { ok: true }
+  })
+
+  ipcMain.on('watcher:registerDropCapability', (event, token: unknown) => {
+    if (typeof token !== 'string' || token.length < 32) return
+    dropCapabilityTokens.set(event.sender.id, token)
+    event.sender.once('destroyed', () => {
+      if (dropCapabilityTokens.get(event.sender.id) === token) {
+        dropCapabilityTokens.delete(event.sender.id)
+      }
+    })
   })
 
   ipcMain.handle('watcher:start', async (_e, { projectId }: { projectId: number }) => {
@@ -428,25 +581,40 @@ export function registerWatcherHandlers() {
       ignoreInitial: false,
     })
 
-    const session: WatchSession = {
+    const session = createWatchSession(
       watcher,
-      pendingFiles: [],
-      pendingEnqueues: new Set(),
-      flushTimer: null,
-      processing: Promise.resolve(),
-      persistence: Promise.resolve(),
-      pendingPersistences: new Set(),
-      previewScheduler: new NewestLivePreviewScheduler(),
-      seenPaths: new Set(),
-      sequenceState: createSequenceState(pendingManualTargets.get(projectId) ?? null),
-    }
+      createSequenceState(pendingManualTargets.get(projectId) ?? null),
+    )
     watchers.set(projectId, session)
 
     watcher.on('add', (filePath) => {
       const diagnosticId = startImagePipelineTrace(filePath)
-      const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId)
-      session.pendingEnqueues.add(enqueueTask)
-      void enqueueTask.finally(() => session.pendingEnqueues.delete(enqueueTask))
+      // Capture identity synchronously with the filesystem event. Waiting for
+      // file stability before taking this snapshot lets a fast roster click
+      // move a JPEG/RAW into the next student's folder.
+      const target = snapshotCaptureTarget(session.sequenceState)
+      const arrivalOrder = session.nextArrivalOrder++
+      session.orderedCaptures.register(arrivalOrder)
+      const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId, {
+        selectedStudentId: target.studentId,
+        assignmentSource: target.source,
+        arrivalOrder,
+        selectedGroupId: pendingGroupTargets.get(projectId) ?? null,
+      })
+      const completion = enqueueTask
+        .then((status) => {
+          if (status !== 'imported') {
+            session.orderedCaptures.fail(arrivalOrder)
+            void scheduleOrderedCaptureDrain(projectId, session)
+          }
+        })
+        .catch((error) => {
+          session.orderedCaptures.fail(arrivalOrder)
+          void scheduleOrderedCaptureDrain(projectId, session)
+          console.error(`[Watcher] Could not enqueue ${filePath}`, error)
+        })
+        .finally(() => session.pendingEnqueues.delete(completion))
+      session.pendingEnqueues.add(completion)
     })
     watcher.on('error', (error) => {
       console.error(`[Watcher] Error for project ${projectId}`, error)
@@ -514,15 +682,40 @@ export function registerWatcherHandlers() {
 
   ipcMain.handle(
     'watcher:getActiveTarget',
-    (_e, { projectId }: { projectId: number }) => ({
-      studentId: pendingGroupTargets.has(projectId)
-        ? null
-        : watchers.get(projectId)?.sequenceState.activeStudentId ?? pendingManualTargets.get(projectId) ?? null,
-      groupId: pendingGroupTargets.get(projectId) ?? null,
-      targetType: pendingGroupTargets.has(projectId)
-        ? 'group'
-        : (pendingManualTargets.has(projectId) ? 'student' : 'none'),
-    }),
+    (_e, { projectId }: { projectId: number }) => {
+      const session = watchers.get(projectId)
+      const manualStudentId = pendingManualTargets.get(projectId)
+        ?? session?.sequenceState.manualStudentId
+        ?? null
+      const qrStudentId = session?.sequenceState.manualStudentId === null
+        ? session.sequenceState.activeStudentId
+        : null
+      if (pendingGroupTargets.has(projectId)) {
+        return {
+          studentId: null,
+          groupId: pendingGroupTargets.get(projectId) ?? null,
+          targetType: 'group' as const,
+          source: 'manual' as const,
+        }
+      }
+      if (manualStudentId !== null) {
+        return {
+          studentId: manualStudentId,
+          groupId: null,
+          targetType: 'student' as const,
+          source: 'manual' as const,
+        }
+      }
+      if (qrStudentId !== null && qrStudentId !== undefined) {
+        return {
+          studentId: qrStudentId,
+          groupId: null,
+          targetType: 'student' as const,
+          source: 'qr' as const,
+        }
+      }
+      return { studentId: null, groupId: null, targetType: 'none' as const, source: 'none' as const }
+    },
   )
 
   ipcMain.handle(
@@ -544,6 +737,35 @@ export function registerWatcherHandlers() {
         projectId, studentId: null, groupId, targetType: groupId === null ? 'none' : 'group', source: groupId === null ? 'none' : 'manual',
       })
       return groupId
+    },
+  )
+
+  ipcMain.handle(
+    'watcher:ingestDroppedFiles',
+    async (
+      event,
+      input: {
+        capabilityToken?: unknown
+        projectId?: unknown
+        studentId?: unknown
+        filePaths?: unknown
+      },
+    ): Promise<DroppedCaptureBatchResult> => {
+      if (
+        typeof input?.capabilityToken !== 'string'
+        || dropCapabilityTokens.get(event.sender.id) !== input.capabilityToken
+      ) {
+        throw new Error('Dropped photo import is only available through the preload capability')
+      }
+      if (
+        !Number.isInteger(input.projectId)
+        || !Number.isInteger(input.studentId)
+        || !Array.isArray(input.filePaths)
+        || input.filePaths.some((filePath) => typeof filePath !== 'string' || !filePath.trim())
+      ) {
+        throw new Error('A valid project, student, and dropped file paths are required')
+      }
+      return queueDroppedCaptureBatch(input.projectId, input.studentId, input.filePaths)
     },
   )
 }
@@ -568,13 +790,15 @@ export async function stopProjectWatcher(
   watchers.delete(projectId)
   if (session.flushTimer) clearTimeout(session.flushTimer)
   session.flushTimer = null
-  await session.watcher.close()
+  if (session.watcher) await session.watcher.close()
   await Promise.allSettled([...session.pendingEnqueues])
+  await scheduleOrderedCaptureDrain(projectId, session)
   const pending = sortCaptureFiles(session.pendingFiles.splice(0))
 
   if (drain && pending.length > 0) {
     session.processing = session.processing.then(async () => {
-      for (const capture of pending) {
+      for (const [index, capture] of pending.entries()) {
+        setImagePipelineBurstContext(capture.diagnosticId, index + 1, pending.length)
         try {
           await handleNewPhoto(projectId, capture, session)
         } catch (error) {
@@ -600,48 +824,115 @@ async function enqueueCapture(
   projectId: number,
   filePath: string,
   diagnosticId?: string,
-): Promise<void> {
+  options: EnqueueCaptureOptions = {},
+): Promise<CaptureProcessingStatus | 'unsupported'> {
   if (desktopRetiring) {
     finishImagePipelineTrace(diagnosticId)
-    return
+    throw new Error('Cloud sync is disabled because this desktop was retired')
   }
-  const session = watchers.get(projectId)
+  const session = options.session ?? watchers.get(projectId)
   if (!session || session.seenPaths.has(filePath)) {
     finishImagePipelineTrace(diagnosticId)
-    return
+    return 'duplicate'
   }
 
   if (!getCaptureFileRole(filePath)) {
     finishImagePipelineTrace(diagnosticId)
-    return
+    return 'unsupported'
   }
 
   try {
     const fileStat = await waitForStableFile(filePath, statFile)
     markImagePipeline(diagnosticId, 'file became stable', `bytes=${fileStat.size}`)
-    if (desktopRetiring || watchers.get(projectId) !== session) {
+    if (desktopRetiring || (options.session === undefined && watchers.get(projectId) !== session)) {
       finishImagePipelineTrace(diagnosticId)
-      return
+      throw new Error('Capture session stopped before the file became available')
     }
-    if (!registerCapturePath(session.seenPaths, filePath)) return
-    session.pendingFiles.push({
+    const db = getDb()
+    if (
+      hasProcessedCaptureSource(db, filePath)
+      || hasProcessedQrMarkerSource(db, filePath)
+    ) {
+      return 'duplicate'
+    }
+    const sourceBuffer = getCaptureFileRole(filePath) === 'JPEG'
+      ? await readStableFile(filePath, fileStat.size)
+      : undefined
+    markImagePipeline(
+      diagnosticId,
+      'source bytes snapshotted',
+      sourceBuffer ? `bytes=${sourceBuffer.length} decoder-input=buffer` : 'decoder-input=managed-source',
+    )
+    if (!registerCapturePath(session.seenPaths, filePath)) return 'duplicate'
+    const capture: CaptureFile = {
       filePath,
       fileName: basename(filePath),
       capturedAtMs: captureTimestamp(fileStat),
+      sourceBuffer,
       diagnosticId,
       // Capture the effective target at arrival time. Processing can be
       // delayed by image copies or a burst of filesystem events, and a
       // photographer may select another student or scan another QR during
       // that delay.
-      selectedStudentId: session.sequenceState.manualStudentId
-        ?? session.sequenceState.activeStudentId,
-      selectedGroupId: pendingGroupTargets.get(projectId) ?? null,
-    })
+      selectedStudentId: options.selectedStudentId !== undefined
+        ? options.selectedStudentId
+        : session.sequenceState.manualStudentId ?? session.sequenceState.activeStudentId,
+      assignmentSource: options.assignmentSource ?? snapshotCaptureTarget(session.sequenceState).source,
+      arrivalOrder: options.arrivalOrder ?? session.nextArrivalOrder++,
+      selectedGroupId: options.selectedGroupId !== undefined
+        ? options.selectedGroupId
+        : pendingGroupTargets.get(projectId) ?? null,
+      strictStudentOwnership: options.strictStudentOwnership,
+    }
+    if (options.arrivalOrder !== undefined) {
+      session.orderedCaptures.ready(options.arrivalOrder, capture)
+      void scheduleOrderedCaptureDrain(projectId, session)
+    } else {
+      session.pendingFiles.push(capture)
+    }
+    if (options.processImmediately) {
+      const [capture] = session.pendingFiles.splice(0)
+      if (!capture) throw new Error('Capture could not be queued')
+      const processing = session.processing.then(() => handleNewPhoto(projectId, capture, session))
+      session.processing = processing.catch((error) => {
+        session.seenPaths.delete(capture.filePath)
+        console.error(`[Watcher] Could not process ${capture.filePath}`, error)
+      })
+      try {
+        return await processing
+      } finally {
+        finishImagePipelineTrace(capture.diagnosticId)
+      }
+    }
     scheduleFlush(projectId)
+    return 'imported'
   } catch (error) {
     console.error(`[Watcher] Could not inspect ${filePath}`, error)
     finishImagePipelineTrace(diagnosticId)
+    throw error
   }
+}
+
+async function scheduleOrderedCaptureDrain(
+  projectId: number,
+  session: WatchSession,
+): Promise<void> {
+  session.processing = session.processing.then(async () => {
+    await session.orderedCaptures.drain(async (capture) => {
+      try {
+        await handleNewPhoto(projectId, capture, session)
+      } catch (error) {
+        session.seenPaths.delete(capture.filePath)
+        console.error(
+          `[Watcher] Could not process ordered capture ${capture.filePath}; it will be retried`,
+          error,
+        )
+      } finally {
+        finishImagePipelineTrace(capture.diagnosticId)
+      }
+    })
+  })
+  await session.processing
 }
 
 function scheduleFlush(projectId: number): void {
@@ -656,7 +947,8 @@ function scheduleFlush(projectId: number): void {
 
     session.processing = session.processing
       .then(async () => {
-        for (const capture of batch) {
+        for (const [index, capture] of batch.entries()) {
+          setImagePipelineBurstContext(capture.diagnosticId, index + 1, batch.length)
           try {
             await handleNewPhoto(projectId, capture, session)
           } catch (error) {
@@ -678,12 +970,144 @@ function scheduleFlush(projectId: number): void {
   }, FLUSH_DELAY_MS)
 }
 
+function sendDroppedProgress(
+  projectId: number,
+  studentId: number,
+  completed: number,
+  total: number,
+  result: DroppedCaptureFileResult,
+): void {
+  getMainWindow()?.webContents.send('watcher:dropProgress', {
+    projectId,
+    studentId,
+    completed,
+    total,
+    result,
+  })
+}
+
+async function ingestDroppedFiles(
+  projectId: number,
+  studentId: number,
+  filePaths: string[],
+): Promise<DroppedCaptureBatchResult> {
+  if (desktopRetiring || getSetting('desktop_retired') === '1') {
+    throw new Error('Cloud sync is disabled because this desktop was retired')
+  }
+
+  const db = getDb()
+  const project = db
+    .select()
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId))
+    .get()
+  if (!project) throw new Error(`Project ${projectId} not found`)
+  if (project.finishedAt) {
+    throw new Error('This project is finished. Reopen it as a new local project before importing photos.')
+  }
+  const student = findProjectStudent(db, projectId, studentId)
+  if (!student) throw new Error('Student does not belong to this project')
+  if (!Array.isArray(filePaths)) throw new Error('Dropped files were not provided')
+
+  // This session intentionally has no chokidar watcher. It reuses the same
+  // stable-file and handleNewPhoto pipeline without importing the configured
+  // watch folder or changing the camera sequence target.
+  const session = createWatchSession(null, createSequenceState(), true)
+  const results: DroppedCaptureFileResult[] = []
+  let imported = 0
+  let duplicates = 0
+  let skipped = 0
+  let errors = 0
+
+  for (const rawPath of filePaths) {
+    const filePath = typeof rawPath === 'string' ? rawPath : ''
+    const fileName = filePath ? basename(filePath) : 'Unknown file'
+    let diagnosticId: string | undefined
+    let result: DroppedCaptureFileResult
+
+    if (!filePath) {
+      result = { filePath, fileName, status: 'error', reason: 'The dropped file path was empty.' }
+    } else if (!getCaptureFileRole(fileName)) {
+      result = {
+        filePath,
+        fileName,
+        status: 'unsupported',
+        reason: 'Only JPEG (.jpg/.jpeg) and supported RAW files can be imported.',
+      }
+    } else {
+      try {
+        diagnosticId = startImagePipelineTrace(filePath)
+        const fileStat = await statFile(filePath)
+        if (!fileStat.isFile()) {
+          throw new Error('The dropped item is not a regular file.')
+        }
+        const status = await enqueueCapture(projectId, filePath, diagnosticId, {
+          session,
+          selectedStudentId: studentId,
+          assignmentSource: 'manual',
+          selectedGroupId: null,
+          strictStudentOwnership: true,
+          processImmediately: true,
+        })
+        if (status === 'duplicate') {
+          result = {
+            filePath,
+            fileName,
+            status: 'duplicate',
+            reason: 'This source file was already imported or discarded.',
+          }
+        } else if (status === 'unmatched') {
+          result = {
+            filePath,
+            fileName,
+            status: 'error',
+            reason: 'The capture could not be assigned to the selected student.',
+          }
+        } else {
+          result = { filePath, fileName, status: 'imported' }
+        }
+      } catch (error) {
+        result = {
+          filePath,
+          fileName,
+          status: 'error',
+          reason: error instanceof Error ? error.message : String(error),
+        }
+      } finally {
+        finishImagePipelineTrace(diagnosticId)
+      }
+    }
+
+    results.push(result)
+    if (result.status === 'imported') imported++
+    else if (result.status === 'duplicate') duplicates++
+    else if (result.status === 'unsupported') skipped++
+    else errors++
+    sendDroppedProgress(projectId, studentId, results.length, filePaths.length, result)
+  }
+
+  await session.processing
+  await session.persistence
+  await Promise.allSettled([...session.pendingPersistences])
+  await session.previewScheduler.waitForIdle()
+  return {
+    projectId,
+    studentId,
+    total: filePaths.length,
+    imported,
+    duplicates,
+    skipped,
+    errors,
+    files: results,
+  }
+}
+
 async function handleNewPhoto(
   projectId: number,
   capture: CaptureFile,
   session: WatchSession,
-): Promise<void> {
-  if (desktopRetiring) return
+): Promise<CaptureProcessingStatus> {
+  if (desktopRetiring) throw new Error('Cloud sync is disabled because this desktop was retired')
   const db = getDb()
   const project = db
     .select()
@@ -696,7 +1120,7 @@ async function handleNewPhoto(
     !role
     || hasProcessedCaptureSource(db, capture.filePath)
     || hasProcessedQrMarkerSource(db, capture.filePath)
-  ) return
+  ) return 'duplicate'
 
   // Group targets deliberately bypass student matching/QR sequencing. Both
   // JPEG and RAW files use the same repository pairing key and remain local
@@ -726,33 +1150,106 @@ async function handleNewPhoto(
       filePath: capture.filePath, storedPath, fileName: capture.fileName,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
     })
-    return
+    notifyLiveUploadJobQueued(projectId)
+    getMainWindow()?.webContents.send('groupCapture:updated', {
+      projectId,
+      groupId: group.id,
+    })
+    return 'imported'
   }
 
   if (role === 'RAW') {
-    await handleNewRaw(projectId, capture, session, db)
-    return
+    return handleNewRaw(projectId, capture, session, db)
   }
 
   const win = getMainWindow()
-  const manualStudentId = capture.selectedStudentId !== undefined
-    ? capture.selectedStudentId
-    : session.sequenceState.manualStudentId
+  const capturedStudentId = capture.selectedStudentId ?? null
+  // Older queued records did not carry a source. Treat a target that was
+  // manual at processing time as manual for compatibility; new records always
+  // use the immutable source captured with the filesystem event.
+  const assignmentSource = capture.assignmentSource
+    ?? (session.sequenceState.manualStudentId !== null
+      ? 'manual'
+      : capturedStudentId !== null ? 'qr' : 'none')
+  const manualStudentId = assignmentSource === 'manual' ? capturedStudentId : null
   const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
+  let qrResult = manualStudentId !== null
+    ? await readQrFromImage(capture.filePath, capture.sourceBuffer)
+    : null
+
+  // A manual target must not turn a QR marker into a portrait just because
+  // the marker filename happens to resemble a Smart Shooter filename.
+  if (manualStudentId !== null && qrResult) {
+    const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
+    const qrStudent = knownStudents.find((candidate) =>
+      candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
+    const decision = advanceSequence(session.sequenceState, {
+      kind: 'marker',
+      studentId: qrStudent?.id ?? null,
+      reference: qrResult.studentId,
+    })
+    recordUnmatched(
+      db,
+      win,
+      projectId,
+      capture,
+      decision.kind === 'review'
+        ? decision.reason
+        : `QR marker "${qrResult.studentId}" was ignored while a student is manually selected`,
+    )
+    return 'unmatched'
+  }
+
+  // A QR-sequenced target is also authoritative for this capture, but unlike
+  // a manual target it may be advanced by a later marker. Keep marker
+  // handling separate from manual handling so a normal QR sequence can move
+  // from A to B instead of being mistaken for a manual mismatch.
+  if (assignmentSource === 'qr') {
+    qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
+    if (qrResult) {
+      if (session.sequenceState.manualStudentId !== null) {
+        recordUnmatched(
+          db,
+          win,
+          projectId,
+          capture,
+          `QR marker "${qrResult.studentId}" was not accepted while a student is manually selected`,
+        )
+        return 'unmatched'
+      }
+      return handleQrMarker(projectId, capture, session, db, win, qrResult)
+    }
+  }
+
   const filenameReference = extractStudentReference(
     capture.fileName,
     knownStudents.map((student) => student.generatedStudentId),
   )
+  const queuedPortraitTarget = resolveQueuedPortraitTarget(
+    session.sequenceState,
+    capturedStudentId,
+    assignmentSource,
+  )
+
+  // With no target snapshot, inspect the pixels before trusting a basename.
+  // A delayed QR marker can have a Smart Shooter-looking filename; treating
+  // that filename as a portrait would silently select the wrong student.
+  if (assignmentSource === 'none') {
+    qrResult = await readQrFromImage(capture.filePath, capture.sourceBuffer)
+    if (qrResult) {
+      return handleQrMarker(projectId, capture, session, db, win, qrResult)
+    }
+  }
 
   // Smart Shooter's roster ID is the most reliable portrait signal. Resolve
-  // it before pixel QR detection so a portrait that happens to contain a
-  // barcode/QR-like pattern is not swallowed as a marker.
-  if (filenameReference) {
+  // it after the explicit QR check above.
+  if (assignmentSource === 'none' && queuedPortraitTarget === null && filenameReference) {
     const result = await processWatchedPhoto(projectId, capture.filePath, {
-      store: createWatchedPhotoStore(db, capture.filePath),
+      store: createCaptureStore(db, capture),
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
+      sourceBuffer: capture.sourceBuffer,
       targetStudentId: manualStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
@@ -770,22 +1267,25 @@ async function handleNewPhoto(
     if (result.kind === 'unmatched') {
       sendUnmatchedResult(win, projectId, result)
       console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
-      return
+      return 'unmatched'
     }
 
     if (result.kind === 'matched-pending') {
-      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+      const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+      if (session.awaitDurability) await persistence
     }
-    return
+    return 'imported'
   }
 
-  if (manualStudentId !== null) {
+  if (manualStudentId !== null || queuedPortraitTarget !== null) {
+    const targetStudentId = manualStudentId ?? queuedPortraitTarget
     const result = await processWatchedPhoto(projectId, capture.filePath, {
-      store: createWatchedPhotoStore(db, capture.filePath),
+      store: createCaptureStore(db, capture),
       photosDir: getPhotosDir(),
       projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
       readQr: async () => null,
-      targetStudentId: manualStudentId,
+      sourceBuffer: capture.sourceBuffer,
+      targetStudentId,
       capturedAt: new Date(capture.capturedAtMs).toISOString(),
       diagnosticId: capture.diagnosticId,
       deferPersistence: true,
@@ -802,78 +1302,34 @@ async function handleNewPhoto(
     if (result.kind === 'unmatched') {
       sendUnmatchedResult(win, projectId, result)
       console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
-      return
+      return 'unmatched'
     }
 
     if (result.kind === 'matched-pending') {
-      enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+      const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+      if (session.awaitDurability) await persistence
     }
-    return
+    return 'imported'
   }
 
-  // A QR marker can select the next student when the photographer has not
-  // explicitly selected one in the roster.
-  const qrResult = await readQrFromImage(capture.filePath)
-
+  // A QR marker can select the next student only when no target was active
+  // when this filesystem event arrived.
+  qrResult = qrResult ?? await readQrFromImage(capture.filePath, capture.sourceBuffer)
   if (qrResult) {
-    const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
-    const student = db
-      .select()
-      .from(studentsTable)
-      .where(eq(studentsTable.projectId, projectId))
-      .all()
-      .find((candidate) =>
-        candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
-
-    const decision = advanceSequence(session.sequenceState, {
-      kind: 'marker',
-      studentId: student?.id ?? null,
-      reference: qrResult.studentId,
-    })
-
-    if (decision.kind === 'review') {
-      recordUnmatched(db, win, projectId, capture, decision.reason)
-      emitActiveStudentChanged(projectId, null, 'none')
-      return
-    }
-
-    if (!student) {
-      recordUnmatched(
-        db,
-        win,
-        projectId,
-        capture,
-        `QR marker "${qrResult.studentId}" does not match a student in this project`,
-      )
-      return
-    }
-
-    const marker = await persistQrMarker(db, projectId, student, capture)
-    win?.webContents.send('photo:marker', {
-      markerId: marker.id,
-      fileName: capture.fileName,
-      capturedAt: new Date(capture.capturedAtMs).toISOString(),
-      student: toStudentEvent(db, student!),
-    })
-    emitActiveStudentChanged(
-      projectId,
-      student.id,
-      'qr',
-    )
-    console.log(`[Watcher] QR marker ${capture.fileName} → ${student!.firstName} ${student!.lastName}`)
-    return
+    return handleQrMarker(projectId, capture, session, db, win, qrResult)
   }
 
   // Once a QR marker is active, its sequence owns every following portrait.
   // Filename matching remains available only for older Smart Shooter setups
   // that do not use marker images.
-  if (session.sequenceState.activeStudentId === null) {
+  if (assignmentSource === 'none' && queuedPortraitTarget === null) {
     if (looksLikeSmartShooterName(capture.fileName)) {
       const result = await processWatchedPhoto(projectId, capture.filePath, {
-        store: createWatchedPhotoStore(db, capture.filePath),
+        store: createCaptureStore(db, capture),
         photosDir: getPhotosDir(),
         projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
         readQr: async () => null,
+        sourceBuffer: capture.sourceBuffer,
         capturedAt: new Date(capture.capturedAtMs).toISOString(),
         diagnosticId: capture.diagnosticId,
         deferPersistence: true,
@@ -890,64 +1346,22 @@ async function handleNewPhoto(
       if (result.kind === 'unmatched') {
         sendUnmatchedResult(win, projectId, result)
         console.log(`[Watcher] Unmatched ${capture.fileName}: ${result.reason}`)
-        return
+        return 'unmatched'
       }
 
       if (result.kind === 'matched-pending') {
-        enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+        const persistence = enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
+        if (session.awaitDurability) await persistence
       }
-      return
+      return 'imported'
     }
   }
 
-  const decision = advanceSequence(session.sequenceState, { kind: 'portrait' })
-  if (decision.kind === 'review') {
-    recordUnmatched(db, win, projectId, capture, decision.reason)
-    return
-  }
-
-  const student = db
-    .select()
-    .from(studentsTable)
-    .where(
-      and(
-        eq(studentsTable.projectId, projectId),
-        eq(studentsTable.id, decision.studentId),
-      ),
-    )
-    .get()
-
-  if (!student) {
-    session.sequenceState.activeStudentId = null
-    recordUnmatched(db, win, projectId, capture, 'The active student is no longer in this project roster')
-    return
-  }
-
-  const result = await processWatchedPhoto(projectId, capture.filePath, {
-    store: createWatchedPhotoStore(db, capture.filePath),
-    photosDir: getPhotosDir(),
-    projectJpegOriginalsDir: getProjectStorage(projectId, project).jpegOriginals,
-    readQr: async () => null,
-    targetStudentId: student.id,
-    capturedAt: new Date(capture.capturedAtMs).toISOString(),
-    diagnosticId: capture.diagnosticId,
-    deferPersistence: true,
-    onPreviewReady: (context) => enqueueLocalPreview(
-      session.previewScheduler,
-      win,
-      projectId,
-      capture,
-      context.student,
-      context,
-    ),
-  })
-  if (result.kind === 'unmatched') {
-    sendUnmatchedResult(win, projectId, result)
-    return
-  }
-  if (result.kind === 'matched-pending') {
-    enqueueMatchedPhotoPersistence(session, db, win, projectId, capture, result)
-  }
+  // No target was active at arrival and no filename/QR identity was found.
+  // Never consult the mutable sequence state here: a later QR/manual event
+  // must not claim an older ambiguous file.
+  recordUnmatched(db, win, projectId, capture, 'Capture had no identity at filesystem arrival')
+  return 'unmatched'
 }
 
 async function copyToProjectFolder(
@@ -1021,9 +1435,9 @@ async function handleNewRaw(
   capture: CaptureFile,
   session: WatchSession,
   db: ReturnType<typeof getDb>,
-): Promise<void> {
+): Promise<CaptureProcessingStatus> {
   const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
-  if (!project) return
+  if (!project) throw new Error(`Project ${projectId} not found`)
 
   const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
   const filenameReference = extractStudentReference(
@@ -1031,20 +1445,43 @@ async function handleNewRaw(
     knownStudents.map((student) => student.generatedStudentId),
   )
   const filenameStudent = findStudentByFilename(db, projectId, capture.fileName)
-  const manualStudentId = capture.selectedStudentId !== undefined
-    ? capture.selectedStudentId
-    : session.sequenceState.manualStudentId
+  const capturedStudentId = capture.selectedStudentId ?? null
+  const assignmentSource = capture.assignmentSource
+    ?? (session.sequenceState.manualStudentId !== null
+      ? 'manual'
+      : capturedStudentId !== null ? 'qr' : 'none')
+  const manualStudentId = assignmentSource === 'manual' ? capturedStudentId : null
   const manualStudent = manualStudentId === null
     ? undefined
     : findProjectStudent(db, projectId, manualStudentId)
-  const sequenceStudentId = session.sequenceState.activeStudentId
-  const sequenceStudent = sequenceStudentId === null
+  const capturedTargetStudent = capturedStudentId === null
     ? undefined
-    : findProjectStudent(db, projectId, sequenceStudentId)
-  // The in-app target is authoritative when one was captured with the file.
-  const student = manualStudentId !== null
-    ? manualStudent
-    : filenameStudent ?? sequenceStudent
+    : findProjectStudent(db, projectId, capturedStudentId)
+  // Pairing is an immutable shutter identity. Resolve an existing JPEG pair
+  // before constructing any destination path; the active target at delayed
+  // RAW arrival is only a fallback when no same-shutter capture exists.
+  const pairAssignment = findCapturePairAssignment(db, {
+    projectId,
+    studentId: manualStudentId ?? capturedStudentId ?? filenameStudent?.id ?? null,
+    fileName: capture.fileName,
+    capturedAt: new Date(capture.capturedAtMs).toISOString(),
+    groupId: capture.selectedGroupId === null || capture.selectedGroupId === undefined
+      ? undefined
+      : String(capture.selectedGroupId),
+    strictStudentOwnership: capture.strictStudentOwnership,
+  })
+  const pairedStudent = pairAssignment?.studentId === null || pairAssignment === undefined
+    ? undefined
+    : findProjectStudent(db, projectId, pairAssignment.studentId)
+  // The target source captured with the filesystem event is authoritative.
+  // Filename matching is only a fallback for an event that had no active
+  // manual/QR target. Never consult the mutable target again for a delayed
+  // RAW file.
+  const student = pairAssignment
+    ? pairedStudent
+    : assignmentSource !== 'none'
+    ? (manualStudent ?? capturedTargetStudent)
+    : filenameStudent
   markImagePipeline(
     capture.diagnosticId,
     'student lookup complete',
@@ -1076,83 +1513,86 @@ async function handleNewRaw(
     )
   }
 
-  const task = session.persistence
-    .then(async () => {
-      await session.previewScheduler.waitForIdle()
-      const storage = getProjectStorage(projectId, project)
-      const destinationFileName = student
-        ? formatStudentPhotoName(
-          student.firstName,
-          student.lastName,
-          student.generatedStudentId,
-          capture.fileName,
-        )
-        : capture.fileName
-      const studentFolder = student ? getStudentPhotoFolder(db, projectId, student) : null
-      const outputFileName = nextAvailableFileName(
-        [studentFolder, storage.rawOriginals]
-          .filter((directory): directory is string => directory !== null),
-        destinationFileName,
+  const task = session.persistence.then(async () => {
+    await session.previewScheduler.waitForIdle()
+    const storage = getProjectStorage(projectId, project)
+    const destinationFileName = student
+      ? formatStudentPhotoName(
+        student.firstName,
+        student.lastName,
+        student.generatedStudentId,
+        capture.fileName,
       )
-      markImagePipeline(
-        capture.diagnosticId,
-        'file move started',
-        `destination=${student ? 'student folder' : 'RAW originals'} mode=async-copy`,
-      )
-      const legacyStoredPath = student
-        ? await copyToProjectFolder(
-          capture.filePath,
-          outputFileName,
-          studentFolder!,
-        )
-        : null
-      const storedPath = await copyToProjectFolder(
+      : capture.fileName
+    const studentFolder = student ? getStudentPhotoFolder(db, projectId, student) : null
+    const outputFileName = nextAvailableFileName(
+      [studentFolder, storage.rawOriginals]
+        .filter((directory): directory is string => directory !== null),
+      destinationFileName,
+    )
+    markImagePipeline(
+      capture.diagnosticId,
+      'file move started',
+      `destination=${student ? 'student folder' : 'RAW originals'} mode=async-copy`,
+    )
+    const legacyStoredPath = student
+      ? await copyToProjectFolder(
         capture.filePath,
         outputFileName,
-        storage.rawOriginals,
+        studentFolder!,
       )
-      markImagePipeline(
-        capture.diagnosticId,
-        'file move complete',
-        `storedPath=${storedPath} legacyPath=${legacyStoredPath ?? 'none'} mode=async-copy`,
-      )
-      markImagePipeline(capture.diagnosticId, 'RAW pairing complete', `capture=${capture.fileName}`)
-      markImagePipeline(capture.diagnosticId, 'database write started', `capture=${capture.fileName}`)
-      const result = recordRawCapture(db, {
-        projectId,
-        studentId: student?.id ?? null,
-        classId: student?.classId ?? null,
-        filePath: capture.filePath,
-        storedPath,
-        fileName: outputFileName,
-        capturedAt: new Date(capture.capturedAtMs).toISOString(),
-      })
+      : null
+    const storedPath = await copyToProjectFolder(
+      capture.filePath,
+      outputFileName,
+      storage.rawOriginals,
+    )
+    markImagePipeline(
+      capture.diagnosticId,
+      'file move complete',
+      `storedPath=${storedPath} legacyPath=${legacyStoredPath ?? 'none'} mode=async-copy`,
+    )
+    markImagePipeline(capture.diagnosticId, 'RAW pairing complete', `capture=${capture.fileName}`)
+    markImagePipeline(capture.diagnosticId, 'database write started', `capture=${capture.fileName}`)
+    const result = recordRawCapture(db, {
+      projectId,
+      studentId: student?.id ?? null,
+      classId: student?.classId ?? null,
+      filePath: capture.filePath,
+      storedPath,
+      fileName: outputFileName,
+      capturedAt: new Date(capture.capturedAtMs).toISOString(),
+      strictStudentOwnership: capture.strictStudentOwnership,
+    })
 
-      if (result.kind === 'duplicate') return
-      markImagePipeline(capture.diagnosticId, 'database write complete', `capture=${result.captureId}`)
-      const savedCapture = db
-        .select()
-        .from(capturesTable)
-        .where(eq(capturesTable.id, result.captureId))
-        .get()
-      getMainWindow()?.webContents.send('capture:updated', {
-        projectId,
-        captureId: result.captureId,
-        studentId: savedCapture?.studentId ?? null,
-      })
-      markImagePipeline(capture.diagnosticId, 'IPC event sent', 'RAW capture update')
-      console.log(
-        `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
-          + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
-      )
+    if (result.kind === 'duplicate') return
+    notifyLiveUploadJobQueued(projectId)
+    markImagePipeline(capture.diagnosticId, 'database write complete', `capture=${result.captureId}`)
+    const savedCapture = db
+      .select()
+      .from(capturesTable)
+      .where(eq(capturesTable.id, result.captureId))
+      .get()
+    getMainWindow()?.webContents.send('capture:updated', {
+      projectId,
+      captureId: result.captureId,
+      studentId: savedCapture?.studentId ?? null,
     })
-    .catch((error) => {
-      session.seenPaths.delete(capture.filePath)
-      console.error(`[Watcher] Could not persist RAW ${capture.filePath}; it will be retried`, error)
-    })
-  session.persistence = task
-  session.pendingPersistences.add(task)
-  void task.finally(() => session.pendingPersistences.delete(task)).catch(() => {})
+    markImagePipeline(capture.diagnosticId, 'IPC event sent', 'RAW capture update')
+    console.log(
+      `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
+        + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
+    )
+  })
+  const handledTask = task.catch((error) => {
+    session.seenPaths.delete(capture.filePath)
+    console.error(`[Watcher] Could not persist RAW ${capture.filePath}; it will be retried`, error)
+  })
+  session.persistence = handledTask
+  session.pendingPersistences.add(handledTask)
+  void handledTask.finally(() => session.pendingPersistences.delete(handledTask)).catch(() => {})
+  if (session.awaitDurability) await task
+  return 'imported'
 }
 
 async function finishMatchedPhoto(

@@ -34,6 +34,7 @@ type CollaborationData = {
     expectedFileCount: number;
     uploadedFileCount: number;
     failedFileCount: number;
+    handoffComment: string | null;
     lastSyncAt: string;
   }>;
   completionGate: {
@@ -95,13 +96,13 @@ export function CollaborationTab({ projectId }: { projectId: number }) {
   ] as const;
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-6 p-4 sm:p-6">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Collaborative project uploads</h2>
           <p className="mt-1 text-sm text-slate-500">Each photographer uploads an independent batch into this shared project.</p>
         </div>
-        <button onClick={() => void load()} className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <button onClick={() => void load()} className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:w-auto">
           <RefreshCw className="h-4 w-4" /> Refresh
         </button>
       </div>
@@ -117,8 +118,8 @@ export function CollaborationTab({ projectId }: { projectId: number }) {
         <div className="border-b border-slate-200 px-5 py-4"><h3 className="flex items-center gap-2 font-semibold text-slate-900"><Users className="h-4 w-4 text-teal-600" /> Assigned photographers</h3></div>
         {data.assignments.length === 0 ? <p className="p-5 text-sm text-slate-500">No photographers are assigned yet. Assign them from Team.</p> : (
           <div className="divide-y divide-slate-100">
-            {data.assignments.map((assignment) => <div key={assignment.memberId} className="flex items-center justify-between gap-4 px-5 py-4">
-              <div><p className="font-medium text-slate-900">{assignment.displayName || assignment.email}</p><p className="text-sm capitalize text-slate-500">{assignment.role} · {assignment.batchCount} {assignment.batchCount === 1 ? 'batch' : 'batches'}</p></div>
+            {data.assignments.map((assignment) => <div key={assignment.memberId} className="flex flex-col items-start gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0"><p className="break-words font-medium text-slate-900">{assignment.displayName || assignment.email}</p><p className="text-sm capitalize text-slate-500">{assignment.role} · {assignment.batchCount} {assignment.batchCount === 1 ? 'batch' : 'batches'}</p></div>
               <StatusBadge status={assignment.latestBatchStatus} />
             </div>)}
           </div>
@@ -130,7 +131,11 @@ export function CollaborationTab({ projectId }: { projectId: number }) {
         {data.batches.length === 0 ? <p className="p-5 text-sm text-slate-500">Batches appear here after a photographer chooses Upload &amp; Finish in the Mac app.</p> : (
           <div className="divide-y divide-slate-100">
             {data.batches.map((batch) => <div key={batch.id} className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_auto_auto] md:items-center">
-              <div><p className="font-medium text-slate-900">{batch.displayName || batch.email}</p><p className="text-sm text-slate-500">{batch.deviceName} · synced {new Date(batch.lastSyncAt).toLocaleString()}</p></div>
+              <div>
+                <p className="font-medium text-slate-900">{batch.displayName || batch.email}</p>
+                <p className="text-sm text-slate-500">{batch.deviceName} · synced {new Date(batch.lastSyncAt).toLocaleString()}</p>
+                {batch.handoffComment ? <p className="mt-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-sm text-teal-900"><span className="font-semibold">Photographer handoff:</span> {batch.handoffComment}</p> : null}
+              </div>
               <p className="text-sm text-slate-600">{batch.uploadedFileCount} / {batch.expectedFileCount} files{batch.failedFileCount ? ` · ${batch.failedFileCount} failed` : ''}</p>
               <StatusBadge status={batch.status} />
             </div>)}

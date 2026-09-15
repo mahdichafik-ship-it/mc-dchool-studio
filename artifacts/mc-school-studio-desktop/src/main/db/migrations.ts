@@ -1,6 +1,12 @@
+import { randomBytes } from 'node:crypto'
+
 export interface SqliteSchemaDatabase {
   pragma(source: string): unknown
   exec(source: string): void
+  prepare?: (source: string) => {
+    all?: () => Array<Record<string, unknown>>
+    run?: (...params: unknown[]) => unknown
+  }
 }
 
 export function ensureColumn(
@@ -15,7 +21,7 @@ export function ensureColumn(
 }
 
 export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
-  for (const migration of [
+  const migrations: ReadonlyArray<readonly [string, string, string]> = [
     ['photos', 'upload_status', 'TEXT'],
     ['photos', 'file_url', 'TEXT'],
     ['projects', 'cloud_id', 'INTEGER'],
@@ -23,9 +29,112 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
     ['students', 'cloud_id', 'INTEGER'],
     ['students', 'email', 'TEXT'],
     ['students', 'phone', 'TEXT'],
+    ['students', 'secondary_email', 'TEXT'],
+    ['students', 'job_title', 'TEXT'],
+    ['students', 'office_location', 'TEXT'],
+    ['students', 'photo_session', 'TEXT'],
+    ['students', 'capture_notes', 'TEXT'],
     ['projects', 'finished_at', 'TEXT'],
-  ] as const) {
-    ensureColumn(sqlite, ...migration)
+    ['projects', 'sync_status', "TEXT NOT NULL DEFAULT 'active'"],
+    ['projects', 'sync_completed_files', 'INTEGER NOT NULL DEFAULT 0'],
+    ['projects', 'sync_total_files', 'INTEGER NOT NULL DEFAULT 0'],
+    ['projects', 'sync_failed_files', 'INTEGER NOT NULL DEFAULT 0'],
+    ['projects', 'sync_error', 'TEXT'],
+    ['projects', 'project_type', "TEXT NOT NULL DEFAULT 'school'"],
+  ]
+  for (const [table, column, definition] of migrations) {
+    ensureColumn(sqlite, table, column, definition)
+  }
+  // Releases before the durable sync lifecycle only wrote finished_at after a
+  // successful cloud handoff. Treat those rows as fully synced, while an
+  // interrupted sync is made explicitly retryable. The guards make this safe
+  // to run on every start.
+  sqlite.exec(`UPDATE projects SET project_type = 'school' WHERE project_type IS NULL OR project_type NOT IN ('school', 'corporate');
+    UPDATE projects
+    SET sync_status = 'synced'
+    WHERE finished_at IS NOT NULL AND sync_status = 'active';
+    UPDATE projects
+    SET sync_status = 'active'
+    WHERE sync_status IS NULL OR sync_status NOT IN ('active', 'finished_local', 'syncing', 'sync_failed', 'synced')
+    ;
+    UPDATE projects
+    SET
+      sync_status = 'sync_failed',
+      sync_error = COALESCE(sync_error, 'Cloud sync was interrupted. Reconnect and retry Upload & Finish.')
+    WHERE sync_status = 'syncing'
+  `)
+}
+
+/**
+ * Repair old local rosters before installing the SQLite authority index.
+ * Keeping the lowest row id preserves the canonical subject and all foreign
+ * keys/captures; only later duplicate codes are changed.
+ */
+export function ensureStudentIdentityConstraint(sqlite: SqliteSchemaDatabase): void {
+  let reassigned = 0
+  let duplicateGroups = 0
+  const countedGroups = new Set<string>()
+  const statement = sqlite.prepare?.(`
+    SELECT id, project_id, generated_student_id
+    FROM students
+    ORDER BY project_id ASC, id ASC
+  `)
+  const rows = statement?.all?.() ?? []
+  if (rows.length > 0 && statement?.all) {
+    const usedByProject = new Map<number, Set<string>>()
+    for (const row of rows) {
+      const projectId = Number(row.project_id)
+      const id = Number(row.id)
+      const value = String(row.generated_student_id ?? '').normalize('NFKC').trim()
+      const key = value.toLocaleLowerCase()
+      const used = usedByProject.get(projectId) ?? new Set<string>()
+      if (!used.has(key)) {
+        used.add(key)
+        usedByProject.set(projectId, used)
+        continue
+      }
+      const groupKey = `${projectId}\u0000${key}`
+      if (!countedGroups.has(groupKey)) {
+        countedGroups.add(groupKey)
+        duplicateGroups += 1
+      }
+      let replacement = ''
+      do {
+        replacement = randomBytes(16).toString('hex').slice(0, 7).toUpperCase()
+      } while (used.has(replacement.toLocaleLowerCase()))
+      used.add(replacement.toLocaleLowerCase())
+      sqlite.prepare?.(
+        'UPDATE students SET generated_student_id = ?, updated_at = datetime(\'now\') WHERE id = ?',
+      )?.run?.(replacement, id)
+      reassigned += 1
+    }
+  } else {
+    // Test doubles and very old adapters may not expose prepare(). The update
+    // is still idempotent and leaves row/capture identity untouched.
+    sqlite.exec(`
+      UPDATE students
+      SET generated_student_id = 'REPAIRED-' || project_id || '-' || id
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY project_id, lower(trim(generated_student_id))
+            ORDER BY id
+          ) AS duplicate_number
+          FROM students
+        ) WHERE duplicate_number > 1
+      );
+    `)
+  }
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_project_generated_id_ci
+    ON students(project_id, lower(generated_student_id))
+  `)
+  if (duplicateGroups || reassigned) {
+    console.info(JSON.stringify({
+      event: 'desktop_student_id_repair',
+      duplicateGroups,
+      reassigned,
+    }))
   }
 }
 
@@ -64,6 +173,8 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       base_filename TEXT NOT NULL,
       captured_at TEXT NOT NULL,
       pairing_status TEXT NOT NULL DEFAULT 'pending',
+      rating INTEGER NOT NULL DEFAULT 0,
+      review_sync_pending INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -99,6 +210,13 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       camera_serial TEXT,
       assignment_locked INTEGER NOT NULL DEFAULT 0,
       pairing_status TEXT NOT NULL DEFAULT 'pending',
+      crop_x INTEGER NOT NULL DEFAULT 0,
+      crop_y INTEGER NOT NULL DEFAULT 0,
+      crop_scale INTEGER NOT NULL DEFAULT 100,
+      aspect_ratio TEXT NOT NULL DEFAULT 'original',
+      straighten_angle INTEGER NOT NULL DEFAULT 0,
+      rotation INTEGER NOT NULL DEFAULT 0,
+      reframe_pending INTEGER NOT NULL DEFAULT 0,
       legacy_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -151,8 +269,59 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   // This column was added after groups shipped; run it after CREATE TABLE so
   // fresh databases and existing installations follow the same path.
   ensureColumn(sqlite, 'groups', 'membership_dirty', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'color_label', "TEXT NOT NULL DEFAULT 'none'")
+  ensureColumn(sqlite, 'captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'crop_x', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'crop_y', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'crop_scale', 'INTEGER NOT NULL DEFAULT 100')
+  ensureColumn(sqlite, 'captures', 'aspect_ratio', "TEXT NOT NULL DEFAULT 'original'")
+  ensureColumn(sqlite, 'captures', 'straighten_angle', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'rotation', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'captures', 'reframe_pending', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'group_capture_files', 'gallery_ready', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'group_captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(sqlite, 'group_captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
 
   sqlite.exec(`
+    -- If a newer capture row already represents this shutter event, attach the
+    -- legacy photo to it instead of creating a second gallery capture.
+    UPDATE captures
+    SET legacy_photo_id = (
+      SELECT p.id
+      FROM photos p
+      WHERE p.project_id = captures.project_id
+        AND p.student_id = captures.student_id
+        AND p.captured_at = captures.captured_at
+        AND (
+          CASE
+            WHEN instr(p.file_name, '.') > 0
+            THEN substr(p.file_name, 1, instr(p.file_name, '.') - 1)
+            ELSE p.file_name
+          END
+        ) = captures.base_filename
+        AND NOT EXISTS (
+          SELECT 1 FROM captures linked
+          WHERE linked.legacy_photo_id = p.id
+        )
+      LIMIT 1
+    )
+    WHERE captures.legacy_photo_id IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM photos p
+        WHERE p.project_id = captures.project_id
+          AND p.student_id = captures.student_id
+          AND p.captured_at = captures.captured_at
+          AND (
+            CASE
+              WHEN instr(p.file_name, '.') > 0
+              THEN substr(p.file_name, 1, instr(p.file_name, '.') - 1)
+              ELSE p.file_name
+            END
+          ) = captures.base_filename
+      );
+
     INSERT OR IGNORE INTO captures (
       capture_key, project_id, student_id, class_id, base_filename, captured_at,
       assignment_locked, pairing_status, legacy_photo_id, created_at, updated_at
@@ -176,7 +345,22 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       p.id,
       p.created_at,
       p.created_at
-    FROM photos p;
+    FROM photos p
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM captures c
+      WHERE c.legacy_photo_id = p.id
+         OR (
+           c.project_id = p.project_id
+           AND c.student_id = p.student_id
+           AND c.captured_at = p.captured_at
+           AND c.base_filename = CASE
+             WHEN instr(p.file_name, '.') > 0
+             THEN substr(p.file_name, 1, instr(p.file_name, '.') - 1)
+             ELSE p.file_name
+           END
+         )
+    );
 
     INSERT OR IGNORE INTO image_files (
       capture_id, file_role, file_format, original_filename, stored_path,
@@ -202,5 +386,80 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
       SELECT 1 FROM image_files f
       WHERE f.capture_id = c.id AND f.file_role = 'JPEG'
     );
+
+    UPDATE captures
+    SET pairing_status = CASE
+      WHEN EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'JPEG'
+      ) AND EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'RAW'
+      ) THEN 'complete'
+      WHEN EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'JPEG'
+      ) THEN 'jpeg_only'
+      WHEN EXISTS (
+        SELECT 1 FROM image_files f
+        WHERE f.capture_id = captures.id AND f.file_role = 'RAW'
+      ) THEN 'raw_only'
+      ELSE 'unpaired'
+    END
+    WHERE legacy_photo_id IS NOT NULL;
+  `)
+
+  // Legacy finished projects predate durable progress counters. Reconstruct
+  // their completed file total from the compatibility capture/file tables so
+  // their synced state remains useful after an upgrade or restart.
+  sqlite.exec(`
+    UPDATE projects
+    SET
+      sync_total_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      ),
+      sync_completed_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      )
+    WHERE sync_status = 'synced' AND sync_total_files = 0
+  `)
+
+  // Legacy finished projects predate durable progress counters. Reconstruct
+  // their completed file total from the compatibility capture/file tables so
+  // their synced state remains useful after an upgrade or restart.
+  sqlite.exec(`
+    UPDATE projects
+    SET
+      sync_total_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      ),
+      sync_completed_files = (
+        SELECT COUNT(*) FROM image_files f
+        JOIN captures c ON c.id = f.capture_id
+        WHERE c.project_id = projects.id AND c.student_id IS NOT NULL
+      ) + (
+        SELECT COUNT(*) FROM group_capture_files gf
+        JOIN group_captures gc ON gc.id = gf.capture_id
+        WHERE gc.project_id = projects.id
+      )
+    WHERE sync_status = 'synced' AND sync_total_files = 0
   `)
 }

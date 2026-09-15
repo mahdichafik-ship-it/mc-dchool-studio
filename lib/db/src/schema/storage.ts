@@ -36,7 +36,15 @@ export const studioStorageAuditTable = pgTable("studio_storage_audit", {
   studioId: integer("studio_id").notNull().references(() => studiosTable.id, { onDelete: "cascade" }),
   actorMemberId: integer("actor_member_id").references(() => studioMembersTable.id, { onDelete: "set null" }),
   action: text("action", {
-    enum: ["connection_started", "connected", "disconnected", "connection_failed", "fallback_selected"],
+    enum: [
+      "connection_started",
+      "connected",
+      "disconnected",
+      "connection_failed",
+      "fallback_selected",
+      "platform_backup_enabled",
+      "platform_backup_disabled",
+    ],
   }).notNull(),
   provider: text("provider", { enum: ["platform_google_drive", "google_drive", "dropbox"] }).notNull(),
   providerAccountId: text("provider_account_id"),

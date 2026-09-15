@@ -28,6 +28,7 @@ import type {
   CreateStudentResult,
   StudentGroup,
   GroupCaptureReview,
+  LiveUploadQueueItem,
 } from '../../../shared/types'
 import { mergeMatchedPhoto } from '../lib/captureEventReconciliation'
 
@@ -61,6 +62,7 @@ export type {
   CreateStudentResult,
   StudentGroup,
   GroupCaptureReview,
+  LiveUploadQueueItem,
 }
 
 const api = window.api
@@ -257,6 +259,17 @@ export function useGroupCaptures(projectId: number | null, groupId: number | nul
     setData(await api.invoke('groupCaptures:list', { projectId, groupId }))
   }, [projectId, groupId])
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (!projectId || !groupId) return
+    const unsubscribe = api.on('groupCapture:updated', (event: { projectId: number; groupId: number }) => {
+      if (event.projectId === projectId && event.groupId === groupId) void load()
+    })
+    const intervalId = window.setInterval(() => void load(), 3000)
+    return () => {
+      unsubscribe()
+      window.clearInterval(intervalId)
+    }
+  }, [projectId, groupId, load])
   return { data, reload: load }
 }
 
@@ -319,17 +332,24 @@ export function useUnmatchedPhotos(projectId: number | null) {
 
 export function useCaptures(studentId: number | null) {
   const [data, setData] = useState<StudentCaptureReview>({ captures: [], qrMarkers: [] })
+  const [dataStudentId, setDataStudentId] = useState<number | null>(null)
   const [livePreview, setLivePreview] = useState<PhotoMatchedEvent | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const liveTraceRef = useRef<PhotoMatchedEvent['pipeline']>(undefined)
+  const activeStudentIdRef = useRef(studentId)
+  const requestIdRef = useRef(0)
+  activeStudentIdRef.current = studentId
 
   const load = useCallback(async () => {
     if (!studentId) return
+    const requestedStudentId = studentId
+    const requestId = ++requestIdRef.current
     setLoading(true)
     setError(null)
     try {
-      const result = await api.invoke('captures:list', { studentId })
+      const result = await api.invoke('captures:list', { studentId: requestedStudentId })
+      if (activeStudentIdRef.current !== requestedStudentId || requestIdRef.current !== requestId) return
       const loaded = result as StudentCaptureReview
       setData((current) => {
         // An initial/reconciliation load can finish after the fast preview
@@ -348,16 +368,23 @@ export function useCaptures(studentId: number | null) {
           ? { ...loaded, captures: [...loaded.captures, ...pending] }
           : loaded
       })
+      setDataStudentId(requestedStudentId)
     } catch (loadError) {
+      if (activeStudentIdRef.current !== requestedStudentId || requestIdRef.current !== requestId) return
+      setDataStudentId(requestedStudentId)
       setError(loadError instanceof Error ? loadError.message : String(loadError))
     } finally {
-      setLoading(false)
+      if (activeStudentIdRef.current === requestedStudentId && requestIdRef.current === requestId) {
+        setLoading(false)
+      }
     }
   }, [studentId])
 
-  useEffect(() => { load() }, [load])
-
   useEffect(() => {
+    requestIdRef.current++
+    setData({ captures: [], qrMarkers: [] })
+    setDataStudentId(null)
+    setError(null)
     if (liveTraceRef.current) {
       reportImagePipelineStage(
         liveTraceRef.current,
@@ -368,6 +395,8 @@ export function useCaptures(studentId: number | null) {
     }
     setLivePreview(null)
   }, [studentId])
+
+  useEffect(() => { void load() }, [load])
 
   useEffect(() => {
     if (!studentId) return
@@ -391,6 +420,7 @@ export function useCaptures(studentId: number | null) {
         liveTraceRef.current = event.pipeline
         setLivePreview(event)
       }
+      setDataStudentId(studentId)
 
       // A preview event is emitted before the managed copy and SQLite work.
       // The persisted event replaces that temporary row, while the database
@@ -439,11 +469,22 @@ export function useCaptures(studentId: number | null) {
           favorite: false,
           rejected: false,
           selected: false,
+          rating: 0,
+          colorLabel: 'none',
           pairingStatus: 'jpeg_only',
           assignmentLocked: true,
           files: [jpegFile],
           thumbnailData: null,
           legacyPhoto: galleryPhoto,
+          framing: {
+            cropX: 0,
+            cropY: 0,
+            cropScale: 100,
+            aspectRatio: 'original',
+            straightenAngle: 0,
+            rotation: 0,
+            pending: false,
+          },
           previewPipeline: event.pipeline,
         }
         return {
@@ -467,7 +508,13 @@ export function useCaptures(studentId: number | null) {
     }
   }, [studentId, load])
 
-  return { data, loading, error, reload: load, livePreview }
+  const visibleData = dataStudentId === studentId
+    ? data
+    : { captures: [], qrMarkers: [] }
+  const visibleLivePreview = livePreview?.student.id === studentId ? livePreview : null
+  const visibleError = dataStudentId === studentId ? error : null
+
+  return { data: visibleData, loading, error: visibleError, reload: load, livePreview: visibleLivePreview }
 }
 
 export function useCaptureSummary(projectId: number | null) {
@@ -477,6 +524,9 @@ export function useCaptureSummary(projectId: number | null) {
     jpegOnly: 0,
     rawOnly: 0,
     unpaired: 0,
+    jpegFiles: 0,
+    rawFiles: 0,
+    incompletePairs: 0,
   })
 
   const load = useCallback(async () => {
@@ -550,7 +600,7 @@ export function useActiveCaptureTarget(projectId: number | null) {
     const result = await api.invoke('watcher:getActiveTarget', { projectId })
     setStudentId(result.studentId)
     setGroupId(result.groupId)
-    setSource(result.targetType === 'none' ? 'none' : 'manual')
+    setSource(result.source)
   }, [projectId])
 
   useEffect(() => { void load() }, [load])
@@ -665,6 +715,44 @@ export function useUploadStatus(projectId: number | null) {
   }, [projectId, load])
 
   return { statusMap, photoStatusMap, errorPhotoIds, reload: load }
+}
+
+export function useLiveUpload(projectId: number | null) {
+  const [state, setState] = useState<import('@shared/types').LiveUploadState | null>(null)
+
+  const load = useCallback(async () => {
+    if (!projectId) return
+    setState(await api.invoke('upload:getLiveState', { projectId }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    if (!projectId) return
+    const unsubscribe = api.on('upload:liveStateChanged', (next: import('@shared/types').LiveUploadState) => {
+      if (next.projectId === projectId) setState(next)
+    })
+    return unsubscribe
+  }, [projectId])
+
+  const setEnabled = useCallback(async (enabled: boolean) => {
+    if (!projectId) return
+    setState(await api.invoke('upload:setLiveEnabled', { projectId, enabled }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  const runNow = useCallback(async () => {
+    if (!projectId) return
+    setState(await api.invoke('upload:runNow', { projectId }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  const retryFailed = useCallback(async () => {
+    if (!projectId) return
+    setState(await api.invoke('upload:retryProjectFailed', { projectId }) as import('@shared/types').LiveUploadState)
+  }, [projectId])
+
+  return { state, load, setEnabled, runNow, retryFailed }
 }
 
 // Total failed upload count across all projects (for Settings screen)

@@ -1,0 +1,81 @@
+/*
+ * ProjectView's capture surface uses the desktop renderer's neutral slate
+ * palette with teal for the capture target. Keep these tokens local so this
+ * extraction can be judged without importing Electron's global stylesheet.
+ */
+.capture-preview-redesign {
+  --cp-slate-950: #020617;
+  --cp-slate-900: #0f172a;
+  --cp-slate-800: #1e293b;
+  --cp-slate-700: #334155;
+  --cp-slate-600: #475569;
+  --cp-slate-500: #64748b;
+  --cp-slate-400: #94a3b8;
+  --cp-slate-300: #cbd5e1;
+  --cp-slate-200: #e2e8f0;
+  --cp-slate-100: #f1f5f9;
+  --cp-slate-50: #f8fafc;
+  --cp-teal-700: #0f766e;
+  --cp-teal-600: #0d9488;
+  --cp-teal-500: #14b8a6;
+  --cp-teal-50: #f0fdfa;
+  --cp-blue-600: #2563eb;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: var(--cp-slate-900);
+  background: var(--cp-slate-50);
+}
+
+.capture-preview-redesign button,
+.capture-preview-redesign input {
+  font: inherit;
+}
+
+.capture-preview-redesign button {
+  cursor: pointer;
+}
+
+.capture-preview-redesign .cp-scrollbar::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.capture-preview-redesign .cp-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--cp-slate-300);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.capture-preview-redesign .cp-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.capture-preview-redesign .cp-roster-row {
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.capture-preview-redesign .cp-roster-row:hover {
+  background: var(--cp-slate-50);
+}
+
+.capture-preview-redesign .cp-roster-row.is-active {
+  background: rgb(240 253 250 / 0.72);
+  border-left-color: var(--cp-teal-500);
+}
+
+.capture-preview-redesign .cp-finder {
+  fill: #111827;
+}
+
+.capture-preview-redesign .cp-finder-cutout {
+  fill: white;
+}
+
+.capture-preview-redesign .cp-preview-image {
+  animation: cp-preview-in 280ms ease-out both;
+}
+
+@keyframes cp-preview-in {
+  from { opacity: 0.45; transform: scale(1.01); }
+  to { opacity: 1; transform: scale(1); }
+}

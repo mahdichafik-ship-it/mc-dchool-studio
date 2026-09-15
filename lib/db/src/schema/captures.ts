@@ -2,6 +2,7 @@ import {
   boolean,
   integer,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
@@ -23,15 +24,19 @@ export const captureBatchesTable = pgTable("capture_batches", {
   desktopConnectionId: integer("desktop_connection_id")
     .notNull()
     .references(() => desktopConnectionsTable.id, { onDelete: "cascade" }),
-  status: text("status", { enum: ["uploading", "failed", "complete"] }).notNull().default("uploading"),
+  status: text("status", { enum: ["uploading", "failed", "complete", "superseded"] }).notNull().default("uploading"),
+  supersedesBatchId: integer("supersedes_batch_id"),
+  supersededAt: timestamp("superseded_at", { withTimezone: true }),
   expectedFileCount: integer("expected_file_count").notNull().default(0),
   uploadedFileCount: integer("uploaded_file_count").notNull().default(0),
   failedFileCount: integer("failed_file_count").notNull().default(0),
+  handoffComment: text("handoff_comment"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   lastSyncAt: timestamp("last_sync_at", { withTimezone: true }).notNull().defaultNow(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("capture_batches_project_key_unique").on(table.projectId, table.batchKey),
+  uniqueIndex("capture_batches_supersedes_unique").on(table.supersedesBatchId),
 ]);
 
 export const capturesTable = pgTable("captures", {
@@ -50,6 +55,18 @@ export const capturesTable = pgTable("captures", {
   favorite: boolean("favorite").notNull().default(false),
   rejected: boolean("rejected").notNull().default(false),
   selected: boolean("selected").notNull().default(false),
+  rating: integer("rating").notNull().default(0),
+  colorLabel: text("color_label", {
+    enum: ["none", "red", "yellow", "green", "blue", "purple"],
+  }).notNull().default("none"),
+  // Edits are deliberately nullable: null means identity and keeps captures
+  // uploaded by older desktop clients backwards compatible.
+  cropPositionX: real("crop_position_x"),
+  cropPositionY: real("crop_position_y"),
+  cropScale: real("crop_scale"),
+  aspectRatio: text("aspect_ratio"),
+  straightenAngle: real("straighten_angle"),
+  rotation: integer("rotation"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -66,6 +83,7 @@ export const captureFilesTable = pgTable("capture_files", {
   fileFormat: text("file_format").notNull(),
   originalFilename: text("original_filename").notNull(),
   fileUrl: text("file_url").notNull(),
+  durableObjectPath: text("durable_object_path"),
   mimeType: text("mime_type").notNull(),
   fileSize: integer("file_size"),
   captureBatchId: integer("capture_batch_id")

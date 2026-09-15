@@ -1,0 +1,65 @@
+## Release 2 — Gallery Correctness complete
+
+Implemented only for the published family/corporate delivery gallery. Release 3 was not started.
+
+### Correctness changes
+
+- Centralized eligibility across gallery listing, ordering, previews, and downloads:
+  - Positive rating required.
+  - Sharing enabled.
+  - Durable storage required.
+  - JPEG MIME required.
+  - Correct project and subject required.
+- RAW, unrated, unshared, incomplete, and cross-subject photos are unavailable through every public path.
+- Group photos now require current group membership in the same database query that grants access.
+- Membership removal hides group photos without deleting projected photo identities or breaking paid orders.
+- Publication readiness now ignores irrelevant RAW, unrated, unshared, and memberless group records.
+- Selected JPEGs without durable storage still block publication.
+- Publication status and access-card creation are transactional and concurrency-safe.
+- Repeated/concurrent publication preserves one publication timestamp and one access record per subject.
+- Photo ordering is deterministic using creation time and photo ID.
+
+### Gallery UI and contract
+
+- Added a strict generated delivery-subject contract using generic organization/group terminology.
+- Corporate galleries consistently return Employee and Department terminology.
+- Removed unsafe school-language fallback behavior.
+- Gallery state now resets when the slug changes, access expires, or the visitor chooses another code.
+- Basket, selection, paid-photo, checkout, order-polling, and mutation-error state are cleared appropriately.
+- Stripe return order state survives access-code re-entry.
+- The payment-received notice is visible before the visitor re-enters the gallery.
+- Paid order polling restores downloadable photo IDs and Download actions.
+
+### Verification
+
+- Full API integration suite: **101/101 passed**
+- Focused Release 2 suites: **17/17 passed**
+- Library typecheck: passed
+- API typecheck: passed
+- Volume Capture frontend typecheck: passed
+- Frontend production build: passed
+- Diff/whitespace validation: passed
+- API and web workflows restarted successfully
+- Visual health check: passed
+- Paid-return browser journey: passed
+  - Notice appeared before access.
+  - Code re-entry succeeded.
+  - Paid order polling recovered the purchased photo.
+  - Purchased badge and Download action appeared.
+- Independent architecture review: **PASS**
+- SAST: no high findings
+- Privacy/dataflow scan: no findings
+- Dependency audit: zero critical findings
+
+### Remaining unrelated findings
+
+- The workspace-wide root typecheck still encounters the existing duplicate-Vite type conflict in `mockup-sandbox`. The Release 2 libraries, API, and Volume Capture app all pass independently.
+- The dependency audit continues to report existing workspace advisories, including npm-database findings against upstream SheetJS `0.20.3`. These remain outside Release 2 and are already tracked separately.
+- The frontend build retains existing source-map and large-chunk warnings; the build completes successfully.
+
+### Schema and production
+
+- **Database schema changes:** none.
+- **Production changes:** none. Nothing was published or deployed.
+
+Stopped after Release 2 as requested. Awaiting your approval before any Release 3 work.

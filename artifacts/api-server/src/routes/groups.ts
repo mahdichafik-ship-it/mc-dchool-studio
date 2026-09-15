@@ -6,6 +6,7 @@ import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject } from "../lib/studioAccess";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
 import { defaultGroupExclusionChanges } from "../lib/groupMembership";
+import { enqueueR2PhotoDeletionsForGroups } from "../lib/r2PhotoDeletionOutbox";
 
 const router = Router({ mergeParams: true });
 function positiveId(value: unknown): value is number {
@@ -92,7 +93,10 @@ router.delete("/:groupId", requireAuth, async (req, res) => {
   const group = await getGroup(projectId, groupId);
   if (!group) return void res.status(404).json({ error: "Group not found" });
   if (group.isDefaultClassGroup) return void res.status(409).json({ error: "Default groups cannot be deleted" });
-  await db.delete(groupsTable).where(eq(groupsTable.id, groupId));
+  await db.transaction(async (tx) => {
+    await enqueueR2PhotoDeletionsForGroups(tx, [groupId]);
+    await tx.delete(groupsTable).where(eq(groupsTable.id, groupId));
+  });
   res.status(204).send();
 });
 

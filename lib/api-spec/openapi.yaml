@@ -26,6 +26,10 @@ tags:
     description: QR code export operations
   - name: platform
     description: Global platform-owner and studio-owner onboarding operations
+  - name: marketing
+    description: Consent-aware studio marketing contacts and campaign drafts
+  - name: desktop
+    description: Public desktop application distribution metadata
 
 paths:
   /healthz:
@@ -41,6 +45,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /desktop/release:
+    get:
+      operationId: getDesktopRelease
+      tags: [desktop]
+      summary: Get the latest validated desktop release
+      description: Returns independently validated macOS installer assets from the latest published GitHub release.
+      responses:
+        "200":
+          description: Validated desktop release metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DesktopRelease"
+        "503":
+          description: A current valid desktop release is unavailable
 
   /dashboard/stats:
     get:
@@ -569,7 +589,7 @@ paths:
     post:
       operationId: confirmImport
       tags: [import]
-      summary: Confirm an import with column mapping and create students
+      summary: Confirm a project-scoped roster reconciliation
       parameters:
         - name: projectId
           in: path
@@ -718,6 +738,8 @@ paths:
           description: Platform owner access required
         "409":
           description: A pending invitation already exists
+        "502":
+          description: The invitation was created but email delivery failed or is not configured
 
   /platform/invites/{inviteId}:
     patch:
@@ -797,8 +819,369 @@ paths:
           description: The signed-in email does not match the invitation
         "404":
           description: Invitation not found
+        "410":
+          description: Invitation has expired
         "409":
           description: Invitation is no longer pending or the account belongs to another studio
+
+  /delivery/{slug}:
+    get:
+      operationId: getDeliveryGallery
+      tags: [delivery]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Delivery gallery, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryGallery" } } } }
+        "404": { description: Not found }
+  /projects/{projectId}/students/{studentId}/photos/{photoId}/share:
+    patch:
+      operationId: updatePhotoSharing
+      tags: [projects]
+      summary: Set whether a photo is shared with parents
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: studentId, in: path, required: true, schema: { type: integer } }
+        - { name: photoId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PhotoShareInput" }
+      responses:
+        "200":
+          description: Updated photo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PhotoShareResponse" }
+        "400": { description: Invalid parameters }
+        "404": { description: Photo or project not found }
+  /delivery/{slug}/access:
+    post:
+      operationId: enterDeliveryAccess
+      tags: [delivery]
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessInput" } } }
+      responses: { "200": { description: Access token, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessResponse" } } } }, "401": { description: Invalid access } }
+  /marketing/overview:
+    get:
+      operationId: getMarketingOverview
+      tags: [marketing]
+      responses:
+        "200": { description: Studio marketing metrics, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingOverview" } } } }
+        "401": { description: Unauthorized }
+        "403": { description: Studio owner or admin required }
+  /marketing/contacts:
+    get:
+      operationId: listMarketingContacts
+      tags: [marketing]
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: engagement, in: query, schema: { type: string, enum: [all, visited, repeat, purchaser] } }
+        - { name: consent, in: query, schema: { type: string, enum: [all, consented, unconsented] } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        "200": { description: Contacts, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingContactsResponse" } } } }
+        "403": { description: Studio owner or admin required }
+  /marketing/contacts/{contactId}/consent:
+    patch:
+      operationId: updateMarketingConsent
+      tags: [marketing]
+      parameters: [{ name: contactId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingConsentInput" } } }
+      responses:
+        "200": { description: Updated contact, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingContactMutationResponse" } } } }
+        "403": { description: Studio owner or admin required }
+  /marketing/contacts/{contactId}/unsubscribe:
+    post:
+      operationId: unsubscribeMarketingContact
+      tags: [marketing]
+      parameters: [{ name: contactId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Unsubscribed contact, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingContactMutationResponse" } } } }
+        "403": { description: Studio owner or admin required }
+  /marketing/templates:
+    get:
+      operationId: listMarketingTemplates
+      tags: [marketing]
+      responses:
+        "200": { description: Studio templates, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/MarketingTemplate" } } } } }
+    post:
+      operationId: createMarketingTemplate
+      tags: [marketing]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplateInput" } } }
+      responses:
+        "201": { description: Created template, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplate" } } } }
+  /marketing/templates/{templateId}:
+    patch:
+      operationId: updateMarketingTemplate
+      tags: [marketing]
+      parameters: [{ name: templateId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplateInput" } } }
+      responses:
+        "200": { description: Updated template, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingTemplate" } } } }
+    delete:
+      operationId: deleteMarketingTemplate
+      tags: [marketing]
+      parameters: [{ name: templateId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "204": { description: Deleted template }
+  /marketing/campaigns:
+    get:
+      operationId: listMarketingCampaigns
+      tags: [marketing]
+      responses:
+        "200": { description: Campaign drafts, content: { application/json: { schema: { type: object, properties: { campaigns: { type: array, items: { $ref: "#/components/schemas/MarketingCampaign" } } } } } } }
+    post:
+      operationId: createMarketingCampaignDraft
+      tags: [marketing]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaignInput" } } }
+      responses:
+        "201": { description: Campaign draft, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaign" } } } }
+  /marketing/email-status:
+    get:
+      operationId: getMarketingEmailStatus
+      tags: [marketing]
+      responses:
+        "200": { description: Resend configuration status, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingEmailStatus" } } } }
+  /marketing/campaigns/{campaignId}/send:
+    post:
+      operationId: sendMarketingCampaign
+      tags: [marketing]
+      parameters: [{ name: campaignId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Sent campaign, content: { application/json: { schema: { $ref: "#/components/schemas/MarketingCampaignSendResponse" } } } }
+        "409": { description: Campaign cannot be sent }
+        "503": { description: Resend is not configured }
+  /delivery/{slug}/gallery:
+    get:
+      operationId: getDeliveryPhotos
+      tags: [delivery]
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }, { name: x-delivery-token, in: header, required: true, schema: { type: string } }]
+      responses: { "200": { description: Approved photos and offers, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPhotosResponse" } } } } }
+  /delivery/{slug}/catalog:
+    get:
+      operationId: getDeliveryCatalog
+      tags: [delivery]
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Active Stripe catalog, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryCatalogResponse" } } } } }
+  /delivery/{slug}/orders:
+    post:
+      operationId: createDeliveryOrder
+      tags: [delivery]
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderInput" } } }
+      responses: { "200": { description: Checkout created, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryCheckoutResponse" } } } } }
+  /delivery/{slug}/orders/{orderId}:
+    get:
+      operationId: getDeliveryOrder
+      tags: [delivery]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: orderId, in: path, required: true, schema: { type: integer } }
+        - { name: x-delivery-token, in: header, required: true, schema: { type: string } }
+      responses: { "200": { description: Order status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderResponse" } } } } }
+  /delivery/{slug}/orders/recovery/{reference}:
+    get:
+      operationId: getDeliveryOrderRecovery
+      tags: [delivery]
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: reference, in: path, required: true, schema: { type: string } }
+        - { name: x-order-recovery-token, in: header, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Safe customer order status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderRecoveryResponse" } } } }
+        "404": { description: "Recovery link is invalid, expired, or revoked" }
+  /projects/{projectId}/delivery:
+    get:
+      operationId: getDeliverySettings
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Delivery settings, content: { application/json: { schema: { $ref: "#/components/schemas/DeliverySettingsResponse" } } } } }
+    patch:
+      operationId: updateDeliverySettings
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliverySettingsInput" } } }
+      responses: { "200": { description: Updated settings, content: { application/json: { schema: { $ref: "#/components/schemas/DeliverySettingsResponse" } } } } }
+  /studio/delivery/price-sheets:
+    get:
+      operationId: listStudioPriceSheets
+      tags: [delivery]
+      responses: { "200": { description: Studio price sheets, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } } }
+    post:
+      operationId: createStudioPriceSheet
+      tags: [delivery]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "201": { description: Price sheet created, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
+  /studio/delivery/price-sheets/{priceSheetId}:
+    patch:
+      operationId: updateStudioPriceSheet
+      tags: [delivery]
+      parameters: [{ name: priceSheetId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "200": { description: Price sheet updated, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
+  /projects/{projectId}/delivery/price-sheets:
+    get:
+      operationId: listDeliveryPriceSheets
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Studio price sheets, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } } }
+    post:
+      operationId: createDeliveryPriceSheet
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "201": { description: Price sheet created, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
+  /projects/{projectId}/delivery/price-sheets/{priceSheetId}:
+    patch:
+      operationId: updateDeliveryPriceSheet
+      tags: [delivery]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: priceSheetId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheetInput" } } }
+      responses: { "200": { description: Price sheet updated, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPriceSheet" } } } } }
+  /projects/{projectId}/delivery/publish:
+    post:
+      operationId: publishDelivery
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Published, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryMutationResponse" } } } }, "409": { description: Invalid photos/settings } }
+  /projects/{projectId}/delivery/invitations/retry:
+    post:
+      operationId: retryDeliveryInvitations
+      tags: [delivery]
+      summary: Retry rejected gallery invitations
+      description: Retries failed delivery invitations only; uncertain, sending, pending, and sent invitations are not reset.
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Invitation retry summary, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryInvitationRetryResponse" } } } }
+        "403": { description: Studio owner or admin required }
+        "404": { description: Project or gallery not found }
+  /projects/{projectId}/delivery/revoke:
+    post:
+      operationId: revokeDelivery
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Revoked, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryMutationResponse" } } } } }
+  /projects/{projectId}/delivery/access-cards:
+    get:
+      operationId: listDeliveryAccessCards
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Access cards, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessCardsResponse" } } } } }
+  /projects/{projectId}/delivery/access-cards/prepare:
+    post:
+      operationId: prepareDeliveryAccessCards
+      tags: [delivery]
+      summary: Prepare stable access credentials for the current project roster
+      description: Creates missing access credentials without publishing the gallery, sending invitations, or changing photo delivery state.
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Access-card preparation status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessCardsPrepareResponse" } } } }
+        "404": { description: Project or delivery gallery not found }
+  /projects/{projectId}/delivery/catalog:
+    get:
+      operationId: listDeliveryStripeCatalog
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Active Stripe prices, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryCatalogResponse" } } } } }
+  /projects/{projectId}/delivery/access/{studentId}/regenerate:
+    post:
+      operationId: regenerateDeliveryAccess
+      tags: [delivery]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: studentId, in: path, required: true, schema: { type: integer } }
+      responses: { "200": { description: New subject code, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryCodeResponse" } } } } }
+  /projects/{projectId}/delivery/access/{studentId}:
+    patch:
+      operationId: updateDeliveryAccess
+      tags: [delivery]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: integer } }
+        - { name: studentId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessUpdateInput" } } }
+      responses: { "200": { description: Updated subject access, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryAccessMutationResponse" } } } } }
+  /projects/{projectId}/delivery/orders:
+    get:
+      operationId: listDeliveryOrders
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Orders, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrdersResponse" } } } } }
+  /projects/{projectId}/delivery/operations:
+    get:
+      operationId: getDeliveryOperations
+      tags: [delivery]
+      summary: Get manager-only delivery operation health
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Safe delivery operation counts, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOperationsResponse" } } } }
+        "404": { description: Project not found }
+  /projects/{projectId}/delivery/orders/{orderId}:
+    get:
+      operationId: getStudioDeliveryOrder
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }, { name: orderId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: Order detail, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderDetailResponse" } } } } }
+  /projects/{projectId}/delivery/orders/{orderId}/fulfillment:
+    patch:
+      operationId: updateDeliveryFulfillment
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }, { name: orderId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/FulfillmentInput" } } }
+      responses: { "200": { description: Updated fulfillment, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderMutationResponse" } } } } }
+  /projects/{projectId}/delivery/orders/{orderId}/payment:
+    patch:
+      operationId: updateDeliveryPayment
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }, { name: orderId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PaymentStatusInput" } } }
+      responses: { "200": { description: Updated payment status, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderMutationResponse" } } } } }
+  /projects/{projectId}/delivery/orders/{orderId}/notifications/retry:
+    post:
+      operationId: retryFailedDeliveryOrderNotifications
+      tags: [delivery]
+      summary: Retry definitively failed order notifications
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }, { name: orderId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Notification dispatch summary, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryOrderNotificationDispatchSummary" } } } }
+        "404": { description: Order not found }
+  /projects/{projectId}/delivery/orders/export.csv:
+    get:
+      operationId: exportDeliveryOrders
+      tags: [delivery]
+      parameters: [{ name: projectId, in: path, required: true, schema: { type: integer } }]
+      responses: { "200": { description: CSV, content: { text/csv: { schema: { type: string } } } } }
 
 components:
   schemas:
@@ -809,6 +1192,57 @@ components:
           type: string
       required:
         - status
+
+    DesktopReleaseAsset:
+      type: object
+      additionalProperties: false
+      required: [url, size]
+      properties:
+        url:
+          type: string
+        size:
+          type: integer
+          minimum: 1
+
+    DesktopReleaseArchitecture:
+      type: object
+      additionalProperties: false
+      required: [displayName, asset]
+      properties:
+        displayName:
+          type: string
+        asset:
+          $ref: "#/components/schemas/DesktopReleaseAsset"
+
+    DesktopRelease:
+      type: object
+      additionalProperties: false
+      required: [version, publishedAt, releasePage, platforms, architectures]
+      properties:
+        version:
+          type: string
+          pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        publishedAt:
+          type: string
+          format: date-time
+        releasePage:
+          type: string
+        platforms:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [macos]
+        architectures:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            arm64:
+              $ref: "#/components/schemas/DesktopReleaseArchitecture"
+            x64:
+              $ref: "#/components/schemas/DesktopReleaseArchitecture"
 
     DashboardStats:
       type: object
@@ -825,10 +1259,13 @@ components:
 
     Project:
       type: object
-      required: [id, schoolName, createdAt, updatedAt, classCount, studentCount]
+      required: [id, projectType, schoolName, createdAt, updatedAt, classCount, studentCount]
       properties:
         id:
           type: integer
+        projectType:
+          type: string
+          enum: [school, corporate]
         schoolName:
           type: string
         photoDate:
@@ -843,6 +1280,8 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        priceSheetId:
+          type: ["integer", "null"]
         classCount:
           type: integer
         studentCount:
@@ -854,8 +1293,12 @@ components:
 
     ProjectInput:
       type: object
-      required: [schoolName]
+      required: [schoolName, priceSheetId]
       properties:
+        projectType:
+          type: string
+          enum: [school, corporate]
+          default: school
         schoolName:
           type: string
           minLength: 1
@@ -871,10 +1314,15 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        priceSheetId:
+          type: integer
 
     ProjectPatch:
       type: object
       properties:
+        projectType:
+          type: string
+          enum: [school, corporate]
         schoolName:
           type: string
           minLength: 1
@@ -946,6 +1394,16 @@ components:
           type: ["string", "null"]
         phone:
           type: ["string", "null"]
+        secondaryEmail:
+          type: ["string", "null"]
+        jobTitle:
+          type: ["string", "null"]
+        officeLocation:
+          type: ["string", "null"]
+        photoSession:
+          type: ["string", "null"]
+        captureNotes:
+          type: ["string", "null"]
         simpleQr:
           type: ["string", "null"]
         jsonQr:
@@ -973,6 +1431,16 @@ components:
           type: ["string", "null"]
         phone:
           type: ["string", "null"]
+        secondaryEmail:
+          type: ["string", "null"]
+        jobTitle:
+          type: ["string", "null"]
+        officeLocation:
+          type: ["string", "null"]
+        photoSession:
+          type: ["string", "null"]
+        captureNotes:
+          type: ["string", "null"]
 
     StudentPatch:
       type: object
@@ -990,6 +1458,16 @@ components:
         email:
           type: ["string", "null"]
         phone:
+          type: ["string", "null"]
+        secondaryEmail:
+          type: ["string", "null"]
+        jobTitle:
+          type: ["string", "null"]
+        officeLocation:
+          type: ["string", "null"]
+        photoSession:
+          type: ["string", "null"]
+        captureNotes:
           type: ["string", "null"]
 
     BulkStudentIds:
@@ -1077,6 +1555,16 @@ components:
           type: ["string", "null"]
         phoneColumn:
           type: ["string", "null"]
+        secondaryEmailColumn:
+          type: ["string", "null"]
+        jobTitleColumn:
+          type: ["string", "null"]
+        officeLocationColumn:
+          type: ["string", "null"]
+        photoSessionColumn:
+          type: ["string", "null"]
+        captureNotesColumn:
+          type: ["string", "null"]
         rows:
           type: array
           items:
@@ -1090,12 +1578,26 @@ components:
 
     ImportResult:
       type: object
-      required: [classesCreated, studentsCreated]
+      required: [classesCreated, studentsCreated, studentsUpdated, studentsMoved, studentsSkipped, conflicts]
       properties:
         classesCreated:
           type: integer
+          description: Classes created; existing classes are reused case-insensitively.
         studentsCreated:
           type: integer
+          description: Students or employees created.
+        studentsUpdated:
+          type: integer
+          description: Existing students or employees whose roster details changed.
+        studentsMoved:
+          type: integer
+          description: Existing students or employees moved to another class or department.
+        studentsSkipped:
+          type: integer
+          description: Unchanged rows skipped because they were already reconciled.
+        conflicts:
+          type: integer
+          description: Ambiguous rows that were not merged.
 
     ImportFileForm:
       type: object
@@ -1280,7 +1782,7 @@ components:
 
     PlatformOverview:
       type: object
-      required: [configured, studios, projects, invites]
+      required: [configured, studios, projects, invites, activity]
       properties:
         configured:
           type: boolean
@@ -1296,3 +1798,609 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PlatformInvite"
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformActivity"
+
+    PlatformActivity:
+      type: object
+      required: [id, actorUserId, studioId, studioName, action, createdAt]
+      properties:
+        id:
+          type: integer
+        actorUserId:
+          type: string
+        studioId:
+          type: ["integer", "null"]
+        studioName:
+          type: ["string", "null"]
+        action:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    DeliveryAccessInput:
+      type: object
+      required: [email, code]
+      properties:
+        code: { type: string, minLength: 8, maxLength: 8 }
+        email: { type: string, maxLength: 254 }
+        consentSource: { type: string, maxLength: 100 }
+        marketingConsent:
+          type: boolean
+          description: Optional explicit consent to receive promotional email from the studio.
+    MarketingContactResponse:
+      type: object
+      required: [id, studioId, email, firstSeenAt, lastSeenAt, successfulGalleryAccesses, marketingConsent, unsubscribedAt]
+      properties:
+        id: { type: integer }
+        studioId: { type: integer }
+        email: { type: string }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        successfulGalleryAccesses: { type: integer }
+        marketingConsent: { type: ["boolean", "null"] }
+        consentAt: { type: ["string", "null"], format: date-time }
+        consentSource: { type: ["string", "null"] }
+        unsubscribedAt: { type: ["string", "null"], format: date-time }
+        lastOrderAt: { type: ["string", "null"], format: date-time }
+        identifiedVisits: { type: integer }
+        purchases: { type: integer }
+    MarketingContactsResponse:
+      type: object
+      required: [contacts, page, pageSize, total, totalPages]
+      properties:
+        contacts: { type: array, items: { $ref: "#/components/schemas/MarketingContactResponse" } }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    MarketingContactMutationResponse:
+      type: object
+      required: [contact]
+      properties:
+        contact: { $ref: "#/components/schemas/MarketingContactResponse" }
+    MarketingOverview:
+      type: object
+      required: [uniqueContacts, identifiedVisits, repeatVisitors, purchasers, conversionRate, consentedContacts, unsubscribedContacts, projects]
+      properties:
+        uniqueContacts: { type: integer }
+        identifiedVisits: { type: integer }
+        repeatVisitors: { type: integer }
+        purchasers: { type: integer }
+        conversionRate: { type: number }
+        consentedContacts: { type: integer }
+        unsubscribedContacts: { type: integer }
+        projects:
+          type: array
+          items: { $ref: "#/components/schemas/MarketingProjectOverview" }
+        perProject:
+          type: array
+          items: { $ref: "#/components/schemas/MarketingProjectOverview" }
+    MarketingProjectOverview:
+      type: object
+      required: [projectId, projectName, projectType, identifiedVisits, uniqueContacts, purchasers, conversionRate]
+      properties:
+        projectId: { type: integer }
+        projectName: { type: string }
+        projectType: { type: string, enum: [school, corporate] }
+        identifiedVisits: { type: integer }
+        uniqueContacts: { type: integer }
+        purchasers: { type: integer }
+        conversionRate: { type: number }
+    MarketingConsentInput:
+      type: object
+      required: [consented]
+      properties:
+        consented: { type: boolean }
+        source: { type: string, maxLength: 100 }
+    MarketingTemplateInput:
+      type: object
+      required: [name, subject, bodyText, category]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        bodyText: { type: string, minLength: 1 }
+        category: { type: string, minLength: 1, maxLength: 80 }
+    MarketingTemplate:
+      allOf:
+        - $ref: "#/components/schemas/MarketingTemplateInput"
+        - type: object
+          required: [id, studioId, createdAt, updatedAt]
+          properties:
+            id: { type: integer }
+            studioId: { type: integer }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    MarketingCampaignInput:
+      type: object
+      required: [name, templateId]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        templateId: { type: integer }
+        audienceFilter:
+          type: object
+          additionalProperties: false
+          properties:
+            consent: { type: string, enum: [consented, unconsented, all] }
+            engagement: { type: string, enum: [visited, repeat, purchaser, all] }
+            search: { type: string, maxLength: 200 }
+    MarketingCampaign:
+      allOf:
+        - $ref: "#/components/schemas/MarketingCampaignInput"
+        - type: object
+          required: [id, studioId, audienceFilterSnapshot, recipientCount, status, sentCount, sentAt, lastError, createdAt, updatedAt]
+          properties:
+            id: { type: integer }
+            studioId: { type: integer }
+            audienceFilterSnapshot: { type: string }
+            recipientCount: { type: integer }
+            status: { type: string, enum: [draft, sending, sent, failed, needs_review] }
+            sentCount: { type: integer }
+            sentAt: { type: ["string", "null"], format: date-time }
+            lastError: { type: ["string", "null"] }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    MarketingEmailStatus:
+      type: object
+      required: [configured, fromEmail]
+      properties:
+        configured: { type: boolean }
+        fromEmail: { type: ["string", "null"] }
+    MarketingCampaignSendResponse:
+      type: object
+      required: [campaign, sentCount]
+      properties:
+        campaign: { $ref: "#/components/schemas/MarketingCampaign" }
+        sentCount: { type: integer }
+    DeliveryOrderInput:
+      type: object
+      required: [paymentMethod, idempotencyKey, customerName, customerEmail]
+      properties:
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+        token: { type: string }
+        items: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/DeliveryBasketItem" } }
+        offerId: { type: string }
+        photoIds: { type: array, minItems: 1, items: { type: integer } }
+        quantity: { type: integer, minimum: 1 }
+        customerName: { type: string }
+        customerEmail: { type: string }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
+        deliveryMethod: { type: string, enum: [digital, school, collection, shipping] }
+        deliveryAddress: { type: string }
+    DeliveryBasketItem:
+      type: object
+      required: [offerId, photoIds, quantity]
+      properties:
+        offerId: { type: string }
+        photoIds: { type: array, minItems: 1, maxItems: 100, items: { type: integer } }
+        quantity: { type: integer, minimum: 1, maximum: 100 }
+    DeliveryOffer:
+      type: object
+      required: [id, name, productType, unitAmount, currency, paymentMethods, photoCount, deliveryMethods, active]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        productType: { type: string, enum: [digital, print, pack] }
+        stripePriceId: { type: string }
+        unitAmount: { type: integer, minimum: 0 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        paymentMethods: { type: array, minItems: 1, items: { type: string, enum: [stripe, establishment, bank_transfer] } }
+        photoCount: { type: integer, minimum: 1 }
+        printSize: { type: string }
+        deliveryMethods: { type: array, items: { type: string, enum: [digital, school, collection, shipping] } }
+        active: { type: boolean }
+        includesDigitalDownloads: { type: boolean, default: false }
+        pricingRules:
+          type: object
+          properties:
+            selection: { type: string }
+            quantity: { type: string }
+    DeliverySettingsInput:
+      type: object
+      properties:
+        watermarkEnabled: { type: boolean }
+        watermarkText: { type: ["string", "null"] }
+        expiresAt: { type: ["string", "null"], format: date-time }
+        establishmentPaymentInstructions: { type: ["string", "null"] }
+        bankTransferInstructions: { type: ["string", "null"] }
+        priceSheetId: { type: ["integer", "null"] }
+        offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+    DeliveryPriceSheetInput:
+      type: object
+      required: [name, offers]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        offers: { type: array, minItems: 1, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+    DeliveryPriceSheet:
+      type: object
+      required: [id, studioId, name, offers, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        studioId: { type: integer }
+        name: { type: string }
+        offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FulfillmentInput:
+      type: object
+      required: [fulfillmentStatus]
+      properties:
+        fulfillmentStatus: { type: string, enum: [not_required, paid, preparing, printed, ready, dispatched, delivered] }
+    PaymentStatusInput:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [pending, paid, cancelled, refunded] }
+    DeliveryGallery:
+      type: object
+      required: [slug, status, projectType, subjectLabel, groupLabel]
+      properties:
+        slug: { type: string }
+        status: { type: string }
+        projectType: { type: string, enum: [school, corporate] }
+        subjectLabel: { type: string }
+        groupLabel: { type: string }
+        expiresAt: { type: ["string", "null"], format: date-time }
+        studio: { type: object, additionalProperties: true }
+        photos:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              fileName: { type: string }
+              fileUrl: { type: string }
+              downloadUrl: { type: string }
+    DeliveryAccessResponse:
+      type: object
+      required: [token, expiresIn]
+      properties:
+        token: { type: string }
+        expiresIn: { type: integer }
+    DeliveryCodeResponse:
+      type: object
+      required: [studentId, accessCode]
+      properties:
+        studentId: { type: integer }
+        accessCode: { type: string }
+    DeliveryAccessUpdateInput:
+      type: object
+      properties:
+        revoked: { type: boolean }
+        expiresAt: { type: ["string", "null"], format: date-time }
+    DeliveryAccessMutationResponse:
+      type: object
+      required: [access]
+      properties:
+        access:
+          type: object
+          properties:
+            studentId: { type: integer }
+            revokedAt: { type: ["string", "null"] }
+            expiresAt: { type: ["string", "null"] }
+    DeliveryPhotosResponse:
+      type: object
+      required: [gallery, student, subject, photos, offers, orderingAvailable, stripeAvailable, mediaExpiresAt]
+      properties:
+        gallery:
+          type: object
+          properties:
+            slug: { type: string }
+            status: { type: string }
+            projectType: { type: string, enum: [school, corporate] }
+            subjectLabel: { type: string }
+            groupLabel: { type: string }
+            priceSheetId: { type: ["integer", "null"] }
+            expiresAt: { type: ["string", "null"] }
+        student:
+          type: object
+          required: [firstName, lastName, label, projectType]
+          properties:
+            firstName: { type: string }
+            lastName: { type: string }
+            label: { type: string }
+            departmentName: { type: string }
+            projectType: { type: string, enum: [school, corporate] }
+        subject:
+          type: object
+          required: [firstName, lastName, displayName, label, organizationName, groupLabel, groupName]
+          properties:
+            firstName: { type: string }
+            lastName: { type: string }
+            displayName: { type: string }
+            label: { type: string }
+            organizationName: { type: ["string", "null"] }
+            groupLabel: { type: string }
+            groupName: { type: ["string", "null"] }
+        price: { type: object, additionalProperties: true }
+        offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+        orderingAvailable:
+          type: boolean
+          description: Whether at least one complete Volume Capture offer is available.
+        stripeAvailable:
+          type: boolean
+          description: Whether Stripe checkout is currently available as an optional payment method.
+        photos: { type: array, items: { $ref: "#/components/schemas/DeliveryGalleryPhotosItem" } }
+        mediaExpiresAt: { type: string, format: date-time }
+    DeliveryGalleryPhotosItem:
+      type: object
+      required: [id, fileName, fileUrl, downloadUrl]
+      properties:
+        id: { type: integer }
+        fileName: { type: string }
+        mimeType: { type: string }
+        fileUrl: { type: string }
+        downloadUrl: { type: string }
+    DeliveryCatalogResponse:
+      type: object
+      required: [prices]
+      properties:
+        prices: { type: array, items: { $ref: "#/components/schemas/DeliveryCatalogPrice" } }
+        offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }
+    DeliveryCatalogPrice:
+      type: object
+      required: [productId, priceId, name, amount, currency]
+      properties:
+        productId: { type: string }
+        priceId: { type: string }
+        name: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+    DeliveryCheckoutResponse:
+      type: object
+      required: [checkoutUrl, orderId, status, paymentMethod, publicReference, checkoutAttemptStatus]
+      properties:
+        checkoutUrl: { type: ["string", "null"] }
+        orderId: { type: integer }
+        status: { type: string }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
+        paymentInstructions: { type: ["string", "null"] }
+        publicReference: { type: string }
+        recoveryUrl: { type: ["string", "null"] }
+        recoveryToken: { type: ["string", "null"], description: Returned only when the order is first created; never persisted in plaintext }
+        checkoutAttemptStatus: { type: string, enum: [not_started, started, created, uncertain, failed] }
+    DeliveryOrderResponse:
+      type: object
+      required: [orderId, status, amountTotal, currency, paymentMethod, photoIds]
+      properties:
+        orderId: { type: integer }
+        status: { type: string }
+        amountTotal: { type: integer }
+        currency: { type: string }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
+        paidAt: { type: ["string", "null"] }
+        photoIds: { type: array, items: { type: integer } }
+        downloadablePhotoIds: { type: array, items: { type: integer } }
+    DeliveryOrderRecoveryResponse:
+      type: object
+      additionalProperties: false
+      required: [reference, status, paymentMethod, amountTotal, currency, createdAt, paidAt, fulfillmentStatus, deliveryMethod, manualInstructions, items]
+      properties:
+        reference: { type: string }
+        status: { type: string, enum: [pending, paid, expired, refunded, cancelled] }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
+        amountTotal: { type: integer }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: ["string", "null"], format: date-time }
+        fulfillmentStatus: { type: string }
+        deliveryMethod: { type: string }
+        manualInstructions: { type: ["string", "null"] }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [productName, productType, quantity]
+            properties:
+              productName: { type: string }
+              productType: { type: string }
+              quantity: { type: integer }
+    DeliverySettingsResponse:
+      type: object
+      required: [gallery]
+      properties:
+        gallery:
+          type: object
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            status: { type: string }
+        projectType: { type: string, enum: [school, corporate] }
+        subjectLabel: { type: string }
+        groupLabel: { type: string }
+        accessCount: { type: integer }
+    DeliveryMutationResponse:
+      type: object
+      required: [gallery]
+      properties:
+        gallery:
+          type: object
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            status: { type: string }
+        publicUrl: { type: string }
+        message: { type: string }
+        invitationSummary: { $ref: "#/components/schemas/DeliveryInvitationSummary" }
+    DeliveryInvitationSummary:
+      type: object
+      required: [dispatched, claimed, sent, failed, needsReview, pending]
+      properties:
+        dispatched: { type: boolean }
+        claimed: { type: integer }
+        sent: { type: integer }
+        failed: { type: integer }
+        needsReview: { type: integer }
+        pending: { type: integer }
+        reason: { type: ["string", "null"] }
+    DeliveryInvitationRetryResponse:
+      type: object
+      required: [gallery, invitationSummary]
+      properties:
+        gallery:
+          type: object
+          required: [id, slug, status]
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            status: { type: string }
+        invitationSummary: { $ref: "#/components/schemas/DeliveryInvitationSummary" }
+    DeliveryAccessCardsResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          firstName: { type: string }
+          lastName: { type: string }
+          subjectLabel: { type: string }
+          groupLabel: { type: string }
+          studentId: { type: integer, description: Legacy subject identifier retained for compatibility }
+          subjectId: { type: integer, description: Legacy subject identifier retained for compatibility }
+          generatedStudentId: { type: string }
+          className: { type: ["string", "null"] }
+          departmentName: { type: ["string", "null"] }
+          accessCode: { type: string }
+          accessUrl: { type: string, description: Absolute human-readable gallery URL without credentials }
+          qrUrl: { type: string, description: Absolute credential-bearing fragment URL encoded by the QR image }
+          qrDataUrl: { type: string }
+    DeliveryAccessCardsPrepareResponse:
+      type: object
+      required: [gallery, preparedCount, studentCount, cards, message]
+      properties:
+        gallery:
+          type: object
+          required: [id, slug, status]
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            status: { type: string, enum: [draft, published, revoked] }
+        preparedCount: { type: integer, minimum: 0 }
+        studentCount: { type: integer, minimum: 0 }
+        cards: { $ref: "#/components/schemas/DeliveryAccessCardsResponse" }
+        message: { type: string }
+    DeliveryOrdersResponse:
+      type: object
+      required: [orders]
+      properties:
+        orders: { type: array, items: { $ref: "#/components/schemas/DeliveryOrderSafe" } }
+    DeliveryOrderDetailResponse:
+      type: object
+      required: [order, items]
+      properties:
+        order: { $ref: "#/components/schemas/DeliveryOrderSafe" }
+        items: { type: array, items: { $ref: "#/components/schemas/DeliveryOrderItemSafe" } }
+    DeliveryOrderMutationResponse:
+      type: object
+      required: [order]
+      properties:
+        order: { $ref: "#/components/schemas/DeliveryOrderSafe" }
+    DeliveryOrderSafe:
+      type: object
+      additionalProperties: false
+      required: [id, publicReference, status, paymentMethod, customerName, customerEmail, fulfillmentStatus, deliveryMethod, deliveryAddress, amountTotal, currency, createdAt, paidAt]
+      properties:
+        id: { type: integer }
+        publicReference: { type: ["string", "null"] }
+        status: { type: string, enum: [pending, paid, expired, refunded, cancelled] }
+        paymentMethod: { type: string, enum: [stripe, establishment, bank_transfer] }
+        customerName: { type: ["string", "null"] }
+        customerEmail: { type: ["string", "null"] }
+        fulfillmentStatus: { type: string }
+        deliveryMethod: { type: string }
+        deliveryAddress: { type: ["string", "null"] }
+        amountTotal: { type: integer }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: ["string", "null"], format: date-time }
+        notifications:
+          type: object
+          description: Manager-only safe delivery states; omitted from viewer responses.
+          additionalProperties: false
+          properties:
+            orderReceived: { $ref: "#/components/schemas/DeliveryOrderNotificationSafeState" }
+            paymentConfirmed: { $ref: "#/components/schemas/DeliveryOrderNotificationSafeState" }
+    DeliveryOrderNotificationSafeState:
+      type: ["object", "null"]
+      additionalProperties: false
+      required: [status, sentAt, attempts, retryAllowed]
+      properties:
+        status: { type: string, enum: [pending, sending, sent, failed, needs_review] }
+        sentAt: { type: ["string", "null"], format: date-time }
+        attempts: { type: integer, minimum: 0 }
+        retryAllowed: { type: boolean }
+    DeliveryOrderItemSafe:
+      type: object
+      additionalProperties: false
+      required: [id, photoId, offerId, productName, productType, includesDigitalDownloads, printSize, quantity, unitAmount, currency]
+      properties:
+        id: { type: integer }
+        photoId: { type: ["integer", "null"] }
+        offerId: { type: string }
+        productName: { type: string }
+        productType: { type: string, enum: [digital, print, pack] }
+        includesDigitalDownloads: { type: boolean }
+        printSize: { type: ["string", "null"] }
+        quantity: { type: integer }
+        unitAmount: { type: integer }
+        currency: { type: string }
+    DeliveryOrderNotificationDispatchSummary:
+      type: object
+      required: [claimed, sent, failed, needsReview, pending]
+      properties:
+        claimed: { type: integer }
+        sent: { type: integer }
+        failed: { type: integer }
+        needsReview: { type: integer }
+        pending: { type: integer }
+    DeliveryOperationsResponse:
+      type: object
+      additionalProperties: false
+      required: [invitations, orderNotifications, issues]
+      properties:
+        invitations: { $ref: "#/components/schemas/DeliveryOperationCounts" }
+        orderNotifications: { $ref: "#/components/schemas/DeliveryOperationCounts" }
+        issues:
+          type: object
+          additionalProperties: false
+          required: [invitations, orderNotifications]
+          properties:
+            invitations: { type: integer, minimum: 0 }
+            orderNotifications: { type: integer, minimum: 0 }
+    DeliveryOperationCounts:
+      type: object
+      additionalProperties: false
+      required: [pending, sending, sent, failed, needsReview]
+      properties:
+        pending: { type: integer, minimum: 0 }
+        sending: { type: integer, minimum: 0 }
+        sent: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        needsReview: { type: integer, minimum: 0 }
+    PhotoShareInput:
+      type: object
+      required: [shareWithParents]
+      properties:
+        shareWithParents: { type: boolean }
+    PhotoShareResponse:
+      type: object
+      required: [photo]
+      properties:
+        photo:
+          type: object
+          required: [id, projectId, studentId, fileName, shareWithParents]
+          properties:
+            id: { type: integer }
+            projectId: { type: integer }
+            studentId: { type: integer }
+            fileName: { type: string }
+            fileUrl: { type: string }
+            mimeType: { type: string }
+            rating: { type: integer }
+            colorLabel: { type: string }
+            shareWithParents: { type: boolean }
+        offers: { type: array, items: { $ref: "#/components/schemas/DeliveryOffer" } }

@@ -10,6 +10,7 @@ import {
   photosTable,
   qrMarkersTable,
   studentsTable,
+  settingsTable,
 } from '../db/schema.ts'
 import { getCaptureFileFormat, getCaptureFileRole, normalizeBaseFilename } from './capturePairing.ts'
 
@@ -26,6 +27,13 @@ interface CaptureFileInput {
   fileName: string
   capturedAt: string
   groupId?: string | null
+  /**
+   * Explicit renderer drops must never pair a file with another student's
+   * capture just because the camera basename and timestamps happen to match.
+   * Ordinary watcher imports leave this unset to preserve their legacy
+   * basename/timestamp pairing behavior.
+   */
+  strictStudentOwnership?: boolean
 }
 
 function timestampMs(value: string): number {
@@ -65,11 +73,36 @@ function findPairCandidate(db: DesktopDb, input: CaptureFileInput) {
     .all()
     .map((capture) => ({ capture, files: getCaptureFiles(db, capture.id) }))
     .filter(({ capture, files }) =>
-       sameCaptureWindow(input.capturedAt, capture.capturedAt)
-       && (input.groupId === undefined || capture.groupId === input.groupId)
+      sameCaptureWindow(input.capturedAt, capture.capturedAt)
+      && (input.groupId === undefined || capture.groupId === input.groupId)
+      && (!input.strictStudentOwnership || capture.studentId === input.studentId)
       && !files.some((file) => file.fileRole === role),
     )
     .sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0]
+}
+
+/**
+ * Resolve the immutable assignment of a JPEG/RAW pair before the incoming
+ * file is copied to a destination. This matters when a delayed RAW arrives
+ * after the photographer changes the active roster target: basename/timestamp
+ * pairing may identify an earlier JPEG whose student must own both files.
+ */
+export function findCapturePairAssignment(
+  db: DesktopDb,
+  input: Pick<CaptureFileInput, 'projectId' | 'studentId' | 'fileName' | 'capturedAt' | 'groupId' | 'strictStudentOwnership'>,
+): { captureId: number; studentId: number | null; classId: number | null } | undefined {
+  const candidate = findPairCandidate(db, {
+    ...input,
+    classId: null,
+    filePath: '',
+    storedPath: '',
+  })
+  if (!candidate) return undefined
+  return {
+    captureId: candidate.capture.id,
+    studentId: candidate.capture.studentId,
+    classId: candidate.capture.classId,
+  }
 }
 
 /** Persist a group JPEG/RAW without creating a legacy student photo row. */
@@ -158,7 +191,9 @@ function insertImageFile(db: DesktopDb, captureId: number, input: CaptureFileInp
  * survives watcher restarts, unlike the per-session seenPaths set.
  */
 export function hasProcessedCaptureSource(db: DesktopDb, sourcePath: string): boolean {
-  return Boolean(findDuplicateFile(db, sourcePath))
+  return Boolean(findDuplicateFile(db, sourcePath)
+    || db.select().from(settingsTable)
+      .where(eq(settingsTable.key, `discarded_capture_source:${sourcePath}`)).get())
 }
 
 export interface QrMarkerInput {
@@ -254,7 +289,12 @@ export function recordRawCapture(db: DesktopDb, input: CaptureFileInput): {
  * newly processed JPEG a capture/file representation while the legacy gallery
  * and upload flows remain the compatibility surface.
  */
-export function mirrorPhotoAsCapture(db: DesktopDb, photo: PhotoRow, sourcePath = photo.filePath): void {
+export function mirrorPhotoAsCapture(
+  db: DesktopDb,
+  photo: PhotoRow,
+  sourcePath = photo.filePath,
+  options: { strictStudentOwnership?: boolean } = {},
+): void {
   const existing = db
     .select()
     .from(capturesTable)
@@ -287,6 +327,7 @@ export function mirrorPhotoAsCapture(db: DesktopDb, photo: PhotoRow, sourcePath 
     storedPath: photo.filePath,
     fileName: photo.fileName,
     capturedAt: photo.capturedAt,
+    strictStudentOwnership: options.strictStudentOwnership,
   })
 
   if (candidate) {

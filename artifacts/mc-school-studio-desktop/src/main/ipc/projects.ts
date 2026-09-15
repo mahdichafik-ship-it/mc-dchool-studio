@@ -2,10 +2,10 @@ import { ipcMain } from 'electron'
 import { readFileSync, mkdirSync } from 'fs'
 import { randomBytes } from 'crypto'
 import { dirname, join } from 'path'
-import { eq, count, and } from 'drizzle-orm'
+import { eq, count, and, isNull } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { projectsTable, classesTable, studentsTable, photosTable, groupsTable, groupMembersTable } from '../db/schema'
-import type { Project, Class, Student, ImportResult, CreateStudentResult, StudentGroup } from '../../shared/types'
+import { projectsTable, classesTable, studentsTable, capturesTable, groupsTable, groupMembersTable } from '../db/schema'
+import { normalizeProjectType, type Project, type Class, type Student, type ImportResult, type CreateStudentResult, type StudentGroup } from '../../shared/types'
 import { safeProjectFolderName } from '../lib/retirement'
 import {
   ensureProjectStorageLayout,
@@ -16,6 +16,10 @@ import { formatStudentFolderName } from '../lib/photoFileNaming'
 import { syncStudentCloudIdentity } from './upload'
 import { getSetting, setSetting } from './upload'
 import { getNewDefaultGroupMemberIds, serializeDefaultGroupRosterSnapshot } from '../lib/groupRoster'
+import {
+  migrateStudentFoldersAt,
+  previewStudentFolderMigration,
+} from '../lib/studentFolderMigration'
 
 function now() {
   return new Date().toISOString()
@@ -65,7 +69,7 @@ function generateUniqueLocalStudentId(projectId: number): string {
       .from(studentsTable)
       .where(eq(studentsTable.projectId, projectId))
       .all()
-      .map((row) => row.id.toUpperCase()),
+      .map((row) => row.id.normalize('NFKC').trim().toLocaleLowerCase()),
   )
   for (let attempt = 0; attempt < 1000; attempt++) {
     const candidate = randomBytes(8)
@@ -73,7 +77,7 @@ function generateUniqueLocalStudentId(projectId: number): string {
       .replace(/[^A-Z0-9]/gi, '')
       .slice(0, 7)
       .toUpperCase()
-    if (candidate.length === 7 && !existing.has(candidate)) return candidate
+    if (candidate.length === 7 && !existing.has(candidate.toLocaleLowerCase())) return candidate
   }
   throw new Error('Could not generate a unique student code.')
 }
@@ -91,6 +95,13 @@ function toStudent(
     firstName: student.firstName,
     lastName: student.lastName,
     generatedStudentId: student.generatedStudentId,
+    email: student.email,
+    phone: student.phone,
+    secondaryEmail: student.secondaryEmail,
+    jobTitle: student.jobTitle,
+    officeLocation: student.officeLocation,
+    photoSession: student.photoSession,
+    captureNotes: student.captureNotes,
     simpleQr: student.simpleQr,
     jsonQr: student.jsonQr,
     photoCount,
@@ -107,6 +118,7 @@ function enrichProject(
 ): Project {
   return {
     id: p.id,
+    projectType: normalizeProjectType(p.projectType),
     schoolName: p.schoolName,
     photoDate: p.photoDate,
     address: p.address,
@@ -116,6 +128,11 @@ function enrichProject(
     notes: p.notes,
     watchFolder: p.watchFolder,
     finishedAt: p.finishedAt,
+    syncStatus: p.syncStatus,
+    syncCompletedFiles: p.syncCompletedFiles,
+    syncTotalFiles: p.syncTotalFiles,
+    syncFailedFiles: p.syncFailedFiles,
+    syncError: p.syncError,
     classCount,
     studentCount,
     photoCount,
@@ -182,8 +199,8 @@ export function registerProjectHandlers() {
         .all()
       const [{ photoCount }] = db
         .select({ photoCount: count() })
-        .from(photosTable)
-        .where(eq(photosTable.projectId, p.id))
+        .from(capturesTable)
+        .where(and(eq(capturesTable.projectId, p.id), isNull(capturesTable.groupId)))
         .all()
       return enrichProject(p, classCount, studentCount, photoCount)
     })
@@ -194,7 +211,11 @@ export function registerProjectHandlers() {
     if (!p) return null
     const [{ classCount }] = db.select({ classCount: count() }).from(classesTable).where(eq(classesTable.projectId, p.id)).all()
     const [{ studentCount }] = db.select({ studentCount: count() }).from(studentsTable).where(eq(studentsTable.projectId, p.id)).all()
-    const [{ photoCount }] = db.select({ photoCount: count() }).from(photosTable).where(eq(photosTable.projectId, p.id)).all()
+    const [{ photoCount }] = db
+      .select({ photoCount: count() })
+      .from(capturesTable)
+      .where(and(eq(capturesTable.projectId, p.id), isNull(capturesTable.groupId)))
+      .all()
     prepareProjectFolders(db, projectId)
     reconcileDefaultGroups(projectId)
     return enrichProject(p, classCount, studentCount, photoCount)
@@ -210,23 +231,50 @@ export function registerProjectHandlers() {
     },
   )
 
+  ipcMain.handle('projects:previewFolderMigration', async (
+    _e,
+    { projectId }: { projectId: number },
+  ) => {
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (!project) throw new Error(`Project ${projectId} not found`)
+    const classes = db.select().from(classesTable).where(eq(classesTable.projectId, projectId)).all()
+    const students = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
+    return previewStudentFolderMigration({
+      projectId,
+      photosDir: getPhotosDir(),
+      project,
+      classes,
+      students,
+    })
+  })
+
+  ipcMain.handle('projects:migrateFolderMigration', async (
+    _e,
+    { projectId, confirmed }: { projectId: number; confirmed: boolean },
+  ) => {
+    if (confirmed !== true) throw new Error('Folder migration requires explicit confirmation.')
+    return migrateStudentFoldersAt(db, projectId, getPhotosDir())
+  })
+
   ipcMain.handle('projects:import', async (_e, { filePath }: { filePath: string }): Promise<ImportResult> => {
     const raw = readFileSync(filePath, 'utf-8')
     const bundle = JSON.parse(raw)
     const { project: p, classes, students, groups = [], groupMembers = [] } = bundle
 
-    // Upsert project by schoolName
-    const existing = db
-      .select()
-      .from(projectsTable)
-      .where(eq(projectsTable.schoolName, p.schoolName))
-      .get()
+    const projectType = normalizeProjectType(p.projectType)
+    const localProjects = db.select().from(projectsTable).all()
+    const existing = localProjects.find((project) => Number.isInteger(p.id) && project.cloudId === p.id)
+      ?? localProjects.find((project) =>
+        project.cloudId === null
+        && project.schoolName === p.schoolName
+        && normalizeProjectType(project.projectType) === projectType)
 
     let projectId: number
     if (existing) {
       db.update(projectsTable)
         .set({
           cloudId: Number.isInteger(p.id) ? p.id : existing.cloudId,
+          projectType,
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,
@@ -246,6 +294,7 @@ export function registerProjectHandlers() {
         .insert(projectsTable)
         .values({
           cloudId: Number.isInteger(p.id) ? p.id : null,
+          projectType,
           schoolName: p.schoolName,
           photoDate: p.photoDate ?? null,
           address: p.address ?? null,
@@ -289,6 +338,13 @@ export function registerProjectHandlers() {
           firstName: stu.firstName,
           lastName: stu.lastName,
           generatedStudentId: stu.generatedStudentId,
+          email: stu.email ?? null,
+          phone: stu.phone ?? null,
+          secondaryEmail: stu.secondaryEmail ?? null,
+          jobTitle: stu.jobTitle ?? null,
+          officeLocation: stu.officeLocation ?? null,
+          photoSession: stu.photoSession ?? null,
+          captureNotes: stu.captureNotes ?? null,
           simpleQr: stu.simpleQr ?? null,
           jsonQr: stu.jsonQr ?? null,
           createdAt: stu.createdAt ?? now(),
@@ -406,21 +462,24 @@ export function registerProjectHandlers() {
       .orderBy(classesTable.className)
       .all()
 
-    return rows.map((c) => {
-      const [{ studentCount }] = db
-        .select({ studentCount: count() })
+    const studentCounts = new Map(
+      db
+        .select({ classId: studentsTable.classId, studentCount: count() })
         .from(studentsTable)
-        .where(eq(studentsTable.classId, c.id))
+        .where(eq(studentsTable.projectId, projectId))
+        .groupBy(studentsTable.classId)
         .all()
-      return {
+        .map(({ classId, studentCount }) => [classId, studentCount]),
+    )
+
+    return rows.map((c) => ({
         id: c.id,
         projectId: c.projectId,
         className: c.className,
-        studentCount,
+        studentCount: studentCounts.get(c.id) ?? 0,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
-      }
-    })
+      }))
   })
 
   // Students
@@ -476,6 +535,9 @@ export function registerProjectHandlers() {
       _e,
       { projectId, classId }: { projectId: number; classId?: number },
     ): Promise<Student[]> => {
+      const rosterFilter = classId
+        ? and(eq(studentsTable.projectId, projectId), eq(studentsTable.classId, classId))
+        : eq(studentsTable.projectId, projectId)
       const rows = db
         .select({
           student: studentsTable,
@@ -483,19 +545,23 @@ export function registerProjectHandlers() {
         })
         .from(studentsTable)
         .leftJoin(classesTable, eq(studentsTable.classId, classesTable.id))
-        .where(eq(studentsTable.projectId, projectId))
+        .where(rosterFilter)
         .orderBy(classesTable.className, studentsTable.lastName, studentsTable.firstName)
         .all()
-        .filter((r) => !classId || r.student.classId === classId)
 
-      return rows.map(({ student: s, className }) => {
-        const [{ photoCount }] = db
-          .select({ photoCount: count() })
-          .from(photosTable)
-          .where(eq(photosTable.studentId, s.id))
+      const photoCounts = new Map(
+        db
+          .select({ studentId: capturesTable.studentId, photoCount: count() })
+          .from(capturesTable)
+          .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
+          .groupBy(capturesTable.studentId)
           .all()
-        return toStudent(s, className ?? '', photoCount)
-      })
+          .flatMap(({ studentId, photoCount }) => studentId === null ? [] : [[studentId, photoCount] as const]),
+      )
+
+      return rows.map(({ student: s, className }) =>
+        toStudent(s, className ?? '', photoCounts.get(s.id) ?? 0),
+      )
     },
   )
 }

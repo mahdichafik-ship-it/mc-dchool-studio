@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { copyFile, mkdir } from 'node:fs/promises'
+import { copyFile, mkdir, writeFile } from 'node:fs/promises'
 import { basename, join, parse } from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import type { getDb } from '../db'
@@ -26,7 +26,11 @@ export interface WatchedPhotoStore {
   insertPhoto(photo: typeof photosTable.$inferInsert): PhotoRow
 }
 
-export function createWatchedPhotoStore(db: DesktopDb, sourcePath?: string): WatchedPhotoStore {
+export function createWatchedPhotoStore(
+  db: DesktopDb,
+  sourcePath?: string,
+  options: { strictStudentOwnership?: boolean } = {},
+): WatchedPhotoStore {
   return {
     findProject: (projectId) =>
       db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get(),
@@ -45,7 +49,9 @@ export function createWatchedPhotoStore(db: DesktopDb, sourcePath?: string): Wat
       db.select().from(classesTable).where(eq(classesTable.id, classId)).get(),
     insertPhoto: (photo) => {
       const saved = db.insert(photosTable).values(photo).returning().get()
-      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath)
+      mirrorPhotoAsCapture(db, saved, sourcePath ?? saved.filePath, {
+        strictStudentOwnership: options.strictStudentOwnership,
+      })
       return saved
     },
   }
@@ -59,7 +65,8 @@ export interface WatchedPhotoProcessorOptions {
   store: WatchedPhotoStore
   photosDir: string
   projectJpegOriginalsDir?: string
-  readQr: (filePath: string) => Promise<WatchedPhotoQrResult | null>
+  readQr: (filePath: string, sourceBuffer?: Buffer) => Promise<WatchedPhotoQrResult | null>
+  sourceBuffer?: Buffer
   targetStudentId?: number | null
   capturedAt?: string
   diagnosticId?: string
@@ -69,6 +76,7 @@ export interface WatchedPhotoProcessorOptions {
     fileName: string
     capturedAt: string
     student: StudentRow
+    sourceBuffer?: Buffer
   }) => Promise<string | null> | string | null
 }
 
@@ -146,6 +154,7 @@ interface MatchedPhotoPersistenceContext {
   filePath: string
   fileName: string
   capturedAt: string
+  sourceBuffer?: Buffer
   projectJpegOriginalsDir?: string
 }
 
@@ -173,11 +182,21 @@ export async function persistMatchedPhoto(
   await mkdir(destDir, { recursive: true })
   const destPath = join(destDir, outputFileName)
   markImagePipeline(diagnosticId, 'file move started', `destination=${destPath} mode=async-copy`)
-  await copyFile(context.filePath, destPath)
+  if (context.sourceBuffer) {
+    // Persist the same snapshot that was decoded for validation/preview. The
+    // camera path may already have been replaced by the time persistence runs.
+    await writeFile(destPath, Buffer.from(context.sourceBuffer))
+  } else {
+    await copyFile(context.filePath, destPath)
+  }
   if (context.projectJpegOriginalsDir) {
     const projectOriginalPath = join(context.projectJpegOriginalsDir, outputFileName)
     await mkdir(context.projectJpegOriginalsDir, { recursive: true })
-    await copyFile(context.filePath, projectOriginalPath)
+    if (context.sourceBuffer) {
+      await writeFile(projectOriginalPath, Buffer.from(context.sourceBuffer))
+    } else {
+      await copyFile(context.filePath, projectOriginalPath)
+    }
     markImagePipeline(
       diagnosticId,
       'project original copy complete',
@@ -202,8 +221,9 @@ export async function persistMatchedPhoto(
 /**
  * Process one file discovered by the Smart Shooter watcher.
  *
- * The source file is only read for QR fallback and copied on a match. It is
- * never moved, renamed, or deleted from the watch folder.
+ * JPEG source bytes are snapshotted by the watcher after stability checks.
+ * Matching, QR fallback, preview generation, and persistence use that
+ * snapshot; the watch-folder path is never moved, renamed, or deleted.
  */
 export async function processWatchedPhoto(
   projectId: number,
@@ -213,6 +233,7 @@ export async function processWatchedPhoto(
     photosDir,
     projectJpegOriginalsDir,
     readQr,
+    sourceBuffer,
     targetStudentId = null,
     capturedAt,
     diagnosticId,
@@ -233,7 +254,7 @@ export async function processWatchedPhoto(
   // remains the fallback only when no student was selected in the app.
   const qrResult = filenameReference || targetStudentId !== null
     ? null
-    : await readQr(filePath)
+    : await readQr(filePath, sourceBuffer)
   const reference = targetStudentId !== null
     ? null
     : filenameReference ?? qrResult?.studentId
@@ -285,6 +306,7 @@ export async function processWatchedPhoto(
     fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
     student,
+    sourceBuffer,
   })
 
   const context = {
@@ -294,6 +316,7 @@ export async function processWatchedPhoto(
     filePath,
     fileName: destinationFileName,
     capturedAt: effectiveCapturedAt,
+    sourceBuffer,
     projectJpegOriginalsDir,
   }
   if (deferPersistence) {

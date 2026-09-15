@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { copyFileSync, existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 import { eq, and, isNull } from 'drizzle-orm'
 import { getDb } from '../db'
 import {
@@ -18,17 +18,18 @@ import type {
 } from '../../shared/types'
 
 function safeName(value: string): string {
-  return value
+  const cleaned = value
     .normalize('NFKC')
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 100) || 'captures'
+    .slice(0, 100)
+  return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : 'captures'
 }
 
-function shouldExport(
+export function shouldExport(
   mode: CaptureExportMode,
-  capture: typeof capturesTable.$inferSelect,
+  capture: Pick<typeof capturesTable.$inferSelect, 'pairingStatus' | 'selected' | 'favorite' | 'rejected'>,
 ): boolean {
   switch (mode) {
     case 'paired':
@@ -45,6 +46,108 @@ function shouldExport(
       return capture.selected && !capture.rejected
     case 'all':
       return true
+  }
+}
+
+export interface CaptureExportRecord {
+  capture: Pick<
+    typeof capturesTable.$inferSelect,
+    'id' | 'pairingStatus' | 'selected' | 'favorite' | 'rejected' | 'baseFilename' | 'sequence' | 'capturedAt'
+  >
+  files: Array<Pick<
+    typeof imageFilesTable.$inferSelect,
+    'fileRole' | 'fileFormat' | 'originalFilename' | 'storedPath'
+  >>
+  className: string | null
+  student: {
+    firstName: string
+    lastName: string
+    generatedStudentId: string
+  } | null
+}
+
+export interface CaptureExportInput {
+  project: Pick<typeof projectsTable.$inferSelect, 'schoolName'> & {
+    projectType?: 'school' | 'corporate'
+  }
+  records: CaptureExportRecord[]
+  destinationDir: string
+  mode: CaptureExportMode
+  layout?: CaptureExportLayout
+}
+
+function isPathInside(parentDir: string, candidatePath: string): boolean {
+  const parent = resolve(parentDir)
+  const candidate = resolve(candidatePath)
+  return candidate === parent || candidate.startsWith(`${parent}${sep}`)
+}
+
+export function exportCaptureRecords({
+  project,
+  records,
+  destinationDir,
+  mode,
+  layout = 'capture_folders',
+}: CaptureExportInput): CaptureExportResult {
+  const outputDir = layout === 'lightroom_watch_folder'
+    ? destinationDir
+    : join(destinationDir, `${safeName(project.schoolName)}-captures`)
+  mkdirSync(outputDir, { recursive: true })
+
+  let exportedCaptureCount = 0
+  let exportedFileCount = 0
+  let skippedMissingFiles = 0
+  let skippedExistingFiles = 0
+
+  for (const { capture, files, className, student } of records.filter(
+    ({ capture }) => shouldExport(mode, capture),
+  )) {
+    const sequence = String(capture.sequence ?? capture.id).padStart(6, '0')
+    const captureDir = join(outputDir, `${sequence}_${safeName(capture.baseFilename)}`)
+    let captureExported = false
+
+    for (const file of files) {
+      if (!existsSync(file.storedPath)) {
+        skippedMissingFiles++
+        continue
+      }
+      const destinationPath = layout === 'lightroom_watch_folder'
+        ? join(outputDir, buildLightroomFilename({
+            schoolName: project.schoolName,
+            projectType: project.projectType,
+            className,
+            student,
+            captureId: capture.id,
+            sequence: capture.sequence,
+            originalFilename: file.originalFilename,
+            fileRole: file.fileRole,
+            fileFormat: file.fileFormat,
+          }))
+        : join(captureDir, safeName(file.originalFilename))
+      const destinationParent = layout === 'lightroom_watch_folder' ? outputDir : captureDir
+      if (!isPathInside(destinationParent, destinationPath)) {
+        skippedMissingFiles++
+        continue
+      }
+      if (layout === 'lightroom_watch_folder' && existsSync(destinationPath)) {
+        skippedExistingFiles++
+        continue
+      }
+      if (layout === 'capture_folders') mkdirSync(captureDir, { recursive: true })
+      copyFileSync(file.storedPath, destinationPath)
+      exportedFileCount++
+      captureExported = true
+    }
+    if (captureExported) exportedCaptureCount++
+  }
+
+  return {
+    ok: true,
+    outputDir,
+    exportedCaptureCount,
+    exportedFileCount,
+    skippedMissingFiles,
+    skippedExistingFiles,
   }
 }
 
@@ -72,76 +175,35 @@ export function registerCaptureExportHandlers(): void {
         const db = getDb()
         const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
         if (!project) return { ok: false, error: 'Project not found.' }
-
-        const outputDir = layout === 'lightroom_watch_folder'
-          ? destinationDir
-          : join(destinationDir, `${safeName(project.schoolName)}-captures`)
-        mkdirSync(outputDir, { recursive: true })
         const captures = db
           .select()
           .from(capturesTable)
-           .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
+          .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
           .all()
-          .filter((capture) => shouldExport(mode, capture))
-
-        let exportedCaptureCount = 0
-        let exportedFileCount = 0
-        let skippedMissingFiles = 0
-        let skippedExistingFiles = 0
-
-        for (const capture of captures) {
-          const files = db
-            .select()
-            .from(imageFilesTable)
-            .where(eq(imageFilesTable.captureId, capture.id))
-            .all()
-          const sequence = String(capture.sequence ?? capture.id).padStart(6, '0')
-          const captureDir = join(outputDir, `${sequence}_${safeName(capture.baseFilename)}`)
-          const student = capture.studentId === null
-            ? null
-            : db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get() ?? null
-          const captureClass = capture.classId === null
-            ? null
-            : db.select().from(classesTable).where(eq(classesTable.id, capture.classId)).get() ?? null
-          let captureExported = false
-
-          for (const file of files) {
-            if (!existsSync(file.storedPath)) {
-              skippedMissingFiles++
-              continue
+        return exportCaptureRecords({
+          project,
+          mode,
+          layout,
+          destinationDir,
+          records: captures.map((capture) => {
+            const captureClass = capture.classId === null
+              ? null
+              : db.select().from(classesTable).where(eq(classesTable.id, capture.classId)).get()
+            const student = capture.studentId === null
+              ? null
+              : db.select().from(studentsTable).where(eq(studentsTable.id, capture.studentId)).get() ?? null
+            return {
+              capture,
+              files: db
+                .select()
+                .from(imageFilesTable)
+                .where(eq(imageFilesTable.captureId, capture.id))
+                .all(),
+              className: captureClass?.className ?? null,
+              student,
             }
-            const destinationPath = layout === 'lightroom_watch_folder'
-              ? join(outputDir, buildLightroomFilename({
-                  schoolName: project.schoolName,
-                  className: captureClass?.className ?? null,
-                  student,
-                  captureId: capture.id,
-                  sequence: capture.sequence,
-                  originalFilename: file.originalFilename,
-                  fileRole: file.fileRole,
-                  fileFormat: file.fileFormat,
-                }))
-              : join(captureDir, safeName(file.originalFilename))
-            if (layout === 'lightroom_watch_folder' && existsSync(destinationPath)) {
-              skippedExistingFiles++
-              continue
-            }
-            if (layout === 'capture_folders') mkdirSync(captureDir, { recursive: true })
-            copyFileSync(file.storedPath, destinationPath)
-            exportedFileCount++
-            captureExported = true
-          }
-          if (captureExported) exportedCaptureCount++
-        }
-
-        return {
-          ok: true,
-          outputDir,
-          exportedCaptureCount,
-          exportedFileCount,
-          skippedMissingFiles,
-          skippedExistingFiles,
-        }
+          }),
+        })
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) }
       }

@@ -18,6 +18,40 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Returns independently validated macOS installer assets from the latest published GitHub release.
+ * @summary Get the latest validated desktop release
+ */
+export const getDesktopReleaseResponseVersionRegExp = new RegExp('^[0-9]+\\.[0-9]+\\.[0-9]+$');
+
+
+
+
+
+export const GetDesktopReleaseResponse = zod.object({
+  "version": zod.string().regex(getDesktopReleaseResponseVersionRegExp),
+  "publishedAt": zod.coerce.date(),
+  "releasePage": zod.string(),
+  "platforms": zod.array(zod.enum(['macos'])).min(1),
+  "architectures": zod.object({
+  "arm64": zod.object({
+  "displayName": zod.string(),
+  "asset": zod.object({
+  "url": zod.string(),
+  "size": zod.number().min(1)
+})
+}).optional(),
+  "x64": zod.object({
+  "displayName": zod.string(),
+  "asset": zod.object({
+  "url": zod.string(),
+  "size": zod.number().min(1)
+})
+}).optional()
+})
+})
+
+
+/**
  * Returns aggregate counts for projects, schools, classes, and students
  * @summary Get dashboard statistics
  */
@@ -34,6 +68,7 @@ export const GetDashboardStatsResponse = zod.object({
  */
 export const ListProjectsResponseItem = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -41,6 +76,7 @@ export const ListProjectsResponseItem = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -52,21 +88,24 @@ export const ListProjectsResponse = zod.array(ListProjectsResponseItem)
 /**
  * @summary Create a new school project
  */
-
+export const createProjectBodyProjectTypeDefault = `school`;
 
 
 export const CreateProjectBody = zod.object({
+  "projectType": zod.enum(['school', 'corporate']).default(createProjectBodyProjectTypeDefault),
   "schoolName": zod.string().min(1),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
   "contactName": zod.string().nullish(),
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "priceSheetId": zod.number()
 })
 
 export const CreateProjectResponse = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -74,6 +113,7 @@ export const CreateProjectResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -90,6 +130,7 @@ export const GetProjectParams = zod.object({
 
 export const GetProjectResponse = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -97,6 +138,7 @@ export const GetProjectResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -115,6 +157,7 @@ export const UpdateProjectParams = zod.object({
 
 
 export const UpdateProjectBody = zod.object({
+  "projectType": zod.enum(['school', 'corporate']).optional(),
   "schoolName": zod.string().min(1).optional(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -126,6 +169,7 @@ export const UpdateProjectBody = zod.object({
 
 export const UpdateProjectResponse = zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -133,6 +177,7 @@ export const UpdateProjectResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -245,6 +290,11 @@ export const ListStudentsResponseItem = zod.object({
   "generatedStudentId": zod.string(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -270,7 +320,12 @@ export const CreateStudentBody = zod.object({
   "lastName": zod.string().min(1),
   "generatedStudentId": zod.string().nullish(),
   "email": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish()
 })
 
 export const CreateStudentResponse = zod.object({
@@ -283,6 +338,11 @@ export const CreateStudentResponse = zod.object({
   "generatedStudentId": zod.string(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -438,7 +498,12 @@ export const UpdateStudentBody = zod.object({
   "generatedStudentId": zod.string().nullish(),
   "classId": zod.number().optional(),
   "email": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish()
 })
 
 export const UpdateStudentResponse = zod.object({
@@ -451,6 +516,11 @@ export const UpdateStudentResponse = zod.object({
   "generatedStudentId": zod.string(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "secondaryEmail": zod.string().nullish(),
+  "jobTitle": zod.string().nullish(),
+  "officeLocation": zod.string().nullish(),
+  "photoSession": zod.string().nullish(),
+  "captureNotes": zod.string().nullish(),
   "simpleQr": zod.string().nullish(),
   "jsonQr": zod.string().nullish(),
   "createdAt": zod.string(),
@@ -523,7 +593,7 @@ export const ParseImportFileResponse = zod.object({
 
 
 /**
- * @summary Confirm an import with column mapping and create students
+ * @summary Confirm a project-scoped roster reconciliation
  */
 export const ConfirmImportParams = zod.object({
   "projectId": zod.coerce.number()
@@ -538,14 +608,23 @@ export const ConfirmImportBody = zod.object({
   "studentIdColumn": zod.string().nullish(),
   "emailColumn": zod.string().nullish(),
   "phoneColumn": zod.string().nullish(),
+  "secondaryEmailColumn": zod.string().nullish(),
+  "jobTitleColumn": zod.string().nullish(),
+  "officeLocationColumn": zod.string().nullish(),
+  "photoSessionColumn": zod.string().nullish(),
+  "captureNotesColumn": zod.string().nullish(),
   "rows": zod.array(zod.array(zod.string())),
   "headers": zod.array(zod.string()).optional()
 }))
 })
 
 export const ConfirmImportResponse = zod.object({
-  "classesCreated": zod.number(),
-  "studentsCreated": zod.number()
+  "classesCreated": zod.number().describe('Classes created; existing classes are reused case-insensitively.'),
+  "studentsCreated": zod.number().describe('Students or employees created.'),
+  "studentsUpdated": zod.number().describe('Existing students or employees whose roster details changed.'),
+  "studentsMoved": zod.number().describe('Existing students or employees moved to another class or department.'),
+  "studentsSkipped": zod.number().describe('Unchanged rows skipped because they were already reconciled.'),
+  "conflicts": zod.number().describe('Ambiguous rows that were not merged.')
 })
 
 
@@ -593,6 +672,7 @@ export const GetPlatformOverviewResponse = zod.object({
 }))),
   "projects": zod.array(zod.object({
   "id": zod.number(),
+  "projectType": zod.enum(['school', 'corporate']),
   "schoolName": zod.string(),
   "photoDate": zod.string().nullish(),
   "address": zod.string().nullish(),
@@ -600,6 +680,7 @@ export const GetPlatformOverviewResponse = zod.object({
   "contactEmail": zod.string().nullish(),
   "contactPhone": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
@@ -617,6 +698,14 @@ export const GetPlatformOverviewResponse = zod.object({
   "acceptedByUserId": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "acceptedAt": zod.coerce.date().nullish()
+})),
+  "activity": zod.array(zod.object({
+  "id": zod.number(),
+  "actorUserId": zod.string(),
+  "studioId": zod.number().nullable(),
+  "studioName": zod.string().nullable(),
+  "action": zod.string(),
+  "createdAt": zod.coerce.date()
 }))
 })
 
@@ -738,3 +827,1601 @@ export const CompletePlatformInviteResponse = zod.object({
 })
 
 
+export const GetDeliveryGalleryParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const GetDeliveryGalleryResponse = zod.object({
+  "slug": zod.string(),
+  "status": zod.string(),
+  "projectType": zod.enum(['school', 'corporate']),
+  "subjectLabel": zod.string(),
+  "groupLabel": zod.string(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "studio": zod.record(zod.string(), zod.unknown()).optional(),
+  "photos": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "fileName": zod.string().optional(),
+  "fileUrl": zod.string().optional(),
+  "downloadUrl": zod.string().optional()
+})).optional()
+})
+
+
+/**
+ * @summary Set whether a photo is shared with parents
+ */
+export const UpdatePhotoSharingParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "studentId": zod.coerce.number(),
+  "photoId": zod.coerce.number()
+})
+
+export const UpdatePhotoSharingBody = zod.object({
+  "shareWithParents": zod.boolean()
+})
+
+export const updatePhotoSharingResponseOffersItemUnitAmountMin = 0;
+
+export const updatePhotoSharingResponseOffersItemCurrencyMin = 3;
+export const updatePhotoSharingResponseOffersItemCurrencyMax = 3;
+
+
+
+export const updatePhotoSharingResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const UpdatePhotoSharingResponse = zod.object({
+  "photo": zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "studentId": zod.number(),
+  "fileName": zod.string(),
+  "fileUrl": zod.string().optional(),
+  "mimeType": zod.string().optional(),
+  "rating": zod.number().optional(),
+  "colorLabel": zod.string().optional(),
+  "shareWithParents": zod.boolean()
+}),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updatePhotoSharingResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(updatePhotoSharingResponseOffersItemCurrencyMin).max(updatePhotoSharingResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updatePhotoSharingResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).optional()
+})
+
+
+export const EnterDeliveryAccessParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const enterDeliveryAccessBodyCodeMin = 8;
+export const enterDeliveryAccessBodyCodeMax = 8;
+
+export const enterDeliveryAccessBodyEmailMax = 254;
+
+export const enterDeliveryAccessBodyConsentSourceMax = 100;
+
+
+
+export const EnterDeliveryAccessBody = zod.object({
+  "code": zod.string().min(enterDeliveryAccessBodyCodeMin).max(enterDeliveryAccessBodyCodeMax),
+  "email": zod.string().max(enterDeliveryAccessBodyEmailMax),
+  "consentSource": zod.string().max(enterDeliveryAccessBodyConsentSourceMax).optional(),
+  "marketingConsent": zod.boolean().optional().describe('Optional explicit consent to receive promotional email from the studio.')
+})
+
+export const EnterDeliveryAccessResponse = zod.object({
+  "token": zod.string(),
+  "expiresIn": zod.number()
+})
+
+
+export const GetMarketingOverviewResponse = zod.object({
+  "uniqueContacts": zod.number(),
+  "identifiedVisits": zod.number(),
+  "repeatVisitors": zod.number(),
+  "purchasers": zod.number(),
+  "conversionRate": zod.number(),
+  "consentedContacts": zod.number(),
+  "unsubscribedContacts": zod.number(),
+  "projects": zod.array(zod.object({
+  "projectId": zod.number(),
+  "projectName": zod.string(),
+  "projectType": zod.enum(['school', 'corporate']),
+  "identifiedVisits": zod.number(),
+  "uniqueContacts": zod.number(),
+  "purchasers": zod.number(),
+  "conversionRate": zod.number()
+})),
+  "perProject": zod.array(zod.object({
+  "projectId": zod.number(),
+  "projectName": zod.string(),
+  "projectType": zod.enum(['school', 'corporate']),
+  "identifiedVisits": zod.number(),
+  "uniqueContacts": zod.number(),
+  "purchasers": zod.number(),
+  "conversionRate": zod.number()
+})).optional()
+})
+
+
+
+export const listMarketingContactsQueryPageSizeMax = 100;
+
+
+
+export const ListMarketingContactsQueryParams = zod.object({
+  "search": zod.coerce.string().optional(),
+  "engagement": zod.enum(['all', 'visited', 'repeat', 'purchaser']).optional(),
+  "consent": zod.enum(['all', 'consented', 'unconsented']).optional(),
+  "page": zod.coerce.number().min(1).optional(),
+  "pageSize": zod.coerce.number().min(1).max(listMarketingContactsQueryPageSizeMax).optional()
+})
+
+export const ListMarketingContactsResponse = zod.object({
+  "contacts": zod.array(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "email": zod.string(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date(),
+  "successfulGalleryAccesses": zod.number(),
+  "marketingConsent": zod.boolean().nullable(),
+  "consentAt": zod.coerce.date().nullish(),
+  "consentSource": zod.string().nullish(),
+  "unsubscribedAt": zod.coerce.date().nullable(),
+  "lastOrderAt": zod.coerce.date().nullish(),
+  "identifiedVisits": zod.number().optional(),
+  "purchases": zod.number().optional()
+})),
+  "page": zod.number(),
+  "pageSize": zod.number(),
+  "total": zod.number(),
+  "totalPages": zod.number()
+})
+
+
+export const UpdateMarketingConsentParams = zod.object({
+  "contactId": zod.coerce.number()
+})
+
+export const updateMarketingConsentBodySourceMax = 100;
+
+
+
+export const UpdateMarketingConsentBody = zod.object({
+  "consented": zod.boolean(),
+  "source": zod.string().max(updateMarketingConsentBodySourceMax).optional()
+})
+
+export const UpdateMarketingConsentResponse = zod.object({
+  "contact": zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "email": zod.string(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date(),
+  "successfulGalleryAccesses": zod.number(),
+  "marketingConsent": zod.boolean().nullable(),
+  "consentAt": zod.coerce.date().nullish(),
+  "consentSource": zod.string().nullish(),
+  "unsubscribedAt": zod.coerce.date().nullable(),
+  "lastOrderAt": zod.coerce.date().nullish(),
+  "identifiedVisits": zod.number().optional(),
+  "purchases": zod.number().optional()
+})
+})
+
+
+export const UnsubscribeMarketingContactParams = zod.object({
+  "contactId": zod.coerce.number()
+})
+
+export const UnsubscribeMarketingContactResponse = zod.object({
+  "contact": zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "email": zod.string(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date(),
+  "successfulGalleryAccesses": zod.number(),
+  "marketingConsent": zod.boolean().nullable(),
+  "consentAt": zod.coerce.date().nullish(),
+  "consentSource": zod.string().nullish(),
+  "unsubscribedAt": zod.coerce.date().nullable(),
+  "lastOrderAt": zod.coerce.date().nullish(),
+  "identifiedVisits": zod.number().optional(),
+  "purchases": zod.number().optional()
+})
+})
+
+
+export const listMarketingTemplatesResponseOneNameMax = 120;
+
+export const listMarketingTemplatesResponseOneSubjectMax = 200;
+
+
+export const listMarketingTemplatesResponseOneCategoryMax = 80;
+
+
+
+export const ListMarketingTemplatesResponseItem = zod.object({
+  "name": zod.string().min(1).max(listMarketingTemplatesResponseOneNameMax),
+  "subject": zod.string().min(1).max(listMarketingTemplatesResponseOneSubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(listMarketingTemplatesResponseOneCategoryMax)
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+export const ListMarketingTemplatesResponse = zod.array(ListMarketingTemplatesResponseItem)
+
+
+export const createMarketingTemplateBodyNameMax = 120;
+
+export const createMarketingTemplateBodySubjectMax = 200;
+
+
+export const createMarketingTemplateBodyCategoryMax = 80;
+
+
+
+export const CreateMarketingTemplateBody = zod.object({
+  "name": zod.string().min(1).max(createMarketingTemplateBodyNameMax),
+  "subject": zod.string().min(1).max(createMarketingTemplateBodySubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(createMarketingTemplateBodyCategoryMax)
+})
+
+export const createMarketingTemplateResponseOneNameMax = 120;
+
+export const createMarketingTemplateResponseOneSubjectMax = 200;
+
+
+export const createMarketingTemplateResponseOneCategoryMax = 80;
+
+
+
+export const CreateMarketingTemplateResponse = zod.object({
+  "name": zod.string().min(1).max(createMarketingTemplateResponseOneNameMax),
+  "subject": zod.string().min(1).max(createMarketingTemplateResponseOneSubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(createMarketingTemplateResponseOneCategoryMax)
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+
+
+export const UpdateMarketingTemplateParams = zod.object({
+  "templateId": zod.coerce.number()
+})
+
+export const updateMarketingTemplateBodyNameMax = 120;
+
+export const updateMarketingTemplateBodySubjectMax = 200;
+
+
+export const updateMarketingTemplateBodyCategoryMax = 80;
+
+
+
+export const UpdateMarketingTemplateBody = zod.object({
+  "name": zod.string().min(1).max(updateMarketingTemplateBodyNameMax),
+  "subject": zod.string().min(1).max(updateMarketingTemplateBodySubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(updateMarketingTemplateBodyCategoryMax)
+})
+
+export const updateMarketingTemplateResponseOneNameMax = 120;
+
+export const updateMarketingTemplateResponseOneSubjectMax = 200;
+
+
+export const updateMarketingTemplateResponseOneCategoryMax = 80;
+
+
+
+export const UpdateMarketingTemplateResponse = zod.object({
+  "name": zod.string().min(1).max(updateMarketingTemplateResponseOneNameMax),
+  "subject": zod.string().min(1).max(updateMarketingTemplateResponseOneSubjectMax),
+  "bodyText": zod.string().min(1),
+  "category": zod.string().min(1).max(updateMarketingTemplateResponseOneCategoryMax)
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+
+
+export const DeleteMarketingTemplateParams = zod.object({
+  "templateId": zod.coerce.number()
+})
+
+export const DeleteMarketingTemplateResponse = zod.void()
+
+
+export const listMarketingCampaignsResponseCampaignsItemOneNameMax = 120;
+
+export const listMarketingCampaignsResponseCampaignsItemOneAudienceFilterSearchMax = 200;
+
+
+
+export const ListMarketingCampaignsResponse = zod.object({
+  "campaigns": zod.array(zod.object({
+  "name": zod.string().min(1).max(listMarketingCampaignsResponseCampaignsItemOneNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(listMarketingCampaignsResponseCampaignsItemOneAudienceFilterSearchMax).optional()
+}).optional()
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "audienceFilterSnapshot": zod.string(),
+  "recipientCount": zod.number(),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentCount": zod.number(),
+  "sentAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))).optional()
+})
+
+
+export const createMarketingCampaignDraftBodyNameMax = 120;
+
+export const createMarketingCampaignDraftBodyAudienceFilterSearchMax = 200;
+
+
+
+export const CreateMarketingCampaignDraftBody = zod.object({
+  "name": zod.string().min(1).max(createMarketingCampaignDraftBodyNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(createMarketingCampaignDraftBodyAudienceFilterSearchMax).optional()
+}).optional()
+})
+
+export const createMarketingCampaignDraftResponseOneNameMax = 120;
+
+export const createMarketingCampaignDraftResponseOneAudienceFilterSearchMax = 200;
+
+
+
+export const CreateMarketingCampaignDraftResponse = zod.object({
+  "name": zod.string().min(1).max(createMarketingCampaignDraftResponseOneNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(createMarketingCampaignDraftResponseOneAudienceFilterSearchMax).optional()
+}).optional()
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "audienceFilterSnapshot": zod.string(),
+  "recipientCount": zod.number(),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentCount": zod.number(),
+  "sentAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+
+
+export const GetMarketingEmailStatusResponse = zod.object({
+  "configured": zod.boolean(),
+  "fromEmail": zod.string().nullable()
+})
+
+
+export const SendMarketingCampaignParams = zod.object({
+  "campaignId": zod.coerce.number()
+})
+
+export const sendMarketingCampaignResponseCampaignOneNameMax = 120;
+
+export const sendMarketingCampaignResponseCampaignOneAudienceFilterSearchMax = 200;
+
+
+
+export const SendMarketingCampaignResponse = zod.object({
+  "campaign": zod.object({
+  "name": zod.string().min(1).max(sendMarketingCampaignResponseCampaignOneNameMax),
+  "templateId": zod.number(),
+  "audienceFilter": zod.object({
+  "consent": zod.enum(['consented', 'unconsented', 'all']).optional(),
+  "engagement": zod.enum(['visited', 'repeat', 'purchaser', 'all']).optional(),
+  "search": zod.string().max(sendMarketingCampaignResponseCampaignOneAudienceFilterSearchMax).optional()
+}).optional()
+}).and(zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "audienceFilterSnapshot": zod.string(),
+  "recipientCount": zod.number(),
+  "status": zod.enum(['draft', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentCount": zod.number(),
+  "sentAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "sentCount": zod.number()
+})
+
+
+export const GetDeliveryPhotosParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const GetDeliveryPhotosHeader = zod.object({
+  "x-delivery-token": zod.string()
+})
+
+export const getDeliveryPhotosResponseOffersItemUnitAmountMin = 0;
+
+export const getDeliveryPhotosResponseOffersItemCurrencyMin = 3;
+export const getDeliveryPhotosResponseOffersItemCurrencyMax = 3;
+
+
+
+export const getDeliveryPhotosResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const GetDeliveryPhotosResponse = zod.object({
+  "gallery": zod.object({
+  "slug": zod.string().optional(),
+  "status": zod.string().optional(),
+  "projectType": zod.enum(['school', 'corporate']).optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
+  "priceSheetId": zod.number().nullish(),
+  "expiresAt": zod.string().nullish()
+}),
+  "student": zod.object({
+  "firstName": zod.string(),
+  "lastName": zod.string(),
+  "label": zod.string(),
+  "departmentName": zod.string().optional(),
+  "projectType": zod.enum(['school', 'corporate'])
+}),
+  "subject": zod.object({
+  "firstName": zod.string(),
+  "lastName": zod.string(),
+  "displayName": zod.string(),
+  "label": zod.string(),
+  "organizationName": zod.string().nullable(),
+  "groupLabel": zod.string(),
+  "groupName": zod.string().nullable()
+}),
+  "price": zod.record(zod.string(), zod.unknown()).optional(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(getDeliveryPhotosResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(getDeliveryPhotosResponseOffersItemCurrencyMin).max(getDeliveryPhotosResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(getDeliveryPhotosResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "orderingAvailable": zod.boolean().describe('Whether at least one complete Volume Capture offer is available.'),
+  "stripeAvailable": zod.boolean().describe('Whether Stripe checkout is currently available as an optional payment method.'),
+  "photos": zod.array(zod.object({
+  "id": zod.number(),
+  "fileName": zod.string(),
+  "mimeType": zod.string().optional(),
+  "fileUrl": zod.string(),
+  "downloadUrl": zod.string()
+})),
+  "mediaExpiresAt": zod.coerce.date()
+})
+
+
+export const GetDeliveryCatalogParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const getDeliveryCatalogResponseOffersItemUnitAmountMin = 0;
+
+export const getDeliveryCatalogResponseOffersItemCurrencyMin = 3;
+export const getDeliveryCatalogResponseOffersItemCurrencyMax = 3;
+
+
+
+export const getDeliveryCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const GetDeliveryCatalogResponse = zod.object({
+  "prices": zod.array(zod.object({
+  "productId": zod.string(),
+  "priceId": zod.string(),
+  "name": zod.string(),
+  "amount": zod.number(),
+  "currency": zod.string()
+})),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(getDeliveryCatalogResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(getDeliveryCatalogResponseOffersItemCurrencyMin).max(getDeliveryCatalogResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(getDeliveryCatalogResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).optional()
+})
+
+
+export const CreateDeliveryOrderParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const createDeliveryOrderBodyIdempotencyKeyMin = 16;
+export const createDeliveryOrderBodyIdempotencyKeyMax = 128;
+
+export const createDeliveryOrderBodyItemsItemPhotoIdsMax = 100;
+
+export const createDeliveryOrderBodyItemsItemQuantityMax = 100;
+
+export const createDeliveryOrderBodyItemsMax = 20;
+
+
+
+
+
+export const CreateDeliveryOrderBody = zod.object({
+  "idempotencyKey": zod.string().min(createDeliveryOrderBodyIdempotencyKeyMin).max(createDeliveryOrderBodyIdempotencyKeyMax),
+  "token": zod.string().optional(),
+  "items": zod.array(zod.object({
+  "offerId": zod.string(),
+  "photoIds": zod.array(zod.number()).min(1).max(createDeliveryOrderBodyItemsItemPhotoIdsMax),
+  "quantity": zod.number().min(1).max(createDeliveryOrderBodyItemsItemQuantityMax)
+})).min(1).max(createDeliveryOrderBodyItemsMax).optional(),
+  "offerId": zod.string().optional(),
+  "photoIds": zod.array(zod.number()).min(1).optional(),
+  "quantity": zod.number().min(1).optional(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "deliveryMethod": zod.enum(['digital', 'school', 'collection', 'shipping']).optional(),
+  "deliveryAddress": zod.string().optional()
+})
+
+export const CreateDeliveryOrderResponse = zod.object({
+  "checkoutUrl": zod.string().nullable(),
+  "orderId": zod.number(),
+  "status": zod.string(),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "paymentInstructions": zod.string().nullish(),
+  "publicReference": zod.string(),
+  "recoveryUrl": zod.string().nullish(),
+  "recoveryToken": zod.string().nullish().describe('Returned only when the order is first created; never persisted in plaintext'),
+  "checkoutAttemptStatus": zod.enum(['not_started', 'started', 'created', 'uncertain', 'failed'])
+})
+
+
+export const GetDeliveryOrderParams = zod.object({
+  "slug": zod.coerce.string(),
+  "orderId": zod.coerce.number()
+})
+
+export const GetDeliveryOrderHeader = zod.object({
+  "x-delivery-token": zod.string()
+})
+
+export const GetDeliveryOrderResponse = zod.object({
+  "orderId": zod.number(),
+  "status": zod.string(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "paidAt": zod.string().nullish(),
+  "photoIds": zod.array(zod.number()),
+  "downloadablePhotoIds": zod.array(zod.number()).optional()
+})
+
+
+export const GetDeliveryOrderRecoveryParams = zod.object({
+  "slug": zod.coerce.string(),
+  "reference": zod.coerce.string()
+})
+
+export const GetDeliveryOrderRecoveryHeader = zod.object({
+  "x-order-recovery-token": zod.string()
+})
+
+export const GetDeliveryOrderRecoveryResponse = zod.object({
+  "reference": zod.string(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "manualInstructions": zod.string().nullable(),
+  "items": zod.array(zod.object({
+  "productName": zod.string(),
+  "productType": zod.string(),
+  "quantity": zod.number()
+}))
+})
+
+
+export const GetDeliverySettingsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const GetDeliverySettingsResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number().optional(),
+  "slug": zod.string().optional(),
+  "status": zod.string().optional()
+}),
+  "projectType": zod.enum(['school', 'corporate']).optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
+  "accessCount": zod.number().optional()
+})
+
+
+export const UpdateDeliverySettingsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const updateDeliverySettingsBodyOffersItemUnitAmountMin = 0;
+
+export const updateDeliverySettingsBodyOffersItemCurrencyMin = 3;
+export const updateDeliverySettingsBodyOffersItemCurrencyMax = 3;
+
+
+
+export const updateDeliverySettingsBodyOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const UpdateDeliverySettingsBody = zod.object({
+  "watermarkEnabled": zod.boolean().optional(),
+  "watermarkText": zod.string().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "establishmentPaymentInstructions": zod.string().nullish(),
+  "bankTransferInstructions": zod.string().nullish(),
+  "priceSheetId": zod.number().nullish(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateDeliverySettingsBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateDeliverySettingsBodyOffersItemCurrencyMin).max(updateDeliverySettingsBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updateDeliverySettingsBodyOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).optional()
+})
+
+export const UpdateDeliverySettingsResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number().optional(),
+  "slug": zod.string().optional(),
+  "status": zod.string().optional()
+}),
+  "projectType": zod.enum(['school', 'corporate']).optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
+  "accessCount": zod.number().optional()
+})
+
+
+export const listStudioPriceSheetsResponseOffersItemUnitAmountMin = 0;
+
+export const listStudioPriceSheetsResponseOffersItemCurrencyMin = 3;
+export const listStudioPriceSheetsResponseOffersItemCurrencyMax = 3;
+
+
+
+export const listStudioPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const ListStudioPriceSheetsResponseItem = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(listStudioPriceSheetsResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(listStudioPriceSheetsResponseOffersItemCurrencyMin).max(listStudioPriceSheetsResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(listStudioPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListStudioPriceSheetsResponse = zod.array(ListStudioPriceSheetsResponseItem)
+
+
+export const createStudioPriceSheetBodyNameMax = 120;
+
+export const createStudioPriceSheetBodyOffersItemUnitAmountMin = 0;
+
+export const createStudioPriceSheetBodyOffersItemCurrencyMin = 3;
+export const createStudioPriceSheetBodyOffersItemCurrencyMax = 3;
+
+
+
+export const createStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
+
+
+export const CreateStudioPriceSheetBody = zod.object({
+  "name": zod.string().min(1).max(createStudioPriceSheetBodyNameMax),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(createStudioPriceSheetBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(createStudioPriceSheetBodyOffersItemCurrencyMin).max(createStudioPriceSheetBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(createStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).min(1)
+})
+
+export const createStudioPriceSheetResponseOffersItemUnitAmountMin = 0;
+
+export const createStudioPriceSheetResponseOffersItemCurrencyMin = 3;
+export const createStudioPriceSheetResponseOffersItemCurrencyMax = 3;
+
+
+
+export const createStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const CreateStudioPriceSheetResponse = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(createStudioPriceSheetResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(createStudioPriceSheetResponseOffersItemCurrencyMin).max(createStudioPriceSheetResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(createStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+export const UpdateStudioPriceSheetParams = zod.object({
+  "priceSheetId": zod.coerce.number()
+})
+
+export const updateStudioPriceSheetBodyNameMax = 120;
+
+export const updateStudioPriceSheetBodyOffersItemUnitAmountMin = 0;
+
+export const updateStudioPriceSheetBodyOffersItemCurrencyMin = 3;
+export const updateStudioPriceSheetBodyOffersItemCurrencyMax = 3;
+
+
+
+export const updateStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
+
+
+export const UpdateStudioPriceSheetBody = zod.object({
+  "name": zod.string().min(1).max(updateStudioPriceSheetBodyNameMax),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateStudioPriceSheetBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateStudioPriceSheetBodyOffersItemCurrencyMin).max(updateStudioPriceSheetBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updateStudioPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).min(1)
+})
+
+export const updateStudioPriceSheetResponseOffersItemUnitAmountMin = 0;
+
+export const updateStudioPriceSheetResponseOffersItemCurrencyMin = 3;
+export const updateStudioPriceSheetResponseOffersItemCurrencyMax = 3;
+
+
+
+export const updateStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const UpdateStudioPriceSheetResponse = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateStudioPriceSheetResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateStudioPriceSheetResponseOffersItemCurrencyMin).max(updateStudioPriceSheetResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updateStudioPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+export const ListDeliveryPriceSheetsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const listDeliveryPriceSheetsResponseOffersItemUnitAmountMin = 0;
+
+export const listDeliveryPriceSheetsResponseOffersItemCurrencyMin = 3;
+export const listDeliveryPriceSheetsResponseOffersItemCurrencyMax = 3;
+
+
+
+export const listDeliveryPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const ListDeliveryPriceSheetsResponseItem = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(listDeliveryPriceSheetsResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(listDeliveryPriceSheetsResponseOffersItemCurrencyMin).max(listDeliveryPriceSheetsResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(listDeliveryPriceSheetsResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListDeliveryPriceSheetsResponse = zod.array(ListDeliveryPriceSheetsResponseItem)
+
+
+export const CreateDeliveryPriceSheetParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const createDeliveryPriceSheetBodyNameMax = 120;
+
+export const createDeliveryPriceSheetBodyOffersItemUnitAmountMin = 0;
+
+export const createDeliveryPriceSheetBodyOffersItemCurrencyMin = 3;
+export const createDeliveryPriceSheetBodyOffersItemCurrencyMax = 3;
+
+
+
+export const createDeliveryPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
+
+
+export const CreateDeliveryPriceSheetBody = zod.object({
+  "name": zod.string().min(1).max(createDeliveryPriceSheetBodyNameMax),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(createDeliveryPriceSheetBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(createDeliveryPriceSheetBodyOffersItemCurrencyMin).max(createDeliveryPriceSheetBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(createDeliveryPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).min(1)
+})
+
+export const createDeliveryPriceSheetResponseOffersItemUnitAmountMin = 0;
+
+export const createDeliveryPriceSheetResponseOffersItemCurrencyMin = 3;
+export const createDeliveryPriceSheetResponseOffersItemCurrencyMax = 3;
+
+
+
+export const createDeliveryPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const CreateDeliveryPriceSheetResponse = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(createDeliveryPriceSheetResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(createDeliveryPriceSheetResponseOffersItemCurrencyMin).max(createDeliveryPriceSheetResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(createDeliveryPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+export const UpdateDeliveryPriceSheetParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "priceSheetId": zod.coerce.number()
+})
+
+export const updateDeliveryPriceSheetBodyNameMax = 120;
+
+export const updateDeliveryPriceSheetBodyOffersItemUnitAmountMin = 0;
+
+export const updateDeliveryPriceSheetBodyOffersItemCurrencyMin = 3;
+export const updateDeliveryPriceSheetBodyOffersItemCurrencyMax = 3;
+
+
+
+export const updateDeliveryPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault = false;
+
+
+export const UpdateDeliveryPriceSheetBody = zod.object({
+  "name": zod.string().min(1).max(updateDeliveryPriceSheetBodyNameMax),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateDeliveryPriceSheetBodyOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateDeliveryPriceSheetBodyOffersItemCurrencyMin).max(updateDeliveryPriceSheetBodyOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updateDeliveryPriceSheetBodyOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).min(1)
+})
+
+export const updateDeliveryPriceSheetResponseOffersItemUnitAmountMin = 0;
+
+export const updateDeliveryPriceSheetResponseOffersItemCurrencyMin = 3;
+export const updateDeliveryPriceSheetResponseOffersItemCurrencyMax = 3;
+
+
+
+export const updateDeliveryPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const UpdateDeliveryPriceSheetResponse = zod.object({
+  "id": zod.number(),
+  "studioId": zod.number(),
+  "name": zod.string(),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(updateDeliveryPriceSheetResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(updateDeliveryPriceSheetResponseOffersItemCurrencyMin).max(updateDeliveryPriceSheetResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(updateDeliveryPriceSheetResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+export const PublishDeliveryParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const PublishDeliveryResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number().optional(),
+  "slug": zod.string().optional(),
+  "status": zod.string().optional()
+}),
+  "publicUrl": zod.string().optional(),
+  "message": zod.string().optional(),
+  "invitationSummary": zod.object({
+  "dispatched": zod.boolean(),
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number(),
+  "reason": zod.string().nullish()
+}).optional()
+})
+
+
+/**
+ * Retries failed delivery invitations only; uncertain, sending, pending, and sent invitations are not reset.
+ * @summary Retry rejected gallery invitations
+ */
+export const RetryDeliveryInvitationsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const RetryDeliveryInvitationsResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "status": zod.string()
+}),
+  "invitationSummary": zod.object({
+  "dispatched": zod.boolean(),
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number(),
+  "reason": zod.string().nullish()
+})
+})
+
+
+export const RevokeDeliveryParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const RevokeDeliveryResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number().optional(),
+  "slug": zod.string().optional(),
+  "status": zod.string().optional()
+}),
+  "publicUrl": zod.string().optional(),
+  "message": zod.string().optional(),
+  "invitationSummary": zod.object({
+  "dispatched": zod.boolean(),
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number(),
+  "reason": zod.string().nullish()
+}).optional()
+})
+
+
+export const ListDeliveryAccessCardsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const ListDeliveryAccessCardsResponseItem = zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
+  "studentId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "subjectId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "generatedStudentId": zod.string().optional(),
+  "className": zod.string().nullish(),
+  "departmentName": zod.string().nullish(),
+  "accessCode": zod.string().optional(),
+  "accessUrl": zod.string().optional().describe('Absolute human-readable gallery URL without credentials'),
+  "qrUrl": zod.string().optional().describe('Absolute credential-bearing fragment URL encoded by the QR image'),
+  "qrDataUrl": zod.string().optional()
+})
+export const ListDeliveryAccessCardsResponse = zod.array(ListDeliveryAccessCardsResponseItem)
+
+
+/**
+ * Creates missing access credentials without publishing the gallery, sending invitations, or changing photo delivery state.
+ * @summary Prepare stable access credentials for the current project roster
+ */
+export const PrepareDeliveryAccessCardsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const prepareDeliveryAccessCardsResponsePreparedCountMin = 0;
+
+export const prepareDeliveryAccessCardsResponseStudentCountMin = 0;
+
+
+
+export const PrepareDeliveryAccessCardsResponse = zod.object({
+  "gallery": zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "status": zod.enum(['draft', 'published', 'revoked'])
+}),
+  "preparedCount": zod.number().min(prepareDeliveryAccessCardsResponsePreparedCountMin),
+  "studentCount": zod.number().min(prepareDeliveryAccessCardsResponseStudentCountMin),
+  "cards": zod.array(zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "subjectLabel": zod.string().optional(),
+  "groupLabel": zod.string().optional(),
+  "studentId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "subjectId": zod.number().optional().describe('Legacy subject identifier retained for compatibility'),
+  "generatedStudentId": zod.string().optional(),
+  "className": zod.string().nullish(),
+  "departmentName": zod.string().nullish(),
+  "accessCode": zod.string().optional(),
+  "accessUrl": zod.string().optional().describe('Absolute human-readable gallery URL without credentials'),
+  "qrUrl": zod.string().optional().describe('Absolute credential-bearing fragment URL encoded by the QR image'),
+  "qrDataUrl": zod.string().optional()
+})),
+  "message": zod.string()
+})
+
+
+export const ListDeliveryStripeCatalogParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const listDeliveryStripeCatalogResponseOffersItemUnitAmountMin = 0;
+
+export const listDeliveryStripeCatalogResponseOffersItemCurrencyMin = 3;
+export const listDeliveryStripeCatalogResponseOffersItemCurrencyMax = 3;
+
+
+
+export const listDeliveryStripeCatalogResponseOffersItemIncludesDigitalDownloadsDefault = false;
+
+export const ListDeliveryStripeCatalogResponse = zod.object({
+  "prices": zod.array(zod.object({
+  "productId": zod.string(),
+  "priceId": zod.string(),
+  "name": zod.string(),
+  "amount": zod.number(),
+  "currency": zod.string()
+})),
+  "offers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().optional(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "stripePriceId": zod.string().optional(),
+  "unitAmount": zod.number().min(listDeliveryStripeCatalogResponseOffersItemUnitAmountMin),
+  "currency": zod.string().min(listDeliveryStripeCatalogResponseOffersItemCurrencyMin).max(listDeliveryStripeCatalogResponseOffersItemCurrencyMax),
+  "paymentMethods": zod.array(zod.enum(['stripe', 'establishment', 'bank_transfer'])).min(1),
+  "photoCount": zod.number().min(1),
+  "printSize": zod.string().optional(),
+  "deliveryMethods": zod.array(zod.enum(['digital', 'school', 'collection', 'shipping'])),
+  "active": zod.boolean(),
+  "includesDigitalDownloads": zod.boolean().default(listDeliveryStripeCatalogResponseOffersItemIncludesDigitalDownloadsDefault),
+  "pricingRules": zod.object({
+  "selection": zod.string().optional(),
+  "quantity": zod.string().optional()
+}).optional()
+})).optional()
+})
+
+
+export const RegenerateDeliveryAccessParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "studentId": zod.coerce.number()
+})
+
+export const RegenerateDeliveryAccessResponse = zod.object({
+  "studentId": zod.number(),
+  "accessCode": zod.string()
+})
+
+
+export const UpdateDeliveryAccessParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "studentId": zod.coerce.number()
+})
+
+export const UpdateDeliveryAccessBody = zod.object({
+  "revoked": zod.boolean().optional(),
+  "expiresAt": zod.coerce.date().nullish()
+})
+
+export const UpdateDeliveryAccessResponse = zod.object({
+  "access": zod.object({
+  "studentId": zod.number().optional(),
+  "revokedAt": zod.string().nullish(),
+  "expiresAt": zod.string().nullish()
+})
+})
+
+
+export const ListDeliveryOrdersParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const listDeliveryOrdersResponseOrdersItemNotificationsOrderReceivedAttemptsMin = 0;
+
+export const listDeliveryOrdersResponseOrdersItemNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
+export const ListDeliveryOrdersResponse = zod.object({
+  "orders": zod.array(zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(listDeliveryOrdersResponseOrdersItemNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(listDeliveryOrdersResponseOrdersItemNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+}))
+})
+
+
+/**
+ * @summary Get manager-only delivery operation health
+ */
+export const GetDeliveryOperationsParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const getDeliveryOperationsResponseInvitationsPendingMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsSendingMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsSentMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsFailedMin = 0;
+
+export const getDeliveryOperationsResponseInvitationsNeedsReviewMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsPendingMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsSendingMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsSentMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsFailedMin = 0;
+
+export const getDeliveryOperationsResponseOrderNotificationsNeedsReviewMin = 0;
+
+export const getDeliveryOperationsResponseIssuesInvitationsMin = 0;
+
+export const getDeliveryOperationsResponseIssuesOrderNotificationsMin = 0;
+
+
+
+export const GetDeliveryOperationsResponse = zod.object({
+  "invitations": zod.object({
+  "pending": zod.number().min(getDeliveryOperationsResponseInvitationsPendingMin),
+  "sending": zod.number().min(getDeliveryOperationsResponseInvitationsSendingMin),
+  "sent": zod.number().min(getDeliveryOperationsResponseInvitationsSentMin),
+  "failed": zod.number().min(getDeliveryOperationsResponseInvitationsFailedMin),
+  "needsReview": zod.number().min(getDeliveryOperationsResponseInvitationsNeedsReviewMin)
+}),
+  "orderNotifications": zod.object({
+  "pending": zod.number().min(getDeliveryOperationsResponseOrderNotificationsPendingMin),
+  "sending": zod.number().min(getDeliveryOperationsResponseOrderNotificationsSendingMin),
+  "sent": zod.number().min(getDeliveryOperationsResponseOrderNotificationsSentMin),
+  "failed": zod.number().min(getDeliveryOperationsResponseOrderNotificationsFailedMin),
+  "needsReview": zod.number().min(getDeliveryOperationsResponseOrderNotificationsNeedsReviewMin)
+}),
+  "issues": zod.object({
+  "invitations": zod.number().min(getDeliveryOperationsResponseIssuesInvitationsMin),
+  "orderNotifications": zod.number().min(getDeliveryOperationsResponseIssuesOrderNotificationsMin)
+})
+})
+
+
+export const GetStudioDeliveryOrderParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "orderId": zod.coerce.number()
+})
+
+export const getStudioDeliveryOrderResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
+
+export const getStudioDeliveryOrderResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
+export const GetStudioDeliveryOrderResponse = zod.object({
+  "order": zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(getStudioDeliveryOrderResponseOrderNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(getStudioDeliveryOrderResponseOrderNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+}),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "photoId": zod.number().nullable(),
+  "offerId": zod.string(),
+  "productName": zod.string(),
+  "productType": zod.enum(['digital', 'print', 'pack']),
+  "includesDigitalDownloads": zod.boolean(),
+  "printSize": zod.string().nullable(),
+  "quantity": zod.number(),
+  "unitAmount": zod.number(),
+  "currency": zod.string()
+}))
+})
+
+
+export const UpdateDeliveryFulfillmentParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "orderId": zod.coerce.number()
+})
+
+export const UpdateDeliveryFulfillmentBody = zod.object({
+  "fulfillmentStatus": zod.enum(['not_required', 'paid', 'preparing', 'printed', 'ready', 'dispatched', 'delivered'])
+})
+
+export const updateDeliveryFulfillmentResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
+
+export const updateDeliveryFulfillmentResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
+export const UpdateDeliveryFulfillmentResponse = zod.object({
+  "order": zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryFulfillmentResponseOrderNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryFulfillmentResponseOrderNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+})
+})
+
+
+export const UpdateDeliveryPaymentParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "orderId": zod.coerce.number()
+})
+
+export const UpdateDeliveryPaymentBody = zod.object({
+  "status": zod.enum(['pending', 'paid', 'cancelled', 'refunded'])
+})
+
+export const updateDeliveryPaymentResponseOrderNotificationsOrderReceivedAttemptsMin = 0;
+
+export const updateDeliveryPaymentResponseOrderNotificationsPaymentConfirmedAttemptsMin = 0;
+
+
+
+export const UpdateDeliveryPaymentResponse = zod.object({
+  "order": zod.object({
+  "id": zod.number(),
+  "publicReference": zod.string().nullable(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'refunded', 'cancelled']),
+  "paymentMethod": zod.enum(['stripe', 'establishment', 'bank_transfer']),
+  "customerName": zod.string().nullable(),
+  "customerEmail": zod.string().nullable(),
+  "fulfillmentStatus": zod.string(),
+  "deliveryMethod": zod.string(),
+  "deliveryAddress": zod.string().nullable(),
+  "amountTotal": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "paidAt": zod.coerce.date().nullable(),
+  "notifications": zod.object({
+  "orderReceived": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryPaymentResponseOrderNotificationsOrderReceivedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish(),
+  "paymentConfirmed": zod.object({
+  "status": zod.enum(['pending', 'sending', 'sent', 'failed', 'needs_review']),
+  "sentAt": zod.coerce.date().nullable(),
+  "attempts": zod.number().min(updateDeliveryPaymentResponseOrderNotificationsPaymentConfirmedAttemptsMin),
+  "retryAllowed": zod.boolean()
+}).nullish()
+}).optional().describe('Manager-only safe delivery states; omitted from viewer responses.')
+})
+})
+
+
+/**
+ * @summary Retry definitively failed order notifications
+ */
+export const RetryFailedDeliveryOrderNotificationsParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "orderId": zod.coerce.number()
+})
+
+export const RetryFailedDeliveryOrderNotificationsResponse = zod.object({
+  "claimed": zod.number(),
+  "sent": zod.number(),
+  "failed": zod.number(),
+  "needsReview": zod.number(),
+  "pending": zod.number()
+})
+
+
+export const ExportDeliveryOrdersParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const ExportDeliveryOrdersResponse = zod.unknown()

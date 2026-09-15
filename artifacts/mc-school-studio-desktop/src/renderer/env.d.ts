@@ -23,10 +23,13 @@ import type {
   CaptureExportLayout,
   CaptureExportResult,
   CaptureFileUploadStatusChangedEvent,
+  CaptureFraming,
   ProjectSyncProgressEvent,
   CreateStudentResult,
   StudentGroup,
   GroupCaptureReview,
+  DroppedCaptureBatchResult,
+  DroppedCaptureProgressEvent,
 } from '../shared/types'
 
 interface UploadConfig {
@@ -87,6 +90,8 @@ interface ElectronAPI {
   invoke(channel: 'projects:get', args: { projectId: number }): Promise<Project | null>
   invoke(channel: 'projects:import', args: { filePath: string }): Promise<ImportResult>
   invoke(channel: 'projects:setWatchFolder', args: { projectId: number; folderPath: string }): Promise<void>
+  invoke(channel: 'projects:previewFolderMigration', args: { projectId: number }): Promise<import('@shared/types').FolderMigrationPreview>
+  invoke(channel: 'projects:migrateFolderMigration', args: { projectId: number; confirmed: true }): Promise<import('@shared/types').FolderMigrationResult>
   invoke(channel: 'classes:list', args: { projectId: number }): Promise<Class[]>
   invoke(channel: 'students:list', args: { projectId: number; classId?: number }): Promise<Student[]>
   invoke(channel: 'students:create', args: {
@@ -101,14 +106,25 @@ interface ElectronAPI {
   invoke(channel: 'groups:delete', args: { projectId: number; groupId: number }): Promise<void>
   invoke(channel: 'groupCaptures:list', args: { projectId: number; groupId: number }): Promise<GroupCaptureReview[]>
   invoke(channel: 'groupCaptures:summary', args: { projectId: number }): Promise<number>
+  invoke(channel: 'groupCaptures:updateReview', args: { captureId: number; rating: number }): Promise<GroupCaptureReview | null>
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
   invoke(channel: 'captures:list', args: { studentId: number }): Promise<StudentCaptureReview>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>
+  invoke(channel: 'captures:reviewSummary', args: { projectId: number }): Promise<{
+    unratedPortraits: number
+    unratedGroups: number
+  }>
   invoke(channel: 'captures:updateReview', args: {
     captureId: number
     favorite?: boolean
     rejected?: boolean
     selected?: boolean
+    rating?: number
+    colorLabel?: import('../shared/types').CaptureColorLabel
+  }): Promise<CaptureReview | null>
+  invoke(channel: 'captures:updateFraming', args: {
+    captureId: number
+    framing: Omit<CaptureFraming, 'pending'>
   }): Promise<CaptureReview | null>
   invoke(channel: 'photos:getThumbnail', args: { filePath: string }): Promise<string | null>
   invoke(channel: 'photos:reassign', args: { photoId: number; studentId: number }): Promise<void>
@@ -120,8 +136,13 @@ interface ElectronAPI {
   invoke(channel: 'watcher:isRunning', args: { projectId: number }): Promise<boolean>
   invoke(channel: 'watcher:getActiveStudent', args: { projectId: number }): Promise<number | null>
   invoke(channel: 'watcher:setActiveStudent', args: { projectId: number; studentId: number | null }): Promise<number | null>
-  invoke(channel: 'watcher:getActiveTarget', args: { projectId: number }): Promise<{ studentId: number | null; groupId: number | null; targetType: 'student' | 'group' | 'none' }>
+  invoke(channel: 'watcher:getActiveTarget', args: { projectId: number }): Promise<{ studentId: number | null; groupId: number | null; targetType: 'student' | 'group' | 'none'; source: 'manual' | 'qr' | 'none' }>
   invoke(channel: 'watcher:setActiveGroup', args: { projectId: number; groupId: number | null }): Promise<number | null>
+  ingestDroppedFiles(
+    projectId: number,
+    studentId: number,
+    files: File[],
+  ): Promise<DroppedCaptureBatchResult>
   invoke(channel: 'dialog:openFile', args?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>
@@ -129,6 +150,7 @@ interface ElectronAPI {
   invoke(channel: 'app:getSpoolDir'): Promise<string>
   invoke(channel: 'app:getVersion'): Promise<string>
   invoke(channel: 'app:setPhotosDir', args: { dir: string }): Promise<string>
+  invoke(channel: 'photos:getPreview', args: { filePath: string; previewKey: string }): Promise<string | null>
   // Cloud upload
   invoke(channel: 'upload:testConnection'): Promise<UploadResult>
   invoke(channel: 'auth:getSession'): Promise<AuthSession>
@@ -140,7 +162,13 @@ interface ElectronAPI {
   invoke(channel: 'upload:retryGroupFile', args: { fileId: number }): Promise<UploadResult>
   invoke(channel: 'upload:getProjectStatus', args: { projectId: number }): Promise<ProjectUploadStatusRow[]>
   invoke(channel: 'upload:getGlobalErrorCount'): Promise<number>
-  invoke(channel: 'project:uploadAndFinish', args: { projectId: number }): Promise<import('../shared/types').ProjectSyncResult>
+  invoke(channel: 'upload:getLiveState', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
+  invoke(channel: 'upload:getQueue', args: { projectId: number }): Promise<import('../shared/types').LiveUploadQueueItem[]>
+  invoke(channel: 'upload:deleteUnmatched', args: { projectId: number; key: string }): Promise<{ deleted: boolean }>
+  invoke(channel: 'upload:setLiveEnabled', args: { projectId: number; enabled: boolean }): Promise<import('../shared/types').LiveUploadState>
+  invoke(channel: 'upload:runNow', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
+  invoke(channel: 'upload:retryProjectFailed', args: { projectId: number }): Promise<import('../shared/types').LiveUploadState>
+  invoke(channel: 'project:uploadAndFinish', args: { projectId: number } & import('../shared/types').ProjectFinishOptions): Promise<import('../shared/types').ProjectSyncResult>
   invoke(channel: 'captures:export', args: {
     projectId: number
     destinationDir: string
@@ -161,11 +189,14 @@ interface ElectronAPI {
   on(channel: 'photo:deleted', listener: (data: PhotoDeletedEvent) => void): () => void
   on(channel: 'photo:reassigned', listener: (data: PhotoReassignedEvent) => void): () => void
   on(channel: 'upload:statusChanged', listener: (data: UploadStatusChangedEvent) => void): () => void
+  on(channel: 'upload:liveStateChanged', listener: (data: import('../shared/types').LiveUploadState) => void): () => void
   on(channel: 'update:status', listener: (data: UpdateState) => void): () => void
   on(channel: 'auth:retired', listener: (session: AuthSession) => void): () => void
   on(channel: 'auth:sessionInvalidated', listener: (session: AuthSession) => void): () => void
   on(channel: 'capture:updated', listener: (event: CaptureUpdatedEvent) => void): () => void
+  on(channel: 'groupCapture:updated', listener: (event: { projectId: number; groupId: number }) => void): () => void
   on(channel: 'watcher:activeStudentChanged', listener: (event: ActiveCaptureTargetEvent) => void): () => void
+  on(channel: 'watcher:dropProgress', listener: (event: DroppedCaptureProgressEvent) => void): () => void
   on(channel: 'capture:fileUploadStatusChanged', listener: (event: CaptureFileUploadStatusChangedEvent) => void): () => void
   on(channel: 'project:syncProgress', listener: (event: ProjectSyncProgressEvent) => void): () => void
 }

@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import sharp from 'sharp'
 
 let appExecutable = process.env.MC_SCHOOL_STUDIO_APP_PATH
 if (!appExecutable) throw new Error('MC_SCHOOL_STUDIO_APP_PATH must point to the packaged app executable')
@@ -51,6 +52,21 @@ assert.deepEqual(
 
 const appBundle = resolve(dirname(appExecutable), '..', '..')
 const unpackedModules = join(appBundle, 'Contents', 'Resources', 'app.asar.unpacked', 'node_modules')
+const sharpPackagesDirectory = join(unpackedModules, '@img')
+const expectedSharpPackages = [
+  `sharp-darwin-${expectedArchitecture === 'arm64' ? 'arm64' : 'x64'}`,
+  `sharp-libvips-darwin-${expectedArchitecture === 'arm64' ? 'arm64' : 'x64'}`,
+].sort()
+const packagedSharpPackages = existsSync(sharpPackagesDirectory)
+  ? readdirSync(sharpPackagesDirectory)
+    .filter((name) => name.startsWith('sharp-'))
+    .sort()
+  : []
+assert.deepEqual(
+  packagedSharpPackages,
+  expectedSharpPackages,
+  `packaged Sharp optional dependencies must contain only ${expectedSharpPackages.join(', ')}, found ${packagedSharpPackages.join(', ')}`,
+)
 const nativeBinaries = findFiles(unpackedModules).filter(
   (path) => path.endsWith('.node') || path.endsWith('.dylib'),
 )
@@ -74,6 +90,19 @@ const storageRoot = join(root, 'managed-photos')
 const watchFolder = join(root, 'camera-originals')
 const sourcePhoto = join(watchFolder, `Smith_John_release-${studentReference}.jpg`)
 const managedPhotoName = `John_Smith_${studentReference}.jpg`
+const droppedStudentOneDir = join(root, 'finder-drop', 'student-one')
+const droppedStudentTwoDir = join(root, 'finder-drop', 'student-two')
+const droppedJpegOne = join(droppedStudentOneDir, 'DSC_9000.JPG')
+const droppedRawOne = join(droppedStudentOneDir, 'DSC_9000.CR3')
+const droppedJpegTwo = join(droppedStudentTwoDir, 'DSC_9000.JPG')
+const droppedRawTwo = join(droppedStudentTwoDir, 'DSC_9000.CR3')
+const dbPath = join(userDataDir, 'mc-school-studio.db')
+const legacyPhotoPath = join(root, 'legacy-existing', 'Legacy_Portrait.jpg')
+const jpegFixture = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
+  'base64',
+)
+const releasePreviewFixture = await createReleasePreviewFixture()
 const debugPort = await reservePort()
 let online = true
 let retired = false
@@ -83,6 +112,71 @@ let uploadCount = 0
 mkdirSync(userDataDir, { recursive: true })
 mkdirSync(storageRoot, { recursive: true })
 mkdirSync(watchFolder, { recursive: true })
+mkdirSync(droppedStudentOneDir, { recursive: true })
+mkdirSync(droppedStudentTwoDir, { recursive: true })
+mkdirSync(dirname(legacyPhotoPath), { recursive: true })
+writeFileSync(legacyPhotoPath, jpegFixture)
+writeFileSync(droppedJpegOne, jpegFixture)
+writeFileSync(droppedRawOne, 'student-one-raw')
+writeFileSync(droppedJpegTwo, jpegFixture)
+writeFileSync(droppedRawTwo, 'student-two-raw')
+
+// Seed a database from before the capture/file model existed. The packaged
+// app must upgrade it in place and keep the legacy portrait in review.
+execFileSync('sqlite3', [dbPath, `
+  CREATE TABLE projects (
+    id INTEGER PRIMARY KEY,
+    school_name TEXT NOT NULL,
+    photo_date TEXT,
+    address TEXT,
+    contact_name TEXT,
+    contact_email TEXT,
+    contact_phone TEXT,
+    notes TEXT,
+    watch_folder TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE classes (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    class_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE students (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    class_id INTEGER NOT NULL,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    generated_student_id TEXT NOT NULL,
+    simple_qr TEXT,
+    json_qr TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE photos (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    student_id INTEGER,
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    is_matched INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  INSERT INTO projects (id, school_name, created_at, updated_at)
+    VALUES (91, 'Existing Legacy Release Project', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  INSERT INTO classes (id, project_id, class_name, created_at, updated_at)
+    VALUES (92, 91, 'Legacy Class', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  INSERT INTO students (id, project_id, class_id, first_name, last_name, generated_student_id, created_at, updated_at)
+    VALUES (93, 91, 92, 'Legacy', 'Portrait', 'LEGACY-RELEASE', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  INSERT INTO photos (id, project_id, student_id, file_path, file_name, captured_at, is_matched, created_at)
+    VALUES (94, 91, 93, '${legacyPhotoPath.replaceAll("'", "''")}', 'Legacy_Portrait.jpg', '2026-01-01T12:00:00.000Z', 1, '2026-01-01T12:00:00.000Z');
+`])
 
 function json(response, status, body) {
   response.writeHead(status, { 'content-type': 'application/json' })
@@ -146,7 +240,7 @@ const server = createServer((request, response) => {
       address: null,
       contactName: null,
       classCount: 1,
-      studentCount: 1,
+      studentCount: 2,
       updatedAt: '2026-08-29T12:00:00.000Z',
     }])
     return
@@ -164,17 +258,30 @@ const server = createServer((request, response) => {
         notes: null,
       },
       classes: [{ id: 51, className: 'Class A' }],
-      students: [{
-        id: 61,
-        classId: 51,
-        firstName: 'John',
-        lastName: 'Smith',
-        generatedStudentId: studentReference,
-        email: null,
-        phone: null,
-        simpleQr: null,
-        jsonQr: null,
-      }],
+      students: [
+        {
+          id: 61,
+          classId: 51,
+          firstName: 'John',
+          lastName: 'Smith',
+          generatedStudentId: studentReference,
+          email: null,
+          phone: null,
+          simpleQr: null,
+          jsonQr: null,
+        },
+        {
+          id: 62,
+          classId: 51,
+          firstName: 'Maya',
+          lastName: 'Chen',
+          generatedStudentId: '005678',
+          email: null,
+          phone: null,
+          simpleQr: null,
+          jsonQr: null,
+        },
+      ],
     })
     return
   }
@@ -193,7 +300,19 @@ const server = createServer((request, response) => {
     request.on('end', () => {
       uploadCount++
       json(response, 201, {
-        file: { fileUrl: '/uploads/release-smoke.jpg' },
+        captureId: 71,
+        captureKey: 'release-smoke-capture',
+        pairingStatus: 'complete',
+        file: {
+          id: 72,
+          fileRole: 'JPEG',
+          fileFormat: 'JPG',
+          originalFilename: managedPhotoName,
+          mimeType: 'image/jpeg',
+          fileSize: 1,
+          fileUrl: '/uploads/release-smoke.jpg',
+        },
+        reused: false,
       })
     })
     return
@@ -213,16 +332,19 @@ function wait(ms) {
 async function waitFor(description, check, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
   let lastError
+  let lastValue
   while (Date.now() < deadline) {
     try {
       const value = await check()
+      lastValue = value
       if (value) return value
     } catch (error) {
       lastError = error
     }
     await wait(250)
   }
-  throw new Error(`Timed out waiting for ${description}${lastError ? `: ${lastError}` : ''}`)
+  const lastObservation = lastValue === undefined ? '' : `; last observation: ${JSON.stringify(lastValue)}`
+  throw new Error(`Timed out waiting for ${description}${lastError ? `: ${lastError}` : ''}${lastObservation}`)
 }
 
 class CdpClient {
@@ -318,6 +440,53 @@ async function stopAppProcess(child) {
   }
 }
 
+function spawnPackagedApp() {
+  const child = spawn(appExecutable, [`--remote-debugging-port=${debugPort}`], {
+    env: {
+      ...process.env,
+      CI: 'true',
+      MC_SCHOOL_STUDIO_SMOKE_API_URL: apiUrl,
+      MC_SCHOOL_STUDIO_SMOKE_SKIP_BROWSER: '1',
+      MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR: userDataDir,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child.stdout.on('data', (chunk) => { appOutput += chunk })
+  child.stderr.on('data', (chunk) => { appOutput += chunk })
+  child.once('error', (error) => { appProcessError = error })
+  child.once('exit', (code, signal) => {
+    appOutput += `\n[smoke] packaged app exited code=${code ?? 'null'} signal=${signal ?? 'null'}\n`
+  })
+  return child
+}
+
+async function dropFilesOnStudent(client, studentId, files) {
+  const point = await client.evaluate(`(() => {
+    const row = document.querySelector('[data-student-row="${studentId}"]')
+    if (!row) return null
+    const rect = row.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  })()`)
+  assert(point, `student ${studentId} must be visible before dropping files`)
+  const data = {
+    items: [],
+    files,
+    dragOperationsMask: 1,
+  }
+  await client.send('Input.dispatchDragEvent', {
+    type: 'dragEnter',
+    x: point.x,
+    y: point.y,
+    data,
+  })
+  await client.send('Input.dispatchDragEvent', {
+    type: 'drop',
+    x: point.x,
+    y: point.y,
+    data,
+  })
+}
+
 async function closeSmokeServer() {
   for (const socket of serverSockets) socket.destroy()
   server.closeAllConnections?.()
@@ -350,6 +519,99 @@ function required(name) {
   return value
 }
 
+async function waitForLivePreview(cdp) {
+  return waitFor('live mc-preview JPEG to paint visible pixels', async () => {
+    const state = await cdp.evaluate(`(async () => {
+    const canvas = document.querySelector('canvas[role="img"][aria-label^="Latest capture"]')
+    const image = document.querySelector('img[alt^="Latest capture"]')
+    const url = canvas?.dataset.previewUrl || image?.currentSrc || image?.src || null
+    const state = {
+      url,
+      protocolStatus: null,
+      contentType: null,
+      responseBytes: null,
+      decodedWidth: null,
+      decodedHeight: null,
+      decodeError: null,
+      canvasWidth: canvas?.width ?? null,
+      canvasHeight: canvas?.height ?? null,
+      canvasVisiblePixels: null,
+      canvasDisplay: canvas ? getComputedStyle(canvas).display : null,
+      canvasError: null,
+    }
+    if (!url) return state
+
+    const response = await fetch(url)
+    state.protocolStatus = response.status
+    state.contentType = response.headers.get('content-type')
+    const bytes = await response.arrayBuffer()
+    state.responseBytes = bytes.byteLength
+    if (!response.ok || !/^image\\/jpeg(?:;|$)/i.test(state.contentType ?? '')) return state
+
+    try {
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: state.contentType ?? '' }))
+      state.decodedWidth = bitmap.width
+      state.decodedHeight = bitmap.height
+      bitmap.close()
+    } catch (error) {
+      state.decodeError = String(error)
+      return state
+    }
+
+    if (canvas && canvas.width > 0 && canvas.height > 0) {
+      try {
+        const pixels = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data
+        if (pixels) {
+          let visible = 0
+          for (let index = 0; index < pixels.length; index += 4) {
+            if (pixels[index + 3] > 0 && pixels[index] + pixels[index + 1] + pixels[index + 2] > 30) {
+              visible++
+            }
+          }
+          state.canvasVisiblePixels = visible
+        }
+      } catch (error) {
+        state.canvasError = String(error)
+      }
+    }
+    return state
+  })()`)
+    const ready = state.url?.startsWith('mc-preview://')
+      && state.protocolStatus === 200
+      && /^image\/jpeg(?:;|$)/i.test(state.contentType ?? '')
+      && state.responseBytes > 0
+      && state.decodedWidth > 0
+      && state.decodedHeight > 0
+      && state.canvasWidth > 0
+      && state.canvasHeight > 0
+      && state.canvasDisplay !== 'none'
+      && state.canvasVisiblePixels > 0
+    if (ready) return state
+    throw new Error(`live preview not ready: ${JSON.stringify(state)}`)
+  }, 40_000)
+}
+
+async function createReleasePreviewFixture() {
+  const width = 1_600
+  const height = 1_200
+  const pixels = Buffer.alloc(width * height * 3)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 3
+      const portrait = x > 420 && x < 1_180 && y > 120 && y < 1_100
+      const stripe = (Math.floor(x / 60) + Math.floor(y / 60)) % 2 === 0
+      pixels[offset] = portrait ? (stripe ? 220 : 170) : 20 + Math.round((x / width) * 55)
+      pixels[offset + 1] = portrait ? (stripe ? 75 : 42) : 50 + Math.round((y / height) * 60)
+      pixels[offset + 2] = portrait
+        ? (stripe ? 40 : 18)
+        : 120 + Math.round(((x + y) / (width + height)) * 60)
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } })
+    .jpeg({ quality: 88 })
+    .toBuffer()
+}
+
 async function reservePort() {
   const probe = createServer()
   const address = await new Promise((resolveAddress, reject) => {
@@ -370,24 +632,9 @@ const apiAddress = await new Promise((resolve, reject) => {
 if (!apiAddress || typeof apiAddress === 'string') throw new Error('Could not start smoke API')
 const apiUrl = `http://127.0.0.1:${apiAddress.port}`
 
-const appProcess = spawn(appExecutable, [`--remote-debugging-port=${debugPort}`], {
-  env: {
-    ...process.env,
-    CI: 'true',
-    MC_SCHOOL_STUDIO_SMOKE_API_URL: apiUrl,
-    MC_SCHOOL_STUDIO_SMOKE_SKIP_BROWSER: '1',
-    MC_SCHOOL_STUDIO_SMOKE_USER_DATA_DIR: userDataDir,
-  },
-  stdio: ['ignore', 'pipe', 'pipe'],
-})
 let appOutput = ''
-appProcess.stdout.on('data', (chunk) => { appOutput += chunk })
-appProcess.stderr.on('data', (chunk) => { appOutput += chunk })
 let appProcessError
-appProcess.once('error', (error) => { appProcessError = error })
-appProcess.once('exit', (code, signal) => {
-  appOutput += `\n[smoke] packaged app exited code=${code ?? 'null'} signal=${signal ?? 'null'}\n`
-})
+let appProcess = spawnPackagedApp()
 
 let cdp
 try {
@@ -399,7 +646,6 @@ try {
   const signedIn = await cdp.evaluate(`window.api.invoke('auth:signIn')`)
   assert.equal(signedIn.signedIn, true)
 
-  const dbPath = join(userDataDir, 'mc-school-studio.db')
   await waitFor('desktop SQLite database', () => existsSync(dbPath))
   const storedToken = querySqlite(
     dbPath,
@@ -414,12 +660,42 @@ try {
   const pulled = await cdp.evaluate(`window.api.invoke('cloud:pullProject', { cloudProjectId: 41 })`)
   assert.deepEqual(
     { ok: pulled.ok, classesImported: pulled.classesImported, studentsImported: pulled.studentsImported },
-    { ok: true, classesImported: 1, studentsImported: 1 },
+    { ok: true, classesImported: 1, studentsImported: 2 },
   )
 
   const localProjects = await cdp.evaluate(`window.api.invoke('projects:list')`)
-  assert.equal(localProjects.length, 1)
-  const localProjectId = localProjects[0].id
+  assert.equal(localProjects.length, 2)
+  const legacyProject = localProjects.find((project) => project.schoolName === 'Existing Legacy Release Project')
+  assert(legacyProject, 'the pre-update project must survive the packaged database upgrade')
+  const legacyStudents = await cdp.evaluate(
+    `window.api.invoke('students:list', { projectId: ${legacyProject.id} })`,
+  )
+  assert.equal(legacyStudents.length, 1)
+  const legacyReview = await cdp.evaluate(
+    `window.api.invoke('captures:list', { studentId: ${legacyStudents[0].id} })`,
+  )
+  assert.equal(legacyReview.captures.length, 1, 'legacy JPEG must render as one review capture')
+  assert.equal(legacyReview.captures[0].legacyPhoto.filePath, legacyPhotoPath)
+  assert.equal(legacyReview.captures[0].files[0].storedPath, legacyPhotoPath)
+  assert.match(legacyReview.captures[0].legacyPhoto.previewUrl, /^mc-preview:\/\//)
+  assert.equal(existsSync(legacyPhotoPath), true, 'upgrade must not move or delete the legacy portrait')
+
+  const localProject = localProjects.find((project) => project.schoolName === projectName)
+  assert(localProject, 'the pulled project must be available after the upgrade')
+  const localProjectId = localProject.id
+  const localStudents = await cdp.evaluate(
+    `window.api.invoke('students:list', { projectId: ${localProjectId} })`,
+  )
+  const localStudentOne = localStudents.find(
+    (student) => student.generatedStudentId === studentReference,
+  )
+  const localStudentTwo = localStudents.find(
+    (student) => student.generatedStudentId === '005678',
+  )
+  assert(localStudentOne, 'the first cloud student must have a local SQLite identity')
+  assert(localStudentTwo, 'the second cloud student must have a local SQLite identity')
+  const localStudentOneId = localStudentOne.id
+  const localStudentTwoId = localStudentTwo.id
   await cdp.evaluate(`window.api.invoke('app:setPhotosDir', { dir: ${JSON.stringify(storageRoot)} })`)
   await cdp.evaluate(`window.api.invoke('projects:setWatchFolder', {
     projectId: ${localProjectId},
@@ -427,18 +703,151 @@ try {
   })`)
   await cdp.evaluate(`window.api.invoke('watcher:start', { projectId: ${localProjectId} })`)
 
+  // Exercise the secure preload bridge with actual native file drops. Both
+  // students receive the same camera basename, so cross-student pairing would
+  // be visible as missing or mixed review captures after restart.
+  await cdp.evaluate('location.reload()')
+  await waitFor('pulled project card after renderer auth refresh', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-project-card="${localProjectId}"]'))`,
+  ))
+  await cdp.evaluate(`(() => {
+    const card = document.querySelector('[data-project-card="${localProjectId}"]')
+    if (!(card instanceof HTMLButtonElement)) {
+      throw new Error('Pulled project card is not an interactive button')
+    }
+    card.click()
+    return true
+  })()`)
+  await waitFor('project roster', () => cdp.evaluate(
+    `Boolean(
+      document.querySelector('[data-student-row="${localStudentOneId}"]')
+      && document.querySelector('[data-student-row="${localStudentTwoId}"]')
+    )`,
+  ))
+  await cdp.evaluate(`window.api.invoke('watcher:setActiveStudent', {
+    projectId: ${localProjectId},
+    studentId: ${localStudentOneId}
+  })`)
+  online = false
+  const dropSession = await cdp.evaluate(`window.api.invoke('auth:getSession')`)
+  assert.equal(dropSession.offline, true)
+  await cdp.evaluate(`window.api.invoke('upload:setLiveEnabled', {
+    projectId: ${localProjectId},
+    enabled: true
+  })`)
+  await dropFilesOnStudent(cdp, localStudentOneId, [droppedJpegOne, droppedRawOne])
+  await dropFilesOnStudent(cdp, localStudentTwoId, [droppedJpegTwo, droppedRawTwo])
+  await waitFor('four dropped files in Live Upload', async () => {
+    const state = await cdp.evaluate(
+      `window.api.invoke('upload:getLiveState', { projectId: ${localProjectId} })`,
+    )
+    return state.pending === 4
+  }, 40_000)
+  assert.equal(
+    await cdp.evaluate(`window.api.invoke('watcher:getActiveStudent', { projectId: ${localProjectId} })`),
+    localStudentOneId,
+    'dropping files on another student must not change the selected camera target',
+  )
+
+  const assertDroppedCaptures = async () => {
+    const first = await cdp.evaluate(
+      `window.api.invoke('captures:list', { studentId: ${localStudentOneId} })`,
+    )
+    const second = await cdp.evaluate(
+      `window.api.invoke('captures:list', { studentId: ${localStudentTwoId} })`,
+    )
+    for (const [review, expectedStudent] of [
+      [first, localStudentOneId],
+      [second, localStudentTwoId],
+    ]) {
+      const dropped = review.captures.find((capture) => capture.baseFilename === 'dsc_9000')
+      assert(dropped, `student ${expectedStudent} must retain the dropped capture`)
+      assert.equal(dropped.studentId, expectedStudent)
+      assert.equal(dropped.pairingStatus, 'complete')
+      assert.deepEqual(
+        dropped.files.map((file) => file.fileRole).sort(),
+        ['JPEG', 'RAW'],
+      )
+    }
+    const queue = await cdp.evaluate(
+      `window.api.invoke('upload:getQueue', { projectId: ${localProjectId} })`,
+    )
+    assert.equal(queue.filter((item) => item.fileName === 'DSC_9000.JPG').length, 2)
+    assert.equal(queue.filter((item) => item.fileName === 'DSC_9000.CR3').length, 2)
+    assert.deepEqual(
+      [...new Set(queue.filter((item) => item.fileName.startsWith('DSC_9000.'))
+        .map((item) => item.subject))].sort(),
+      ['John Smith', 'Maya Chen'],
+    )
+  }
+  await assertDroppedCaptures()
+
+  cdp.close()
+  cdp = undefined
+  await stopAppProcess(appProcess)
+  appProcess = spawnPackagedApp()
+  cdp = await CdpClient.connect()
+  await waitFor('restarted signed desktop session', () => cdp.evaluate(
+    `document.body.innerText.includes(${JSON.stringify(projectName)})`,
+  ))
+  await assertDroppedCaptures()
+  const restartedLiveUpload = await cdp.evaluate(
+    `window.api.invoke('upload:getLiveState', { projectId: ${localProjectId} })`,
+  )
+  assert.equal(restartedLiveUpload.enabled, true)
+  assert.equal(restartedLiveUpload.pending, 4)
+  await cdp.evaluate(`window.api.invoke('upload:setLiveEnabled', {
+    projectId: ${localProjectId},
+    enabled: false
+  })`)
+
+  // Return to the pulled project after the restart above so the live preview
+  // reaches the real selected-student renderer rather than only the main process.
+  await waitFor('pulled project card for portrait preview', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-project-card="${localProjectId}"]'))`,
+  ))
+  await cdp.evaluate(`(() => {
+    const card = document.querySelector('[data-project-card="${localProjectId}"]')
+    if (!(card instanceof HTMLButtonElement)) {
+      throw new Error('Pulled project card is not an interactive button')
+    }
+    card.click()
+  })()`)
+  await waitFor('first student row for portrait preview', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-student-row="${localStudentOneId}"]'))`,
+  ))
+  await cdp.evaluate(`document.querySelector('[data-student-row="${localStudentOneId}"]').click()`)
+  await waitFor('first student selected for portrait preview', () => cdp.evaluate(
+    `document.querySelector('[data-student-row="${localStudentOneId}"]')?.getAttribute('aria-pressed') === 'true'`,
+  ))
+
   // Capture while disconnected. This exercises cached authorization, local
   // matching, durable pending state, and remote-ID mapping. Reconnecting must
   // not silently upload; the photographer explicitly retries the pending file.
   online = false
-  writeFileSync(sourcePhoto, Buffer.from(
-    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
-    'base64',
-  ))
+  writeFileSync(sourcePhoto, releasePreviewFixture)
+
+  const livePreview = await waitForLivePreview(cdp)
+  assert.equal(livePreview.protocolStatus, 200, `mc-preview protocol failed: ${JSON.stringify(livePreview)}`)
+  assert.match(
+    livePreview.contentType,
+    /^image\/jpeg(?:;|$)/i,
+    `mc-preview returned the wrong MIME type: ${JSON.stringify(livePreview)}`,
+  )
+  assert(
+    livePreview.decodedWidth <= 1_440
+      && livePreview.decodedHeight <= 1_440
+      && (livePreview.decodedWidth < 1_600 || livePreview.decodedHeight < 1_200),
+    `live preview dimensions were not reduced from 1600x1200: ${JSON.stringify(livePreview)}`,
+  )
+  assert(
+    livePreview.canvasVisiblePixels > 0,
+    `live preview canvas remained blank: ${JSON.stringify(livePreview)}`,
+  )
 
   await waitFor('managed photo copy and SQLite photo row', async () => {
     const project = await cdp.evaluate(`window.api.invoke('projects:get', { projectId: ${localProjectId} })`)
-    return project?.photoCount === 1 && findFiles(storageRoot).some((path) => basename(path) === managedPhotoName)
+    return project?.photoCount === 3 && findFiles(storageRoot).some((path) => basename(path) === managedPhotoName)
   }, 40_000)
   const managedPhoto = findFiles(storageRoot).find((path) => basename(path) === managedPhotoName)
   assert(managedPhoto)
@@ -450,8 +859,13 @@ try {
   const waitingUploads = await cdp.evaluate(
     `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
   )
+  const sourcePhotoUpload = waitingUploads.reduce(
+    (latest, photo) => !latest || photo.id > latest.id ? photo : latest,
+    null,
+  )
+  assert(sourcePhotoUpload, 'the later watched JPEG must have a durable upload row')
   assert.equal(
-    waitingUploads[0].uploadStatus,
+    sourcePhotoUpload.uploadStatus,
     null,
     'local capture must remain neutral until an explicit upload begins',
   )
@@ -465,17 +879,21 @@ try {
     `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
   )
   assert.equal(uploadCount, 0, 'reconnecting must not start a background upload')
-  assert.equal(stillPendingAfterReconnect[0]?.uploadStatus, null)
+  assert.equal(
+    stillPendingAfterReconnect.find((photo) => photo.id === sourcePhotoUpload.id)?.uploadStatus,
+    null,
+  )
 
   const retryResult = await cdp.evaluate(
-    `window.api.invoke('upload:retry', { photoId: ${waitingUploads[0].id} })`,
+    `window.api.invoke('upload:retry', { photoId: ${sourcePhotoUpload.id} })`,
   )
   assert.equal(retryResult.ok, true)
   await waitFor('explicit pending upload retry', async () => {
     const statuses = await cdp.evaluate(
       `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
     )
-    return uploadCount === 1 && statuses[0]?.uploadStatus === 'done'
+    return uploadCount === 1
+      && statuses.find((photo) => photo.id === sourcePhotoUpload.id)?.uploadStatus === 'done'
   }, 35_000)
   assert.equal(uploadCount, 1, 'the explicit retry must upload exactly once')
 
@@ -486,8 +904,11 @@ try {
   const photosAfterResync = await cdp.evaluate(
     `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
   )
-  assert.equal(photosAfterResync.length, 1)
-  assert.equal(photosAfterResync[0].uploadStatus, 'done')
+  assert.equal(photosAfterResync.length, 3)
+  assert.equal(
+    photosAfterResync.find((photo) => photo.id === sourcePhotoUpload.id)?.uploadStatus,
+    'done',
+  )
 
   online = false
   retired = true

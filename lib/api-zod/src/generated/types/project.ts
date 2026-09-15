@@ -5,9 +5,11 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ProjectProjectType } from './projectProjectType';
 
 export interface Project {
   id: number;
+  projectType: ProjectProjectType;
   schoolName: string;
   /** @nullable */
   photoDate?: string | null;
@@ -21,6 +23,8 @@ export interface Project {
   contactPhone?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  priceSheetId?: number | null;
   classCount: number;
   studentCount: number;
   createdAt: string;

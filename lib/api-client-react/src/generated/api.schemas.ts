@@ -9,6 +9,39 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface DesktopReleaseAsset {
+  url: string;
+  /** @minimum 1 */
+  size: number;
+}
+
+export interface DesktopReleaseArchitecture {
+  displayName: string;
+  asset: DesktopReleaseAsset;
+}
+
+export type DesktopReleasePlatformsItem = typeof DesktopReleasePlatformsItem[keyof typeof DesktopReleasePlatformsItem];
+
+
+export const DesktopReleasePlatformsItem = {
+  macos: 'macos',
+} as const;
+
+export type DesktopReleaseArchitectures = {
+  arm64?: DesktopReleaseArchitecture;
+  x64?: DesktopReleaseArchitecture;
+};
+
+export interface DesktopRelease {
+  /** @pattern ^[0-9]+\.[0-9]+\.[0-9]+$ */
+  version: string;
+  publishedAt: string;
+  releasePage: string;
+  /** @minItems 1 */
+  platforms: DesktopReleasePlatformsItem[];
+  architectures: DesktopReleaseArchitectures;
+}
+
 export interface DashboardStats {
   totalProjects: number;
   totalSchools: number;
@@ -16,8 +49,17 @@ export interface DashboardStats {
   totalStudents: number;
 }
 
+export type ProjectProjectType = typeof ProjectProjectType[keyof typeof ProjectProjectType];
+
+
+export const ProjectProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export interface Project {
   id: number;
+  projectType: ProjectProjectType;
   schoolName: string;
   /** @nullable */
   photoDate?: string | null;
@@ -31,13 +73,24 @@ export interface Project {
   contactPhone?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  priceSheetId?: number | null;
   classCount: number;
   studentCount: number;
   createdAt: string;
   updatedAt: string;
 }
 
+export type ProjectInputProjectType = typeof ProjectInputProjectType[keyof typeof ProjectInputProjectType];
+
+
+export const ProjectInputProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export interface ProjectInput {
+  projectType?: ProjectInputProjectType;
   /** @minLength 1 */
   schoolName: string;
   /** @nullable */
@@ -52,9 +105,19 @@ export interface ProjectInput {
   contactPhone?: string | null;
   /** @nullable */
   notes?: string | null;
+  priceSheetId: number;
 }
 
+export type ProjectPatchProjectType = typeof ProjectPatchProjectType[keyof typeof ProjectPatchProjectType];
+
+
+export const ProjectPatchProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
 export interface ProjectPatch {
+  projectType?: ProjectPatchProjectType;
   /** @minLength 1 */
   schoolName?: string;
   /** @nullable */
@@ -103,6 +166,16 @@ export interface Student {
   /** @nullable */
   phone?: string | null;
   /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
+  /** @nullable */
+  captureNotes?: string | null;
+  /** @nullable */
   simpleQr?: string | null;
   /** @nullable */
   jsonQr?: string | null;
@@ -122,6 +195,16 @@ export interface StudentInput {
   email?: string | null;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
+  /** @nullable */
+  captureNotes?: string | null;
 }
 
 export interface StudentPatch {
@@ -136,6 +219,16 @@ export interface StudentPatch {
   email?: string | null;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  secondaryEmail?: string | null;
+  /** @nullable */
+  jobTitle?: string | null;
+  /** @nullable */
+  officeLocation?: string | null;
+  /** @nullable */
+  photoSession?: string | null;
+  /** @nullable */
+  captureNotes?: string | null;
 }
 
 export interface BulkStudentIds {
@@ -176,6 +269,16 @@ export interface SheetMapping {
   emailColumn?: string | null;
   /** @nullable */
   phoneColumn?: string | null;
+  /** @nullable */
+  secondaryEmailColumn?: string | null;
+  /** @nullable */
+  jobTitleColumn?: string | null;
+  /** @nullable */
+  officeLocationColumn?: string | null;
+  /** @nullable */
+  photoSessionColumn?: string | null;
+  /** @nullable */
+  captureNotesColumn?: string | null;
   rows: string[][];
   headers?: string[];
 }
@@ -185,8 +288,18 @@ export interface ImportConfirmation {
 }
 
 export interface ImportResult {
+  /** Classes created; existing classes are reused case-insensitively. */
   classesCreated: number;
+  /** Students or employees created. */
   studentsCreated: number;
+  /** Existing students or employees whose roster details changed. */
+  studentsUpdated: number;
+  /** Existing students or employees moved to another class or department. */
+  studentsMoved: number;
+  /** Unchanged rows skipped because they were already reconciled. */
+  studentsSkipped: number;
+  /** Ambiguous rows that were not merged. */
+  conflicts: number;
 }
 
 export interface ImportFileForm {
@@ -338,10 +451,929 @@ export type PlatformProject = Project & ({
   studioName: string | null;
 });
 
+export interface PlatformActivity {
+  id: number;
+  actorUserId: string;
+  /** @nullable */
+  studioId: number | null;
+  /** @nullable */
+  studioName: string | null;
+  action: string;
+  createdAt: string;
+}
+
 export interface PlatformOverview {
   configured: boolean;
   studios: PlatformStudio[];
   projects: PlatformProject[];
   invites: PlatformInvite[];
+  activity: PlatformActivity[];
 }
 
+export interface DeliveryAccessInput {
+  /**
+     * @minLength 8
+     * @maxLength 8
+     */
+  code: string;
+  /** @maxLength 254 */
+  email: string;
+  /** @maxLength 100 */
+  consentSource?: string;
+  /** Optional explicit consent to receive promotional email from the studio. */
+  marketingConsent?: boolean;
+}
+
+export interface MarketingContactResponse {
+  id: number;
+  studioId: number;
+  email: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  successfulGalleryAccesses: number;
+  /** @nullable */
+  marketingConsent: boolean | null;
+  /** @nullable */
+  consentAt?: string | null;
+  /** @nullable */
+  consentSource?: string | null;
+  /** @nullable */
+  unsubscribedAt: string | null;
+  /** @nullable */
+  lastOrderAt?: string | null;
+  identifiedVisits?: number;
+  purchases?: number;
+}
+
+export interface MarketingContactsResponse {
+  contacts: MarketingContactResponse[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface MarketingContactMutationResponse {
+  contact: MarketingContactResponse;
+}
+
+export type MarketingProjectOverviewProjectType = typeof MarketingProjectOverviewProjectType[keyof typeof MarketingProjectOverviewProjectType];
+
+
+export const MarketingProjectOverviewProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export interface MarketingProjectOverview {
+  projectId: number;
+  projectName: string;
+  projectType: MarketingProjectOverviewProjectType;
+  identifiedVisits: number;
+  uniqueContacts: number;
+  purchasers: number;
+  conversionRate: number;
+}
+
+export interface MarketingOverview {
+  uniqueContacts: number;
+  identifiedVisits: number;
+  repeatVisitors: number;
+  purchasers: number;
+  conversionRate: number;
+  consentedContacts: number;
+  unsubscribedContacts: number;
+  projects: MarketingProjectOverview[];
+  perProject?: MarketingProjectOverview[];
+}
+
+export interface MarketingConsentInput {
+  consented: boolean;
+  /** @maxLength 100 */
+  source?: string;
+}
+
+export interface MarketingTemplateInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  subject: string;
+  /** @minLength 1 */
+  bodyText: string;
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  category: string;
+}
+
+export type MarketingTemplate = MarketingTemplateInput & {
+  id: number;
+  studioId: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MarketingCampaignInputAudienceFilterConsent = typeof MarketingCampaignInputAudienceFilterConsent[keyof typeof MarketingCampaignInputAudienceFilterConsent];
+
+
+export const MarketingCampaignInputAudienceFilterConsent = {
+  consented: 'consented',
+  unconsented: 'unconsented',
+  all: 'all',
+} as const;
+
+export type MarketingCampaignInputAudienceFilterEngagement = typeof MarketingCampaignInputAudienceFilterEngagement[keyof typeof MarketingCampaignInputAudienceFilterEngagement];
+
+
+export const MarketingCampaignInputAudienceFilterEngagement = {
+  visited: 'visited',
+  repeat: 'repeat',
+  purchaser: 'purchaser',
+  all: 'all',
+} as const;
+
+export type MarketingCampaignInputAudienceFilter = {
+  consent?: MarketingCampaignInputAudienceFilterConsent;
+  engagement?: MarketingCampaignInputAudienceFilterEngagement;
+  /** @maxLength 200 */
+  search?: string;
+};
+
+export interface MarketingCampaignInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  templateId: number;
+  audienceFilter?: MarketingCampaignInputAudienceFilter;
+}
+
+export type MarketingCampaignStatus = typeof MarketingCampaignStatus[keyof typeof MarketingCampaignStatus];
+
+
+export const MarketingCampaignStatus = {
+  draft: 'draft',
+  sending: 'sending',
+  sent: 'sent',
+  failed: 'failed',
+  needs_review: 'needs_review',
+} as const;
+
+export type MarketingCampaign = MarketingCampaignInput & ({
+  id: number;
+  studioId: number;
+  audienceFilterSnapshot: string;
+  recipientCount: number;
+  status: MarketingCampaignStatus;
+  sentCount: number;
+  /** @nullable */
+  sentAt: string | null;
+  /** @nullable */
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export interface MarketingEmailStatus {
+  configured: boolean;
+  /** @nullable */
+  fromEmail: string | null;
+}
+
+export interface MarketingCampaignSendResponse {
+  campaign: MarketingCampaign;
+  sentCount: number;
+}
+
+export type DeliveryOrderInputPaymentMethod = typeof DeliveryOrderInputPaymentMethod[keyof typeof DeliveryOrderInputPaymentMethod];
+
+
+export const DeliveryOrderInputPaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export type DeliveryOrderInputDeliveryMethod = typeof DeliveryOrderInputDeliveryMethod[keyof typeof DeliveryOrderInputDeliveryMethod];
+
+
+export const DeliveryOrderInputDeliveryMethod = {
+  digital: 'digital',
+  school: 'school',
+  collection: 'collection',
+  shipping: 'shipping',
+} as const;
+
+export interface DeliveryBasketItem {
+  offerId: string;
+  /**
+     * @minItems 1
+     * @maxItems 100
+     */
+  photoIds: number[];
+  /**
+     * @minimum 1
+     * @maximum 100
+     */
+  quantity: number;
+}
+
+export interface DeliveryOrderInput {
+  /**
+     * @minLength 16
+     * @maxLength 128
+     */
+  idempotencyKey: string;
+  token?: string;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  items?: DeliveryBasketItem[];
+  offerId?: string;
+  /** @minItems 1 */
+  photoIds?: number[];
+  /** @minimum 1 */
+  quantity?: number;
+  customerName: string;
+  customerEmail: string;
+  paymentMethod: DeliveryOrderInputPaymentMethod;
+  deliveryMethod?: DeliveryOrderInputDeliveryMethod;
+  deliveryAddress?: string;
+}
+
+export type DeliveryOfferProductType = typeof DeliveryOfferProductType[keyof typeof DeliveryOfferProductType];
+
+
+export const DeliveryOfferProductType = {
+  digital: 'digital',
+  print: 'print',
+  pack: 'pack',
+} as const;
+
+export type DeliveryOfferPaymentMethodsItem = typeof DeliveryOfferPaymentMethodsItem[keyof typeof DeliveryOfferPaymentMethodsItem];
+
+
+export const DeliveryOfferPaymentMethodsItem = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export type DeliveryOfferDeliveryMethodsItem = typeof DeliveryOfferDeliveryMethodsItem[keyof typeof DeliveryOfferDeliveryMethodsItem];
+
+
+export const DeliveryOfferDeliveryMethodsItem = {
+  digital: 'digital',
+  school: 'school',
+  collection: 'collection',
+  shipping: 'shipping',
+} as const;
+
+export type DeliveryOfferPricingRules = {
+  selection?: string;
+  quantity?: string;
+};
+
+export interface DeliveryOffer {
+  id: string;
+  name: string;
+  description?: string;
+  productType: DeliveryOfferProductType;
+  stripePriceId?: string;
+  /** @minimum 0 */
+  unitAmount: number;
+  /**
+     * @minLength 3
+     * @maxLength 3
+     */
+  currency: string;
+  /** @minItems 1 */
+  paymentMethods: DeliveryOfferPaymentMethodsItem[];
+  /** @minimum 1 */
+  photoCount: number;
+  printSize?: string;
+  deliveryMethods: DeliveryOfferDeliveryMethodsItem[];
+  active: boolean;
+  includesDigitalDownloads?: boolean;
+  pricingRules?: DeliveryOfferPricingRules;
+}
+
+export interface DeliverySettingsInput {
+  watermarkEnabled?: boolean;
+  /** @nullable */
+  watermarkText?: string | null;
+  /** @nullable */
+  expiresAt?: string | null;
+  /** @nullable */
+  establishmentPaymentInstructions?: string | null;
+  /** @nullable */
+  bankTransferInstructions?: string | null;
+  /** @nullable */
+  priceSheetId?: number | null;
+  offers?: DeliveryOffer[];
+}
+
+export interface DeliveryPriceSheetInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  /** @minItems 1 */
+  offers: DeliveryOffer[];
+}
+
+export interface DeliveryPriceSheet {
+  id: number;
+  studioId: number;
+  name: string;
+  offers: DeliveryOffer[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FulfillmentInputFulfillmentStatus = typeof FulfillmentInputFulfillmentStatus[keyof typeof FulfillmentInputFulfillmentStatus];
+
+
+export const FulfillmentInputFulfillmentStatus = {
+  not_required: 'not_required',
+  paid: 'paid',
+  preparing: 'preparing',
+  printed: 'printed',
+  ready: 'ready',
+  dispatched: 'dispatched',
+  delivered: 'delivered',
+} as const;
+
+export interface FulfillmentInput {
+  fulfillmentStatus: FulfillmentInputFulfillmentStatus;
+}
+
+export type PaymentStatusInputStatus = typeof PaymentStatusInputStatus[keyof typeof PaymentStatusInputStatus];
+
+
+export const PaymentStatusInputStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  cancelled: 'cancelled',
+  refunded: 'refunded',
+} as const;
+
+export interface PaymentStatusInput {
+  status: PaymentStatusInputStatus;
+}
+
+export type DeliveryGalleryProjectType = typeof DeliveryGalleryProjectType[keyof typeof DeliveryGalleryProjectType];
+
+
+export const DeliveryGalleryProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export type DeliveryGalleryStudio = { [key: string]: unknown };
+
+export type DeliveryGalleryPhotosItem = {
+  id?: number;
+  fileName?: string;
+  fileUrl?: string;
+  downloadUrl?: string;
+};
+
+export interface DeliveryGallery {
+  slug: string;
+  status: string;
+  projectType: DeliveryGalleryProjectType;
+  subjectLabel: string;
+  groupLabel: string;
+  /** @nullable */
+  expiresAt?: string | null;
+  studio?: DeliveryGalleryStudio;
+  photos?: DeliveryGalleryPhotosItem[];
+}
+
+export interface DeliveryAccessResponse {
+  token: string;
+  expiresIn: number;
+}
+
+export interface DeliveryCodeResponse {
+  studentId: number;
+  accessCode: string;
+}
+
+export interface DeliveryAccessUpdateInput {
+  revoked?: boolean;
+  /** @nullable */
+  expiresAt?: string | null;
+}
+
+export type DeliveryAccessMutationResponseAccess = {
+  studentId?: number;
+  /** @nullable */
+  revokedAt?: string | null;
+  /** @nullable */
+  expiresAt?: string | null;
+};
+
+export interface DeliveryAccessMutationResponse {
+  access: DeliveryAccessMutationResponseAccess;
+}
+
+export type DeliveryPhotosResponseGalleryProjectType = typeof DeliveryPhotosResponseGalleryProjectType[keyof typeof DeliveryPhotosResponseGalleryProjectType];
+
+
+export const DeliveryPhotosResponseGalleryProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export type DeliveryPhotosResponseGallery = {
+  slug?: string;
+  status?: string;
+  projectType?: DeliveryPhotosResponseGalleryProjectType;
+  subjectLabel?: string;
+  groupLabel?: string;
+  /** @nullable */
+  priceSheetId?: number | null;
+  /** @nullable */
+  expiresAt?: string | null;
+};
+
+export type DeliveryPhotosResponseStudentProjectType = typeof DeliveryPhotosResponseStudentProjectType[keyof typeof DeliveryPhotosResponseStudentProjectType];
+
+
+export const DeliveryPhotosResponseStudentProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export type DeliveryPhotosResponseStudent = {
+  firstName: string;
+  lastName: string;
+  label: string;
+  departmentName?: string;
+  projectType: DeliveryPhotosResponseStudentProjectType;
+};
+
+export type DeliveryPhotosResponseSubject = {
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  label: string;
+  /** @nullable */
+  organizationName: string | null;
+  groupLabel: string;
+  /** @nullable */
+  groupName: string | null;
+};
+
+export type DeliveryPhotosResponsePrice = { [key: string]: unknown };
+
+export interface DeliveryPhotosResponse {
+  gallery: DeliveryPhotosResponseGallery;
+  student: DeliveryPhotosResponseStudent;
+  subject: DeliveryPhotosResponseSubject;
+  price?: DeliveryPhotosResponsePrice;
+  offers: DeliveryOffer[];
+  /** Whether at least one complete Volume Capture offer is available. */
+  orderingAvailable: boolean;
+  /** Whether Stripe checkout is currently available as an optional payment method. */
+  stripeAvailable: boolean;
+  photos: DeliveryGalleryPhotosItem[];
+  mediaExpiresAt: string;
+}
+
+export interface DeliveryCatalogPrice {
+  productId: string;
+  priceId: string;
+  name: string;
+  amount: number;
+  currency: string;
+}
+
+export interface DeliveryCatalogResponse {
+  prices: DeliveryCatalogPrice[];
+  offers?: DeliveryOffer[];
+}
+
+export type DeliveryCheckoutResponsePaymentMethod = typeof DeliveryCheckoutResponsePaymentMethod[keyof typeof DeliveryCheckoutResponsePaymentMethod];
+
+
+export const DeliveryCheckoutResponsePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export type DeliveryCheckoutResponseCheckoutAttemptStatus = typeof DeliveryCheckoutResponseCheckoutAttemptStatus[keyof typeof DeliveryCheckoutResponseCheckoutAttemptStatus];
+
+
+export const DeliveryCheckoutResponseCheckoutAttemptStatus = {
+  not_started: 'not_started',
+  started: 'started',
+  created: 'created',
+  uncertain: 'uncertain',
+  failed: 'failed',
+} as const;
+
+export interface DeliveryCheckoutResponse {
+  /** @nullable */
+  checkoutUrl: string | null;
+  orderId: number;
+  status: string;
+  paymentMethod: DeliveryCheckoutResponsePaymentMethod;
+  /** @nullable */
+  paymentInstructions?: string | null;
+  publicReference: string;
+  /** @nullable */
+  recoveryUrl?: string | null;
+  /**
+     * Returned only when the order is first created; never persisted in plaintext
+     * @nullable
+     */
+  recoveryToken?: string | null;
+  checkoutAttemptStatus: DeliveryCheckoutResponseCheckoutAttemptStatus;
+}
+
+export type DeliveryOrderResponsePaymentMethod = typeof DeliveryOrderResponsePaymentMethod[keyof typeof DeliveryOrderResponsePaymentMethod];
+
+
+export const DeliveryOrderResponsePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export interface DeliveryOrderResponse {
+  orderId: number;
+  status: string;
+  amountTotal: number;
+  currency: string;
+  paymentMethod: DeliveryOrderResponsePaymentMethod;
+  /** @nullable */
+  paidAt?: string | null;
+  photoIds: number[];
+  downloadablePhotoIds?: number[];
+}
+
+export type DeliveryOrderRecoveryResponseStatus = typeof DeliveryOrderRecoveryResponseStatus[keyof typeof DeliveryOrderRecoveryResponseStatus];
+
+
+export const DeliveryOrderRecoveryResponseStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  expired: 'expired',
+  refunded: 'refunded',
+  cancelled: 'cancelled',
+} as const;
+
+export type DeliveryOrderRecoveryResponsePaymentMethod = typeof DeliveryOrderRecoveryResponsePaymentMethod[keyof typeof DeliveryOrderRecoveryResponsePaymentMethod];
+
+
+export const DeliveryOrderRecoveryResponsePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export type DeliveryOrderRecoveryResponseItemsItem = {
+  productName: string;
+  productType: string;
+  quantity: number;
+};
+
+export interface DeliveryOrderRecoveryResponse {
+  reference: string;
+  status: DeliveryOrderRecoveryResponseStatus;
+  paymentMethod: DeliveryOrderRecoveryResponsePaymentMethod;
+  amountTotal: number;
+  currency: string;
+  createdAt: string;
+  /** @nullable */
+  paidAt: string | null;
+  fulfillmentStatus: string;
+  deliveryMethod: string;
+  /** @nullable */
+  manualInstructions: string | null;
+  items: DeliveryOrderRecoveryResponseItemsItem[];
+}
+
+export type DeliverySettingsResponseGallery = {
+  id?: number;
+  slug?: string;
+  status?: string;
+};
+
+export type DeliverySettingsResponseProjectType = typeof DeliverySettingsResponseProjectType[keyof typeof DeliverySettingsResponseProjectType];
+
+
+export const DeliverySettingsResponseProjectType = {
+  school: 'school',
+  corporate: 'corporate',
+} as const;
+
+export interface DeliverySettingsResponse {
+  gallery: DeliverySettingsResponseGallery;
+  projectType?: DeliverySettingsResponseProjectType;
+  subjectLabel?: string;
+  groupLabel?: string;
+  accessCount?: number;
+}
+
+export type DeliveryMutationResponseGallery = {
+  id?: number;
+  slug?: string;
+  status?: string;
+};
+
+export interface DeliveryInvitationSummary {
+  dispatched: boolean;
+  claimed: number;
+  sent: number;
+  failed: number;
+  needsReview: number;
+  pending: number;
+  /** @nullable */
+  reason?: string | null;
+}
+
+export interface DeliveryMutationResponse {
+  gallery: DeliveryMutationResponseGallery;
+  publicUrl?: string;
+  message?: string;
+  invitationSummary?: DeliveryInvitationSummary;
+}
+
+export type DeliveryInvitationRetryResponseGallery = {
+  id: number;
+  slug: string;
+  status: string;
+};
+
+export interface DeliveryInvitationRetryResponse {
+  gallery: DeliveryInvitationRetryResponseGallery;
+  invitationSummary: DeliveryInvitationSummary;
+}
+
+export type DeliveryAccessCardsResponseItem = {
+  firstName?: string;
+  lastName?: string;
+  subjectLabel?: string;
+  groupLabel?: string;
+  /** Legacy subject identifier retained for compatibility */
+  studentId?: number;
+  /** Legacy subject identifier retained for compatibility */
+  subjectId?: number;
+  generatedStudentId?: string;
+  /** @nullable */
+  className?: string | null;
+  /** @nullable */
+  departmentName?: string | null;
+  accessCode?: string;
+  /** Absolute human-readable gallery URL without credentials */
+  accessUrl?: string;
+  /** Absolute credential-bearing fragment URL encoded by the QR image */
+  qrUrl?: string;
+  qrDataUrl?: string;
+};
+
+export type DeliveryAccessCardsResponse = DeliveryAccessCardsResponseItem[];
+
+export type DeliveryAccessCardsPrepareResponseGalleryStatus = typeof DeliveryAccessCardsPrepareResponseGalleryStatus[keyof typeof DeliveryAccessCardsPrepareResponseGalleryStatus];
+
+
+export const DeliveryAccessCardsPrepareResponseGalleryStatus = {
+  draft: 'draft',
+  published: 'published',
+  revoked: 'revoked',
+} as const;
+
+export type DeliveryAccessCardsPrepareResponseGallery = {
+  id: number;
+  slug: string;
+  status: DeliveryAccessCardsPrepareResponseGalleryStatus;
+};
+
+export interface DeliveryAccessCardsPrepareResponse {
+  gallery: DeliveryAccessCardsPrepareResponseGallery;
+  /** @minimum 0 */
+  preparedCount: number;
+  /** @minimum 0 */
+  studentCount: number;
+  cards: DeliveryAccessCardsResponse;
+  message: string;
+}
+
+export type DeliveryOrderSafeStatus = typeof DeliveryOrderSafeStatus[keyof typeof DeliveryOrderSafeStatus];
+
+
+export const DeliveryOrderSafeStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  expired: 'expired',
+  refunded: 'refunded',
+  cancelled: 'cancelled',
+} as const;
+
+export type DeliveryOrderSafePaymentMethod = typeof DeliveryOrderSafePaymentMethod[keyof typeof DeliveryOrderSafePaymentMethod];
+
+
+export const DeliveryOrderSafePaymentMethod = {
+  stripe: 'stripe',
+  establishment: 'establishment',
+  bank_transfer: 'bank_transfer',
+} as const;
+
+export type DeliveryOrderNotificationSafeStateStatus = typeof DeliveryOrderNotificationSafeStateStatus[keyof typeof DeliveryOrderNotificationSafeStateStatus];
+
+
+export const DeliveryOrderNotificationSafeStateStatus = {
+  pending: 'pending',
+  sending: 'sending',
+  sent: 'sent',
+  failed: 'failed',
+  needs_review: 'needs_review',
+} as const;
+
+/**
+ * @nullable
+ */
+export type DeliveryOrderNotificationSafeState = {
+  status: DeliveryOrderNotificationSafeStateStatus;
+  /** @nullable */
+  sentAt: string | null;
+  /** @minimum 0 */
+  attempts: number;
+  retryAllowed: boolean;
+} | null;
+
+/**
+ * Manager-only safe delivery states; omitted from viewer responses.
+ */
+export type DeliveryOrderSafeNotifications = {
+  orderReceived?: DeliveryOrderNotificationSafeState | null;
+  paymentConfirmed?: DeliveryOrderNotificationSafeState | null;
+};
+
+export interface DeliveryOrderSafe {
+  id: number;
+  /** @nullable */
+  publicReference: string | null;
+  status: DeliveryOrderSafeStatus;
+  paymentMethod: DeliveryOrderSafePaymentMethod;
+  /** @nullable */
+  customerName: string | null;
+  /** @nullable */
+  customerEmail: string | null;
+  fulfillmentStatus: string;
+  deliveryMethod: string;
+  /** @nullable */
+  deliveryAddress: string | null;
+  amountTotal: number;
+  currency: string;
+  createdAt: string;
+  /** @nullable */
+  paidAt: string | null;
+  /** Manager-only safe delivery states; omitted from viewer responses. */
+  notifications?: DeliveryOrderSafeNotifications;
+}
+
+export interface DeliveryOrdersResponse {
+  orders: DeliveryOrderSafe[];
+}
+
+export type DeliveryOrderItemSafeProductType = typeof DeliveryOrderItemSafeProductType[keyof typeof DeliveryOrderItemSafeProductType];
+
+
+export const DeliveryOrderItemSafeProductType = {
+  digital: 'digital',
+  print: 'print',
+  pack: 'pack',
+} as const;
+
+export interface DeliveryOrderItemSafe {
+  id: number;
+  /** @nullable */
+  photoId: number | null;
+  offerId: string;
+  productName: string;
+  productType: DeliveryOrderItemSafeProductType;
+  includesDigitalDownloads: boolean;
+  /** @nullable */
+  printSize: string | null;
+  quantity: number;
+  unitAmount: number;
+  currency: string;
+}
+
+export interface DeliveryOrderDetailResponse {
+  order: DeliveryOrderSafe;
+  items: DeliveryOrderItemSafe[];
+}
+
+export interface DeliveryOrderMutationResponse {
+  order: DeliveryOrderSafe;
+}
+
+export interface DeliveryOrderNotificationDispatchSummary {
+  claimed: number;
+  sent: number;
+  failed: number;
+  needsReview: number;
+  pending: number;
+}
+
+export type DeliveryOperationsResponseIssues = {
+  /** @minimum 0 */
+  invitations: number;
+  /** @minimum 0 */
+  orderNotifications: number;
+};
+
+export interface DeliveryOperationCounts {
+  /** @minimum 0 */
+  pending: number;
+  /** @minimum 0 */
+  sending: number;
+  /** @minimum 0 */
+  sent: number;
+  /** @minimum 0 */
+  failed: number;
+  /** @minimum 0 */
+  needsReview: number;
+}
+
+export interface DeliveryOperationsResponse {
+  invitations: DeliveryOperationCounts;
+  orderNotifications: DeliveryOperationCounts;
+  issues: DeliveryOperationsResponseIssues;
+}
+
+export interface PhotoShareInput {
+  shareWithParents: boolean;
+}
+
+export type PhotoShareResponsePhoto = {
+  id: number;
+  projectId: number;
+  studentId: number;
+  fileName: string;
+  fileUrl?: string;
+  mimeType?: string;
+  rating?: number;
+  colorLabel?: string;
+  shareWithParents: boolean;
+};
+
+export interface PhotoShareResponse {
+  photo: PhotoShareResponsePhoto;
+  offers?: DeliveryOffer[];
+}
+
+export type ListMarketingContactsParams = {
+search?: string;
+engagement?: ListMarketingContactsEngagement;
+consent?: ListMarketingContactsConsent;
+/**
+ * @minimum 1
+ */
+page?: number;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+pageSize?: number;
+};
+
+export type ListMarketingContactsEngagement = typeof ListMarketingContactsEngagement[keyof typeof ListMarketingContactsEngagement];
+
+
+export const ListMarketingContactsEngagement = {
+  all: 'all',
+  visited: 'visited',
+  repeat: 'repeat',
+  purchaser: 'purchaser',
+} as const;
+
+export type ListMarketingContactsConsent = typeof ListMarketingContactsConsent[keyof typeof ListMarketingContactsConsent];
+
+
+export const ListMarketingContactsConsent = {
+  all: 'all',
+  consented: 'consented',
+  unconsented: 'unconsented',
+} as const;
+
+export type ListMarketingCampaigns200 = {
+  campaigns?: MarketingCampaign[];
+};

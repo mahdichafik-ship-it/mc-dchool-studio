@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   ArrowLeft, Folder, Play, Square, Search, Image, User,
-  ChevronRight, Camera, AlertCircle, ExternalLink, Download,
+  ChevronRight, ArrowRight, Camera, AlertCircle, ExternalLink, Download,
   Upload, CloudUpload, CheckCircle, XCircle, Loader,
-  RefreshCw, Star, Check, Plus, Pencil, Trash2
+  RefreshCw, Star, Check, Plus, Pencil, Trash2, QrCode, RotateCw, Maximize2, FolderSync
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +22,7 @@ import {
   useWatcherStatus,
   useActiveCaptureTarget,
   useUploadStatus,
+  useLiveUpload,
 } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
 import {
@@ -29,6 +30,15 @@ import {
   previewScheduler,
   waitForPaintFrames,
 } from '@/lib/previewScheduler'
+import { CaptureFramingPreview } from '@/lib/CaptureFramingPreview'
+import { captureUploadLabel } from '@/lib/shootWorkspace'
+import { getEmployeeCaptureContext } from '@/lib/employeeCaptureContext'
+import {
+  isRosterShortcutEditingTarget,
+  resolveRosterShortcut,
+} from '@/lib/rosterShortcuts'
+import { filterRosterStudents } from '@/lib/rosterFilter'
+import { createGroupMemberStudentIdSet } from '@/lib/groupMembership'
 import type {
   Student,
   Class,
@@ -41,9 +51,17 @@ import type {
   CaptureExportLayout,
   ProjectSyncProgressEvent,
   CreateStudentResult,
+  LiveUploadQueueItem,
   StudentGroup,
   GroupCaptureReview,
 } from '@/hooks/useApi'
+import type {
+  CaptureAspectRatio,
+  CaptureFraming,
+  DroppedCaptureFileResult,
+  DroppedCaptureProgressEvent,
+  FolderMigrationPreview,
+} from '@shared/types'
 
 interface Props {
   projectId: number
@@ -61,8 +79,20 @@ const captureFilterOptions: Array<{ value: CaptureFilter; label: string }> = [
   { value: 'unpaired', label: 'Needs review' },
 ]
 
+interface DropProgressState {
+  studentId: number
+  completed: number
+  total: number
+  results: DroppedCaptureFileResult[]
+}
+
 export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
+  const projectSynced = project?.syncStatus === 'synced'
+  const isCorporate = project?.projectType === 'corporate'
+  const departmentLabel = isCorporate ? 'Department' : 'Class'
+  const employeeLabel = isCorporate ? 'Employee' : 'Student'
+  const employeePlural = `${employeeLabel}s`
   const { data: captureSummary } = useCaptureSummary(projectId)
   const [groupCaptureCount, setGroupCaptureCount] = useState(0)
   const { data: classes, reload: reloadClasses } = useClasses(projectId)
@@ -86,7 +116,15 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     setGroupTarget: setActiveGroupTarget,
   } = useActiveCaptureTarget(projectId)
   const { statusMap: uploadStatusMap, photoStatusMap, errorPhotoIds, reload: reloadUploadStatus } = useUploadStatus(projectId)
+  const {
+    state: liveUpload,
+    load: reloadLiveUpload,
+    setEnabled: setLiveUploadEnabled,
+    runNow: runUploadNow,
+    retryFailed: retryProjectFailed,
+  } = useLiveUpload(projectId)
   const [search, setSearch] = useState('')
+  const filteredStudents = filterRosterStudents(students, search)
   const [addStudentOpen, setAddStudentOpen] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
@@ -96,17 +134,181 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [renamingGroupId, setRenamingGroupId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [uploadQueue, setUploadQueue] = useState<LiveUploadQueueItem[]>([])
+  const [deletingQueueItem, setDeletingQueueItem] = useState<string | null>(null)
+  const [finishDialogOpen, setFinishDialogOpen] = useState(false)
+  const [folderMigrationRunning, setFolderMigrationRunning] = useState(false)
+  const [photographerComment, setPhotographerComment] = useState('')
+  const [uploadActionRunning, setUploadActionRunning] = useState(false)
+  const [reviewSummary, setReviewSummary] = useState<{
+    unratedPortraits: number
+    unratedGroups: number
+  }>({ unratedPortraits: 0, unratedGroups: 0 })
+  const [dropProgress, setDropProgress] = useState<DropProgressState | null>(null)
+  const [draggedStudentId, setDraggedStudentId] = useState<number | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const autoStartAttemptedRef = useRef<number | null>(null)
-  const pendingUploadCount = [...uploadStatusMap.values()]
-    .reduce((count, summary) => count + summary.pending + summary.uploading, 0)
+
+  const actionsRef = useRef({
+    handleSelectCaptureStudent,
+    handleClearCaptureStudent,
+    setActiveGroupTarget,
+    setSelectedGroup
+  })
+  actionsRef.current = {
+    handleSelectCaptureStudent,
+    handleClearCaptureStudent,
+    setActiveGroupTarget,
+    setSelectedGroup
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (isRosterShortcutEditingTarget(target)) {
+        if (e.key === 'Escape' && target === searchInputRef.current) {
+          setSearch('')
+          target.blur()
+        }
+        return
+      }
+
+      const anyDialogOpen =
+        addStudentOpen ||
+        uploadDialogOpen ||
+        finishDialogOpen ||
+        reassignDialogPhoto !== null ||
+        renamingGroupId !== null ||
+        document.querySelector('[role="dialog"], [aria-modal="true"]') !== null
+
+      const action = resolveRosterShortcut({
+        key: e.key,
+        students: filteredStudents,
+        selectedStudentId: selectedStudent?.id ?? null,
+        activeStudentId,
+        hasSearch: search.length > 0,
+        hasActiveTarget:
+          activeStudentId !== null ||
+          selectedStudent !== null ||
+          activeGroupId !== null ||
+          selectedGroup !== null,
+        blocked: anyDialogOpen || Boolean(project?.finishedAt),
+      })
+
+      if (action.type === 'focus-search') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        return
+      }
+
+      if (action.type === 'clear-search') {
+        setSearch('')
+        return
+      }
+
+      if (action.type === 'clear-target') {
+        void actionsRef.current.handleClearCaptureStudent()
+        setSelectedStudent(null)
+        actionsRef.current.setSelectedGroup(null)
+        void actionsRef.current.setActiveGroupTarget(null)
+        return
+      }
+
+      if (action.type === 'select-student') {
+        e.preventDefault()
+        void actionsRef.current.handleSelectCaptureStudent(action.student)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    addStudentOpen,
+    uploadDialogOpen,
+    finishDialogOpen,
+    reassignDialogPhoto,
+    renamingGroupId,
+    project?.finishedAt,
+    search,
+    activeStudentId,
+    selectedStudent,
+    selectedGroup,
+    activeGroupId,
+    filteredStudents,
+  ])
+
+  useEffect(() => {
+    if (selectedStudent) {
+      const el = document.querySelector(`[data-student-row="${selectedStudent.id}"]`)
+      if (el) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }
+    }
+  }, [selectedStudent])
+
+  const pendingUploadCount = liveUpload
+    ? liveUpload.pending + liveUpload.uploading
+    : [...uploadStatusMap.values()].reduce(
+      (count, summary) => count + summary.pending + summary.uploading,
+      0,
+    )
 
   useEffect(() => {
     void window.api.invoke('groupCaptures:summary', { projectId }).then(setGroupCaptureCount)
   }, [projectId, groupCaptures])
 
   useEffect(() => {
+    if (!uploadDialogOpen) return
+    void window.api.invoke('upload:getQueue', { projectId })
+      .then((items) => setUploadQueue(items as LiveUploadQueueItem[]))
+  }, [
+    uploadDialogOpen,
+    projectId,
+    liveUpload?.pending,
+    liveUpload?.uploading,
+    liveUpload?.error,
+    liveUpload?.blocked,
+    liveUpload?.lastUploadedAt,
+    liveUpload?.lastError,
+  ])
+
+  useEffect(() => {
     return window.api.on('project:syncProgress', (event) => {
       if (event.projectId === projectId) setSyncProgress(event)
+    })
+  }, [projectId])
+
+  // The lifecycle and file counters are persisted in SQLite, so restore the
+  // banner/progress after switching projects or restarting the desktop.
+  useEffect(() => {
+    if (!project || project.syncStatus === 'active') {
+      setSyncProgress(null)
+      return
+    }
+    setSyncProgress({
+      projectId,
+      phase: project.syncStatus === 'synced'
+        ? 'finished'
+        : project.syncStatus === 'finished_local'
+          ? 'finished-locally'
+          : project.syncStatus === 'syncing' ? 'syncing' : 'error',
+      completed: project.syncCompletedFiles,
+      total: project.syncTotalFiles,
+      failed: project.syncFailedFiles,
+      ...(project.syncError ? { error: project.syncError } : {}),
+    })
+  }, [project, projectId])
+
+  useEffect(() => {
+    return window.api.on('watcher:dropProgress', (event: DroppedCaptureProgressEvent) => {
+      if (event.projectId !== projectId) return
+      setDropProgress((current) => ({
+        studentId: event.studentId,
+        completed: event.completed,
+        total: event.total,
+        results: [...(current?.studentId === event.studentId ? current.results : []), event.result],
+      }))
     })
   }, [projectId])
 
@@ -222,10 +424,10 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   }
 
   async function handleSelectCaptureStudent(student: Student) {
-    setSelectedStudent(student)
-    setSelectedGroup(null)
     try {
       await setActiveCaptureTarget(student.id)
+      setSelectedStudent(student)
+      setSelectedGroup(null)
     } catch (error) {
       addToast({
         type: 'error',
@@ -281,6 +483,57 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     addToast({ type: 'success', title: 'Watch folder set', description: folder })
   }
 
+  async function handleConsolidateStudentFolders() {
+    if (folderMigrationRunning) return
+    setFolderMigrationRunning(true)
+    try {
+      const preview = await window.api.invoke('projects:previewFolderMigration', { projectId }) as FolderMigrationPreview
+      if (preview.legacyFolderCount === 0) {
+        addToast({
+          type: 'success',
+          title: 'Student folders are already consolidated',
+          description: 'No legacy ID_LastName_FirstName folders were found.',
+        })
+        return
+      }
+      const conflictDetails = preview.students
+        .filter((student) => student.conflictFiles.length > 0)
+        .map((student) => [
+          student.studentName,
+          ...student.conflictFiles.map((fileName) => `  • ${fileName}`),
+        ].join('\n'))
+        .join('\n\n')
+      const confirmed = window.confirm([
+        `Found ${preview.legacyFolderCount} legacy student folder${preview.legacyFolderCount === 1 ? '' : 's'} containing ${preview.fileCount} file${preview.fileCount === 1 ? '' : 's'}.`,
+        preview.conflictCount > 0
+          ? [
+              `${preview.conflictCount} existing destination file${preview.conflictCount === 1 ? '' : 's'} will remain unchanged. The legacy copies will be added with a -legacy suffix:`,
+              conflictDetails,
+            ].join('\n\n')
+          : 'Photos, RAW files, and QR markers will be copied into the new FirstName_LastName_ID folders.',
+        'Original folders will not be deleted. Continue?',
+      ].join('\n\n'))
+      if (!confirmed) return
+      const result = await window.api.invoke('projects:migrateFolderMigration', {
+        projectId,
+        confirmed: true,
+      })
+      addToast({
+        type: 'success',
+        title: 'Student folders consolidated',
+        description: `${result.migratedFiles} copied, ${result.skippedFiles} already present. Original folders were preserved.`,
+      })
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Could not consolidate student folders',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setFolderMigrationRunning(false)
+    }
+  }
+
   async function handleToggleWatcher() {
     if (!project?.watchFolder) {
       addToast({ type: 'error', title: 'No watch folder', description: 'Set a watch folder first' })
@@ -296,6 +549,70 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       }
     } catch (e) {
       addToast({ type: 'error', title: 'Watcher error', description: String(e) })
+    }
+  }
+
+  async function handleDropForStudent(
+    studentId: number,
+    event: React.DragEvent<HTMLElement>,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    setDraggedStudentId(null)
+    if (project?.finishedAt) {
+      addToast({
+        type: 'error',
+        title: 'Project is finished',
+        description: 'Finished projects cannot import more captures.',
+      })
+      return
+    }
+
+    const droppedFiles = Array.from(event.dataTransfer.files)
+    if (droppedFiles.length === 0) {
+      addToast({
+        type: 'error',
+        title: 'No files dropped',
+        description: 'Drop JPEG or RAW files from Finder onto a student.',
+      })
+      return
+    }
+
+    setDropProgress({ studentId, completed: 0, total: droppedFiles.length, results: [] })
+    try {
+      const result = await window.api.ingestDroppedFiles(projectId, studentId, droppedFiles)
+      await reloadStudents()
+      if (result.imported > 0) {
+        addToast({
+          type: result.errors > 0 ? 'error' : 'success',
+          title: result.errors > 0 ? 'Drop completed with errors' : 'Photos imported',
+          description: [
+            `${result.imported} imported`,
+            result.duplicates > 0 ? `${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} skipped` : null,
+            result.skipped > 0 ? `${result.skipped} unsupported skipped` : null,
+            result.errors > 0 ? `${result.errors} error${result.errors === 1 ? '' : 's'}` : null,
+          ].filter(Boolean).join(' · '),
+        })
+      } else {
+        const hasErrors = result.errors > 0
+        addToast({
+          type: hasErrors ? 'error' : 'info',
+          title: hasErrors ? 'No photos imported' : 'No new photos imported',
+          description: [
+            result.duplicates > 0 ? `${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'}` : null,
+            result.skipped > 0 ? `${result.skipped} unsupported` : null,
+            result.errors > 0 ? `${result.errors} error${result.errors === 1 ? '' : 's'}` : null,
+          ].filter(Boolean).join(' · ') || 'The dropped files could not be imported.',
+        })
+      }
+      window.setTimeout(() => setDropProgress(null), 1200)
+    } catch (error) {
+      setDropProgress(null)
+      addToast({
+        type: 'error',
+        title: 'Photo drop failed',
+        description: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -357,7 +674,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   }
 
   async function handleUploadAndFinish() {
-    if (!project || project.finishedAt || finishing) return
+    if (!project || projectSynced || finishing) return
     setFinishing(true)
     setSyncProgress({
       projectId,
@@ -367,10 +684,15 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       failed: 0,
     })
     try {
-      const result = await window.api.invoke('project:uploadAndFinish', { projectId })
+      const result = await window.api.invoke('project:uploadAndFinish', {
+        projectId,
+        photographerComment: photographerComment.trim() || undefined,
+      })
       await reloadProject()
       await reloadUploadStatus()
       if (result.ok) {
+        setFinishDialogOpen(false)
+        setUploadDialogOpen(false)
         addToast({
           type: 'success',
           title: 'Project uploaded and finished',
@@ -378,8 +700,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         })
       } else {
         addToast({
-          type: 'error',
-          title: 'Project remains unfinished',
+          type: result.localFinished ? 'info' : 'error',
+          title: result.localFinished ? 'Project finished locally' : 'Project remains unfinished',
           description: result.error ?? 'Some local files could not be synchronized.',
         })
       }
@@ -387,23 +709,166 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       addToast({ type: 'error', title: 'Could not finish project', description: String(error) })
     } finally {
       setFinishing(false)
+      await reloadLiveUpload()
     }
   }
 
-  const filteredStudents = students.filter((s) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      s.firstName.toLowerCase().includes(q) ||
-      s.lastName.toLowerCase().includes(q) ||
-      s.generatedStudentId.toLowerCase().includes(q)
-    )
-  })
+  async function loadReviewSummary() {
+    const summary = await window.api.invoke('captures:reviewSummary', { projectId }) as {
+      unratedPortraits: number
+      unratedGroups: number
+    }
+    setReviewSummary(summary)
+    return summary
+  }
+
+  async function openUploadDialog() {
+    try {
+      await loadReviewSummary()
+      setUploadDialogOpen(true)
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not check photo ratings', description: String(error) })
+    }
+  }
+
+  async function openFinishDialog() {
+    try {
+      await loadReviewSummary()
+      setFinishDialogOpen(true)
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not check photo ratings', description: String(error) })
+    }
+  }
+
+  async function handleToggleLiveUpload() {
+    if (!liveUpload || project?.finishedAt) return
+    setUploadActionRunning(true)
+    try {
+      await setLiveUploadEnabled(!liveUpload.enabled)
+      addToast({
+        type: 'success',
+        title: liveUpload.enabled ? 'Live Upload paused' : 'Live Upload enabled',
+        description: liveUpload.enabled
+          ? 'New captures stay queued locally until you resume or finish.'
+          : 'New captures will upload in the background. This does not finish the shoot.',
+      })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not change Live Upload', description: String(error) })
+    } finally {
+      setUploadActionRunning(false)
+    }
+  }
+
+  async function handleUploadNow(retryFailed = false) {
+    setUploadActionRunning(true)
+    try {
+      if (retryFailed) await retryProjectFailed()
+      else await runUploadNow()
+      await reloadUploadStatus()
+      addToast({
+        type: 'success',
+        title: retryFailed ? 'Retry started' : 'Upload started',
+        description: 'Upload continues in the background. Keep this window open to monitor progress.',
+      })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Upload could not continue', description: String(error) })
+    } finally {
+      setUploadActionRunning(false)
+    }
+  }
+
+  const errCount = liveUpload
+    ? liveUpload.error
+    : errorPhotoIds.length
+
+  const uploadingCount = liveUpload
+    ? liveUpload.uploading
+    : [...uploadStatusMap.values()].reduce((count, s) => count + s.uploading, 0)
+
+  const blockedCount = liveUpload?.blocked ?? 0
+
+  let LocalIcon = Folder
+  let localColor = "text-slate-400"
+  let localText = "Waiting for photos"
+
+  if (unmatchedPhotos.length > 0) {
+    localColor = "text-rose-400"
+    localText = `${captureSummary.total} captures · ${captureSummary.jpegFiles} JPEG · ${captureSummary.rawFiles} RAW`
+      + ` · ${captureSummary.incompletePairs} incomplete · ${unmatchedPhotos.length} unmatched`
+    LocalIcon = AlertCircle
+  } else if (captureSummary.total === 0) {
+    localText = !isRunning && !project?.finishedAt
+      ? "No captures · watcher paused"
+      : "Waiting for photos"
+  } else {
+    LocalIcon = CheckCircle
+    localColor = !isRunning && !project?.finishedAt ? "text-amber-400" : "text-emerald-400"
+    localText = `${captureSummary.total} captures · ${captureSummary.jpegFiles} JPEG · ${captureSummary.rawFiles} RAW`
+      + (captureSummary.incompletePairs > 0 ? ` · ${captureSummary.incompletePairs} incomplete` : "")
+      + (!isRunning && !project?.finishedAt ? " · watcher paused" : "")
+  }
+
+  let CloudIcon = CloudUpload
+  let cloudColor = "text-slate-400"
+  let cloudText = liveUpload ? "No uploads waiting" : "Checking cloud…"
+  let showUploadDots = false
+
+  if (errCount > 0) {
+    cloudColor = "text-rose-400"
+    cloudText = `${errCount} failed${blockedCount > 0 ? ` · ${blockedCount} blocked` : ""}`
+    CloudIcon = XCircle
+  } else if (blockedCount > 0) {
+    cloudColor = "text-amber-400"
+    cloudText = `${blockedCount} blocked`
+    CloudIcon = AlertCircle
+  } else if (liveUpload && !liveUpload.cloudReady) {
+    cloudColor = "text-amber-400"
+    cloudText = "Cloud unavailable · files stay local"
+  } else if (uploadingCount > 0) {
+    cloudColor = "text-teal-400"
+    cloudText = `${uploadingCount}/3 uploading${(liveUpload?.pending ?? 0) > 0 ? ` · ${liveUpload?.pending} queued` : ""}`
+    showUploadDots = true
+  } else if ((liveUpload?.pending ?? 0) > 0) {
+    cloudColor = liveUpload?.enabled ? "text-blue-400" : "text-amber-400"
+    cloudText = `${liveUpload?.pending} queued${liveUpload?.enabled ? "" : " · Live Upload off"}`
+  } else if (captureSummary.total === 0) {
+    cloudColor = "text-slate-500"
+    cloudText = "Ready when captures arrive"
+  } else {
+    CloudIcon = CheckCircle
+    cloudColor = "text-emerald-400"
+    cloudText = "Cloud queue clear"
+  }
+
+  const activeDots = Math.min(3, uploadingCount)
+  const shootHealthLabel = `Shoot health. Local: ${localText}. Cloud: ${cloudText}. Open upload activity.`
 
   return (
-    <div className="flex flex-col h-full font-sans bg-slate-50">
+    <div
+      className="shoot-workspace flex flex-col h-full font-sans bg-slate-50"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => event.preventDefault()}
+    >
+      {dropProgress && (
+        <div className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2 rounded-xl border border-teal-200 bg-white px-5 py-3 shadow-xl">
+          <div className="flex items-center gap-3 text-sm font-bold text-slate-800">
+            <Loader className="size-4 animate-spin text-teal-600" />
+            Importing photos {Math.min(dropProgress.completed, dropProgress.total)}/{dropProgress.total}
+          </div>
+          <div className="mt-2 h-1.5 w-64 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-teal-500 transition-all"
+              style={{
+                width: `${dropProgress.total > 0
+                  ? Math.min(100, (dropProgress.completed / dropProgress.total) * 100)
+                  : 0}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
       {/* Header bar */}
-      <header className="bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
+      <header className="shoot-toolbar bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
         <div className="flex items-center gap-5 min-w-0">
           <button onClick={onBack} aria-label="Back to projects" className="text-slate-400 hover:text-white transition-colors bg-slate-900 hover:bg-slate-800 p-1.5 rounded-md shrink-0">
             <ArrowLeft className="size-4" />
@@ -412,30 +877,15 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             <h1 className="font-extrabold text-white text-base tracking-tight truncate">
               {project?.schoolName ?? '…'}
             </h1>
+            {isCorporate && <div className="text-[10px] font-bold uppercase tracking-widest text-teal-400">Headshot Session</div>}
             <div className="flex items-center gap-2.5 text-[11px] font-medium text-slate-400 mt-0.5 whitespace-nowrap">
-              <span>{project?.classCount} classes</span>
+              <span>{project?.classCount} {departmentLabel.toLowerCase()}{project?.classCount === 1 ? '' : 's'}</span>
               <span className="w-1 h-1 rounded-full bg-slate-700" />
-              <span>{project?.studentCount} students</span>
-              <span className="w-1 h-1 rounded-full bg-slate-700" />
-              <span className="text-slate-300">
+              <span>{project?.studentCount} {employeePlural.toLowerCase()}</span>
+              <span className="w-1 h-1 rounded-full bg-slate-700 sm:hidden" />
+              <span className="text-slate-300 sm:hidden">
                 {captureSummary.total > 0 ? `${captureSummary.total} captures` : `${project?.photoCount ?? 0} photos`}
               </span>
-              {pendingUploadCount > 0 && (
-                <>
-                  <span className="w-1 h-1 rounded-full bg-amber-500/50" />
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <Upload className="size-3" /> {pendingUploadCount} pending
-                  </span>
-                </>
-              )}
-              {syncProgress?.phase === 'error' && (
-                 <>
-                   <span className="w-1 h-1 rounded-full bg-red-500/50" />
-                   <span className="text-red-400 flex items-center gap-1">
-                     <AlertCircle className="size-3" /> {syncProgress.failed} failed
-                   </span>
-                 </>
-              )}
             </div>
           </div>
         </div>
@@ -443,7 +893,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         <div className="flex items-center gap-4 shrink-0">
           {/* Watch Folder Control */}
           {project?.watchFolder ? (
-            <div className={cn(
+            <div data-testid="shoot-watch-status" className={cn(
               "flex items-center h-8 rounded-md border transition-colors overflow-hidden",
               isRunning ? "bg-teal-500/10 border-teal-500/20" : "bg-slate-900 border-slate-800"
             )}>
@@ -469,12 +919,91 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             </Button>
           )}
 
-          <div className="w-px h-6 bg-slate-800" />
+           <div className="w-px h-6 bg-slate-800" />
+
+           <button
+             onClick={() => void handleConsolidateStudentFolders()}
+             disabled={folderMigrationRunning}
+              className="shoot-secondary-action flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900 px-2.5 h-8 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:cursor-wait disabled:opacity-60"
+             title="Preview and consolidate legacy student folders"
+           >
+             <FolderSync className={cn("size-3.5", folderMigrationRunning && "animate-pulse")} />
+             {folderMigrationRunning ? 'Checking…' : 'Consolidate folders'}
+           </button>
+
+           <button
+             onClick={() => void openUploadDialog()}
+             aria-label={shootHealthLabel}
+              className="hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-md hover:bg-slate-800 hover:border-slate-700 transition-all text-left focus:outline-none focus:ring-2 focus:ring-teal-500/50 group"
+             title={shootHealthLabel}
+           >
+             <div className="flex flex-col gap-1">
+               <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                 <LocalIcon className={cn("size-3.5", localColor)} />
+                 <span className={cn(localColor === 'text-slate-400' ? 'text-slate-400' : 'text-slate-200')}>
+                   {localText}
+                 </span>
+               </div>
+               <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                 <CloudIcon className={cn("size-3.5", cloudColor)} />
+                 <span className={cn(cloudColor === 'text-slate-400' || cloudColor === 'text-slate-500' ? 'text-slate-400' : 'text-slate-200')}>
+                   {cloudText}
+                 </span>
+               </div>
+             </div>
+
+             {showUploadDots && (
+               <div className="flex gap-1 items-center pl-1.5 border-l border-slate-800 h-6">
+                 {[0, 1, 2].map(i => (
+                    <span
+                      key={i}
+                     className={cn(
+                        "w-1.5 h-1.5 rounded-full transition-all duration-300",
+                        i < activeDots
+                          ? "bg-teal-400 animate-pulse"
+                         : "bg-slate-800"
+                      )}
+                   />
+                 ))}
+               </div>
+             )}
+
+             {!showUploadDots && (
+               <div className="pl-0.5 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                 <ChevronRight className="size-3.5 text-slate-500" />
+               </div>
+             )}
+           </button>
 
           {/* Exports & Finish */}
           <div className="flex items-center gap-2">
+             <div className={cn(
+               "flex items-center h-8 rounded-md border overflow-hidden",
+               liveUpload?.enabled ? "bg-blue-500/10 border-blue-500/30" : "bg-slate-900 border-slate-800",
+             )}>
+               <button
+                 onClick={() => void handleToggleLiveUpload()}
+                 disabled={uploadActionRunning || Boolean(project?.finishedAt)}
+                 className={cn(
+                   "h-full px-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50",
+                   liveUpload?.enabled ? "text-blue-300 hover:bg-blue-500/20" : "text-slate-300 hover:bg-slate-800",
+                 )}
+                 title="Uploads captures in the background without finishing the shoot"
+               >
+                 {liveUpload?.running ? <Loader className="size-3 animate-spin" /> : <CloudUpload className="size-3" />}
+                 Live Upload {liveUpload?.enabled ? 'On' : 'Off'}
+               </button>
+               <div className={cn("w-px h-full md:hidden", liveUpload?.enabled ? "bg-blue-500/30" : "bg-slate-800")} />
+               <button
+                  onClick={() => void openUploadDialog()}
+                 className="h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold md:hidden"
+                 title="Open upload activity"
+               >
+                 {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}
+               </button>
+             </div>
              {captureSummary.total > 0 && (
-                <div className="flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
+                 <div className="shoot-secondary-action flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
                    <select
                       value={exportMode}
                       onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
@@ -499,27 +1028,366 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                    </button>
                 </div>
              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void openUploadDialog()}
+                disabled={uploadActionRunning || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
+                className="h-8 px-3 border-blue-500/50 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 hover:text-white text-[10px] font-bold uppercase tracking-wider"
+              >
+                {liveUpload?.running || uploadActionRunning
+                  ? <Loader className="size-3.5 mr-1.5 animate-spin" />
+                  : <Upload className="size-3.5 mr-1.5" />}
+                {liveUpload?.uploading
+                  ? `Uploading ${liveUpload.uploading}`
+                  : pendingUploadCount > 0
+                    ? `Upload ${pendingUploadCount}`
+                    : 'Upload'}
+              </Button>
              <Button
                size="sm"
-               onClick={() => void handleUploadAndFinish()}
-               disabled={finishing || Boolean(project?.finishedAt) || (captureSummary.total === 0 && groupCaptureCount === 0)}
+                onClick={() => void openFinishDialog()}
+                data-testid="shoot-primary-action"
+                disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
                className={cn(
                  "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
-                 project?.finishedAt ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+                  projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
                )}
              >
                {finishing ? (
                  <Loader className="size-3.5 mr-1.5 animate-spin" />
-               ) : project?.finishedAt ? (
+                ) : projectSynced ? (
                  <CheckCircle className="size-3.5 mr-1.5" />
                ) : (
                  <CloudUpload className="size-3.5 mr-1.5" />
                )}
-               {finishing ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…') : project?.finishedAt ? 'Finished' : 'Upload & Finish'}
+                {finishing
+                  ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
+                  : projectSynced
+                    ? 'Finished'
+                    : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
+                      ? 'Retry Upload & Finish'
+                      : 'Finish My Shoot'}
              </Button>
           </div>
         </div>
       </header>
+      {project && project.syncStatus !== 'active' && (
+        <div className={cn(
+          "flex items-center justify-between gap-4 border-b px-6 py-2.5 text-xs",
+          projectSynced
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : project.syncStatus === 'finished_local'
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : project.syncStatus === 'syncing'
+                ? "border-blue-200 bg-blue-50 text-blue-900"
+                : "border-red-200 bg-red-50 text-red-900",
+        )}>
+          <span className="font-semibold">
+            {projectSynced
+              ? 'Fully synced to Volume Capture.'
+              : project.syncStatus === 'finished_local'
+                ? 'Finished locally. Cloud sync is waiting for a connection.'
+                : project.syncStatus === 'syncing'
+                  ? 'Cloud sync in progress.'
+                  : 'Cloud sync needs recovery. Local captures are safe.'}
+          </span>
+          {syncProgress && syncProgress.total > 0 && (
+            <span className="shrink-0 font-medium">
+              {Math.min(syncProgress.completed, syncProgress.total)}/{syncProgress.total} files
+              {syncProgress.failed > 0 ? ` · ${syncProgress.failed} failed` : ''}
+            </span>
+          )}
+          {!projectSynced && (
+            <button
+              type="button"
+              onClick={() => void openFinishDialog()}
+              className="shrink-0 font-bold underline underline-offset-2 hover:no-underline"
+            >
+              Retry when connected
+            </button>
+          )}
+        </div>
+      )}
+
+      <Dialog
+        open={uploadDialogOpen}
+        onClose={() => setUploadDialogOpen(false)}
+        title="Upload Activity"
+        className="max-w-lg"
+      >
+        <div className="space-y-5">
+          <p className="text-sm text-slate-600">
+            Uploads can continue while you photograph and while this window is closed.
+            They do not finish the shoot.
+          </p>
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              ['Uploaded', liveUpload?.done ?? 0, 'text-emerald-700 bg-emerald-50'],
+              ['Uploading', liveUpload?.uploading ?? 0, 'text-blue-700 bg-blue-50'],
+              ['Queued', liveUpload?.pending ?? 0, 'text-amber-700 bg-amber-50'],
+              ['Failed', liveUpload?.error ?? 0, 'text-red-700 bg-red-50'],
+              ['Blocked', liveUpload?.blocked ?? 0, 'text-slate-700 bg-slate-100'],
+            ].map(([label, value, color]) => (
+              <div key={String(label)} className={cn("rounded-lg p-3 text-center", String(color))}>
+                <div className="text-xl font-extrabold">{String(value)}</div>
+                <div className="text-[10px] font-bold uppercase tracking-wider">{String(label)}</div>
+              </div>
+            ))}
+          </div>
+          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <div className="flex gap-3">
+                <AlertCircle className="size-5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="font-bold text-amber-900">Review photos before uploading</p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    {reviewSummary.unratedPortraits > 0
+                      ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? '' : 's'} need a rating or “Do not share”.`
+                      : ''}
+                    {reviewSummary.unratedPortraits > 0 && reviewSummary.unratedGroups > 0 ? ' ' : ''}
+                    {reviewSummary.unratedGroups > 0
+                      ? `${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'} need a rating.`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Files still waiting
+              </span>
+              <span className="text-xs text-slate-400">
+                {liveUpload?.pending ?? uploadQueue.length} uploadable
+                {(liveUpload?.blocked ?? 0) > 0 ? ` · ${liveUpload?.blocked} blocked` : ''}
+              </span>
+            </div>
+            <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+              {uploadQueue.length === 0 ? (
+                <p className="px-2 py-4 text-center text-sm text-slate-500">No files are waiting.</p>
+              ) : uploadQueue.map((item) => {
+                const waitingForRetry = item.retryAt && new Date(item.retryAt).getTime() > Date.now()
+                const statusLabel = item.status === 'preparing_gallery'
+                  ? 'Preparing gallery'
+                  : item.status === 'blocked'
+                    ? 'Waiting for match'
+                    : item.status === 'uploading'
+                      ? 'Uploading'
+                      : item.status === 'failed'
+                        ? 'Failed'
+                        : waitingForRetry ? 'Retry scheduled' : 'Queued'
+                return (
+                  <div key={item.key} className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-800">{item.fileName}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {item.subject} · {item.kind === 'group' ? 'Group' : 'Portrait'} · {item.fileRole}
+                        </p>
+                      </div>
+                      <Badge className={cn(
+                        "shrink-0 border-0 text-[10px]",
+                        item.status === 'blocked' ? "bg-slate-200 text-slate-700"
+                          : item.status === 'failed' ? "bg-red-100 text-red-700"
+                          : item.status === 'uploading' ? "bg-blue-100 text-blue-700"
+                            : item.status === 'preparing_gallery' ? "bg-violet-100 text-violet-700"
+                              : waitingForRetry ? "bg-orange-100 text-orange-700"
+                                : "bg-amber-100 text-amber-700",
+                      )}>
+                        {statusLabel}
+                      </Badge>
+                    </div>
+                    {(item.attempts > 0 || item.lastError || item.blockedReason) && (
+                      <div className="mt-1.5 text-xs text-slate-500">
+                        {item.attempts > 0 && (
+                          <span>{item.attempts} attempt{item.attempts === 1 ? '' : 's'}</span>
+                        )}
+                        {waitingForRetry && (
+                          <span> · retry at {new Date(item.retryAt!).toLocaleTimeString()}</span>
+                        )}
+                        {item.blockedReason && (
+                          <p className="mt-1 break-words text-slate-600">{item.blockedReason}</p>
+                        )}
+                        {item.lastError && (
+                          <p className="mt-1 break-words text-red-600">{item.lastError}</p>
+                        )}
+                      </div>
+                    )}
+                    {item.status === 'blocked' && (
+                      <Button
+                        variant="outline"
+                        className="mt-2 text-red-700"
+                        disabled={deletingQueueItem !== null}
+                        onClick={async () => {
+                          setDeletingQueueItem(item.key)
+                          try {
+                            await window.api.invoke('upload:deleteUnmatched', { projectId, key: item.key })
+                            setUploadQueue(await window.api.invoke('upload:getQueue', { projectId }))
+                            await reloadLiveUpload()
+                          } catch (error) {
+                            addToast({ type: 'error', title: 'Could not delete file', description: String(error) })
+                          } finally {
+                            setDeletingQueueItem(null)
+                          }
+                        }}
+                      >
+                        <Trash2 className="mr-1 size-3" />
+                        {deletingQueueItem === item.key ? 'Confirming…' : 'Delete from project'}
+                      </Button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-700">Cloud connection</span>
+              <span className={cn("font-bold", liveUpload?.cloudReady ? "text-emerald-600" : "text-amber-600")}>
+                {liveUpload?.cloudReady ? 'Connected' : 'Waiting for connection'}
+              </span>
+            </div>
+            {liveUpload?.lastUploadedAt && (
+              <div className="mt-2 text-slate-500">
+                Last upload {new Date(liveUpload.lastUploadedAt).toLocaleTimeString()}
+              </div>
+            )}
+            {liveUpload?.lastError && (
+              <div className="mt-2 text-red-600 break-words">{liveUpload.lastError}</div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Button
+              variant="outline"
+              disabled={uploadActionRunning || Boolean(project?.finishedAt)}
+              onClick={() => void handleToggleLiveUpload()}
+            >
+              {liveUpload?.enabled ? 'Pause Live Upload' : 'Resume Live Upload'}
+            </Button>
+            {(liveUpload?.error ?? 0) > 0 && (
+              <Button
+                variant="outline"
+                disabled={uploadActionRunning || !liveUpload?.cloudReady}
+                onClick={() => void handleUploadNow(true)}
+              >
+                Retry Failed
+              </Button>
+            )}
+            <Button
+              disabled={
+                uploadActionRunning
+                || !liveUpload?.cloudReady
+                || reviewSummary.unratedPortraits > 0
+                || reviewSummary.unratedGroups > 0
+              }
+              onClick={() => void handleUploadNow()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {uploadActionRunning && <Loader className="size-4 mr-2 animate-spin" />}
+              Upload Now
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={finishDialogOpen}
+        onClose={() => !finishing && setFinishDialogOpen(false)}
+        title="Finish My Shoot?"
+        className="max-w-lg"
+      >
+        <div className="space-y-5">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex gap-3">
+              <AlertCircle className="size-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-900">This stops capture intake on this computer.</p>
+                <p className="text-sm text-amber-800 mt-1">
+                  Volume Capture will drain the watch folder and save local completion first.
+                  When connected, it will then upload every remaining file and finish this photographer’s batch.
+                  It does not close the studio’s entire project.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-slate-50 p-3">
+              <div className="text-xl font-extrabold text-slate-900">{liveUpload?.done ?? 0}</div>
+              <div className="text-[10px] font-bold uppercase text-slate-500">Uploaded</div>
+            </div>
+            <div className="rounded-lg bg-amber-50 p-3">
+              <div className="text-xl font-extrabold text-amber-700">{(liveUpload?.pending ?? 0) + (liveUpload?.uploading ?? 0)}</div>
+              <div className="text-[10px] font-bold uppercase text-amber-700">Remaining</div>
+            </div>
+            <div className="rounded-lg bg-red-50 p-3">
+              <div className="text-xl font-extrabold text-red-700">{liveUpload?.error ?? 0}</div>
+              <div className="text-[10px] font-bold uppercase text-red-700">Need retry</div>
+            </div>
+          </div>
+          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+            <div className="rounded-xl border border-red-300 bg-red-50 p-4">
+              <div className="flex gap-3">
+                <AlertCircle className="size-5 shrink-0 text-red-600" />
+                <div>
+                  <p className="font-bold text-red-900">Photo review is not complete</p>
+                  <p className="mt-1 text-sm text-red-800">
+                    Review {reviewSummary.unratedPortraits} portrait{reviewSummary.unratedPortraits === 1 ? '' : 's'}
+                    {reviewSummary.unratedGroups > 0
+                      ? ` and ${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'}`
+                      : ''}.
+                    Rate photos to share, or choose “Do not share” for portraits that must stay private.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          {!liveUpload?.cloudReady && (
+            <p className="text-sm font-medium text-amber-700">
+              You are offline. Finish locally now; reconnect later and use Retry Upload &amp; Finish.
+              Your local captures remain safe.
+            </p>
+          )}
+          <div>
+            <label htmlFor="photographer-comment" className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+              Photographer comment <span className="font-medium normal-case tracking-normal text-slate-400">(optional)</span>
+            </label>
+            <textarea
+              id="photographer-comment"
+              value={photographerComment}
+              onChange={(event) => setPhotographerComment(event.target.value)}
+              disabled={finishing}
+              maxLength={2000}
+              rows={3}
+              placeholder="Anything the studio should know about this shoot?"
+              className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+            />
+            <p className="mt-1 text-right text-[10px] text-slate-400">{photographerComment.length}/2000</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="outline" disabled={finishing} onClick={() => setFinishDialogOpen(false)}>
+              Keep Shooting
+            </Button>
+            <Button
+              disabled={
+                finishing
+                || reviewSummary.unratedPortraits > 0
+                || reviewSummary.unratedGroups > 0
+              }
+              onClick={() => void handleUploadAndFinish()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {finishing && <Loader className="size-4 mr-2 animate-spin" />}
+              {finishing && syncProgress?.total
+                ? `Uploading ${syncProgress.completed}/${syncProgress.total}`
+                : !liveUpload?.cloudReady && project?.syncStatus === 'active'
+                  ? 'Finish Locally & Sync Later'
+                  : 'Upload Remaining & Finish'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* Body: split panel */}
       <div className="flex-1 flex overflow-hidden">
@@ -556,8 +1424,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
                 <input
+                  ref={searchInputRef}
                   type="text"
-                  placeholder="Search roster..."
+                  aria-keyshortcuts="/"
+                  title="Press / to search the roster"
+                   placeholder={`Search ${employeePlural.toLowerCase()}...`}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 text-sm font-medium border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all shadow-sm placeholder:text-slate-400"
@@ -567,9 +1438,9 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                 type="button"
                 onClick={() => setAddStudentOpen(true)}
                 disabled={classes.length === 0 || Boolean(project?.finishedAt)}
-                aria-label="Add student"
+                 aria-label={`Add ${employeeLabel.toLowerCase()}`}
                 className="size-[38px] bg-slate-900 text-white rounded-lg flex items-center justify-center hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm shrink-0"
-                title={project?.finishedAt ? 'This project is finished' : 'Add student'}
+                 title={project?.finishedAt ? 'This project is finished' : `Add ${employeeLabel.toLowerCase()}`}
               >
                 <Plus className="size-4" />
               </button>
@@ -649,7 +1520,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
             <div className="py-2">
               <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                Students
+                {employeePlural}
               </div>
               {filteredStudents.map((s) => (
                 <StudentRow
@@ -658,14 +1529,31 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                   isSelected={selectedStudent?.id === s.id}
                   isActive={activeStudentId === s.id}
                   onClick={() => void handleSelectCaptureStudent(s)}
+                   isDropActive={draggedStudentId === s.id}
+                   onDragEnter={(event) => {
+                     event.preventDefault()
+                     setDraggedStudentId(s.id)
+                   }}
+                   onDragLeave={() => setDraggedStudentId((current) => current === s.id ? null : current)}
+                   onDrop={(event) => void handleDropForStudent(s.id, event)}
                   uploadSummary={uploadStatusMap.get(s.id)}
                 />
               ))}
               {filteredStudents.length === 0 && (
-                <div className="p-8 text-center text-slate-400 text-xs font-medium">No subjects found</div>
+                <div className="p-8 text-center text-slate-400 text-xs font-medium">No {employeePlural.toLowerCase()} found</div>
               )}
             </div>
           </div>
+
+          {/* Shortcut Guidance */}
+          {!project?.finishedAt && (
+            <div className="p-2 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[10px] text-slate-500 font-medium shrink-0">
+              <span className="flex items-center gap-1.5"><kbd className="font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm">/</kbd> Search</span>
+              <span className="flex items-center gap-1.5"><kbd className="font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm">↑↓</kbd> Navigate</span>
+              <span className="flex items-center gap-1.5"><kbd className="font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm">N</kbd> Next unphotographed</span>
+              <span className="flex items-center gap-1.5"><kbd className="font-sans font-bold bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded shadow-sm">Esc</kbd> Clear</span>
+            </div>
+          )}
         </div>
 
         {/* Right panel: QR code + photos */}
@@ -683,6 +1571,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           ) : selectedStudent ? (
             <StudentDetail
               student={selectedStudent}
+              isCorporate={isCorporate}
               projectId={projectId}
               photoStatusMap={photoStatusMap}
               onReassign={() => reloadStudents()}
@@ -690,6 +1579,14 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               activeStudentSource={activeStudentSource}
               onClearCaptureTarget={() => void handleClearCaptureStudent()}
               offline={offline}
+              employeeLabel={employeeLabel}
+               isDropActive={draggedStudentId === selectedStudent.id}
+               onDragEnter={(event) => {
+                 event.preventDefault()
+                 setDraggedStudentId(selectedStudent.id)
+               }}
+               onDragLeave={() => setDraggedStudentId((current) => current === selectedStudent.id ? null : current)}
+               onDrop={(event) => void handleDropForStudent(selectedStudent.id, event)}
             />
           ) : unmatchedPhotos.length > 0 ? (
             <UnmatchedPhotosPanel
@@ -731,6 +1628,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         initialClassId={selectedClassId}
         onClose={() => setAddStudentOpen(false)}
         onCreated={handleStudentCreated}
+        departmentLabel={departmentLabel}
+        employeeLabel={employeeLabel}
       />
     </div>
   )
@@ -743,6 +1642,8 @@ function AddStudentDialog({
   initialClassId,
   onClose,
   onCreated,
+  departmentLabel,
+  employeeLabel,
 }: {
   open: boolean
   projectId: number
@@ -750,6 +1651,8 @@ function AddStudentDialog({
   initialClassId: number | null
   onClose: () => void
   onCreated: (result: CreateStudentResult) => Promise<void>
+  departmentLabel: string
+  employeeLabel: string
 }) {
   const [classId, setClassId] = useState('')
   const [firstName, setFirstName] = useState('')
@@ -788,11 +1691,11 @@ function AddStudentDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Add Student to Class" className="max-w-md">
+    <Dialog open={open} onClose={onClose} title={`Add ${employeeLabel} to ${departmentLabel}`} className="max-w-md">
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="new-student-class" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            Class
+             {departmentLabel}
           </label>
           <select
             id="new-student-class"
@@ -836,7 +1739,7 @@ function AddStudentDialog({
           </div>
         </div>
         <p className="text-xs font-medium leading-relaxed text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100">
-          The student is saved on this Mac immediately and selected as the active capture target.
+           The {employeeLabel.toLowerCase()} is saved on this Mac immediately and selected as the active capture target.
           If you are offline, Volume Capture will add them to the cloud during Upload & Finish.
         </p>
         <div className="flex justify-end gap-3 pt-2">
@@ -845,7 +1748,7 @@ function AddStudentDialog({
           </Button>
           <Button type="submit" disabled={saving || !classId || !firstName.trim() || !lastName.trim()} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider h-10 px-5 shadow-sm">
             {saving ? <Loader className="size-4 mr-2 animate-spin" /> : <Plus className="size-4 mr-2" />}
-            {saving ? 'Adding…' : 'Add student'}
+             {saving ? 'Adding…' : `Add ${employeeLabel.toLowerCase()}`}
           </Button>
         </div>
       </form>
@@ -973,23 +1876,46 @@ function StudentRow({
   isSelected,
   isActive,
   onClick,
+  isDropActive,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
   uploadSummary,
 }: {
   student: Student
   isSelected: boolean
   isActive: boolean
   onClick: () => void
+  isDropActive: boolean
+  onDragEnter: (event: React.DragEvent<HTMLButtonElement>) => void
+  onDragLeave: () => void
+  onDrop: (event: React.DragEvent<HTMLButtonElement>) => void
   uploadSummary?: StudentUploadSummary
 }) {
   return (
     <button
+      data-student-row={s.id}
+      aria-keyshortcuts="ArrowUp ArrowDown N"
       onClick={onClick}
+      onDragEnter={onDragEnter}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={cn(
         "text-left w-full p-3 border-b transition-colors flex items-center gap-3",
-        isActive ? "bg-teal-50/50 border-l-4 border-l-teal-500" : isSelected ? "bg-slate-50 border-l-4 border-l-transparent" : "hover:bg-slate-50 border-l-4 border-l-transparent border-b-slate-100"
+        isDropActive
+          ? "bg-teal-100 border-l-4 border-l-teal-600 ring-2 ring-inset ring-teal-300"
+          : isActive
+            ? "bg-teal-50/50 border-l-4 border-l-teal-500"
+            : isSelected
+              ? "bg-slate-50 border-l-4 border-l-transparent"
+              : "hover:bg-slate-50 border-l-4 border-l-transparent border-b-slate-100"
       )}
       aria-pressed={isActive}
-      title={isActive ? 'Active capture student' : 'Select as active capture student'}
+      title={isDropActive ? 'Drop photos to import for this student' : isActive ? 'Active capture student' : 'Select as active capture student'}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
@@ -1025,6 +1951,7 @@ function StudentRow({
 
 function StudentDetail({
   student,
+  isCorporate,
   projectId,
   photoStatusMap,
   onReassign,
@@ -1032,8 +1959,14 @@ function StudentDetail({
   activeStudentSource,
   onClearCaptureTarget,
   offline,
+  employeeLabel,
+  isDropActive,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
 }: {
   student: Student
+  isCorporate: boolean
   projectId: number
   photoStatusMap: Map<number, ProjectUploadStatusRow>
   onReassign: () => void
@@ -1041,7 +1974,13 @@ function StudentDetail({
   activeStudentSource: 'manual' | 'qr' | 'none'
   onClearCaptureTarget: () => void
   offline: boolean
+  employeeLabel: string
+  isDropActive: boolean
+  onDragEnter: (event: React.DragEvent<HTMLDivElement>) => void
+  onDragLeave: () => void
+  onDrop: (event: React.DragEvent<HTMLDivElement>) => void
 }) {
+  const employeeContext = getEmployeeCaptureContext(student, isCorporate)
   const {
     data: review,
     loading: capturesLoading,
@@ -1056,17 +1995,87 @@ function StudentDetail({
   const [retryingPhotoId, setRetryingPhotoId] = useState<number | null>(null)
   const [retryingFileId, setRetryingFileId] = useState<number | null>(null)
   const [pairingFilter, setPairingFilter] = useState<CaptureFilter>('all')
+  const [reviewCaptureKey, setReviewCaptureKey] = useState<string | null>(null)
+  const [showQrOpen, setShowQrOpen] = useState(false)
+  const [framingCapture, setFramingCapture] = useState<CaptureReview | null>(null)
+  const [quickLookCapture, setQuickLookCapture] = useState<CaptureReview | null>(null)
 
   const captureCounts = captures.reduce(
     (counts, capture) => {
-      counts[capture.pairingStatus]++
+      if (capture.pairingStatus === 'pending') counts.unpaired++
+      else counts[capture.pairingStatus]++
       return counts
     },
     { complete: 0, jpeg_only: 0, raw_only: 0, unpaired: 0, pending: 0 } as Record<CaptureReview['pairingStatus'], number>,
   )
   const filteredCaptures = pairingFilter === 'all'
     ? captures
-    : captures.filter((capture) => capture.pairingStatus === pairingFilter)
+    : captures.filter((capture) => pairingFilter === 'unpaired'
+      ? capture.pairingStatus === 'unpaired' || capture.pairingStatus === 'pending'
+      : capture.pairingStatus === pairingFilter)
+  const latestCapture = captures[captures.length - 1] ?? null
+  const isFollowingLatest = reviewCaptureKey === null
+  const selectedCapture = isFollowingLatest
+    ? latestCapture
+    : captures.find((capture) => captureReviewKey(capture) === reviewCaptureKey) ?? latestCapture
+  const livePreviewMatchesLatest = Boolean(
+    isFollowingLatest
+    && livePreview?.photo.previewUrl
+    && latestCapture?.legacyPhoto
+    && (
+      (livePreview.previewKey && livePreview.previewKey === latestCapture.legacyPhoto.previewKey)
+      || livePreview.photo.id === latestCapture.legacyPhoto.id
+      || livePreview.photo.filePath === latestCapture.legacyPhoto.filePath
+    ),
+  )
+
+  useEffect(() => {
+    if (reviewCaptureKey !== null && !captures.some((capture) => captureReviewKey(capture) === reviewCaptureKey)) {
+      setReviewCaptureKey(null)
+    }
+  }, [captures, reviewCaptureKey])
+
+  useEffect(() => {
+    setReviewCaptureKey(null)
+  }, [student.id])
+
+  useEffect(() => {
+    const handleReviewShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      const isInput =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable
+      if (
+        isInput ||
+        showQrOpen ||
+        reassignOpen ||
+        framingCapture !== null ||
+        quickLookCapture !== null ||
+        document.querySelector('[role="dialog"], [aria-modal="true"]')
+      ) return
+      if (event.key.toLowerCase() === 'l' && latestCapture) {
+        event.preventDefault()
+        setReviewCaptureKey(null)
+        return
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault()
+        const currentIndex = isFollowingLatest
+          ? captures.length - 1
+          : captures.findIndex((capture) => capture.id === selectedCapture?.id)
+        if (event.key === 'ArrowLeft' && currentIndex > 0) {
+          setReviewCaptureKey(captureReviewKey(captures[currentIndex - 1]))
+        } else if (event.key === 'ArrowRight' && currentIndex >= 0 && currentIndex < captures.length - 1) {
+          const nextCapture = captures[currentIndex + 1]
+          setReviewCaptureKey(nextCapture.id === latestCapture?.id ? null : captureReviewKey(nextCapture))
+        }
+      }
+    }
+    window.addEventListener('keydown', handleReviewShortcut)
+    return () => window.removeEventListener('keydown', handleReviewShortcut)
+  }, [captures, framingCapture, isFollowingLatest, latestCapture, quickLookCapture, reassignOpen, selectedCapture?.id, showQrOpen])
 
   async function handleDeletePhoto(photoId: number) {
     await window.api.invoke('photos:delete', { photoId })
@@ -1126,7 +2135,13 @@ function StudentDetail({
 
   async function handleUpdateCaptureReview(
     captureId: number,
-    values: { favorite?: boolean; rejected?: boolean; selected?: boolean },
+    values: {
+      favorite?: boolean
+      rejected?: boolean
+      selected?: boolean
+      rating?: number
+      colorLabel?: CaptureReview['colorLabel']
+    },
   ) {
     try {
       await window.api.invoke('captures:updateReview', { captureId, ...values })
@@ -1136,14 +2151,40 @@ function StudentDetail({
     }
   }
 
+  async function handleSaveFraming(
+    captureId: number,
+    framing: Omit<CaptureFraming, 'pending'>,
+  ) {
+    try {
+      await window.api.invoke('captures:updateFraming', { captureId, framing })
+      setFramingCapture(null)
+      await reloadCaptures()
+      addToast({ type: 'success', title: 'Framing saved', description: 'The original capture remains unchanged.' })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not save framing', description: String(error) })
+    }
+  }
+
   return (
-    <div className="flex flex-col h-full relative bg-slate-50">
-      {/* Student info header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
+    <div
+      className={cn(
+        "flex flex-col h-full relative bg-slate-50 transition-colors",
+        isDropActive && "ring-4 ring-inset ring-teal-400 bg-teal-50/30",
+      )}
+      onDragEnter={onDragEnter}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+       {/* Person info header */}
+      <div className="shoot-subject-header bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
         {isActiveCaptureTarget && (
           <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
         )}
-        <div className="flex flex-col min-w-0">
+         <div className="flex flex-col min-w-0">
           <div className="flex flex-wrap items-center gap-3 mb-2">
             {isActiveCaptureTarget && (
               <Badge className="bg-teal-500 hover:bg-teal-500 text-white font-extrabold uppercase tracking-widest text-[10px] px-2.5 py-0.5 shadow-sm">
@@ -1157,37 +2198,141 @@ function StudentDetail({
               {student.className}
             </span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
+             <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words" aria-label={employeeLabel}>
             {student.firstName} {student.lastName}
           </h2>
+           {employeeContext.length > 0 && (
+             <dl className="mt-3 flex max-w-4xl flex-wrap gap-x-5 gap-y-2 text-sm">
+               {employeeContext.map((item) => (
+                 <div
+                   key={item.label}
+                   className={cn(
+                     'min-w-0',
+                     item.emphasized && 'basis-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950',
+                   )}
+                 >
+                   <dt className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">
+                     {item.label}
+                   </dt>
+                   <dd className={cn('break-words font-semibold text-slate-800', item.emphasized && 'text-amber-950')}>
+                     {item.value}
+                   </dd>
+                 </div>
+               ))}
+             </dl>
+           )}
         </div>
-        <div className="flex flex-col items-end gap-3 justify-center shrink-0">
-          {isActiveCaptureTarget && (
-            <Button variant="outline" size="sm" onClick={onClearCaptureTarget} className="text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm">
-              <XCircle className="size-3.5 mr-1.5" /> Clear Target
+        <div className="flex flex-col items-end gap-2 justify-center shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isActiveCaptureTarget && (
+              <Button variant="outline" size="sm" onClick={onClearCaptureTarget} className="text-[10px] font-bold uppercase tracking-wider h-8 border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 shadow-sm">
+                <XCircle className="size-3.5 mr-1.5" /> Clear Target
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowQrOpen(true)}
+              className="h-8 border-slate-300 bg-white text-[10px] font-extrabold uppercase tracking-wider text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <Camera className="mr-1.5 size-3.5" /> Show QR
             </Button>
-          )}
+          </div>
           <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
             {captures.length} Capture{captures.length !== 1 ? 's' : ''} recorded
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-[1400px] mx-auto flex flex-col-reverse xl:flex-row gap-8">
-          {/* Photo gallery */}
-          <div className="flex-1 min-w-0 flex flex-col gap-6">
-            {livePreview?.photo.previewUrl && (
-              <LivePreview
-                photo={livePreview.photo}
-                traceId={livePreview.pipeline?.traceId}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="max-w-[1400px] mx-auto flex flex-col gap-5">
+          {/* Latest confirmation stage and filmstrip */}
+          <div className="shoot-capture-area min-w-0 flex flex-col gap-3">
+            <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_164px]">
+              <div className="min-w-0">
+                {livePreviewMatchesLatest && livePreview ? (
+                  <LivePreview
+                    photo={livePreview.photo}
+                    traceId={livePreview.pipeline?.traceId}
+                  />
+                ) : selectedCapture ? (
+                  <CaptureStage capture={selectedCapture} />
+                ) : (
+                  <div className="flex aspect-[16/7] min-h-[220px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-900 text-center text-sm font-semibold text-slate-400">
+                    <div>
+                      <Camera className="mx-auto mb-3 size-9 text-slate-600" />
+                      <p>Latest JPEG preview will appear here</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">Ready for the next capture</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <PersistentQrCard
+                student={student}
+                employeeLabel={employeeLabel}
+                onOpen={() => setShowQrOpen(true)}
+              />
+            </div>
+
+            {selectedCapture && (
+              <CaptureStageMeta
+                capture={selectedCapture}
+                uploadStatus={selectedCapture.legacyPhoto ? photoStatusMap.get(selectedCapture.legacyPhoto.id) : undefined}
+                onUpdateReview={handleUpdateCaptureReview}
+                onEditFraming={() => setFramingCapture(selectedCapture)}
               />
             )}
 
-            <div>
+            {!isFollowingLatest && selectedCapture && latestCapture && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-950">
+                <span><strong>Manual review:</strong> browsing this capture does not change the active {employeeLabel.toLowerCase()} or capture target.</span>
+                <button
+                  type="button"
+                  onClick={() => setReviewCaptureKey(null)}
+                  className="flex items-center gap-1 font-extrabold uppercase tracking-wider text-amber-800 hover:text-amber-950"
+                >
+                  Latest capture <ArrowRight className="size-3.5" />
+                  <kbd className="ml-1 rounded border border-amber-300 bg-amber-100 px-1 py-0.5 text-[9px]">L</kbd>
+                </button>
+              </div>
+            )}
+
+            <CaptureFilmstrip
+              captures={captures}
+              selectedCaptureId={selectedCapture?.id ?? null}
+              isFollowingLatest={isFollowingLatest}
+              onSelect={(captureId) => {
+                const capture = captures.find((candidate) => candidate.id === captureId)
+                setReviewCaptureKey(captureId === latestCapture?.id || !capture ? null : captureReviewKey(capture))
+              }}
+              onLatest={() => setReviewCaptureKey(null)}
+              onQuickLook={(capture) => setQuickLookCapture(capture)}
+              onPrevious={() => {
+                const index = isFollowingLatest
+                  ? captures.length - 1
+                  : captures.findIndex((capture) => capture.id === selectedCapture?.id)
+                if (index > 0) setReviewCaptureKey(captureReviewKey(captures[index - 1]))
+              }}
+              onNext={() => {
+                const index = isFollowingLatest
+                  ? captures.length - 1
+                  : captures.findIndex((capture) => capture.id === selectedCapture?.id)
+                if (index >= 0 && index < captures.length - 1) {
+                  const nextCapture = captures[index + 1]
+                  setReviewCaptureKey(nextCapture.id === latestCapture?.id ? null : captureReviewKey(nextCapture))
+                }
+              }}
+            />
+          </div>
+
+          {/* Detailed capture review remains below the latest stage. */}
+          <div>
               <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
-                  2. Live Captures
+                <div>
+                  <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
+                    Capture review
+                  </div>
+                  <p className="mt-2 text-xs font-semibold text-slate-500">Star a photo to include it in the parent gallery.</p>
                 </div>
                 <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
                   {captureFilterOptions.map((option) => (
@@ -1248,7 +2393,7 @@ function StudentDetail({
                   <p className="text-sm font-extrabold text-slate-500 uppercase tracking-wider">No captures match filter</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
                   {qrMarkers.map((marker) => (
                     <QrMarkerTile
                       key={marker.id}
@@ -1278,44 +2423,7 @@ function StudentDetail({
               )}
             </div>
           </div>
-
-          {/* QR code panel */}
-          <div className="w-full xl:w-[300px] shrink-0">
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 flex flex-col sm:flex-row xl:flex-col items-center sm:items-stretch xl:items-center gap-6">
-              <div className="flex flex-col flex-1 justify-center items-center sm:items-start xl:items-center min-w-0 w-full">
-                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-4 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm">
-                  1. Scan to link
-                </div>
-                <p className="text-[11px] text-slate-500 font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center sm:text-left xl:text-center border border-slate-100 hidden sm:block xl:hidden mb-4">
-                  {student.firstName}.{student.lastName}.{student.generatedStudentId}
-                </p>
-                <div className="hidden sm:block xl:hidden text-xs text-slate-400 font-medium max-w-[200px]">
-                  Present this code to the camera before capturing portraits.
-                </div>
-              </div>
-              <div className="shrink-0 w-48 sm:w-40 xl:w-full flex flex-col items-center">
-                {student.simpleQr ? (
-                  <img
-                    src={student.simpleQr}
-                    alt="Student QR Code"
-                    className="w-full aspect-square bg-slate-50 rounded-2xl border-2 border-slate-100 p-3 shadow-inner"
-                    draggable={false}
-                  />
-                ) : (
-                  <div className="w-full aspect-square bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-4">
-                    <AlertCircle className="size-8 text-slate-300 mb-2" />
-                    <p className="text-xs font-bold text-slate-500 text-center">QR not generated</p>
-                    <p className="text-[10px] font-medium text-slate-400 text-center mt-1">Generate in the web app</p>
-                  </div>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-2 sm:hidden xl:block font-mono font-medium bg-slate-50 px-3 py-2 rounded-lg w-full truncate text-center border border-slate-100">
-                {student.firstName}.{student.lastName}.{student.generatedStudentId}
-              </p>
-            </div>
-          </div>
         </div>
-      </div>
 
       {reassignOpen && reassignPhoto && (
         <ReassignDialog
@@ -1329,6 +2437,632 @@ function StudentDetail({
           }}
         />
       )}
+      <Dialog
+        open={showQrOpen}
+        onClose={() => setShowQrOpen(false)}
+        title={`Scan to link ${employeeLabel.toLowerCase()}`}
+        className="max-w-sm"
+      >
+        <div className="flex flex-col items-center gap-4">
+          {student.simpleQr ? (
+            <img
+              src={student.simpleQr}
+              alt={`${employeeLabel} QR Code`}
+              className="w-64 max-w-full aspect-square rounded-2xl border-2 border-slate-100 bg-slate-50 p-3 shadow-inner"
+              draggable={false}
+            />
+          ) : (
+            <div className="flex aspect-square w-64 max-w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-4">
+              <AlertCircle className="mb-2 size-8 text-slate-300" />
+              <p className="text-xs font-bold text-slate-500 text-center">QR not generated</p>
+              <p className="mt-1 text-[10px] font-medium text-slate-400 text-center">Generate in the web app</p>
+            </div>
+          )}
+          <p className="w-full truncate rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-center font-mono text-[11px] font-medium text-slate-500">
+            {student.firstName}.{student.lastName}.{student.generatedStudentId}
+          </p>
+          <p className="text-center text-xs font-medium text-slate-500">
+            Present this code to the camera before capturing portraits.
+          </p>
+        </div>
+      </Dialog>
+      {framingCapture && (
+        <ReframeEditor
+          capture={framingCapture}
+          onCancel={() => setFramingCapture(null)}
+          onSave={handleSaveFraming}
+        />
+      )}
+      {quickLookCapture && (
+        <QuickLookDialog
+          capture={quickLookCapture}
+          latestCapture={latestCapture}
+          onClose={() => setQuickLookCapture(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function captureUploadSummary(
+  capture: CaptureReview,
+  legacyUploadStatus?: ProjectUploadStatusRow,
+) {
+  const statuses = capture.files.map((file) => file.uploadStatus)
+  const status = legacyUploadStatus?.uploadStatus
+    ?? (statuses.includes('error')
+      ? 'error'
+      : statuses.includes('uploading')
+        ? 'uploading'
+        : statuses.includes('pending')
+          ? 'pending'
+          : statuses.length > 0 && statuses.every((fileStatus) => fileStatus === 'done')
+            ? 'done'
+            : null)
+  if (status === 'error') return { label: 'Upload error', className: 'text-rose-600', icon: <XCircle className="size-3.5" /> }
+  if (status === 'uploading') return { label: 'Uploading', className: 'text-blue-600', icon: <Loader className="size-3.5 animate-spin" /> }
+  if (status === 'pending') return { label: 'Queued', className: 'text-amber-600', icon: <CloudUpload className="size-3.5" /> }
+  if (status === 'done') return { label: 'Synced', className: 'text-emerald-600', icon: <CheckCircle className="size-3.5" /> }
+  return { label: 'Local', className: 'text-slate-500', icon: <Image className="size-3.5" /> }
+}
+
+function captureReviewKey(capture: CaptureReview) {
+  return `${capture.projectId}:${capture.studentId ?? 'none'}:${capture.capturedAt}:${capture.baseFilename}`
+}
+
+function PersistentQrCard({
+  student,
+  employeeLabel,
+  onOpen,
+}: {
+  student: Student
+  employeeLabel: string
+  onOpen: () => void
+}) {
+  return (
+    <aside
+      className="flex min-w-0 items-center gap-3 rounded-2xl border border-teal-200 bg-teal-50/80 p-3 shadow-sm lg:flex-col lg:justify-center lg:gap-2.5 lg:p-3"
+      aria-label={`${employeeLabel} QR code`}
+      data-testid="card-persistent-qr"
+    >
+      <div className="flex size-[92px] shrink-0 items-center justify-center rounded-xl border border-teal-100 bg-white p-2 shadow-inner sm:size-[104px] lg:size-[132px] lg:p-2.5">
+        {student.simpleQr ? (
+          <img
+            src={student.simpleQr}
+            alt={`${employeeLabel} QR code for ${student.firstName} ${student.lastName}`}
+            className="block aspect-square size-full object-contain"
+            draggable={false}
+            data-testid="img-persistent-qr"
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center text-center">
+            <QrCode className="size-7 text-slate-300" />
+            <span className="mt-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">Not generated</span>
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1 lg:w-full lg:flex-none lg:text-center">
+        <div className="flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-[.16em] text-teal-800 lg:justify-center">
+          <QrCode className="size-3.5" />
+          Capture QR
+        </div>
+        <p className="mt-1 truncate font-mono text-[10px] font-semibold text-teal-950" title={`${student.firstName}.${student.lastName}.${student.generatedStudentId}`}>
+          {student.firstName}.{student.lastName}.{student.generatedStudentId}
+        </p>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="mt-2 inline-flex min-h-7 items-center rounded-md border border-teal-200 bg-white px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider text-teal-800 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1"
+          data-testid="button-open-persistent-qr"
+        >
+          Show larger
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+function CaptureStage({ capture }: { capture: CaptureReview }) {
+  const imageSource = capture.legacyPhoto?.previewUrl
+    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? capture.thumbnailData
+    ?? capture.legacyPhoto?.thumbnailData
+  const framing = capture.framing
+  return (
+    <div
+      className="shoot-preview relative flex min-h-[220px] max-h-[430px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-lg"
+    >
+      {imageSource ? (
+        <CaptureFramingPreview
+          source={imageSource}
+          alt={`Capture ${capture.baseFilename}`}
+          framing={framing ?? defaultCaptureFraming}
+          maxBlockSize="430px"
+          className="max-w-full"
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center text-center text-slate-500">
+          <Image className="mb-3 size-10 text-slate-600" />
+          <p className="text-sm font-bold text-slate-300">JPEG preview unavailable</p>
+          <p className="mt-1 text-xs font-medium">The capture remains safely stored below.</p>
+        </div>
+      )}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/75 to-transparent p-4">
+        <span className="rounded bg-black/55 px-2 py-1 font-mono text-[10px] font-bold text-white">
+          {capture.baseFilename}
+        </span>
+        <span className="rounded bg-black/55 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-white/80">
+          JPEG preview
+        </span>
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-7 text-[10px] font-medium text-white/80">
+        <span>{new Date(capture.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+        <span>{capture.pairingStatus === 'complete' ? 'JPEG + RAW' : capture.pairingStatus.replace('_', ' ')}</span>
+      </div>
+    </div>
+  )
+}
+
+function CaptureStageMeta({
+  capture,
+  uploadStatus,
+  onUpdateReview,
+  onEditFraming,
+}: {
+  capture: CaptureReview
+  uploadStatus?: ProjectUploadStatusRow
+  onUpdateReview: (
+    captureId: number,
+    values: {
+      favorite?: boolean
+      rejected?: boolean
+      selected?: boolean
+      rating?: number
+      colorLabel?: CaptureReview['colorLabel']
+    },
+  ) => void
+  onEditFraming: () => void
+}) {
+  const upload = captureUploadSummary(capture, uploadStatus)
+  return (
+    <div data-testid="shoot-completeness" className="shoot-completeness grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5">
+      <div className="min-w-0">
+        <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Rating</p>
+        <div className="mt-1.5 flex items-center gap-0.5" aria-label={`${capture.rating} out of 5 stars`}>
+          {Array.from({ length: 5 }, (_, index) => (
+            <button
+              key={index}
+              type="button"
+              title={`Rate ${index + 1} out of 5`}
+              aria-label={`Rate ${index + 1} out of 5`}
+              onClick={() => onUpdateReview(capture.id, { rating: index + 1 })}
+              className="rounded p-0.5 hover:bg-amber-50"
+            >
+              <Star className="size-3.5 text-amber-400" fill={index < capture.rating ? 'currentColor' : 'none'} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="min-w-0">
+        <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Pairing</p>
+        <p className={cn('mt-2 truncate text-xs font-bold', capture.pairingStatus === 'unpaired' ? 'text-rose-600' : 'text-slate-700')}>
+          {capture.pairingStatus === 'complete' ? 'JPEG + RAW' : capture.pairingStatus === 'jpeg_only' ? 'JPEG only' : capture.pairingStatus === 'raw_only' ? 'RAW only' : capture.pairingStatus === 'unpaired' ? 'Needs review' : 'Pending'}
+        </p>
+      </div>
+      <div className="min-w-0">
+        <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Upload</p>
+        <span className={cn('mt-2 flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider', upload.className)}>
+          {upload.icon} {upload.label}
+        </span>
+      </div>
+      <div className="flex items-end gap-2 sm:justify-end">
+        <button
+          type="button"
+          onClick={onEditFraming}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-500 hover:bg-slate-50"
+        >
+          <Pencil className="mr-1 inline size-3" /> Edit framing
+        </button>
+        <button
+          type="button"
+          onClick={() => onUpdateReview(capture.id, { selected: !capture.selected })}
+          className={cn('rounded-lg border px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider', capture.selected ? 'border-teal-200 bg-teal-50 text-teal-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}
+        >
+          <Check className="mr-1 inline size-3" /> {capture.selected ? 'Selected' : 'Select'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onUpdateReview(capture.id, { favorite: !capture.favorite })}
+          className={cn('rounded-lg border px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider', capture.favorite ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}
+        >
+          <Star className="mr-1 inline size-3" fill={capture.favorite ? 'currentColor' : 'none'} /> {capture.favorite ? 'Favorite' : 'Favorite'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function QuickLookDialog({
+  capture,
+  latestCapture,
+  onClose,
+}: {
+  capture: CaptureReview
+  latestCapture: CaptureReview | null
+  onClose: () => void
+}) {
+  const [zoom, setZoom] = useState(1)
+  const [compareLatest, setCompareLatest] = useState(false)
+  const captureSource = capture.legacyPhoto?.previewUrl
+    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? capture.thumbnailData
+    ?? capture.legacyPhoto?.thumbnailData
+  const latestSource = latestCapture?.legacyPhoto?.previewUrl
+    ?? latestCapture?.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? latestCapture?.thumbnailData
+    ?? latestCapture?.legacyPhoto?.thumbnailData
+  const displayedSource = compareLatest && latestSource ? latestSource : captureSource
+  const displayedName = compareLatest && latestCapture ? latestCapture.baseFilename : capture.baseFilename
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Quick Look ${capture.baseFilename}`}
+      className="fixed inset-0 z-[100] flex flex-col bg-slate-950/95"
+      onClick={onClose}
+    >
+      <div
+        className="flex flex-wrap items-center justify-between gap-3 border-b border-white/15 px-5 py-3 text-white"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-bold">Quick Look</p>
+          <p className="truncate text-xs text-white/60">{displayedName}</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {latestCapture && latestCapture.id !== capture.id && latestSource && (
+            <button
+              type="button"
+              onClick={() => setCompareLatest((value) => !value)}
+              className={cn(
+                'rounded-lg px-3 py-2 text-xs font-bold transition-colors',
+                compareLatest ? 'bg-teal-500 text-white' : 'bg-white/10 text-white hover:bg-white/20',
+              )}
+            >
+              {compareLatest ? 'Showing latest' : 'Compare with latest'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
+            className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20"
+          >
+            −
+          </button>
+          <span className="w-14 text-center text-xs font-bold">{Math.round(zoom * 100)}%</span>
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
+            className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20"
+          >
+            +
+          </button>
+          <button type="button" onClick={onClose} className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-900">
+            Close
+          </button>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6" onClick={(event) => event.stopPropagation()}>
+        {displayedSource ? (
+          <img
+            src={displayedSource}
+            alt={displayedName}
+            draggable={false}
+            style={{ transform: `scale(${zoom})` }}
+            className="max-h-[82vh] max-w-[92vw] origin-center object-contain transition-transform"
+          />
+        ) : (
+          <p className="text-sm font-semibold text-slate-400">Preview unavailable for this capture.</p>
+        )}
+      </div>
+      <p className="border-t border-white/10 px-5 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-white/45">
+        Escape or click outside to close · Original file is unchanged
+      </p>
+    </div>
+  )
+}
+
+const defaultCaptureFraming: Omit<CaptureFraming, 'pending'> = {
+  cropX: 0,
+  cropY: 0,
+  cropScale: 100,
+  aspectRatio: 'original',
+  straightenAngle: 0,
+  rotation: 0,
+}
+
+function ReframeEditor({
+  capture,
+  onCancel,
+  onSave,
+}: {
+  capture: CaptureReview
+  onCancel: () => void
+  onSave: (captureId: number, framing: Omit<CaptureFraming, 'pending'>) => Promise<void>
+}) {
+  const [framing, setFraming] = useState<Omit<CaptureFraming, 'pending'>>({
+    ...defaultCaptureFraming,
+    ...capture.framing,
+  })
+  const source = capture.legacyPhoto?.previewUrl
+    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
+    ?? capture.thumbnailData
+    ?? capture.legacyPhoto?.thumbnailData
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onCancel()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onCancel])
+
+  const update = <K extends keyof Omit<CaptureFraming, 'pending'>>(key: K, value: Omit<CaptureFraming, 'pending'>[K]) => {
+    setFraming((current) => ({ ...current, [key]: value }))
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={`Edit framing ${capture.baseFilename}`} className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/70 p-4">
+      <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="text-sm font-extrabold text-slate-900">Edit framing</p>
+            <p className="mt-1 text-xs text-slate-500">{capture.baseFilename} · non-destructive</p>
+          </div>
+          <button type="button" onClick={onCancel} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close framing editor">
+            <XCircle className="size-5" />
+          </button>
+        </div>
+        <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="flex min-h-[280px] items-center justify-center overflow-hidden rounded-xl bg-slate-950 p-5">
+            <div className="flex max-h-[62vh] w-full items-center justify-center overflow-hidden bg-black">
+              {source ? (
+                <CaptureFramingPreview
+                  source={source}
+                  alt={`Framing preview ${capture.baseFilename}`}
+                  framing={framing}
+                  maxBlockSize="62vh"
+                  className="max-w-full"
+                />
+              ) : (
+                <p className="text-sm font-semibold text-slate-400">Preview unavailable</p>
+              )}
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="reframe-aspect" className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Aspect ratio</label>
+              <select
+                id="reframe-aspect"
+                value={framing.aspectRatio}
+                onChange={(event) => update('aspectRatio', event.target.value as CaptureAspectRatio)}
+                className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              >
+                <option value="original">Original</option>
+                <option value="1:1">Square · 1:1</option>
+                <option value="4:5">Portrait · 4:5</option>
+                <option value="3:2">Classic · 3:2</option>
+                <option value="16:9">Widescreen · 16:9</option>
+              </select>
+            </div>
+            {([
+              ['cropX', 'Horizontal position', -100, 100, 1],
+              ['cropY', 'Vertical position', -100, 100, 1],
+              ['cropScale', 'Crop scale', 100, 300, 1],
+              ['straightenAngle', 'Straighten angle', -15, 15, 1],
+            ] as const).map(([key, label, min, max, step]) => (
+              <label key={key} className="block">
+                <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                  <span>{label}</span>
+                  <span className="font-mono text-slate-700">{framing[key]}{key === 'cropScale' ? '%' : key === 'straightenAngle' ? '°' : ''}</span>
+                </div>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={framing[key]}
+                  onChange={(event) => update(key, Number(event.target.value) as never)}
+                  className="mt-2 w-full accent-teal-600"
+                />
+              </label>
+            ))}
+            <div>
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Rotate</p>
+              <button
+                type="button"
+                onClick={() => update('rotation', ((framing.rotation + 90) % 360) as CaptureFraming['rotation'])}
+                className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50"
+              >
+                <RotateCw className="size-3.5" /> 90° clockwise · {framing.rotation}°
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFraming(defaultCaptureFraming)}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50"
+            >
+              Reset adjustments
+            </button>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" onClick={() => void onSave(capture.id, framing)} className="rounded-lg bg-teal-600 px-4 py-2 text-xs font-extrabold uppercase tracking-wider text-white hover:bg-teal-700">
+            Save framing
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CaptureFilmstrip({
+  captures,
+  selectedCaptureId,
+  isFollowingLatest,
+  onSelect,
+  onQuickLook,
+  onLatest,
+  onPrevious,
+  onNext,
+}: {
+  captures: CaptureReview[]
+  selectedCaptureId: number | null
+  isFollowingLatest: boolean
+  onSelect: (captureId: number) => void
+  onQuickLook: (capture: CaptureReview) => void
+  onLatest: () => void
+  onPrevious: () => void
+  onNext: () => void
+}) {
+  const stripRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    if (isFollowingLatest) {
+      strip.scrollTo({ left: strip.scrollWidth, behavior: 'smooth' })
+      return
+    }
+    strip.querySelector<HTMLElement>(`[data-filmstrip-capture="${selectedCaptureId}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [captures.length, isFollowingLatest, selectedCaptureId])
+
+  if (captures.length === 0) return null
+  const latestCaptureId = captures[captures.length - 1].id
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-slate-500">Recent captures</p>
+          <p className="mt-1 text-[11px] text-slate-400">Newest on the right · click to review without changing target</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onPrevious}
+            disabled={isFollowingLatest && captures.length < 2}
+            aria-label="Previous capture"
+            title="Previous capture"
+            className="rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <ArrowLeft className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={isFollowingLatest || captures.length < 2}
+            aria-label="Next capture"
+            title="Next capture"
+            className="rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <ArrowRight className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onLatest}
+            className={cn('rounded-full px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider', isFollowingLatest ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700 hover:bg-amber-100')}
+          >
+            {isFollowingLatest ? 'Following latest' : 'Latest capture'}
+          </button>
+        </div>
+      </div>
+      <div ref={stripRef} className="flex gap-2 overflow-x-auto pb-1">
+        {captures.map((capture) => {
+          const isCurrent = selectedCaptureId === capture.id
+           const isNewest = capture.id === latestCaptureId
+           const jpegFile = capture.files.find((file) => file.fileRole === 'JPEG')
+           const source = capture.legacyPhoto?.previewUrl ?? jpegFile?.previewUrl
+           const filePath = jpegFile?.storedPath ?? capture.legacyPhoto?.filePath
+           const fallback = capture.thumbnailData ?? capture.legacyPhoto?.thumbnailData
+          return (
+            <button
+              key={capture.id}
+              data-filmstrip-capture={capture.id}
+              type="button"
+              onClick={() => onSelect(capture.id)}
+              className={cn(
+                'group relative min-w-[132px] overflow-hidden rounded-lg border-2 text-left transition-all sm:min-w-[150px]',
+                isCurrent ? 'border-teal-500 shadow-[0_0_0_2px_rgba(20,184,166,.14)]' : 'border-slate-200 hover:border-slate-400',
+              )}
+              aria-label={`Review capture ${capture.baseFilename}`}
+              aria-pressed={isCurrent}
+            >
+              <div className="relative aspect-[1.45] overflow-hidden bg-slate-900">
+                <GalleryThumbnail
+                  source={source}
+                  fallback={fallback}
+                  filePath={filePath}
+                  previewKey={`gallery-capture-${capture.id}`}
+                  alt={`Capture ${capture.baseFilename}`}
+                />
+                {(source || fallback) && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Quick Look"
+                    aria-label={`Quick Look ${capture.baseFilename}`}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onQuickLook(capture)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onQuickLook(capture)
+                    }}
+                    className="absolute bottom-2 right-2 rounded-md bg-black/70 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/90 group-hover:opacity-100 group-focus-within:opacity-100"
+                  >
+                    <Maximize2 className="size-3.5" />
+                  </span>
+                )}
+                <span className={cn('absolute left-2 top-2 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-white', isNewest ? 'bg-red-600' : 'bg-black/60')}>
+                  {isNewest ? 'Newest' : `Frame ${capture.sequence ?? ''}`}
+                </span>
+                {capture.favorite && <Star className="absolute right-2 top-2 size-3.5 text-amber-300" fill="currentColor" />}
+              </div>
+              <div className="flex items-center justify-between gap-2 bg-white px-2 py-2">
+                <span className="font-mono text-[9px] text-slate-500">
+                  {new Date(capture.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+                <span className={cn('text-[9px] font-extrabold uppercase', capture.pairingStatus === 'complete' ? 'text-emerald-600' : capture.pairingStatus === 'unpaired' ? 'text-rose-600' : 'text-slate-500')}>
+                  {capture.pairingStatus === 'complete' ? 'JPG+RAW' : capture.pairingStatus === 'jpeg_only' ? 'JPG' : capture.pairingStatus.replace('_', ' ')}
+                </span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -1350,9 +3084,45 @@ function GroupDetail({
   onClearCaptureTarget: () => void
   onRefreshCaptures: () => void
 }) {
+  const memberStudentIds = createGroupMemberStudentIdSet(group.memberStudentIds)
+
+  function captureUploadState(capture: GroupCaptureReview) {
+    const label = captureUploadLabel(capture.files)
+    if (label === 'Upload failed') return { label, className: 'bg-red-50 text-red-700 border-red-200' }
+    if (label === 'Uploading') return { label, className: 'bg-blue-50 text-blue-700 border-blue-200' }
+    if (label === 'Queued') return { label, className: 'bg-amber-50 text-amber-700 border-amber-200' }
+    if (label === 'Preparing gallery') return { label, className: 'bg-violet-50 text-violet-700 border-violet-200' }
+    return { label, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+  }
+
+  function fileUploadState(file: GroupCaptureReview['files'][number]) {
+    if (file.uploadStatus === 'done' && file.fileRole === 'JPEG' && !file.galleryReady) {
+      return { label: 'Preparing gallery', className: 'text-violet-700', icon: <Loader className="size-3 animate-spin" /> }
+    }
+    if (file.uploadStatus === 'done') {
+      return { label: 'Uploaded', className: 'text-emerald-700', icon: <CheckCircle className="size-3" /> }
+    }
+    if (file.uploadStatus === 'uploading') {
+      return { label: 'Uploading', className: 'text-blue-700', icon: <Loader className="size-3 animate-spin" /> }
+    }
+    if (file.uploadStatus === 'error') {
+      return { label: 'Failed', className: 'text-red-700', icon: <XCircle className="size-3" /> }
+    }
+    return { label: 'Queued', className: 'text-amber-700', icon: <CloudUpload className="size-3" /> }
+  }
+
+  async function updateGroupRating(captureId: number, rating: number) {
+    try {
+      await window.api.invoke('groupCaptures:updateReview', { captureId, rating })
+      onRefreshCaptures()
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not update group selection', description: String(error) })
+    }
+  }
+
   return (
     <div className="flex flex-col h-full relative bg-slate-50">
-      <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
+      <div className="shoot-subject-header bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
         {isActiveCaptureTarget && (
           <div className="absolute top-0 left-0 w-full h-1 bg-teal-500" />
         )}
@@ -1365,7 +3135,7 @@ function GroupDetail({
             )}
             <span className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Custom Group</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
+          <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
             {group.name}
           </h2>
         </div>
@@ -1382,7 +3152,7 @@ function GroupDetail({
       </div>
 
       <div className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8">
+        <div className="shoot-group-body max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8">
           {/* Members Column */}
           <div className="w-full xl:w-[340px] shrink-0">
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[300px] xl:max-h-[calc(100vh-250px)]">
@@ -1395,7 +3165,7 @@ function GroupDetail({
               </div>
               <div className="flex-1 overflow-y-auto p-3">
                 {students.map(student => {
-                  const isSelected = group.memberStudentIds.includes(student.id);
+                  const isSelected = memberStudentIds.has(student.id)
                   return (
                     <label key={student.id} className={cn("flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border", isSelected ? "bg-teal-50/50 border-teal-200 shadow-sm" : "border-transparent hover:bg-slate-50")}>
                       <input type="checkbox" className="rounded border-slate-300 text-teal-600 focus:ring-teal-600 size-4" checked={isSelected} onChange={e => onMembershipChange(group, student.id, e.target.checked)} />
@@ -1404,14 +3174,14 @@ function GroupDetail({
                         <p className="text-[10px] font-mono font-medium text-slate-500 truncate mt-0.5">{student.generatedStudentId}</p>
                       </div>
                     </label>
-                  );
+                  )
                 })}
               </div>
             </div>
           </div>
 
           {/* Captures Column */}
-          <div className="flex-1 min-w-0 flex flex-col gap-4">
+          <div className="shoot-capture-area flex-1 min-w-0 flex flex-col gap-4">
             <div className="flex items-center justify-between mb-1">
               <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
                 2. Group Captures
@@ -1435,25 +3205,70 @@ function GroupDetail({
                 </Button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
-                {groupCaptures.map(capture => (
-                  <div key={capture.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col gap-4 relative overflow-hidden group/tile transition-shadow hover:shadow-md">
+              <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6">
+                {groupCaptures.map(capture => {
+                  const overallUploadState = captureUploadState(capture)
+                  return (
+                  <div key={capture.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md">
                     <div className="absolute top-0 left-0 w-1 h-full bg-teal-500" />
+                    {capture.files.find(file => file.fileRole === 'JPEG') && (
+                      <button
+                        type="button"
+                        className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100"
+                        onClick={() => void window.api.invoke('photos:openInSystem', {
+                          filePath: capture.files.find(file => file.fileRole === 'JPEG')!.storedPath,
+                        })}
+                        title="Open full-size image to inspect focus and zoom"
+                      >
+                        <GalleryThumbnail
+                          source={capture.files.find(file => file.fileRole === 'JPEG')!.previewUrl}
+                          filePath={capture.files.find(file => file.fileRole === 'JPEG')!.storedPath}
+                          previewKey={`group-capture-${capture.id}`}
+                          alt={capture.baseFilename}
+                        />
+                      </button>
+                    )}
                     <div>
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center justify-between gap-2 mb-2">
                         <span className="font-extrabold text-base text-slate-900 truncate">{capture.baseFilename}</span>
+                        <Badge data-testid="shoot-completeness" className={cn('shoot-completeness shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none', overallUploadState.className)}>
+                          {overallUploadState.label}
+                        </Badge>
                       </div>
                       <Badge className="bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none">{capture.pairingStatus}</Badge>
                     </div>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {capture.files.map(file => (
-                        <button key={file.id} type="button" onClick={() => void window.api.invoke('photos:openInSystem', { filePath: file.storedPath })} className="hover:text-teal-700 hover:bg-teal-50 transition-colors flex items-center justify-center gap-1.5 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 flex-1">
-                          <ExternalLink className="size-3" /> {file.fileRole}
-                        </button>
-                      ))}
+                      {capture.files.map(file => {
+                        const uploadState = fileUploadState(file)
+                        return (
+                          <button key={file.id} type="button" onClick={() => void window.api.invoke('photos:openInSystem', { filePath: file.storedPath })} className="hover:bg-teal-50 transition-colors flex min-w-[140px] flex-1 items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                            <span className="flex items-center gap-1.5"><ExternalLink className="size-3" /> {file.fileRole}</span>
+                            <span className={cn('flex items-center gap-1 normal-case tracking-normal', uploadState.className)}>
+                              {uploadState.icon} {uploadState.label}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery</span>
+                      <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map(rating => (
+                          <button
+                            key={rating}
+                            type="button"
+                            aria-label={`Rate group photo ${rating} stars`}
+                            onClick={() => void updateGroupRating(capture.id, capture.rating === rating ? 0 : rating)}
+                            className="p-1 text-amber-500 hover:text-amber-600"
+                          >
+                            <Star className="size-5" fill={capture.rating >= rating ? 'currentColor' : 'none'} />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -1506,7 +3321,14 @@ function LivePreview({
       priority: 'live',
       execute: async (signal) => {
         try {
-          report('image decode started', 'source=resized-local-url')
+          const queue = previewScheduler.snapshot()
+          report(
+            'image decode started',
+            `source=resized-local-url active=${queue.activePriority ?? 'none'}`
+              + ` pendingLive=${queue.pendingLive ? '1' : '0'}`
+              + ` galleryQueued=${queue.galleryQueued}`
+              + ` galleryMax=${queue.maxGalleryQueued}`,
+          )
           const bitmap = await decodeResizedPreview(photo.previewUrl!, 1440, signal)
           if (!bitmap || signal.aborted || !mounted) {
             bitmap?.close()
@@ -1548,7 +3370,7 @@ function LivePreview({
   }, [photo.filePath, photo.previewUrl, traceId])
 
   return (
-    <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group">
+    <div className="shoot-preview mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group">
       <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-5 z-10 flex justify-between items-start pointer-events-none transition-opacity duration-300">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-2 bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded shadow-sm">
@@ -1567,6 +3389,7 @@ function LivePreview({
           ref={canvasRef}
           role="img"
           aria-label={`Latest capture ${photo.fileName}`}
+          data-preview-url={photo.previewUrl}
           className={cn(
             'block max-h-full max-w-full object-contain',
             (!canvasPainted || showImageFallback) && 'hidden',
@@ -1596,24 +3419,33 @@ function LivePreview({
 function GalleryThumbnail({
   source,
   fallback,
+  filePath,
+  previewKey,
   alt,
 }: {
   source?: string
   fallback?: string | null
+  filePath?: string
+  previewKey?: string
   alt: string
 }) {
   const [generatedSource, setGeneratedSource] = useState<string | null>(null)
 
   useEffect(() => {
     setGeneratedSource(null)
-    if (fallback || !source) return
+    if (fallback || (!source && !filePath)) return
     let mounted = true
     let objectUrl: string | null = null
     const cancel = previewScheduler.enqueue({
-      id: `gallery-${source}`,
+      id: `gallery-${previewKey ?? source ?? filePath}`,
       priority: 'gallery',
       execute: async (signal) => {
-        const bitmap = await decodeResizedPreview(source, 320, signal)
+        const resolvedSource = source ?? await window.api.invoke('photos:getPreview', {
+          filePath: filePath!,
+          previewKey: previewKey ?? `gallery-${filePath}`,
+        })
+        if (!resolvedSource || signal.aborted || !mounted) return
+        const bitmap = await decodeResizedPreview(resolvedSource, 320, signal)
         if (!bitmap || signal.aborted || !mounted) {
           bitmap?.close()
           return
@@ -1637,7 +3469,7 @@ function GalleryThumbnail({
       cancel()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [fallback, source])
+  }, [fallback, filePath, previewKey, source])
 
   const imageSource = fallback ?? generatedSource
   if (!imageSource) {
@@ -1698,18 +3530,14 @@ function PhotoTile({
   retrying: boolean
 }) {
   return (
-    <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
-      {photo.thumbnailData || photo.previewUrl ? (
-        <GalleryThumbnail
-          source={photo.previewUrl}
-          fallback={photo.thumbnailData}
-          alt={photo.fileName}
-        />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <Image className="size-8 text-slate-300" />
-        </div>
-      )}
+    <div className="group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md">
+      <GalleryThumbnail
+        source={photo.previewUrl}
+        fallback={photo.thumbnailData}
+        filePath={photo.filePath}
+        previewKey={`gallery-photo-${photo.id}`}
+        alt={photo.fileName}
+      />
 
       {/* Hover overlay */}
       <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all flex flex-col items-center justify-center gap-2.5 p-4 duration-200 z-20">
@@ -1773,6 +3601,7 @@ function QrMarkerTile({
   onOpen,
 }: {
   marker: {
+    id: number
     fileName: string
     filePath: string
     thumbnailData: string | null
@@ -1782,17 +3611,13 @@ function QrMarkerTile({
 }) {
   return (
     <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
-        {marker.thumbnailData || marker.previewUrl ? (
-          <GalleryThumbnail
-            source={marker.previewUrl}
-            fallback={marker.thumbnailData}
-            alt={`QR marker ${marker.fileName}`}
-          />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <Image className="size-8 text-slate-300" />
-        </div>
-      )}
+        <GalleryThumbnail
+          source={marker.previewUrl}
+          fallback={marker.thumbnailData}
+          filePath={marker.filePath}
+          previewKey={`gallery-marker-${marker.id}`}
+          alt={`QR marker ${marker.fileName}`}
+        />
 
       <div className="absolute top-2 left-2 rounded bg-teal-600/90 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-widest text-white shadow-sm border border-teal-500/50 backdrop-blur-sm z-10">
         QR MARKER
@@ -1838,12 +3663,27 @@ function CaptureTile({
   retryingFileId?: number | null
   onUpdateReview?: (captureId: number, values: { favorite?: boolean; rejected?: boolean; selected?: boolean }) => void
 }) {
+  const [zoomOpen, setZoomOpen] = useState(false)
+  const [zoom, setZoom] = useState(1)
   const photo = capture.legacyPhoto
   const rawFile = capture.files.find((file) => file.fileRole === 'RAW')
+  const zoomSource = photo?.previewUrl ?? photo?.thumbnailData ?? undefined
+
+  useEffect(() => {
+    if (!zoomOpen) return
+    const handleZoomKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setZoomOpen(false)
+    }
+    window.addEventListener('keydown', handleZoomKeyDown)
+    return () => window.removeEventListener('keydown', handleZoomKeyDown)
+  }, [zoomOpen])
 
   if (photo) {
     return (
-      <div className="group relative rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full w-full bg-slate-100">
+      <div className="group relative flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
         <PhotoTile
           photo={photo}
           uploadStatus={uploadStatus}
@@ -1858,6 +3698,39 @@ function CaptureTile({
         </div>
         <CaptureUploadBadge capture={capture} />
         <CaptureReviewControls capture={capture} onUpdateReview={onUpdateReview} />
+        {zoomSource && (
+          <button
+            type="button"
+            onClick={() => { setZoom(1); setZoomOpen(true) }}
+            className="absolute right-2 top-2 z-30 rounded-lg bg-black/70 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+          >
+            Inspect & zoom
+          </button>
+        )}
+        {zoomOpen && zoomSource && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Inspect ${capture.baseFilename}`}
+            className="fixed inset-0 z-[100] flex flex-col bg-black/95"
+            onClick={() => setZoomOpen(false)}
+          >
+            <div className="flex items-center justify-between border-b border-white/15 px-5 py-3 text-white" onClick={(event) => event.stopPropagation()}>
+              <span className="text-sm font-bold">{capture.baseFilename}</span>
+              <div className="flex items-center gap-2">
+                <button type="button" className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20" onClick={() => setZoom(value => Math.max(0.5, value - 0.25))}>− Zoom out</button>
+                <span className="w-14 text-center text-xs font-bold">{Math.round(zoom * 100)}%</span>
+                <button type="button" className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold hover:bg-white/20" onClick={() => setZoom(value => Math.min(4, value + 0.25))}>+ Zoom in</button>
+                <button type="button" className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-900" onClick={() => setZoomOpen(false)}>Close</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-6" onClick={(event) => event.stopPropagation()}>
+              <div className="flex min-h-full min-w-full items-center justify-center">
+                <img src={zoomSource} alt={capture.baseFilename} draggable={false} style={{ transform: `scale(${zoom})` }} className="max-h-[78vh] max-w-[90vw] origin-center object-contain transition-transform" />
+              </div>
+            </div>
+          </div>
+        )}
 
         {rawFile?.uploadStatus === 'error' && onRetryFile && (
           <button
@@ -1928,52 +3801,116 @@ function CaptureReviewControls({
   onUpdateReview,
 }: {
   capture: CaptureReview
-  onUpdateReview?: (captureId: number, values: { favorite?: boolean; rejected?: boolean; selected?: boolean }) => void
+  onUpdateReview?: (captureId: number, values: {
+    favorite?: boolean
+    rejected?: boolean
+    selected?: boolean
+    rating?: number
+    colorLabel?: CaptureReview['colorLabel']
+  }) => void
 }) {
   if (!onUpdateReview) return null
-  const hasActiveState = capture.favorite || capture.selected || capture.rejected
+  const colors = [
+    ['red', 'bg-red-500'],
+    ['yellow', 'bg-yellow-400'],
+    ['green', 'bg-emerald-500'],
+    ['blue', 'bg-blue-500'],
+    ['purple', 'bg-purple-500'],
+  ] as const
   return (
-    <div className={cn(
-      "absolute bottom-2 left-2 z-30 flex gap-1.5 transition-all duration-200",
-      hasActiveState
-        ? "opacity-100 translate-y-0"
-        : "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-within:opacity-100 focus-within:translate-y-0"
-    )}>
-      <button
-        type="button"
-        aria-label={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
-        title={capture.favorite ? 'Remove favorite' : 'Mark favorite'}
-        onClick={() => onUpdateReview(capture.id, { favorite: !capture.favorite })}
-        className={cn(
-          'rounded-full p-2 shadow-sm transition-colors border',
-          capture.favorite
-            ? 'border-amber-300 bg-amber-100 text-amber-600'
-            : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',
-        )}
-      >
-        <Star className="size-3.5" fill={capture.favorite ? 'currentColor' : 'none'} />
-      </button>
-      <button
-        type="button"
-        aria-label={capture.selected ? 'Remove from selection' : 'Add to selection'}
-        title={capture.selected ? 'Remove from selection' : 'Add to selection'}
-        onClick={() => onUpdateReview(capture.id, { selected: !capture.selected, rejected: false })}
-        className={cn(
-          'rounded-full p-2 shadow-sm transition-colors border',
-          capture.selected
-            ? 'border-teal-300 bg-teal-100 text-teal-700'
-            : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',
-        )}
-      >
-        <Check className="size-3.5" />
-      </button>
+    <div className="relative z-30 flex flex-col gap-2 border-t border-slate-200 bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">Parent gallery</p>
+          <p className={cn(
+            "text-[10px] font-semibold",
+            capture.rating > 0 ? "text-teal-700" : "text-slate-400",
+          )}>
+            {capture.rating > 0
+              ? `Shared · ${capture.rating} star${capture.rating === 1 ? '' : 's'}`
+              : capture.rejected
+                ? 'Not shared · reviewed'
+                : 'Not reviewed · choose 1–5 stars'}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {capture.rating <= 0 && (
+            <button
+              type="button"
+              onClick={() => onUpdateReview(capture.id, {
+                rating: 0,
+                favorite: false,
+                selected: false,
+                rejected: !capture.rejected,
+              })}
+              className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-200"
+            >
+              {capture.rejected ? 'Review again' : 'Do not share'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onUpdateReview(capture.id, {
+              rating: capture.rating > 0 ? 0 : 5,
+              favorite: capture.rating <= 0,
+              selected: capture.rating <= 0,
+              rejected: capture.rating > 0,
+            })}
+            className={cn(
+              "rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition-colors",
+              capture.rating > 0
+                ? "bg-teal-100 text-teal-800 hover:bg-teal-200"
+                : "bg-blue-600 text-white hover:bg-blue-700",
+            )}
+          >
+            {capture.rating > 0 ? 'Remove' : 'Share'}
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2">
+        {[1, 2, 3, 4, 5].map((rating) => (
+          <button
+            key={rating}
+            type="button"
+            aria-label={`Rate ${rating} star${rating === 1 ? '' : 's'}`}
+            onClick={() => onUpdateReview(capture.id, {
+              rating: capture.rating === rating ? 0 : rating,
+              favorite: rating >= 4,
+              selected: capture.rating !== rating,
+              rejected: false,
+            })}
+            className="p-1.5 text-amber-500 hover:text-amber-600"
+          >
+            <Star className="size-5" fill={capture.rating >= rating ? 'currentColor' : 'none'} />
+          </button>
+        ))}
+        <span className="mx-1 h-4 w-px bg-amber-200" />
+        {colors.map(([label, color]) => (
+          <button
+            key={label}
+            type="button"
+            aria-label={`${label} color label${label === 'green' ? ' — share with parents' : ''}`}
+            title={label === 'green' ? 'Green — share with parents' : `${label} label`}
+            onClick={() => onUpdateReview(capture.id, {
+              colorLabel: capture.colorLabel === label ? 'none' : label,
+              selected: label === 'green' ? capture.colorLabel !== 'green' : capture.selected,
+              rejected: false,
+            })}
+            className={cn(
+              'size-5 rounded-full border-2 transition-transform hover:scale-110',
+              color,
+              capture.colorLabel === label ? 'border-white ring-2 ring-white/70' : 'border-black/30',
+            )}
+          />
+        ))}
+      </div>
       <button
         type="button"
         aria-label={capture.rejected ? 'Restore capture' : 'Reject capture'}
         title={capture.rejected ? 'Restore capture' : 'Reject capture'}
         onClick={() => onUpdateReview(capture.id, { rejected: !capture.rejected, selected: false })}
         className={cn(
-          'rounded-full p-2 shadow-sm transition-colors border',
+          'self-start rounded-full p-2 shadow-sm transition-colors border',
           capture.rejected
             ? 'border-red-300 bg-red-100 text-red-700'
             : 'border-white/20 bg-black/60 backdrop-blur-md text-white hover:bg-black/80 hover:border-white/40',

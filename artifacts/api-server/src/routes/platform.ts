@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import {
   db,
@@ -16,14 +16,18 @@ import {
 } from "@workspace/db";
 import { getUserId, requireAuth } from "../lib/auth";
 import { getUserEmail } from "../lib/studioAccess";
-import { platformOwnerIsConfigured, requirePlatformOwner } from "../lib/platformAccess";
+import { isPlatformOwner, platformOwnerIsConfigured, requirePlatformOwner } from "../lib/platformAccess";
+import { logger } from "../lib/logger";
+import { sendPlatformInviteEmail, type PlatformInviteEmail } from "../lib/platformInviteEmail";
 
 const router = Router();
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const platformInviteLifetimeMs = 7 * 24 * 60 * 60 * 1000;
+let platformInviteEmailSender = sendPlatformInviteEmail;
 
 async function recordPlatformAction(
   actorUserId: string,
-  studioId: number,
+  studioId: number | null,
   action: string,
   targetType: string,
   targetId?: string | number | null,
@@ -39,6 +43,15 @@ async function recordPlatformAction(
   });
 }
 
+type PlatformActivity = {
+  id: number;
+  actorUserId: string;
+  studioId: number | null;
+  studioName: string | null;
+  action: string;
+  createdAt: Date;
+};
+
 function studioIdParam(value: string | string[] | undefined): number | null {
   const id = Number(Array.isArray(value) ? value[0] : value);
   return Number.isInteger(id) && id > 0 ? id : null;
@@ -47,6 +60,29 @@ function studioIdParam(value: string | string[] | undefined): number | null {
 function inviteCode() {
   return randomBytes(32).toString("base64url");
 }
+
+function inviteExpiresAt(createdAt: Date): Date {
+  return new Date(createdAt.getTime() + platformInviteLifetimeMs);
+}
+
+function invitationBaseUrl(req: Request): string | null {
+  const configuredUrl = process.env.PUBLIC_APP_URL?.trim();
+  const requestOrigin = req.get("origin")?.trim();
+  const candidate = configuredUrl || requestOrigin;
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+export type PlatformRouterOptions = {
+  sendInviteEmail?: (email: PlatformInviteEmail) => Promise<void>;
+};
 
 function parseStudioUpdate(body: unknown): {
   description?: string | null;
@@ -92,8 +128,13 @@ function parseStudioUpdate(body: unknown): {
   return result;
 }
 
+router.get("/status", requireAuth, async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  res.json({ isPlatformOwner: await isPlatformOwner(userId) });
+});
+
 router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<void> => {
-  const [studios, members, projectCounts, projectRows, invites, desktopConnections] = await Promise.all([
+  const [studios, members, projectCounts, projectRows, invites, desktopConnections, activity] = await Promise.all([
     db.select().from(studiosTable).orderBy(asc(studiosTable.createdAt)),
     db.select().from(studioMembersTable).where(eq(studioMembersTable.status, "active")),
     db.select({ studioId: projectsTable.studioId, count: count() }).from(projectsTable).groupBy(projectsTable.studioId),
@@ -101,6 +142,7 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
       id: projectsTable.id,
       studioId: projectsTable.studioId,
       studioName: studiosTable.name,
+      projectType: projectsTable.projectType,
       schoolName: projectsTable.schoolName,
       photoDate: projectsTable.photoDate,
       address: projectsTable.address,
@@ -120,6 +162,18 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
       status: desktopConnectionsTable.status,
       expiresAt: desktopConnectionsTable.expiresAt,
     }).from(desktopConnectionsTable),
+    db.select({
+      id: platformActionAuditTable.id,
+      actorUserId: platformActionAuditTable.actorUserId,
+      studioId: platformActionAuditTable.studioId,
+      studioName: studiosTable.name,
+      action: platformActionAuditTable.action,
+      createdAt: platformActionAuditTable.createdAt,
+    })
+      .from(platformActionAuditTable)
+      .leftJoin(studiosTable, eq(platformActionAuditTable.studioId, studiosTable.id))
+      .orderBy(desc(platformActionAuditTable.createdAt))
+      .limit(100),
   ]);
 
   const ownerByStudio = new Map(
@@ -166,7 +220,7 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
     } else if (studio.storageStatus === "connection_requested") {
       alerts.push({ code: "storage_pending", label: "Storage connection is pending", severity: "attention" });
     } else if (studio.storageStatus === "using_platform") {
-      alerts.push({ code: "platform_storage", label: "Using platform storage fallback", severity: "attention" });
+      alerts.push({ code: "platform_storage", label: "Managed platform fallback is enabled", severity: "info" });
     }
     if (expiredDesktops.length > 0) {
       alerts.push({
@@ -236,6 +290,7 @@ router.get("/", requireAuth, requirePlatformOwner, async (_req, res): Promise<vo
     })),
     projects,
     invites,
+    activity: activity satisfies PlatformActivity[],
   });
 });
 
@@ -444,6 +499,11 @@ router.patch("/studios/:studioId", requireAuth, requirePlatformOwner, async (req
   res.json(updated);
 });
 
+export function createPlatformRouter({ sendInviteEmail }: PlatformRouterOptions = {}) {
+  platformInviteEmailSender = sendInviteEmail ?? sendPlatformInviteEmail;
+  return router;
+}
+
 router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Promise<void> => {
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   if (!emailPattern.test(email)) {
@@ -457,8 +517,14 @@ router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Pro
     .where(and(eq(platformInvitesTable.email, email), eq(platformInvitesTable.status, "pending")))
     .limit(1);
   if (existing) {
-    res.status(409).json({ error: "A pending studio-owner invitation already exists for this email" });
-    return;
+    if (new Date() < inviteExpiresAt(existing.createdAt)) {
+      res.status(409).json({ error: "A pending studio-owner invitation already exists for this email" });
+      return;
+    }
+    await db
+      .update(platformInvitesTable)
+      .set({ status: "cancelled" })
+      .where(and(eq(platformInvitesTable.id, existing.id), eq(platformInvitesTable.status, "pending")));
   }
 
   const [invite] = await db
@@ -469,6 +535,33 @@ router.post("/invites", requireAuth, requirePlatformOwner, async (req, res): Pro
       invitedByUserId: getUserId(req),
     })
     .returning();
+
+  const baseUrl = invitationBaseUrl(req);
+  if (!baseUrl) {
+    logger.error(
+      { event: "platform_invite_email_failed", inviteId: invite.id, recipient: email, reason: "missing_public_app_url" },
+      "Could not deliver platform invitation email",
+    );
+    res.status(502).json({ error: "Invitation created, but email delivery is not configured. Copy the secure link below." });
+    return;
+  }
+
+  try {
+    await platformInviteEmailSender({
+      to: email,
+      invitationUrl: `${baseUrl}/studio-invite/${invite.code}`,
+      expiresAt: inviteExpiresAt(invite.createdAt),
+    });
+  } catch (error) {
+    logger.error(
+      { event: "platform_invite_email_failed", inviteId: invite.id, recipient: email, err: error },
+      "Could not deliver platform invitation email",
+    );
+    res.status(502).json({ error: "Invitation created, but the email could not be delivered. Copy the secure link below." });
+    return;
+  }
+
+  await recordPlatformAction(getUserId(req), null, "studio_invite_created", "platform_invite", invite.id);
   res.status(201).json(invite);
 });
 
@@ -487,6 +580,7 @@ router.patch("/invites/:inviteId", requireAuth, requirePlatformOwner, async (req
     res.status(404).json({ error: "Pending invitation not found" });
     return;
   }
+  await recordPlatformAction(getUserId(req), null, "studio_invite_cancelled", "platform_invite", updated.id);
   res.json(updated);
 });
 
@@ -519,6 +613,14 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
     res.status(409).json({ error: `This invitation is already ${invite.status}` });
     return;
   }
+  if (new Date() >= inviteExpiresAt(invite.createdAt)) {
+    await db
+      .update(platformInvitesTable)
+      .set({ status: "cancelled" })
+      .where(and(eq(platformInvitesTable.id, invite.id), eq(platformInvitesTable.status, "pending")));
+    res.status(410).json({ error: "This invitation has expired. Ask the platform owner for a new invitation." });
+    return;
+  }
 
   const userId = getUserId(req);
   const email = (await getUserEmail(userId)).toLowerCase();
@@ -546,9 +648,9 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
       .where(and(eq(studioMembersTable.userId, userId), eq(studioMembersTable.status, "active")))
       .limit(1);
 
-    let studio;
+    let existingStudio: typeof studiosTable.$inferSelect | undefined;
     if (existingMember) {
-      const [existingStudio] = await tx.select().from(studiosTable).where(eq(studiosTable.id, existingMember.studioId)).limit(1);
+      [existingStudio] = await tx.select().from(studiosTable).where(eq(studiosTable.id, existingMember.studioId)).limit(1);
       if (
         existingMember.role !== "owner" ||
         !existingStudio ||
@@ -556,6 +658,23 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
       ) {
         return { error: "This account already belongs to another studio" as const };
       }
+    }
+
+    const [claimedInvite] = await tx
+      .update(platformInvitesTable)
+      .set({
+        status: "accepted",
+        acceptedByUserId: userId,
+        acceptedAt: new Date(),
+      })
+      .where(and(eq(platformInvitesTable.id, invite.id), eq(platformInvitesTable.status, "pending")))
+      .returning({ id: platformInvitesTable.id });
+    if (!claimedInvite) {
+      return { error: "This invitation is already accepted or cancelled" as const };
+    }
+
+    let studio;
+    if (existingMember && existingStudio) {
       [studio] = await tx
         .update(studiosTable)
         .set({
@@ -584,15 +703,13 @@ router.post("/invites/:code/complete", requireAuth, async (req, res): Promise<vo
         role: "owner",
       });
     }
-
-    await tx
-      .update(platformInvitesTable)
-      .set({
-        status: "accepted",
-        acceptedByUserId: userId,
-        acceptedAt: new Date(),
-      })
-      .where(and(eq(platformInvitesTable.id, invite.id), eq(platformInvitesTable.status, "pending")));
+    await tx.insert(platformActionAuditTable).values({
+      actorUserId: userId,
+      studioId: studio.id,
+      action: "studio_onboarded",
+      targetType: "studio",
+      targetId: String(studio.id),
+    });
     return { studio };
   });
 

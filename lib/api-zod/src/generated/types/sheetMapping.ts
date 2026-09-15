@@ -17,6 +17,16 @@ export interface SheetMapping {
   emailColumn?: string | null;
   /** @nullable */
   phoneColumn?: string | null;
+  /** @nullable */
+  secondaryEmailColumn?: string | null;
+  /** @nullable */
+  jobTitleColumn?: string | null;
+  /** @nullable */
+  officeLocationColumn?: string | null;
+  /** @nullable */
+  photoSessionColumn?: string | null;
+  /** @nullable */
+  captureNotesColumn?: string | null;
   rows: string[][];
   headers?: string[];
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { Activity, AlertTriangle, Building2, Calendar, Check, CheckCircle2, ChevronRight, Copy, FolderKanban, Layers, Link2, Loader2, Mail, Pencil, RefreshCw, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useUser } from "@clerk/react";
 import type { PlatformInvite, PlatformOverview } from "@workspace/api-client-react";
 import { Link } from "wouter";
@@ -8,7 +8,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-
 type HealthAlert = {
   code: string;
   label: string;
@@ -34,6 +33,20 @@ type PlatformData = Omit<PlatformOverview, "studios"> & {
   studios: Array<PlatformOverview["studios"][number] & { health: StudioHealth }>;
 };
 
+const activityLabels: Record<string, string> = {
+  studio_invite_created: "Created a studio-owner invitation",
+  studio_invite_cancelled: "Cancelled a studio-owner invitation",
+  studio_onboarded: "Completed studio onboarding",
+  studio_archived: "Archived a studio",
+  studio_restored: "Restored a studio",
+  studio_details_updated: "Updated studio details",
+  member_suspended: "Suspended a studio member",
+  member_reactivated: "Reactivated a studio member",
+  desktop_revoke: "Revoked desktop access",
+  desktop_retire: "Retired desktop access",
+  desktop_set_expiry: "Changed desktop access expiry",
+  storage_revoked: "Revoked storage access",
+};
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function Platform() {
@@ -41,6 +54,7 @@ export default function Platform() {
   const [data, setData] = useState<PlatformData | null>(null);
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [editingStudio, setEditingStudio] = useState<PlatformData["studios"][number] | null>(null);
@@ -49,13 +63,20 @@ export default function Platform() {
   const [studioError, setStudioError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  async function load() {
-    const response = await fetch("/api/platform");
-    if (!response.ok) {
-      setError(response.status === 403 ? "This area is only available to the platform owner." : "Could not load platform data.");
-      return;
+  async function load(options?: { showLoading?: boolean }) {
+    const showLoading = options?.showLoading === true;
+    if (showLoading) setRefreshing(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/platform");
+      if (!response.ok) {
+        setError(response.status === 403 ? "This area is only available to the platform owner." : "Could not load platform data.");
+        return;
+      }
+      setData(await response.json() as PlatformData);
+    } finally {
+      if (showLoading) setRefreshing(false);
     }
-    setData(await response.json() as PlatformData);
   }
 
   useEffect(() => {
@@ -89,9 +110,11 @@ export default function Platform() {
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) {
         setError(body.error ?? "Could not create the invitation.");
+        await load();
         return;
       }
       setEmail("");
+      toast({ title: "Invitation sent", description: `The onboarding email was sent to ${email}.` });
       await load();
     } finally {
       setSaving(false);
@@ -167,9 +190,21 @@ export default function Platform() {
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex items-start gap-3">
           <div className="rounded-lg bg-teal-100 p-2 text-teal-700"><ShieldCheck className="h-6 w-6" /></div>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Platform workspace</h1>
-            <p className="mt-1 text-slate-500">Create and oversee independent photography studios.</p>
+          <div className="flex min-w-0 flex-1 items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900">Platform workspace</h1>
+              <p className="mt-1 text-slate-500">Create and oversee independent photography studios.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void load({ showLoading: true })}
+              disabled={refreshing}
+              className="inline-flex shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+              aria-label="Refresh platform workspace"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
           </div>
         </header>
 
@@ -178,7 +213,7 @@ export default function Platform() {
           <p className="mt-1 text-sm text-teal-800">They will create their own studio page. Their projects and team stay separate from every other studio.</p>
           <form onSubmit={(event) => void createInvite(event)} className="mt-4 flex flex-col gap-3 sm:flex-row">
             <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@photostudio.com" className="h-10 flex-1 rounded-md border border-teal-300 bg-white px-3 text-sm text-slate-900" />
-            <button disabled={saving} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-60">{saving ? "Creating…" : "Create invitation"}</button>
+            <button disabled={saving} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-60">{saving ? <><Loader2 className="h-4 w-4 animate-spin" />Sending…</> : <><Mail className="h-4 w-4" />Send invitation</>}</button>
           </form>
           {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
         </section>
@@ -188,7 +223,7 @@ export default function Platform() {
           <div className="divide-y">
             {pendingInvites.map((invite) => (
               <div key={invite.id} className="flex flex-col gap-3 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0"><p className="font-medium text-slate-900">{invite.email}</p><p className="mt-1 text-xs text-slate-500">Send the secure link below. It can be used once.</p></div>
+                <div className="min-w-0"><p className="font-medium text-slate-900">{invite.email}</p><p className="mt-1 text-xs text-slate-500">Email sent. The secure link can be used once and expires after 7 days.</p></div>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input readOnly value={`${window.location.origin}${basePath}/studio-invite/${invite.code}`} aria-label={`Invitation link for ${invite.email}`} className="h-9 min-w-0 rounded-md border border-slate-300 bg-slate-50 px-3 text-xs text-slate-600 sm:w-80" />
                   <button type="button" onClick={() => void copyInvite(invite)} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"><Copy className="h-4 w-4" />{copiedId === invite.id ? "Copied" : "Copy link"}</button>
@@ -198,6 +233,36 @@ export default function Platform() {
             ))}
           </div>
         </section>}
+
+        <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
+          <div className="flex items-center gap-2 border-b px-6 py-4">
+            <Activity className="h-4 w-4 text-teal-700" />
+            <div>
+              <h2 className="font-semibold text-slate-900">Recent platform activity</h2>
+              <p className="mt-1 text-sm text-slate-500">A record of sensitive access and onboarding changes.</p>
+            </div>
+          </div>
+          {data.activity.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">No platform activity recorded yet.</div>
+          ) : (
+            <div className="divide-y">
+              {data.activity.map((item) => (
+                <div key={item.id} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900">{activityLabels[item.action] ?? item.action}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {item.studioName ?? (item.action.startsWith("studio_invite_") ? "Platform invitation" : "Platform workspace")}
+                      {" · "}Actor {item.actorUserId}
+                    </p>
+                  </div>
+                  <time className="shrink-0 text-xs text-slate-500" dateTime={new Date(item.createdAt).toISOString()}>
+                    {format(new Date(item.createdAt), "MMM d, yyyy HH:mm")}
+                  </time>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="space-y-4">
           <div className="flex items-end justify-between gap-4">

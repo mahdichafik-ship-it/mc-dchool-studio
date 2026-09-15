@@ -1,0 +1,67 @@
+import { boolean, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { projectsTable } from "./projects";
+import { studiosTable } from "./studios";
+import { studentsTable } from "./students";
+
+export const deliveryPriceSheetsTable = pgTable("delivery_price_sheets", {
+  id: serial("id").primaryKey(),
+  studioId: integer("studio_id").notNull().references(() => studiosTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  offersJson: text("offers_json").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("delivery_price_sheets_studio_name_unique").on(table.studioId, table.name),
+]);
+
+export const deliveryGalleriesTable = pgTable("delivery_galleries", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projectsTable.id, { onDelete: "cascade" }),
+  studioId: integer("studio_id")
+    .references(() => studiosTable.id, { onDelete: "set null" }),
+  priceSheetId: integer("price_sheet_id")
+    .references(() => deliveryPriceSheetsTable.id, { onDelete: "set null" }),
+  slug: text("slug").notNull().unique(),
+  status: text("status", { enum: ["draft", "published", "revoked"] })
+    .notNull()
+    .default("draft"),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  watermarkEnabled: boolean("watermark_enabled").notNull().default(true),
+  watermarkText: text("watermark_text"),
+  priceSheetJson: text("price_sheet_json"),
+  establishmentPaymentInstructions: text("establishment_payment_instructions"),
+  bankTransferInstructions: text("bank_transfer_instructions"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("delivery_galleries_project_unique").on(table.projectId),
+]);
+
+export const deliveryAccessesTable = pgTable("delivery_accesses", {
+  id: serial("id").primaryKey(),
+  galleryId: integer("gallery_id")
+    .notNull()
+    .references(() => deliveryGalleriesTable.id, { onDelete: "cascade" }),
+  studentId: integer("student_id")
+    .notNull()
+    .references(() => studentsTable.id, { onDelete: "cascade" }),
+  accessCodeHash: text("access_code_hash").notNull(),
+  accessCodeEncrypted: text("access_code_encrypted").notNull(),
+  accessCodeLast4: text("access_code_last4").notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  tokenVersion: integer("token_version").notNull().default(1),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("delivery_accesses_gallery_student_unique").on(table.galleryId, table.studentId),
+]);
+
+export type DeliveryGallery = typeof deliveryGalleriesTable.$inferSelect;
+export type DeliveryAccess = typeof deliveryAccessesTable.$inferSelect;
+export type DeliveryPriceSheet = typeof deliveryPriceSheetsTable.$inferSelect;

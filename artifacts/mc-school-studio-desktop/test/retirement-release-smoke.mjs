@@ -779,17 +779,48 @@ try {
     return { first, second, queue }
   }
 
-  const findDroppedCapture = (review, expectedSources) => review.captures.find((capture) => {
-    const sources = capture.files.map((file) => file.sourcePath).filter(Boolean).sort()
-    return sources.length === expectedSources.length
-      && sources.every((source, index) => source === expectedSources[index])
+  const findDroppedCapture = (review, expectedFiles) => review.captures.find((capture) => {
+    const files = capture.files.map((file) => ({
+      fileRole: file.fileRole,
+      originalFilename: file.originalFilename,
+      storedFilename: basename(file.storedPath),
+    })).sort((left, right) => left.fileRole.localeCompare(right.fileRole))
+    return JSON.stringify(files) === JSON.stringify(expectedFiles)
   })
-  const firstDroppedSources = [droppedJpegOne, droppedRawOne].sort()
-  const secondDroppedSources = [droppedJpegTwo, droppedRawTwo].sort()
+  const firstDroppedFiles = [
+    {
+      fileRole: 'JPEG',
+      originalFilename: `John_Smith_${studentReference}.JPG`,
+      storedFilename: `John_Smith_${studentReference}.JPG`,
+    },
+    {
+      fileRole: 'RAW',
+      originalFilename: `John_Smith_${studentReference}.CR3`,
+      storedFilename: `John_Smith_${studentReference}.CR3`,
+    },
+  ]
+  const secondDroppedFiles = [
+    {
+      fileRole: 'JPEG',
+      originalFilename: 'Maya_Chen_005678.JPG',
+      storedFilename: 'Maya_Chen_005678.JPG',
+    },
+    {
+      fileRole: 'RAW',
+      originalFilename: 'Maya_Chen_005678.CR3',
+      storedFilename: 'Maya_Chen_005678.CR3',
+    },
+  ]
+  const expectedDroppedQueue = [
+    `John Smith:JPEG:John_Smith_${studentReference}.JPG`,
+    `John Smith:RAW:John_Smith_${studentReference}.CR3`,
+    'Maya Chen:JPEG:Maya_Chen_005678.JPG',
+    'Maya Chen:RAW:Maya_Chen_005678.CR3',
+  ].sort()
 
   const hasDurableDroppedCaptureState = ({ first, second, queue }) => {
-    const firstDropped = findDroppedCapture(first, firstDroppedSources)
-    const secondDropped = findDroppedCapture(second, secondDroppedSources)
+    const firstDropped = findDroppedCapture(first, firstDroppedFiles)
+    const secondDropped = findDroppedCapture(second, secondDroppedFiles)
     if (
       !firstDropped
       || firstDropped.studentId !== localStudentOneId
@@ -803,11 +834,9 @@ try {
       capture.files.map((file) => file.fileRole).sort().join(',') === 'JPEG,RAW'
     if (!hasExpectedRoles(firstDropped) || !hasExpectedRoles(secondDropped)) return false
 
-    const droppedQueue = queue.filter((item) => item.fileName.startsWith('DSC_9000.'))
-    return queue.filter((item) => item.fileName === 'DSC_9000.JPG').length === 2
-      && queue.filter((item) => item.fileName === 'DSC_9000.CR3').length === 2
-      && [...new Set(droppedQueue.map((item) => item.subject))].sort().join(',')
-        === 'John Smith,Maya Chen'
+    return JSON.stringify(
+      queue.map((item) => `${item.subject}:${item.fileRole}:${item.fileName}`).sort(),
+    ) === JSON.stringify(expectedDroppedQueue)
   }
 
   let droppedCaptureState
@@ -818,11 +847,11 @@ try {
 
   const assertDroppedCaptures = async (state) => {
     state ??= await readDroppedCaptureState()
-    for (const [review, expectedStudent, expectedSources] of [
-      [state.first, localStudentOneId, firstDroppedSources],
-      [state.second, localStudentTwoId, secondDroppedSources],
+    for (const [review, expectedStudent, expectedFiles] of [
+      [state.first, localStudentOneId, firstDroppedFiles],
+      [state.second, localStudentTwoId, secondDroppedFiles],
     ]) {
-      const dropped = findDroppedCapture(review, expectedSources)
+      const dropped = findDroppedCapture(review, expectedFiles)
       assert(dropped, `student ${expectedStudent} must retain the dropped capture`)
       assert.equal(dropped.studentId, expectedStudent)
       assert.equal(dropped.pairingStatus, 'complete')
@@ -831,18 +860,19 @@ try {
         ['JPEG', 'RAW'],
       )
       assert.deepEqual(
-        dropped.files.map((file) => file.sourcePath).sort(),
-        expectedSources,
-        `student ${expectedStudent} must retain only its own dropped source files`,
+        dropped.files.map((file) => ({
+          fileRole: file.fileRole,
+          originalFilename: file.originalFilename,
+          storedFilename: basename(file.storedPath),
+        })).sort((left, right) => left.fileRole.localeCompare(right.fileRole)),
+        expectedFiles,
+        `student ${expectedStudent} must retain only its own renamed dropped files`,
       )
     }
     const { queue } = state
-    assert.equal(queue.filter((item) => item.fileName === 'DSC_9000.JPG').length, 2)
-    assert.equal(queue.filter((item) => item.fileName === 'DSC_9000.CR3').length, 2)
     assert.deepEqual(
-      [...new Set(queue.filter((item) => item.fileName.startsWith('DSC_9000.'))
-        .map((item) => item.subject))].sort(),
-      ['John Smith', 'Maya Chen'],
+      queue.map((item) => `${item.subject}:${item.fileRole}:${item.fileName}`).sort(),
+      expectedDroppedQueue,
     )
   }
   await assertDroppedCaptures(droppedCaptureState)

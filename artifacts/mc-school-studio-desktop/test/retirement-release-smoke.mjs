@@ -735,8 +735,11 @@ try {
   ))
   await cdp.evaluate(`(() => {
     const card = document.querySelector('[data-project-card="${localProjectId}"]')
-    if (!(card instanceof HTMLButtonElement)) {
-      throw new Error('Pulled project card is not an interactive button')
+    if (card?.tagName !== 'BUTTON') {
+      throw new Error('Pulled project card must render as a BUTTON, found ' + (card?.tagName ?? 'nothing'))
+    }
+    if (card.disabled) {
+      throw new Error('Pulled project card must be enabled')
     }
     card.click()
     return true
@@ -903,8 +906,11 @@ try {
   ))
   await cdp.evaluate(`(() => {
     const card = document.querySelector('[data-project-card="${localProjectId}"]')
-    if (!(card instanceof HTMLButtonElement)) {
-      throw new Error('Pulled project card is not an interactive button')
+    if (card?.tagName !== 'BUTTON') {
+      throw new Error('Pulled project card must render as a BUTTON, found ' + (card?.tagName ?? 'nothing'))
+    }
+    if (card.disabled) {
+      throw new Error('Pulled project card must be enabled')
     }
     card.click()
   })()`)
@@ -914,6 +920,9 @@ try {
   await cdp.evaluate(`document.querySelector('[data-student-row="${localStudentOneId}"]').click()`)
   await waitFor('first student selected for portrait preview', () => cdp.evaluate(
     `document.querySelector('[data-student-row="${localStudentOneId}"]')?.getAttribute('aria-pressed') === 'true'`,
+  ))
+  await waitFor('selected student capture detail ready for live preview', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-filmstrip-capture]'))`,
   ))
 
   // Capture while disconnected. This exercises cached authorization, local

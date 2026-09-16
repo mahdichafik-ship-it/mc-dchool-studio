@@ -115,7 +115,7 @@ mkdirSync(watchFolder, { recursive: true })
 mkdirSync(droppedStudentOneDir, { recursive: true })
 mkdirSync(droppedStudentTwoDir, { recursive: true })
 mkdirSync(dirname(legacyPhotoPath), { recursive: true })
-writeFileSync(legacyPhotoPath, jpegFixture)
+writeFileSync(legacyPhotoPath, releasePreviewFixture)
 writeFileSync(droppedJpegOne, jpegFixture)
 writeFileSync(droppedRawOne, 'student-one-raw')
 writeFileSync(droppedJpegTwo, jpegFixture)
@@ -677,8 +677,31 @@ try {
   assert.equal(legacyReview.captures.length, 1, 'legacy JPEG must render as one review capture')
   assert.equal(legacyReview.captures[0].legacyPhoto.filePath, legacyPhotoPath)
   assert.equal(legacyReview.captures[0].files[0].storedPath, legacyPhotoPath)
-  assert.match(legacyReview.captures[0].legacyPhoto.previewUrl, /^mc-preview:\/\//)
   assert.equal(existsSync(legacyPhotoPath), true, 'upgrade must not move or delete the legacy portrait')
+  await cdp.evaluate('location.reload()')
+  await waitFor('legacy project card for cold-cache preview', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-project-card="${legacyProject.id}"]'))`,
+  ))
+  await cdp.evaluate(`document.querySelector('[data-project-card="${legacyProject.id}"]').click()`)
+  await waitFor('legacy student row for cold-cache preview', () => cdp.evaluate(
+    `Boolean(document.querySelector('[data-student-row="${legacyStudents[0].id}"]'))`,
+  ))
+  await cdp.evaluate(`document.querySelector('[data-student-row="${legacyStudents[0].id}"]').click()`)
+  const legacyPreview = await waitFor('migrated legacy portrait to paint after lazy hydration', () => cdp.evaluate(
+    `(() => {
+      const image = [...document.querySelectorAll('.shoot-preview img[alt^="Capture "]')]
+        .find((candidate) => candidate.src.startsWith('mc-preview://'))
+      if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false
+      return {
+        url: image.src,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      }
+    })()`,
+  ), 40_000)
+  assert.match(legacyPreview.url, /^mc-preview:\/\//)
+  assert(legacyPreview.width > 0 && legacyPreview.height > 0)
+  await cdp.evaluate(`document.querySelector('button[aria-label="Back to projects"]').click()`)
 
   const localProject = localProjects.find((project) => project.schoolName === projectName)
   assert(localProject, 'the pulled project must be available after the upgrade')

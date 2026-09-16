@@ -2563,10 +2563,7 @@ function PersistentQrCard({
 }
 
 function CaptureStage({ capture }: { capture: CaptureReview }) {
-  const imageSource = capture.legacyPhoto?.previewUrl
-    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
-    ?? capture.thumbnailData
-    ?? capture.legacyPhoto?.thumbnailData
+  const imageSource = useCapturePreviewSource(capture)
   const framing = capture.framing
   return (
     <div
@@ -2693,14 +2690,8 @@ function QuickLookDialog({
 }) {
   const [zoom, setZoom] = useState(1)
   const [compareLatest, setCompareLatest] = useState(false)
-  const captureSource = capture.legacyPhoto?.previewUrl
-    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
-    ?? capture.thumbnailData
-    ?? capture.legacyPhoto?.thumbnailData
-  const latestSource = latestCapture?.legacyPhoto?.previewUrl
-    ?? latestCapture?.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
-    ?? latestCapture?.thumbnailData
-    ?? latestCapture?.legacyPhoto?.thumbnailData
+  const captureSource = useCapturePreviewSource(capture)
+  const latestSource = useCapturePreviewSource(latestCapture)
   const displayedSource = compareLatest && latestSource ? latestSource : captureSource
   const displayedName = compareLatest && latestCapture ? latestCapture.baseFilename : capture.baseFilename
 
@@ -2793,6 +2784,51 @@ const defaultCaptureFraming: Omit<CaptureFraming, 'pending'> = {
   rotation: 0,
 }
 
+function useCapturePreviewSource(capture: CaptureReview | null): string | undefined {
+  const jpegFile = capture?.files.find((file) => file.fileRole === 'JPEG')
+  const immediateSource = capture?.legacyPhoto?.previewUrl
+    ?? jpegFile?.previewUrl
+    ?? capture?.thumbnailData
+    ?? capture?.legacyPhoto?.thumbnailData
+    ?? undefined
+  const filePath = jpegFile?.storedPath ?? capture?.legacyPhoto?.filePath
+  const previewKey = capture ? `gallery-capture-${capture.id}` : null
+  const [generatedPreview, setGeneratedPreview] = useState<{
+    previewKey: string
+    source: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (immediateSource || !previewKey || !filePath) return
+    let mounted = true
+    const cancel = previewScheduler.enqueue({
+      id: `selected-${previewKey}`,
+      priority: 'gallery',
+      execute: async (signal) => {
+        const source = await window.api.invoke('photos:getPreview', {
+          filePath,
+          previewKey,
+        })
+        if (
+          mounted
+          && !signal.aborted
+          && typeof source === 'string'
+          && source.startsWith('mc-preview://')
+        ) {
+          setGeneratedPreview({ previewKey, source })
+        }
+      },
+    })
+    return () => {
+      mounted = false
+      cancel()
+    }
+  }, [filePath, immediateSource, previewKey])
+
+  return immediateSource
+    ?? (generatedPreview?.previewKey === previewKey ? generatedPreview.source : undefined)
+}
+
 function ReframeEditor({
   capture,
   onCancel,
@@ -2806,10 +2842,7 @@ function ReframeEditor({
     ...defaultCaptureFraming,
     ...capture.framing,
   })
-  const source = capture.legacyPhoto?.previewUrl
-    ?? capture.files.find((file) => file.fileRole === 'JPEG')?.previewUrl
-    ?? capture.thumbnailData
-    ?? capture.legacyPhoto?.thumbnailData
+  const source = useCapturePreviewSource(capture)
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -3024,7 +3057,7 @@ function CaptureFilmstrip({
                   previewKey={`gallery-capture-${capture.id}`}
                   alt={`Capture ${capture.baseFilename}`}
                 />
-                {(source || fallback) && (
+                {(source || fallback || filePath) && (
                   <span
                     role="button"
                     tabIndex={0}

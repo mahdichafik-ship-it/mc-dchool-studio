@@ -98,11 +98,8 @@ const droppedJpegTwo = join(droppedStudentTwoDir, 'DSC_9000.JPG')
 const droppedRawTwo = join(droppedStudentTwoDir, 'DSC_9000.CR3')
 const dbPath = join(userDataDir, 'mc-school-studio.db')
 const legacyPhotoPath = join(root, 'legacy-existing', 'Legacy_Portrait.jpg')
-const jpegFixture = Buffer.from(
-  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=',
-  'base64',
-)
 const releasePreviewFixture = await createReleasePreviewFixture()
+const jpegFixture = Buffer.from(releasePreviewFixture)
 const debugPort = await reservePort()
 let online = true
 let retired = false
@@ -519,8 +516,52 @@ function required(name) {
   return value
 }
 
-async function waitForLivePreview(cdp) {
-  return waitFor('live mc-preview JPEG to paint visible pixels', async () => {
+async function installPreviewEventProbe(cdp, studentId, expectedFileName) {
+  const ready = await cdp.evaluate(`(() => {
+    window.__releaseSmokePreviewUnsubscribe?.()
+    window.__releaseSmokePreviewEvents = []
+    window.__releaseSmokePreviewReady = false
+    window.__releaseSmokePreviewUnsubscribe = window.api.on('photo:matched', (event) => {
+      if (
+        event.student.id === ${studentId}
+        && event.photo.fileName === ${JSON.stringify(expectedFileName)}
+        && event.preview
+      ) {
+        window.__releaseSmokePreviewEvents.push({
+          studentId: event.student.id,
+          captureId: event.captureId ?? null,
+          fileName: event.photo.fileName,
+          filePath: event.photo.filePath,
+          previewKey: event.previewKey ?? null,
+          previewUrl: event.photo.previewUrl ?? null,
+        })
+      }
+    })
+    window.__releaseSmokePreviewReady = true
+    return window.__releaseSmokePreviewReady
+      && Boolean(document.querySelector('[data-student-row="${studentId}"][aria-pressed="true"]'))
+      && Boolean(document.querySelector('[data-filmstrip-capture]'))
+  })()`)
+  assert.equal(
+    ready,
+    true,
+    `selected student renderer was not ready to observe ${expectedFileName}`,
+  )
+}
+
+async function waitForPreviewEvent(cdp, expectedFileName) {
+  return waitFor(`renderer preview event for ${expectedFileName}`, () => cdp.evaluate(`(() => {
+    if (!window.__releaseSmokePreviewReady) return null
+    return window.__releaseSmokePreviewEvents?.find((event) =>
+      event.fileName === ${JSON.stringify(expectedFileName)}
+      && event.previewUrl?.startsWith('mc-preview://')
+      && event.previewKey
+    ) ?? null
+  })()`), 40_000)
+}
+
+async function waitForLivePreview(cdp, expectedPreview) {
+  return waitFor(`live mc-preview JPEG for ${expectedPreview.fileName} to paint visible pixels`, async () => {
     const state = await cdp.evaluate(`(async () => {
     const canvas = document.querySelector('canvas[role="img"][aria-label^="Latest capture"]')
     const image = document.querySelector('img[alt^="Latest capture"]')
@@ -576,7 +617,8 @@ async function waitForLivePreview(cdp) {
     }
     return state
   })()`)
-    const ready = state.url?.startsWith('mc-preview://')
+    const ready = state.url === expectedPreview.previewUrl
+      && state.url?.startsWith('mc-preview://')
       && state.protocolStatus === 200
       && /^image\/jpeg(?:;|$)/i.test(state.contentType ?? '')
       && state.responseBytes > 0
@@ -928,10 +970,22 @@ try {
   // Capture while disconnected. This exercises cached authorization, local
   // matching, durable pending state, and remote-ID mapping. Reconnecting must
   // not silently upload; the photographer explicitly retries the pending file.
+  const expectedPreviewFileName = `John_Smith_${studentReference}-2.jpg`
+  await installPreviewEventProbe(cdp, localStudentOneId, expectedPreviewFileName)
   online = false
   writeFileSync(sourcePhoto, releasePreviewFixture)
 
-  const livePreview = await waitForLivePreview(cdp)
+  const expectedPreview = await waitForPreviewEvent(cdp, expectedPreviewFileName)
+  assert.equal(expectedPreview.studentId, localStudentOneId)
+  assert.equal(expectedPreview.fileName, expectedPreviewFileName)
+  assert(expectedPreview.previewKey)
+  assert.match(expectedPreview.previewUrl, /^mc-preview:\/\//)
+  const livePreview = await waitForLivePreview(cdp, expectedPreview)
+  assert.equal(
+    livePreview.url,
+    expectedPreview.previewUrl,
+    `rendered preview did not belong to ${expectedPreviewFileName}`,
+  )
   assert.equal(livePreview.protocolStatus, 200, `mc-preview protocol failed: ${JSON.stringify(livePreview)}`)
   assert.match(
     livePreview.contentType,

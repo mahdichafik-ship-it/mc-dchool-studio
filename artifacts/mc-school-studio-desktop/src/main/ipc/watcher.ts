@@ -1176,32 +1176,11 @@ async function handleNewPhoto(
       : capturedStudentId !== null ? 'qr' : 'none')
   const manualStudentId = assignmentSource === 'manual' ? capturedStudentId : null
   const knownStudents = db.select().from(studentsTable).where(eq(studentsTable.projectId, projectId)).all()
-  let qrResult = manualStudentId !== null
-    ? await readQrFromImage(capture.filePath, capture.sourceBuffer)
-    : null
-
-  // A manual target must not turn a QR marker into a portrait just because
-  // the marker filename happens to resemble a Smart Shooter filename.
-  if (manualStudentId !== null && qrResult) {
-    const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
-    const qrStudent = knownStudents.find((candidate) =>
-      candidate.generatedStudentId.trim().toLocaleLowerCase() === normalizedQrStudentId)
-    const decision = advanceSequence(session.sequenceState, {
-      kind: 'marker',
-      studentId: qrStudent?.id ?? null,
-      reference: qrResult.studentId,
-    })
-    recordUnmatched(
-      db,
-      win,
-      projectId,
-      capture,
-      decision.kind === 'review'
-        ? decision.reason
-        : `QR marker "${qrResult.studentId}" was ignored while a student is manually selected`,
-    )
-    return 'unmatched'
-  }
+  // Preserve the proven v1.0.66 fast path: an explicit roster selection is
+  // authoritative, so portraits reach preview and assignment without waiting
+  // for full-image QR analysis. QR sequencing remains active only when there
+  // is no manual student/person target.
+  let qrResult: QrResult | null = null
 
   // A QR-sequenced target is also authoritative for this capture, but unlike
   // a manual target it may be advanced by a later marker. Keep marker

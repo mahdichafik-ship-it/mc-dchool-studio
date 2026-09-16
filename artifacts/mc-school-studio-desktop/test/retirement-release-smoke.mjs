@@ -760,30 +760,69 @@ try {
   })`)
   await dropFilesOnStudent(cdp, localStudentOneId, [droppedJpegOne, droppedRawOne])
   await dropFilesOnStudent(cdp, localStudentTwoId, [droppedJpegTwo, droppedRawTwo])
-  await waitFor('four dropped files in Live Upload', async () => {
-    const state = await cdp.evaluate(
-      `window.api.invoke('upload:getLiveState', { projectId: ${localProjectId} })`,
-    )
-    return state.pending === 4
-  }, 40_000)
   assert.equal(
     await cdp.evaluate(`window.api.invoke('watcher:getActiveStudent', { projectId: ${localProjectId} })`),
     localStudentOneId,
     'dropping files on another student must not change the selected camera target',
   )
 
-  const assertDroppedCaptures = async () => {
+  const readDroppedCaptureState = async () => {
     const first = await cdp.evaluate(
       `window.api.invoke('captures:list', { studentId: ${localStudentOneId} })`,
     )
     const second = await cdp.evaluate(
       `window.api.invoke('captures:list', { studentId: ${localStudentTwoId} })`,
     )
-    for (const [review, expectedStudent] of [
-      [first, localStudentOneId],
-      [second, localStudentTwoId],
+    const queue = await cdp.evaluate(
+      `window.api.invoke('upload:getQueue', { projectId: ${localProjectId} })`,
+    )
+    return { first, second, queue }
+  }
+
+  const findDroppedCapture = (review, expectedSources) => review.captures.find((capture) => {
+    const sources = capture.files.map((file) => file.sourcePath).filter(Boolean).sort()
+    return sources.length === expectedSources.length
+      && sources.every((source, index) => source === expectedSources[index])
+  })
+  const firstDroppedSources = [droppedJpegOne, droppedRawOne].sort()
+  const secondDroppedSources = [droppedJpegTwo, droppedRawTwo].sort()
+
+  const hasDurableDroppedCaptureState = ({ first, second, queue }) => {
+    const firstDropped = findDroppedCapture(first, firstDroppedSources)
+    const secondDropped = findDroppedCapture(second, secondDroppedSources)
+    if (
+      !firstDropped
+      || firstDropped.studentId !== localStudentOneId
+      || firstDropped.pairingStatus !== 'complete'
+      || !secondDropped
+      || secondDropped.studentId !== localStudentTwoId
+      || secondDropped.pairingStatus !== 'complete'
+    ) return false
+
+    const hasExpectedRoles = (capture) =>
+      capture.files.map((file) => file.fileRole).sort().join(',') === 'JPEG,RAW'
+    if (!hasExpectedRoles(firstDropped) || !hasExpectedRoles(secondDropped)) return false
+
+    const droppedQueue = queue.filter((item) => item.fileName.startsWith('DSC_9000.'))
+    return queue.filter((item) => item.fileName === 'DSC_9000.JPG').length === 2
+      && queue.filter((item) => item.fileName === 'DSC_9000.CR3').length === 2
+      && [...new Set(droppedQueue.map((item) => item.subject))].sort().join(',')
+        === 'John Smith,Maya Chen'
+  }
+
+  let droppedCaptureState
+  await waitFor('durable dropped captures and transfer queue', async () => {
+    droppedCaptureState = await readDroppedCaptureState()
+    return hasDurableDroppedCaptureState(droppedCaptureState)
+  }, 40_000)
+
+  const assertDroppedCaptures = async (state) => {
+    state ??= await readDroppedCaptureState()
+    for (const [review, expectedStudent, expectedSources] of [
+      [state.first, localStudentOneId, firstDroppedSources],
+      [state.second, localStudentTwoId, secondDroppedSources],
     ]) {
-      const dropped = review.captures.find((capture) => capture.baseFilename === 'dsc_9000')
+      const dropped = findDroppedCapture(review, expectedSources)
       assert(dropped, `student ${expectedStudent} must retain the dropped capture`)
       assert.equal(dropped.studentId, expectedStudent)
       assert.equal(dropped.pairingStatus, 'complete')
@@ -791,10 +830,13 @@ try {
         dropped.files.map((file) => file.fileRole).sort(),
         ['JPEG', 'RAW'],
       )
+      assert.deepEqual(
+        dropped.files.map((file) => file.sourcePath).sort(),
+        expectedSources,
+        `student ${expectedStudent} must retain only its own dropped source files`,
+      )
     }
-    const queue = await cdp.evaluate(
-      `window.api.invoke('upload:getQueue', { projectId: ${localProjectId} })`,
-    )
+    const { queue } = state
     assert.equal(queue.filter((item) => item.fileName === 'DSC_9000.JPG').length, 2)
     assert.equal(queue.filter((item) => item.fileName === 'DSC_9000.CR3').length, 2)
     assert.deepEqual(
@@ -803,7 +845,7 @@ try {
       ['John Smith', 'Maya Chen'],
     )
   }
-  await assertDroppedCaptures()
+  await assertDroppedCaptures(droppedCaptureState)
 
   cdp.close()
   cdp = undefined

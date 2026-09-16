@@ -592,7 +592,10 @@ export function registerWatcherHandlers() {
       // Capture identity synchronously with the filesystem event. Waiting for
       // file stability before taking this snapshot lets a fast roster click
       // move a JPEG/RAW into the next student's folder.
-      const target = snapshotCaptureTarget(session.sequenceState)
+      const target = snapshotCaptureTarget(
+        session.sequenceState,
+        pendingManualTargets.get(projectId),
+      )
       const arrivalOrder = session.nextArrivalOrder++
       session.orderedCaptures.register(arrivalOrder)
       const enqueueTask = enqueueCapture(projectId, filePath, diagnosticId, {
@@ -654,7 +657,7 @@ export function registerWatcherHandlers() {
     'watcher:getActiveStudent',
     (_e, { projectId }: { projectId: number }): number | null => {
       const session = watchers.get(projectId)
-      return session?.sequenceState.activeStudentId ?? pendingManualTargets.get(projectId) ?? null
+      return pendingManualTargets.get(projectId) ?? session?.sequenceState.activeStudentId ?? null
     },
   )
 

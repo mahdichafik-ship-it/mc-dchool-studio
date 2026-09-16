@@ -130,10 +130,16 @@ export function clearManualStudent(state: SequenceState): void {
  * from SequenceState again after waiting for file stability: that would let a
  * later roster click reassign an already-captured file.
  */
-export function snapshotCaptureTarget(state: SequenceState): {
+export function snapshotCaptureTarget(
+  state: SequenceState,
+  authoritativeManualStudentId?: number,
+): {
   studentId: number | null
   source: CaptureAssignmentSource
 } {
+  if (authoritativeManualStudentId !== undefined) {
+    return { studentId: authoritativeManualStudentId, source: 'manual' }
+  }
   if (state.manualStudentId !== null) {
     return { studentId: state.manualStudentId, source: 'manual' }
   }

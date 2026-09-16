@@ -11,6 +11,12 @@
 name: Desktop Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Stable desktop version to build without publishing
+        required: true
+        type: string
   push:
     branches:
       - "**"
@@ -57,7 +63,7 @@ jobs:
   # genuinely dark photographs. This gate runs before any desktop packaging.
   # ---------------------------------------------------------------------------
   test-capture-integrity:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -88,7 +94,7 @@ jobs:
   # ---------------------------------------------------------------------------
   verify-release-history:
     name: Release history validation
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -123,7 +129,7 @@ jobs:
   # macOS — produces separate installers for Intel and Apple silicon Macs.
   # ---------------------------------------------------------------------------
   build-mac:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
     needs: [test-capture-integrity, verify-release-history]
     strategy:
       fail-fast: false
@@ -149,10 +155,37 @@ jobs:
           uname -a
           test "$(uname -m)" = "$EXPECTED_RUNNER_ARCHITECTURE"
 
-      - name: Verify release tag matches app version
+      - name: Verify requested version matches app version
         env:
+          EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node -e "const fs=require('fs'); const tag=process.env.RELEASE_TAG; const version=JSON.parse(fs.readFileSync('artifacts/mc-school-studio-desktop/package.json','utf8')).version; if(!/^v\\d+\\.\\d+\\.\\d+$/.test(tag) || !/^\\d+\\.\\d+\\.\\d+$/.test(version) || tag !== 'v'+version){console.error('Release tag '+tag+' must be stable semver and match desktop package version v'+version);process.exit(1)}"
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const eventName = process.env.EVENT_NAME
+          const tag = process.env.RELEASE_TAG
+          const candidateVersion = process.env.CANDIDATE_VERSION
+          const packageVersion = JSON.parse(
+            fs.readFileSync('artifacts/mc-school-studio-desktop/package.json', 'utf8'),
+          ).version
+          const stableVersion = /^\d+\.\d+\.\d+$/
+
+          if (!stableVersion.test(packageVersion)) {
+            throw new Error(`Desktop package version ${packageVersion} is not stable semver`)
+          }
+          if (eventName === 'workflow_dispatch') {
+            if (!stableVersion.test(candidateVersion) || candidateVersion !== packageVersion) {
+              throw new Error(
+                `Candidate version ${candidateVersion} must match desktop package version ${packageVersion}`,
+              )
+            }
+          } else if (!/^v\d+\.\d+\.\d+$/.test(tag) || tag !== `v${packageVersion}`) {
+            throw new Error(
+              `Release tag ${tag} must match desktop package version v${packageVersion}`,
+            )
+          }
+          NODE
 
       - name: Verify macOS signing credentials
         env:
@@ -292,11 +325,11 @@ jobs:
 
       - name: Verify macOS packages are signed and notarized
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_version || github.ref_name }}
           PACKAGE_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
+          version="${RELEASE_VERSION#v}"
 
           verify_app() {
             app_path="$1"
@@ -371,10 +404,10 @@ jobs:
 
       - name: Merge and validate electron-updater metadata
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_version || github.ref_name }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
+          version="${RELEASE_VERSION#v}"
           pnpm --filter @workspace/mc-school-studio-desktop run merge:mac-updater \
             "$GITHUB_WORKSPACE/release" "$version"
           pnpm --filter @workspace/mc-school-studio-desktop run validate:updater \
@@ -440,11 +473,11 @@ jobs:
 
       - name: Exercise retirement reconnect in packaged signed app
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_version || github.ref_name }}
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
+          version="${RELEASE_VERSION#v}"
           smoke_dir="$(mktemp -d)"
           ditto -x -k \
             "release/mc-school-studio-${version}-${EXPECTED_ARCHITECTURE}.zip" \
@@ -456,6 +489,7 @@ jobs:
             pnpm --filter @workspace/mc-school-studio-desktop run test:retirement-release
 
   publish-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [combine-mac, retirement-smoke]
     permissions:
       contents: write

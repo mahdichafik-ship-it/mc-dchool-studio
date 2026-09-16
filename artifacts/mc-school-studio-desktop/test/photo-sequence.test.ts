@@ -190,6 +190,18 @@ test('snapshots manual authority before delayed file stability and never reassig
   assert.deepEqual(second, { studentId: 202, source: 'manual' })
 })
 
+test('uses the authoritative project target when watcher session state has drifted', () => {
+  const state = createSequenceState()
+  state.activeStudentId = 303
+
+  assert.deepEqual(
+    snapshotCaptureTarget(state, 101),
+    { studentId: 101, source: 'manual' },
+  )
+  assert.equal(state.activeStudentId, 303)
+  assert.equal(state.manualStudentId, null)
+})
+
 test('distinguishes QR authority from manual authority for delayed processing', () => {
   const state = createSequenceState()
   state.activeStudentId = 303

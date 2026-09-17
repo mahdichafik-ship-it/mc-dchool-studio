@@ -575,6 +575,10 @@ async function waitForLivePreview(cdp, expectedPreview) {
       canvasHeight: canvas?.height ?? null,
       canvasVisiblePixels: null,
       canvasDisplay: canvas ? getComputedStyle(canvas).display : null,
+       imageComplete: image?.complete ?? false,
+       imageNaturalWidth: image?.naturalWidth ?? 0,
+       imageNaturalHeight: image?.naturalHeight ?? 0,
+       imageDisplay: image ? getComputedStyle(image).display : null,
       canvasError: null,
     }
     if (!url) return state
@@ -623,8 +627,15 @@ async function waitForLivePreview(cdp, expectedPreview) {
       && state.decodedHeight > 0
       && state.canvasWidth > 0
       && state.canvasHeight > 0
-      && state.canvasDisplay !== 'none'
-      && state.canvasVisiblePixels > 0
+       && (
+         (state.canvasDisplay !== 'none' && state.canvasVisiblePixels > 0)
+         || (
+           state.imageComplete
+           && state.imageNaturalWidth > 0
+           && state.imageNaturalHeight > 0
+           && state.imageDisplay !== 'none'
+         )
+       )
     if (ready) return state
     throw new Error(`live preview not ready: ${JSON.stringify(state)}`)
   }, 40_000)

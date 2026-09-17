@@ -20,6 +20,26 @@ import { accessibleProjectIds, canAccessProject, getStudioMember, isStudioManage
 import { randomBytes } from "node:crypto";
 import { enqueueR2PhotoDeletionsForProject } from "../lib/r2PhotoDeletionOutbox";
 
+async function getPixiesetReadiness(projectId: number) {
+  const students = await db
+    .select({
+      email: studentsTable.email,
+      guardianFirstName: studentsTable.guardianFirstName,
+      firstName: studentsTable.firstName,
+    })
+    .from(studentsTable)
+    .where(eq(studentsTable.projectId, projectId));
+  const missingEmail = students.filter((s) => !s.email?.trim()).length;
+  const missingGuardianFirstName = students.filter((s) => !s.guardianFirstName?.trim()).length;
+  return {
+    total: students.length,
+    contactReady: students.filter((s) => s.email?.trim() && s.guardianFirstName?.trim()).length,
+    missingEmail,
+    missingGuardianFirstName,
+    ready: missingEmail === 0 && missingGuardianFirstName === 0,
+  };
+}
+
 const router = Router();
 
 // GET /api/projects
@@ -61,6 +81,7 @@ router.get("/", requireAuth, async (req, res) => {
         ...p,
         classCount,
         studentCount,
+        pixiesetReadiness: await getPixiesetReadiness(p.id),
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString(),
       };
@@ -302,11 +323,13 @@ router.get("/:projectId", requireAuth, async (req, res) => {
     .select({ studentCount: count() })
     .from(studentsTable)
     .where(eq(studentsTable.projectId, projectId));
+  const pixiesetReadiness = await getPixiesetReadiness(projectId);
 
   res.json({
     ...project,
     classCount,
     studentCount,
+    pixiesetReadiness,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
   });

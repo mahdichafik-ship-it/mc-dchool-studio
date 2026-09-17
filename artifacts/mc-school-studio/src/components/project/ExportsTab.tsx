@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Project } from '@workspace/api-client-react';
-import { Download, FileArchive, QrCode, MonitorDown } from 'lucide-react';
+import { Download, FileArchive, QrCode, MonitorDown, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'wouter';
 
@@ -26,6 +26,32 @@ export function ExportsTab({ project, isCorporate }: { project: Project, isCorpo
         <p className="text-sm text-slate-500 mb-6">
           Download QR codes and {isCorporate ? 'employee' : 'student'} data for {isCorporate ? 'headshot day' : 'photo day'}. Make sure to generate QR codes for all {isCorporate ? 'employees' : 'students'} before exporting.
         </p>
+      </div>
+
+      <div className={`rounded-xl border p-5 ${project.pixiesetReadiness?.ready ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+        <div className="flex items-start gap-3">
+          {project.pixiesetReadiness?.ready
+            ? <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-600" />
+            : <AlertTriangle className="mt-0.5 h-5 w-5 text-amber-600" />}
+          <div>
+            <h4 className="font-semibold text-slate-900">Pixieset contact readiness</h4>
+            <p className="mt-1 text-sm text-slate-600">
+              {project.pixiesetReadiness
+                ? `${project.pixiesetReadiness.contactReady} of ${project.pixiesetReadiness.total} records have the required Pixieset contact details.`
+                : 'Checking roster contact fields…'}
+            </p>
+            {!!project.pixiesetReadiness?.missingEmail && (
+              <p className="mt-1 text-xs text-amber-800">
+                {project.pixiesetReadiness.missingEmail} record(s) need an email before a valid Pixieset CSV can be created. Capture and normal delivery remain available.
+              </p>
+            )}
+            {!!project.pixiesetReadiness?.missingGuardianFirstName && (
+              <p className="mt-1 text-xs text-amber-800">
+                {project.pixiesetReadiness.missingGuardianFirstName} record(s) need a parent or guardian first name. Capture and normal delivery remain available.
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

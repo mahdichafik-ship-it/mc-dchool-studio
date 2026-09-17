@@ -13,6 +13,8 @@ export interface StudentPatch {
   lastName?: string;
   /** @nullable */
   generatedStudentId?: string | null;
+  /** @nullable */
+  schoolId?: string | null;
   classId?: number;
   /** @nullable */
   email?: string | null;
@@ -20,6 +22,26 @@ export interface StudentPatch {
   phone?: string | null;
   /** @nullable */
   secondaryEmail?: string | null;
+  /** @nullable */
+  guardianFirstName?: string | null;
+  /** @nullable */
+  guardianLastName?: string | null;
+  /** @nullable */
+  company?: string | null;
+  /** @nullable */
+  addressLine1?: string | null;
+  /** @nullable */
+  addressLine2?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  stateProvince?: string | null;
+  /** @nullable */
+  zipPostalCode?: string | null;
+  /** @nullable */
+  country?: string | null;
+  /** @nullable */
+  contactNote?: string | null;
   /** @nullable */
   jobTitle?: string | null;
   /** @nullable */

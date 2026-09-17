@@ -5,6 +5,7 @@
  * MC School Studio API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PixiesetReadiness } from './pixiesetReadiness';
 import type { ProjectProjectType } from './projectProjectType';
 
 export interface Project {
@@ -29,4 +30,5 @@ export interface Project {
   studentCount: number;
   createdAt: string;
   updatedAt: string;
+  pixiesetReadiness?: PixiesetReadiness;
 }

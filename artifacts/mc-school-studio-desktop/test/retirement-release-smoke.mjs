@@ -966,6 +966,9 @@ try {
   await waitFor('selected student capture detail ready for live preview', () => cdp.evaluate(
     `Boolean(document.querySelector('[data-filmstrip-capture]'))`,
   ))
+  await waitFor('restarted project watcher', () => cdp.evaluate(
+    `window.api.invoke('watcher:isRunning', { projectId: ${localProjectId} })`,
+  ))
 
   // Capture while disconnected. This exercises cached authorization, local
   // matching, durable pending state, and remote-ID mapping. Reconnecting must

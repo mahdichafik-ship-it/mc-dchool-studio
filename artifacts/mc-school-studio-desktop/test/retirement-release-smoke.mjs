@@ -1107,6 +1107,11 @@ try {
 
   console.log('Packaged retirement smoke test passed.')
 } catch (error) {
+  const annotation = String(error?.stack ?? error)
+    .replaceAll('%', '%25')
+    .replaceAll('\r', '%0D')
+    .replaceAll('\n', '%0A')
+  console.error(`::error title=Packaged retirement smoke failed::${annotation}`)
   console.error([
     `[smoke] runner=${execFileSync('/usr/bin/uname', ['-a'], { encoding: 'utf8' }).trim()}`,
     `[smoke] executable=${appExecutable}`,

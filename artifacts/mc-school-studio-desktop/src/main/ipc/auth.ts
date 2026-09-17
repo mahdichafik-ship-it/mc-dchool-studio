@@ -2,7 +2,20 @@ import { ipcMain, shell } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import { getDb, getPhotosDir } from '../db'
-import { photosTable, projectsTable } from '../db/schema'
+import {
+  capturesTable,
+  classesTable,
+  groupCaptureFilesTable,
+  groupCapturesTable,
+  groupMembersTable,
+  groupsTable,
+  imageFilesTable,
+  photosTable,
+  projectsTable,
+  qrMarkersTable,
+  studentsTable,
+} from '../db/schema'
+import { inArray } from 'drizzle-orm'
 import { retireLocalProjects } from '../lib/retirement'
 import { enableWatchersAfterSignIn, stopAllWatchersForRetirement } from './watcher'
 import { disableCloudImportsForRetirement, enableCloudImportsAfterSignIn } from './cloud'
@@ -49,7 +62,79 @@ async function clearLocalProjectData() {
         .all()
         .map((photo) => photo.filePath),
       clearProjects: () => {
-        db.delete(projectsTable).run()
+        const projectIds = db
+          .select({ id: projectsTable.id })
+          .from(projectsTable)
+          .all()
+          .map((project) => project.id)
+        if (projectIds.length === 0) return
+
+        db.transaction((tx) => {
+          const captureIds = tx
+            .select({ id: capturesTable.id })
+            .from(capturesTable)
+            .where(inArray(capturesTable.projectId, projectIds))
+            .all()
+            .map((capture) => capture.id)
+          const groupCaptureIds = tx
+            .select({ id: groupCapturesTable.id })
+            .from(groupCapturesTable)
+            .where(inArray(groupCapturesTable.projectId, projectIds))
+            .all()
+            .map((capture) => capture.id)
+          const groupIds = tx
+            .select({ id: groupsTable.id })
+            .from(groupsTable)
+            .where(inArray(groupsTable.projectId, projectIds))
+            .all()
+            .map((group) => group.id)
+
+          if (captureIds.length > 0) {
+            tx.delete(imageFilesTable)
+              .where(inArray(imageFilesTable.captureId, captureIds))
+              .run()
+          }
+          if (groupCaptureIds.length > 0) {
+            tx.delete(groupCaptureFilesTable)
+              .where(inArray(groupCaptureFilesTable.captureId, groupCaptureIds))
+              .run()
+          }
+          if (groupIds.length > 0) {
+            tx.delete(groupMembersTable)
+              .where(inArray(groupMembersTable.groupId, groupIds))
+              .run()
+          }
+          tx.delete(qrMarkersTable)
+            .where(inArray(qrMarkersTable.projectId, projectIds))
+            .run()
+          if (groupCaptureIds.length > 0) {
+            tx.delete(groupCapturesTable)
+              .where(inArray(groupCapturesTable.id, groupCaptureIds))
+              .run()
+          }
+          if (captureIds.length > 0) {
+            tx.delete(capturesTable)
+              .where(inArray(capturesTable.id, captureIds))
+              .run()
+          }
+          if (groupIds.length > 0) {
+            tx.delete(groupsTable)
+              .where(inArray(groupsTable.id, groupIds))
+              .run()
+          }
+          tx.delete(photosTable)
+            .where(inArray(photosTable.projectId, projectIds))
+            .run()
+          tx.delete(studentsTable)
+            .where(inArray(studentsTable.projectId, projectIds))
+            .run()
+          tx.delete(classesTable)
+            .where(inArray(classesTable.projectId, projectIds))
+            .run()
+          tx.delete(projectsTable)
+            .where(inArray(projectsTable.id, projectIds))
+            .run()
+        })
       },
     },
     {

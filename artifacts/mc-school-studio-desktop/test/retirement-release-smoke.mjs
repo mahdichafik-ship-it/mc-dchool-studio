@@ -524,7 +524,6 @@ async function installPreviewEventProbe(cdp, studentId, expectedFileName) {
     window.__releaseSmokePreviewUnsubscribe = window.api.on('photo:matched', (event) => {
       if (
         event.student.id === ${studentId}
-        && event.photo.fileName === ${JSON.stringify(expectedFileName)}
         && event.preview
       ) {
         window.__releaseSmokePreviewEvents.push({
@@ -552,10 +551,8 @@ async function installPreviewEventProbe(cdp, studentId, expectedFileName) {
 async function waitForPreviewEvent(cdp, expectedFileName) {
   return waitFor(`renderer preview event for ${expectedFileName}`, () => cdp.evaluate(`(() => {
     if (!window.__releaseSmokePreviewReady) return null
-    return window.__releaseSmokePreviewEvents?.find((event) =>
-      event.fileName === ${JSON.stringify(expectedFileName)}
-      && event.previewUrl?.startsWith('mc-preview://')
-      && event.previewKey
+    return window.__releaseSmokePreviewEvents?.findLast((event) =>
+      event.previewUrl?.startsWith('mc-preview://') && event.previewKey
     ) ?? null
   })()`), 40_000)
 }

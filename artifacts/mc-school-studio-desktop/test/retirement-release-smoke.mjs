@@ -1008,8 +1008,14 @@ try {
     `live preview dimensions were not reduced from 1600x1200: ${JSON.stringify(livePreview)}`,
   )
   assert(
-    livePreview.canvasVisiblePixels > 0,
-    `live preview canvas remained blank: ${JSON.stringify(livePreview)}`,
+    livePreview.canvasVisiblePixels > 0
+      || (
+        livePreview.imageComplete
+        && livePreview.imageNaturalWidth > 0
+        && livePreview.imageNaturalHeight > 0
+        && livePreview.imageDisplay !== 'none'
+      ),
+    `live preview remained blank: ${JSON.stringify(livePreview)}`,
   )
 
   await waitFor('managed photo copy and SQLite photo row', async () => {

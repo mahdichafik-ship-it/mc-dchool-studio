@@ -1020,9 +1020,13 @@ try {
 
   await waitFor('managed photo copy and SQLite photo row', async () => {
     const project = await cdp.evaluate(`window.api.invoke('projects:get', { projectId: ${localProjectId} })`)
-    return project?.photoCount === 3 && findFiles(storageRoot).some((path) => basename(path) === managedPhotoName)
+    return project?.photoCount === 3 && findFiles(storageRoot).some((path) =>
+      new RegExp(`^John_Smith_${studentReference}(?:-\\d+)?\\.jpg$`, 'i').test(basename(path)),
+    )
   }, 40_000)
-  const managedPhoto = findFiles(storageRoot).find((path) => basename(path) === managedPhotoName)
+  const managedPhoto = findFiles(storageRoot).find((path) =>
+    new RegExp(`^John_Smith_${studentReference}(?:-\\d+)?\\.jpg$`, 'i').test(basename(path)),
+  )
   assert(managedPhoto)
   assert.deepEqual(readFileSync(managedPhoto), readFileSync(sourcePhoto))
 

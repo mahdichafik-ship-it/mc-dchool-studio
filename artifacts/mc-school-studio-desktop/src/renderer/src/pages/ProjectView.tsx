@@ -2056,12 +2056,6 @@ function StudentDetail({
   const livePreviewMatchesLatest = Boolean(
     isFollowingLatest
     && livePreview?.photo.previewUrl
-    && latestCapture?.legacyPhoto
-    && (
-      (livePreview.previewKey && livePreview.previewKey === latestCapture.legacyPhoto.previewKey)
-      || livePreview.photo.id === latestCapture.legacyPhoto.id
-      || livePreview.photo.filePath === latestCapture.legacyPhoto.filePath
-    ),
   )
 
   useEffect(() => {

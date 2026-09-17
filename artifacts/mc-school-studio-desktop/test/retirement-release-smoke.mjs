@@ -968,7 +968,7 @@ try {
   // Capture while disconnected. This exercises cached authorization, local
   // matching, durable pending state, and remote-ID mapping. Reconnecting must
   // not silently upload; the photographer explicitly retries the pending file.
-  const expectedPreviewFileName = `John_Smith_${studentReference}-2.jpg`
+  const expectedPreviewFileName = managedPhotoName
   await installPreviewEventProbe(cdp, localStudentOneId, expectedPreviewFileName)
   online = false
   writeFileSync(sourcePhoto, releasePreviewFixture)

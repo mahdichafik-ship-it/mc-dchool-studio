@@ -1036,11 +1036,17 @@ try {
   const waitingUploads = await cdp.evaluate(
     `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
   )
-  const sourcePhotoUpload = waitingUploads.reduce(
-    (latest, photo) => !latest || photo.id > latest.id ? photo : latest,
-    null,
-  )
-  assert(sourcePhotoUpload, 'the later watched JPEG must have a durable upload row')
+  const watchedPhotoIds = querySqlite(
+    dbPath,
+    `SELECT id FROM photos
+       WHERE project_id = ${localProjectId}
+         AND is_matched = 1
+         AND file_path = '${managedPhoto.replaceAll("'", "''")}'
+       ORDER BY id;`,
+  ).split('\n').filter(Boolean).map(Number)
+  assert.deepEqual(watchedPhotoIds.length, 1, 'the watched JPEG path must identify exactly one durable upload row')
+  const sourcePhotoUpload = waitingUploads.find((photo) => photo.id === watchedPhotoIds[0])
+  assert(sourcePhotoUpload, 'the watched JPEG must have a durable upload row')
   assert.equal(
     sourcePhotoUpload.uploadStatus,
     null,

@@ -128,8 +128,13 @@ export function registerCloudHandlers() {
           students: {
             id: number; classId: number; className: string | null
             firstName: string; lastName: string; generatedStudentId: string
+             schoolId?: string | null
             email?: string | null; phone?: string | null
             secondaryEmail?: string | null; jobTitle?: string | null
+             guardianFirstName?: string | null; guardianLastName?: string | null
+             company?: string | null; addressLine1?: string | null; addressLine2?: string | null
+             city?: string | null; stateProvince?: string | null; zipPostalCode?: string | null
+             country?: string | null; contactNote?: string | null
             officeLocation?: string | null; photoSession?: string | null
             captureNotes?: string | null
             simpleQr?: string | null; jsonQr?: string | null
@@ -222,9 +227,20 @@ export function registerCloudHandlers() {
               firstName: student.firstName,
               lastName: student.lastName,
               generatedStudentId: student.generatedStudentId,
+               schoolId: student.schoolId ?? null,
               email: student.email ?? null,
               phone: student.phone ?? null,
                secondaryEmail: student.secondaryEmail ?? null,
+               guardianFirstName: student.guardianFirstName ?? null,
+               guardianLastName: student.guardianLastName ?? null,
+               company: student.company ?? null,
+               addressLine1: student.addressLine1 ?? null,
+               addressLine2: student.addressLine2 ?? null,
+               city: student.city ?? null,
+               stateProvince: student.stateProvince ?? null,
+               zipPostalCode: student.zipPostalCode ?? null,
+               country: student.country ?? null,
+               contactNote: student.contactNote ?? null,
                jobTitle: student.jobTitle ?? null,
                officeLocation: student.officeLocation ?? null,
                photoSession: student.photoSession ?? null,

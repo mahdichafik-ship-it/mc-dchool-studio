@@ -61,6 +61,21 @@ function guessColumnByKeywords(headers: string[], keywords: string[]): string {
   return headers.find((_, i) => keywords.some(k => lowerHeaders[i].includes(k))) || '';
 }
 
+function ColumnSelect({ label, value, headers, onChange }: { label: string; value: string; headers: string[]; onChange: (value: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <Label className="text-slate-500">{label} <span className="text-slate-400 font-normal">(Optional)</span></Label>
+      <Select value={value || 'none'} onValueChange={v => onChange(v === 'none' ? '' : v)}>
+        <SelectTrigger><SelectValue placeholder="-- Skip --" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">-- Skip --</SelectItem>
+          {headers.map((h, i) => <SelectItem key={`${label}-${i}`} value={h}>{h || `(column ${i + 1})`}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 export default function ProjectImport() {
   const [match, params] = useRoute('/projects/:projectId/import');
   const projectId = match && params?.projectId ? parseInt(params.projectId, 10) : null;
@@ -89,9 +104,20 @@ export default function ProjectImport() {
     firstNameColumn: string;
     lastNameColumn: string;
     studentIdColumn: string;
+    schoolIdColumn: string;
     emailColumn: string;
     phoneColumn: string;
     secondaryEmailColumn: string;
+    guardianFirstNameColumn: string;
+    guardianLastNameColumn: string;
+    companyColumn: string;
+    addressLine1Column: string;
+    addressLine2Column: string;
+    cityColumn: string;
+    stateProvinceColumn: string;
+    zipPostalCodeColumn: string;
+    countryColumn: string;
+    contactNoteColumn: string;
     jobTitleColumn: string;
     officeLocationColumn: string;
     photoSessionColumn: string;
@@ -136,9 +162,20 @@ export default function ProjectImport() {
             firstNameColumn: guessColumnByKeywords(sheet.headers, ['first', 'prenom', 'prénom']),
             lastNameColumn: guessColumnByKeywords(sheet.headers, ['last', 'nom', 'surname']),
             studentIdColumn: guessIdColumn(sheet.headers),
+            schoolIdColumn: guessColumnByKeywords(sheet.headers, ['school id', 'student number', 'matricule', 'student no']),
             emailColumn: guessPrimaryEmailColumn(sheet.headers),
             phoneColumn: guessColumnByKeywords(sheet.headers, ['phone', 'tel', 'mobile', 'gsm', 'portable']),
             secondaryEmailColumn: guessSecondaryEmailColumn(sheet.headers),
+            guardianFirstNameColumn: guessColumnByKeywords(sheet.headers, ['guardian first', 'parent first', 'parent prénom']),
+            guardianLastNameColumn: guessColumnByKeywords(sheet.headers, ['guardian last', 'parent last', 'parent nom']),
+            companyColumn: guessColumnByKeywords(sheet.headers, ['company', 'school']),
+            addressLine1Column: guessColumnByKeywords(sheet.headers, ['address line 1', 'address', 'street']),
+            addressLine2Column: guessColumnByKeywords(sheet.headers, ['address line 2', 'apt', 'unit']),
+            cityColumn: guessColumnByKeywords(sheet.headers, ['city', 'ville']),
+            stateProvinceColumn: guessColumnByKeywords(sheet.headers, ['state', 'province', 'region']),
+            zipPostalCodeColumn: guessColumnByKeywords(sheet.headers, ['zip', 'postal', 'postcode']),
+            countryColumn: guessColumnByKeywords(sheet.headers, ['country', 'pays']),
+            contactNoteColumn: guessColumnByKeywords(sheet.headers, ['contact note', 'parent note', 'note']),
             jobTitleColumn: guessColumnByKeywords(sheet.headers, ['job', 'title', 'role', 'poste']),
             officeLocationColumn: guessColumnByKeywords(sheet.headers, ['office', 'location', 'bureau', 'lieu']),
             photoSessionColumn: guessColumnByKeywords(
@@ -230,9 +267,20 @@ export default function ProjectImport() {
           firstNameColumn: map.firstNameColumn,
           lastNameColumn: map.lastNameColumn,
           studentIdColumn: map.studentIdColumn || null,
+          schoolIdColumn: map.schoolIdColumn || null,
           emailColumn: map.emailColumn || null,
           phoneColumn: map.phoneColumn || null,
           secondaryEmailColumn: map.secondaryEmailColumn || null,
+          guardianFirstNameColumn: map.guardianFirstNameColumn || null,
+          guardianLastNameColumn: map.guardianLastNameColumn || null,
+          companyColumn: map.companyColumn || null,
+          addressLine1Column: map.addressLine1Column || null,
+          addressLine2Column: map.addressLine2Column || null,
+          cityColumn: map.cityColumn || null,
+          stateProvinceColumn: map.stateProvinceColumn || null,
+          zipPostalCodeColumn: map.zipPostalCodeColumn || null,
+          countryColumn: map.countryColumn || null,
+          contactNoteColumn: map.contactNoteColumn || null,
           jobTitleColumn: map.jobTitleColumn || null,
           officeLocationColumn: map.officeLocationColumn || null,
           photoSessionColumn: map.photoSessionColumn || null,
@@ -400,6 +448,12 @@ export default function ProjectImport() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <ColumnSelect
+                        label={isCorporate ? 'School/Client ID' : 'School ID'}
+                        value={mappings[sheet.name]?.schoolIdColumn || ''}
+                        headers={sheet.headers}
+                        onChange={v => updateMapping(sheet.name, 'schoolIdColumn', v)}
+                      />
                       <div className="space-y-2">
                         <Label className="text-slate-500">{isCorporate ? 'Primary Delivery Email' : 'Parent/Guardian Email'} <span className="text-slate-400 font-normal">(Optional)</span></Label>
                         <Select value={mappings[sheet.name]?.emailColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'emailColumn', v === 'none' ? '' : v)}>
@@ -410,6 +464,16 @@ export default function ProjectImport() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <ColumnSelect label="Guardian First Name" value={mappings[sheet.name]?.guardianFirstNameColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'guardianFirstNameColumn', v)} />
+                      <ColumnSelect label="Guardian Last Name" value={mappings[sheet.name]?.guardianLastNameColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'guardianLastNameColumn', v)} />
+                      <ColumnSelect label="Company / School" value={mappings[sheet.name]?.companyColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'companyColumn', v)} />
+                      <ColumnSelect label="Address Line 1" value={mappings[sheet.name]?.addressLine1Column || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'addressLine1Column', v)} />
+                      <ColumnSelect label="Address Line 2" value={mappings[sheet.name]?.addressLine2Column || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'addressLine2Column', v)} />
+                      <ColumnSelect label="City" value={mappings[sheet.name]?.cityColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'cityColumn', v)} />
+                      <ColumnSelect label="State / Province" value={mappings[sheet.name]?.stateProvinceColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'stateProvinceColumn', v)} />
+                      <ColumnSelect label="Zip / Postal Code" value={mappings[sheet.name]?.zipPostalCodeColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'zipPostalCodeColumn', v)} />
+                      <ColumnSelect label="Country" value={mappings[sheet.name]?.countryColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'countryColumn', v)} />
+                      <ColumnSelect label="Contact Note" value={mappings[sheet.name]?.contactNoteColumn || ''} headers={sheet.headers} onChange={v => updateMapping(sheet.name, 'contactNoteColumn', v)} />
                       <div className="space-y-2">
                         <Label className="text-slate-500">{isCorporate ? 'Secondary Delivery Email' : 'Second Parent/Guardian Email'} <span className="text-slate-400 font-normal">(Optional)</span></Label>
                         <Select value={mappings[sheet.name]?.secondaryEmailColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'secondaryEmailColumn', v === 'none' ? '' : v)}>

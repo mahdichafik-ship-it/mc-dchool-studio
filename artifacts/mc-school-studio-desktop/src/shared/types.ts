@@ -48,9 +48,20 @@ export interface Student {
   firstName: string
   lastName: string
   generatedStudentId: string
+  schoolId: string | null
   email: string | null
   phone: string | null
   secondaryEmail: string | null
+  guardianFirstName: string | null
+  guardianLastName: string | null
+  company: string | null
+  addressLine1: string | null
+  addressLine2: string | null
+  city: string | null
+  stateProvince: string | null
+  zipPostalCode: string | null
+  country: string | null
+  contactNote: string | null
   jobTitle: string | null
   officeLocation: string | null
   photoSession: string | null

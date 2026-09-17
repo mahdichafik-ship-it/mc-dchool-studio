@@ -15,11 +15,33 @@ export interface StudentInput {
   /** @nullable */
   generatedStudentId?: string | null;
   /** @nullable */
+  schoolId?: string | null;
+  /** @nullable */
   email?: string | null;
   /** @nullable */
   phone?: string | null;
   /** @nullable */
   secondaryEmail?: string | null;
+  /** @nullable */
+  guardianFirstName?: string | null;
+  /** @nullable */
+  guardianLastName?: string | null;
+  /** @nullable */
+  company?: string | null;
+  /** @nullable */
+  addressLine1?: string | null;
+  /** @nullable */
+  addressLine2?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  stateProvince?: string | null;
+  /** @nullable */
+  zipPostalCode?: string | null;
+  /** @nullable */
+  country?: string | null;
+  /** @nullable */
+  contactNote?: string | null;
   /** @nullable */
   jobTitle?: string | null;
   /** @nullable */

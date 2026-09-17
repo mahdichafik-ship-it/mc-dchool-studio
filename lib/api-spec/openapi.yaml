@@ -1290,6 +1290,8 @@ components:
           type: string
         updatedAt:
           type: string
+        pixiesetReadiness:
+          $ref: "#/components/schemas/PixiesetReadiness"
 
     ProjectInput:
       type: object
@@ -1338,6 +1340,16 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+
+    PixiesetReadiness:
+      type: object
+      required: [total, contactReady, missingEmail, missingGuardianFirstName, ready]
+      properties:
+        total: { type: integer }
+        contactReady: { type: integer }
+        missingEmail: { type: integer }
+        missingGuardianFirstName: { type: integer }
+        ready: { type: boolean }
 
     Class:
       type: object
@@ -1390,11 +1402,33 @@ components:
           type: string
         generatedStudentId:
           type: string
+        schoolId:
+          type: ["string", "null"]
         email:
           type: ["string", "null"]
         phone:
           type: ["string", "null"]
         secondaryEmail:
+          type: ["string", "null"]
+        guardianFirstName:
+          type: ["string", "null"]
+        guardianLastName:
+          type: ["string", "null"]
+        company:
+          type: ["string", "null"]
+        addressLine1:
+          type: ["string", "null"]
+        addressLine2:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        stateProvince:
+          type: ["string", "null"]
+        zipPostalCode:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        contactNote:
           type: ["string", "null"]
         jobTitle:
           type: ["string", "null"]
@@ -1427,11 +1461,33 @@ components:
           minLength: 1
         generatedStudentId:
           type: ["string", "null"]
+        schoolId:
+          type: ["string", "null"]
         email:
           type: ["string", "null"]
         phone:
           type: ["string", "null"]
         secondaryEmail:
+          type: ["string", "null"]
+        guardianFirstName:
+          type: ["string", "null"]
+        guardianLastName:
+          type: ["string", "null"]
+        company:
+          type: ["string", "null"]
+        addressLine1:
+          type: ["string", "null"]
+        addressLine2:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        stateProvince:
+          type: ["string", "null"]
+        zipPostalCode:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        contactNote:
           type: ["string", "null"]
         jobTitle:
           type: ["string", "null"]
@@ -1453,6 +1509,8 @@ components:
           minLength: 1
         generatedStudentId:
           type: ["string", "null"]
+        schoolId:
+          type: ["string", "null"]
         classId:
           type: integer
         email:
@@ -1460,6 +1518,26 @@ components:
         phone:
           type: ["string", "null"]
         secondaryEmail:
+          type: ["string", "null"]
+        guardianFirstName:
+          type: ["string", "null"]
+        guardianLastName:
+          type: ["string", "null"]
+        company:
+          type: ["string", "null"]
+        addressLine1:
+          type: ["string", "null"]
+        addressLine2:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        stateProvince:
+          type: ["string", "null"]
+        zipPostalCode:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        contactNote:
           type: ["string", "null"]
         jobTitle:
           type: ["string", "null"]
@@ -1556,6 +1634,28 @@ components:
         phoneColumn:
           type: ["string", "null"]
         secondaryEmailColumn:
+          type: ["string", "null"]
+        schoolIdColumn:
+          type: ["string", "null"]
+        guardianFirstNameColumn:
+          type: ["string", "null"]
+        guardianLastNameColumn:
+          type: ["string", "null"]
+        companyColumn:
+          type: ["string", "null"]
+        addressLine1Column:
+          type: ["string", "null"]
+        addressLine2Column:
+          type: ["string", "null"]
+        cityColumn:
+          type: ["string", "null"]
+        stateProvinceColumn:
+          type: ["string", "null"]
+        zipPostalCodeColumn:
+          type: ["string", "null"]
+        countryColumn:
+          type: ["string", "null"]
+        contactNoteColumn:
           type: ["string", "null"]
         jobTitleColumn:
           type: ["string", "null"]

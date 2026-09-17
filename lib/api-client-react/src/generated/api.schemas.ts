@@ -57,6 +57,14 @@ export const ProjectProjectType = {
   corporate: 'corporate',
 } as const;
 
+export interface PixiesetReadiness {
+  total: number;
+  contactReady: number;
+  missingEmail: number;
+  missingGuardianFirstName: number;
+  ready: boolean;
+}
+
 export interface Project {
   id: number;
   projectType: ProjectProjectType;
@@ -79,6 +87,7 @@ export interface Project {
   studentCount: number;
   createdAt: string;
   updatedAt: string;
+  pixiesetReadiness?: PixiesetReadiness;
 }
 
 export type ProjectInputProjectType = typeof ProjectInputProjectType[keyof typeof ProjectInputProjectType];
@@ -162,11 +171,33 @@ export interface Student {
   lastName: string;
   generatedStudentId: string;
   /** @nullable */
+  schoolId?: string | null;
+  /** @nullable */
   email?: string | null;
   /** @nullable */
   phone?: string | null;
   /** @nullable */
   secondaryEmail?: string | null;
+  /** @nullable */
+  guardianFirstName?: string | null;
+  /** @nullable */
+  guardianLastName?: string | null;
+  /** @nullable */
+  company?: string | null;
+  /** @nullable */
+  addressLine1?: string | null;
+  /** @nullable */
+  addressLine2?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  stateProvince?: string | null;
+  /** @nullable */
+  zipPostalCode?: string | null;
+  /** @nullable */
+  country?: string | null;
+  /** @nullable */
+  contactNote?: string | null;
   /** @nullable */
   jobTitle?: string | null;
   /** @nullable */
@@ -192,11 +223,33 @@ export interface StudentInput {
   /** @nullable */
   generatedStudentId?: string | null;
   /** @nullable */
+  schoolId?: string | null;
+  /** @nullable */
   email?: string | null;
   /** @nullable */
   phone?: string | null;
   /** @nullable */
   secondaryEmail?: string | null;
+  /** @nullable */
+  guardianFirstName?: string | null;
+  /** @nullable */
+  guardianLastName?: string | null;
+  /** @nullable */
+  company?: string | null;
+  /** @nullable */
+  addressLine1?: string | null;
+  /** @nullable */
+  addressLine2?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  stateProvince?: string | null;
+  /** @nullable */
+  zipPostalCode?: string | null;
+  /** @nullable */
+  country?: string | null;
+  /** @nullable */
+  contactNote?: string | null;
   /** @nullable */
   jobTitle?: string | null;
   /** @nullable */
@@ -214,6 +267,8 @@ export interface StudentPatch {
   lastName?: string;
   /** @nullable */
   generatedStudentId?: string | null;
+  /** @nullable */
+  schoolId?: string | null;
   classId?: number;
   /** @nullable */
   email?: string | null;
@@ -221,6 +276,26 @@ export interface StudentPatch {
   phone?: string | null;
   /** @nullable */
   secondaryEmail?: string | null;
+  /** @nullable */
+  guardianFirstName?: string | null;
+  /** @nullable */
+  guardianLastName?: string | null;
+  /** @nullable */
+  company?: string | null;
+  /** @nullable */
+  addressLine1?: string | null;
+  /** @nullable */
+  addressLine2?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  stateProvince?: string | null;
+  /** @nullable */
+  zipPostalCode?: string | null;
+  /** @nullable */
+  country?: string | null;
+  /** @nullable */
+  contactNote?: string | null;
   /** @nullable */
   jobTitle?: string | null;
   /** @nullable */
@@ -271,6 +346,28 @@ export interface SheetMapping {
   phoneColumn?: string | null;
   /** @nullable */
   secondaryEmailColumn?: string | null;
+  /** @nullable */
+  schoolIdColumn?: string | null;
+  /** @nullable */
+  guardianFirstNameColumn?: string | null;
+  /** @nullable */
+  guardianLastNameColumn?: string | null;
+  /** @nullable */
+  companyColumn?: string | null;
+  /** @nullable */
+  addressLine1Column?: string | null;
+  /** @nullable */
+  addressLine2Column?: string | null;
+  /** @nullable */
+  cityColumn?: string | null;
+  /** @nullable */
+  stateProvinceColumn?: string | null;
+  /** @nullable */
+  zipPostalCodeColumn?: string | null;
+  /** @nullable */
+  countryColumn?: string | null;
+  /** @nullable */
+  contactNoteColumn?: string | null;
   /** @nullable */
   jobTitleColumn?: string | null;
   /** @nullable */

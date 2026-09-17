@@ -187,8 +187,19 @@ router.post("/confirm", requireAuth, async (req, res) => {
         firstName: string;
         lastName: string;
         providedId: string | null;
+        schoolId: string | null;
         email: string | null;
         secondaryEmail: string | null;
+        guardianFirstName: string | null;
+        guardianLastName: string | null;
+        company: string | null;
+        addressLine1: string | null;
+        addressLine2: string | null;
+        city: string | null;
+        stateProvince: string | null;
+        zipPostalCode: string | null;
+        country: string | null;
+        contactNote: string | null;
         phone: string | null;
         jobTitle: string | null;
         officeLocation: string | null;
@@ -196,6 +207,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
         captureNotes: string | null;
         hasEmail: boolean;
         hasSecondaryEmail: boolean;
+        hasSchoolId: boolean;
+        hasGuardianFirstName: boolean;
+        hasGuardianLastName: boolean;
+        hasCompany: boolean;
+        hasAddressLine1: boolean;
+        hasAddressLine2: boolean;
+        hasCity: boolean;
+        hasStateProvince: boolean;
+        hasZipPostalCode: boolean;
+        hasCountry: boolean;
+        hasContactNote: boolean;
         hasPhone: boolean;
         hasJobTitle: boolean;
         hasOfficeLocation: boolean;
@@ -282,6 +304,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
           studentIdColumn,
           emailColumn,
           secondaryEmailColumn,
+          schoolIdColumn,
+          guardianFirstNameColumn,
+          guardianLastNameColumn,
+          companyColumn,
+          addressLine1Column,
+          addressLine2Column,
+          cityColumn,
+          stateProvinceColumn,
+          zipPostalCodeColumn,
+          countryColumn,
+          contactNoteColumn,
           jobTitleColumn,
           officeLocationColumn,
           photoSessionColumn,
@@ -307,6 +340,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
         const studentIdIdx = studentIdColumn ? headers.indexOf(studentIdColumn) : -1;
         const emailIdx = emailColumn ? headers.indexOf(emailColumn) : -1;
         const secondaryEmailIdx = secondaryEmailColumn ? headers.indexOf(secondaryEmailColumn) : -1;
+        const schoolIdIdx = schoolIdColumn ? headers.indexOf(schoolIdColumn) : -1;
+        const guardianFirstNameIdx = guardianFirstNameColumn ? headers.indexOf(guardianFirstNameColumn) : -1;
+        const guardianLastNameIdx = guardianLastNameColumn ? headers.indexOf(guardianLastNameColumn) : -1;
+        const companyIdx = companyColumn ? headers.indexOf(companyColumn) : -1;
+        const addressLine1Idx = addressLine1Column ? headers.indexOf(addressLine1Column) : -1;
+        const addressLine2Idx = addressLine2Column ? headers.indexOf(addressLine2Column) : -1;
+        const cityIdx = cityColumn ? headers.indexOf(cityColumn) : -1;
+        const stateProvinceIdx = stateProvinceColumn ? headers.indexOf(stateProvinceColumn) : -1;
+        const zipPostalCodeIdx = zipPostalCodeColumn ? headers.indexOf(zipPostalCodeColumn) : -1;
+        const countryIdx = countryColumn ? headers.indexOf(countryColumn) : -1;
+        const contactNoteIdx = contactNoteColumn ? headers.indexOf(contactNoteColumn) : -1;
         const jobTitleIdx = jobTitleColumn ? headers.indexOf(jobTitleColumn) : -1;
         const officeLocationIdx = officeLocationColumn ? headers.indexOf(officeLocationColumn) : -1;
         const photoSessionIdx = photoSessionColumn ? headers.indexOf(photoSessionColumn) : -1;
@@ -344,6 +388,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
           const email = emailIdx >= 0 ? normalizeOptionalString(row[emailIdx]) : null;
           const secondaryEmail =
             secondaryEmailIdx >= 0 ? normalizeOptionalString(row[secondaryEmailIdx]) : null;
+          const schoolId = schoolIdIdx >= 0 ? normalizeOptionalString(row[schoolIdIdx]) : null;
+          const guardianFirstName = guardianFirstNameIdx >= 0 ? normalizeOptionalString(row[guardianFirstNameIdx]) : null;
+          const guardianLastName = guardianLastNameIdx >= 0 ? normalizeOptionalString(row[guardianLastNameIdx]) : null;
+          const company = companyIdx >= 0 ? normalizeOptionalString(row[companyIdx]) : null;
+          const addressLine1 = addressLine1Idx >= 0 ? normalizeOptionalString(row[addressLine1Idx]) : null;
+          const addressLine2 = addressLine2Idx >= 0 ? normalizeOptionalString(row[addressLine2Idx]) : null;
+          const city = cityIdx >= 0 ? normalizeOptionalString(row[cityIdx]) : null;
+          const stateProvince = stateProvinceIdx >= 0 ? normalizeOptionalString(row[stateProvinceIdx]) : null;
+          const zipPostalCode = zipPostalCodeIdx >= 0 ? normalizeOptionalString(row[zipPostalCodeIdx]) : null;
+          const country = countryIdx >= 0 ? normalizeOptionalString(row[countryIdx]) : null;
+          const contactNote = contactNoteIdx >= 0 ? normalizeOptionalString(row[contactNoteIdx]) : null;
           if (!isValidEmail(email) || !isValidEmail(secondaryEmail)) {
             throw new ImportValidationError(`Invalid email address for ${firstName} ${lastName}`);
           }
@@ -360,8 +415,19 @@ router.post("/confirm", requireAuth, async (req, res) => {
             firstName,
             lastName,
             providedId,
+            schoolId,
             email,
             secondaryEmail,
+            guardianFirstName,
+            guardianLastName,
+            company,
+            addressLine1,
+            addressLine2,
+            city,
+            stateProvince,
+            zipPostalCode,
+            country,
+            contactNote,
             phone,
             jobTitle,
             officeLocation,
@@ -369,6 +435,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
             captureNotes,
             hasEmail: emailIdx >= 0,
             hasSecondaryEmail: secondaryEmailIdx >= 0,
+            hasSchoolId: schoolIdIdx >= 0,
+            hasGuardianFirstName: guardianFirstNameIdx >= 0,
+            hasGuardianLastName: guardianLastNameIdx >= 0,
+            hasCompany: companyIdx >= 0,
+            hasAddressLine1: addressLine1Idx >= 0,
+            hasAddressLine2: addressLine2Idx >= 0,
+            hasCity: cityIdx >= 0,
+            hasStateProvince: stateProvinceIdx >= 0,
+            hasZipPostalCode: zipPostalCodeIdx >= 0,
+            hasCountry: countryIdx >= 0,
+            hasContactNote: contactNoteIdx >= 0,
             hasPhone: phoneIdx >= 0,
             hasJobTitle: jobTitleIdx >= 0,
             hasOfficeLocation: officeLocationIdx >= 0,
@@ -390,8 +467,19 @@ router.post("/confirm", requireAuth, async (req, res) => {
         normalizeKey(input.lastName),
         normalizeKey(input.className),
         normalizeKey(input.providedId),
+        normalizeKey(input.schoolId),
         normalizeKey(input.email),
         normalizeKey(input.secondaryEmail),
+        normalizeKey(input.guardianFirstName),
+        normalizeKey(input.guardianLastName),
+        normalizeKey(input.company),
+        normalizeKey(input.addressLine1),
+        normalizeKey(input.addressLine2),
+        normalizeKey(input.city),
+        normalizeKey(input.stateProvince),
+        normalizeKey(input.zipPostalCode),
+        normalizeKey(input.country),
+        normalizeKey(input.contactNote),
         normalizeKey(input.phone),
         normalizeKey(input.jobTitle),
         normalizeKey(input.officeLocation),
@@ -399,6 +487,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
         normalizeKey(input.captureNotes),
         input.hasEmail,
         input.hasSecondaryEmail,
+        input.hasSchoolId,
+        input.hasGuardianFirstName,
+        input.hasGuardianLastName,
+        input.hasCompany,
+        input.hasAddressLine1,
+        input.hasAddressLine2,
+        input.hasCity,
+        input.hasStateProvince,
+        input.hasZipPostalCode,
+        input.hasCountry,
+        input.hasContactNote,
         input.hasPhone,
         input.hasJobTitle,
         input.hasOfficeLocation,
@@ -503,9 +602,20 @@ router.post("/confirm", requireAuth, async (req, res) => {
             firstName: input.firstName,
             lastName: input.lastName,
             generatedStudentId,
+            schoolId: input.schoolId,
             email: input.email,
             phone: input.phone,
             secondaryEmail: input.secondaryEmail,
+            guardianFirstName: input.guardianFirstName,
+            guardianLastName: input.guardianLastName,
+            company: input.company,
+            addressLine1: input.addressLine1,
+            addressLine2: input.addressLine2,
+            city: input.city,
+            stateProvince: input.stateProvince,
+            zipPostalCode: input.zipPostalCode,
+            country: input.country,
+            contactNote: input.contactNote,
             jobTitle: input.jobTitle,
             officeLocation: input.officeLocation,
             photoSession: input.photoSession,
@@ -528,6 +638,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
           ...(input.hasEmail ? { email: input.email } : {}),
           ...(input.hasPhone ? { phone: input.phone } : {}),
           ...(input.hasSecondaryEmail ? { secondaryEmail: input.secondaryEmail } : {}),
+          ...(input.hasSchoolId ? { schoolId: input.schoolId } : {}),
+          ...(input.hasGuardianFirstName ? { guardianFirstName: input.guardianFirstName } : {}),
+          ...(input.hasGuardianLastName ? { guardianLastName: input.guardianLastName } : {}),
+          ...(input.hasCompany ? { company: input.company } : {}),
+          ...(input.hasAddressLine1 ? { addressLine1: input.addressLine1 } : {}),
+          ...(input.hasAddressLine2 ? { addressLine2: input.addressLine2 } : {}),
+          ...(input.hasCity ? { city: input.city } : {}),
+          ...(input.hasStateProvince ? { stateProvince: input.stateProvince } : {}),
+          ...(input.hasZipPostalCode ? { zipPostalCode: input.zipPostalCode } : {}),
+          ...(input.hasCountry ? { country: input.country } : {}),
+          ...(input.hasContactNote ? { contactNote: input.contactNote } : {}),
           ...(input.hasJobTitle ? { jobTitle: input.jobTitle } : {}),
           ...(input.hasOfficeLocation ? { officeLocation: input.officeLocation } : {}),
           ...(input.hasPhotoSession ? { photoSession: input.photoSession } : {}),
@@ -540,6 +661,17 @@ router.post("/confirm", requireAuth, async (req, res) => {
           (input.hasEmail && old.email !== next.email) ||
           (input.hasPhone && old.phone !== next.phone) ||
           (input.hasSecondaryEmail && old.secondaryEmail !== next.secondaryEmail) ||
+          (input.hasSchoolId && old.schoolId !== next.schoolId) ||
+          (input.hasGuardianFirstName && old.guardianFirstName !== next.guardianFirstName) ||
+          (input.hasGuardianLastName && old.guardianLastName !== next.guardianLastName) ||
+          (input.hasCompany && old.company !== next.company) ||
+          (input.hasAddressLine1 && old.addressLine1 !== next.addressLine1) ||
+          (input.hasAddressLine2 && old.addressLine2 !== next.addressLine2) ||
+          (input.hasCity && old.city !== next.city) ||
+          (input.hasStateProvince && old.stateProvince !== next.stateProvince) ||
+          (input.hasZipPostalCode && old.zipPostalCode !== next.zipPostalCode) ||
+          (input.hasCountry && old.country !== next.country) ||
+          (input.hasContactNote && old.contactNote !== next.contactNote) ||
           (input.hasJobTitle && old.jobTitle !== next.jobTitle) ||
           (input.hasOfficeLocation && old.officeLocation !== next.officeLocation) ||
           (input.hasPhotoSession && old.photoSession !== next.photoSession) ||

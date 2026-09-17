@@ -125,6 +125,7 @@ export * from './paymentStatusInputStatus';
 export * from './photoShareInput';
 export * from './photoShareResponse';
 export * from './photoShareResponsePhoto';
+export * from './pixiesetReadiness';
 export * from './platformActivity';
 export * from './platformInvite';
 export * from './platformInviteInput';

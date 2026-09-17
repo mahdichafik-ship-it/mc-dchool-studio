@@ -175,6 +175,29 @@ interface ElectronAPI {
     mode: CaptureExportMode
     layout?: CaptureExportLayout
   }): Promise<CaptureExportResult>
+  invoke(channel: 'pixieset:export', args: {
+    projectId: number
+    destinationDir: string
+  }): Promise<{
+    ok: boolean
+    outputDir?: string
+    csvPath?: string
+    reportPath?: string
+    collectionsCreated?: number
+    portraitPhotosCopied?: number
+    groupPhotosCopied?: number
+    excluded?: Array<{ studentId: number; generatedStudentId: string; studentName: string; reason: string }>
+    preflight?: {
+      totalStudents: number
+      readyStudents: number
+      missingEmail: number
+      invalidEmail: number
+      missingGuardianFirstName: number
+      missingRatedPhotos: number
+      issues: Array<{ studentId: number; generatedStudentId: string; studentName: string; reason: string }>
+    }
+    error?: string
+  }>
   // Desktop updates
   invoke(channel: 'update:getState'): Promise<UpdateState>
   invoke(channel: 'update:check'): Promise<UpdateState>

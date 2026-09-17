@@ -80,7 +80,14 @@ export const ListProjectsResponseItem = zod.object({
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string(),
+  "pixiesetReadiness": zod.object({
+  "total": zod.number(),
+  "contactReady": zod.number(),
+  "missingEmail": zod.number(),
+  "missingGuardianFirstName": zod.number(),
+  "ready": zod.boolean()
+}).optional()
 })
 export const ListProjectsResponse = zod.array(ListProjectsResponseItem)
 
@@ -117,7 +124,14 @@ export const CreateProjectResponse = zod.object({
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string(),
+  "pixiesetReadiness": zod.object({
+  "total": zod.number(),
+  "contactReady": zod.number(),
+  "missingEmail": zod.number(),
+  "missingGuardianFirstName": zod.number(),
+  "ready": zod.boolean()
+}).optional()
 })
 
 
@@ -142,7 +156,14 @@ export const GetProjectResponse = zod.object({
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string(),
+  "pixiesetReadiness": zod.object({
+  "total": zod.number(),
+  "contactReady": zod.number(),
+  "missingEmail": zod.number(),
+  "missingGuardianFirstName": zod.number(),
+  "ready": zod.boolean()
+}).optional()
 })
 
 
@@ -181,7 +202,14 @@ export const UpdateProjectResponse = zod.object({
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string(),
+  "pixiesetReadiness": zod.object({
+  "total": zod.number(),
+  "contactReady": zod.number(),
+  "missingEmail": zod.number(),
+  "missingGuardianFirstName": zod.number(),
+  "ready": zod.boolean()
+}).optional()
 })
 
 
@@ -288,9 +316,20 @@ export const ListStudentsResponseItem = zod.object({
   "firstName": zod.string(),
   "lastName": zod.string(),
   "generatedStudentId": zod.string(),
+  "schoolId": zod.string().nullish(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "secondaryEmail": zod.string().nullish(),
+  "guardianFirstName": zod.string().nullish(),
+  "guardianLastName": zod.string().nullish(),
+  "company": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateProvince": zod.string().nullish(),
+  "zipPostalCode": zod.string().nullish(),
+  "country": zod.string().nullish(),
+  "contactNote": zod.string().nullish(),
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
@@ -319,9 +358,20 @@ export const CreateStudentBody = zod.object({
   "firstName": zod.string().min(1),
   "lastName": zod.string().min(1),
   "generatedStudentId": zod.string().nullish(),
+  "schoolId": zod.string().nullish(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "secondaryEmail": zod.string().nullish(),
+  "guardianFirstName": zod.string().nullish(),
+  "guardianLastName": zod.string().nullish(),
+  "company": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateProvince": zod.string().nullish(),
+  "zipPostalCode": zod.string().nullish(),
+  "country": zod.string().nullish(),
+  "contactNote": zod.string().nullish(),
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
@@ -336,9 +386,20 @@ export const CreateStudentResponse = zod.object({
   "firstName": zod.string(),
   "lastName": zod.string(),
   "generatedStudentId": zod.string(),
+  "schoolId": zod.string().nullish(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "secondaryEmail": zod.string().nullish(),
+  "guardianFirstName": zod.string().nullish(),
+  "guardianLastName": zod.string().nullish(),
+  "company": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateProvince": zod.string().nullish(),
+  "zipPostalCode": zod.string().nullish(),
+  "country": zod.string().nullish(),
+  "contactNote": zod.string().nullish(),
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
@@ -496,10 +557,21 @@ export const UpdateStudentBody = zod.object({
   "firstName": zod.string().min(1).optional(),
   "lastName": zod.string().min(1).optional(),
   "generatedStudentId": zod.string().nullish(),
+  "schoolId": zod.string().nullish(),
   "classId": zod.number().optional(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "secondaryEmail": zod.string().nullish(),
+  "guardianFirstName": zod.string().nullish(),
+  "guardianLastName": zod.string().nullish(),
+  "company": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateProvince": zod.string().nullish(),
+  "zipPostalCode": zod.string().nullish(),
+  "country": zod.string().nullish(),
+  "contactNote": zod.string().nullish(),
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
@@ -514,9 +586,20 @@ export const UpdateStudentResponse = zod.object({
   "firstName": zod.string(),
   "lastName": zod.string(),
   "generatedStudentId": zod.string(),
+  "schoolId": zod.string().nullish(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "secondaryEmail": zod.string().nullish(),
+  "guardianFirstName": zod.string().nullish(),
+  "guardianLastName": zod.string().nullish(),
+  "company": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "addressLine2": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateProvince": zod.string().nullish(),
+  "zipPostalCode": zod.string().nullish(),
+  "country": zod.string().nullish(),
+  "contactNote": zod.string().nullish(),
   "jobTitle": zod.string().nullish(),
   "officeLocation": zod.string().nullish(),
   "photoSession": zod.string().nullish(),
@@ -609,6 +692,17 @@ export const ConfirmImportBody = zod.object({
   "emailColumn": zod.string().nullish(),
   "phoneColumn": zod.string().nullish(),
   "secondaryEmailColumn": zod.string().nullish(),
+  "schoolIdColumn": zod.string().nullish(),
+  "guardianFirstNameColumn": zod.string().nullish(),
+  "guardianLastNameColumn": zod.string().nullish(),
+  "companyColumn": zod.string().nullish(),
+  "addressLine1Column": zod.string().nullish(),
+  "addressLine2Column": zod.string().nullish(),
+  "cityColumn": zod.string().nullish(),
+  "stateProvinceColumn": zod.string().nullish(),
+  "zipPostalCodeColumn": zod.string().nullish(),
+  "countryColumn": zod.string().nullish(),
+  "contactNoteColumn": zod.string().nullish(),
   "jobTitleColumn": zod.string().nullish(),
   "officeLocationColumn": zod.string().nullish(),
   "photoSessionColumn": zod.string().nullish(),
@@ -684,7 +778,14 @@ export const GetPlatformOverviewResponse = zod.object({
   "classCount": zod.number(),
   "studentCount": zod.number(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string(),
+  "pixiesetReadiness": zod.object({
+  "total": zod.number(),
+  "contactReady": zod.number(),
+  "missingEmail": zod.number(),
+  "missingGuardianFirstName": zod.number(),
+  "ready": zod.boolean()
+}).optional()
 }).and(zod.object({
   "studioId": zod.number().nullable(),
   "studioName": zod.string().nullable()

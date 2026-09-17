@@ -130,6 +130,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
   const [exporting, setExporting] = useState<CaptureExportLayout | null>(null)
+  const [pixiesetExporting, setPixiesetExporting] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [renamingGroupId, setRenamingGroupId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -673,6 +674,35 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
     }
   }
 
+  async function handlePixiesetExport() {
+    const destinationDir = await window.api.invoke('dialog:openFolder') as string | null
+    if (!destinationDir) return
+    setPixiesetExporting(true)
+    try {
+      const result = await window.api.invoke('pixieset:export', { projectId, destinationDir })
+      if (!result.ok) {
+        const readiness = result.preflight
+          ? ` ${result.preflight.readyStudents}/${result.preflight.totalStudents} contacts ready.`
+          : ''
+        addToast({ type: 'error', title: 'Pixieset export not ready', description: `${result.error ?? 'Resolve the listed roster or rating issues first.'}${readiness}` })
+        return
+      }
+      const excluded = result.excluded?.length ?? 0
+      const exclusionSummary = result.excluded?.slice(0, 3)
+        .map((issue) => `${issue.studentName}: ${issue.reason}`)
+        .join(' · ')
+      addToast({
+        type: 'success',
+        title: 'Pixieset export complete',
+        description: `${result.collectionsCreated ?? 0} collections · ${(result.portraitPhotosCopied ?? 0) + (result.groupPhotosCopied ?? 0)} rated JPEGs copied${excluded ? ` · ${excluded} excluded. ${exclusionSummary}${excluded > 3 ? ' · See the export report for all issues.' : ''}` : ''}`,
+      })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Pixieset export failed', description: String(error) })
+    } finally {
+      setPixiesetExporting(false)
+    }
+  }
+
   async function handleUploadAndFinish() {
     if (!project || projectSynced || finishing) return
     setFinishing(true)
@@ -1002,7 +1032,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                  {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}
                </button>
              </div>
-             {captureSummary.total > 0 && (
+             {(captureSummary.total > 0 || groupCaptureCount > 0) && (
                  <div className="shoot-secondary-action flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
                    <select
                       value={exportMode}
@@ -1026,6 +1056,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
                       {exporting === 'lightroom_watch_folder' ? <Loader className="size-3 animate-spin" /> : <Image className="size-3" />}
                       To LR
                    </button>
+                    <div className="w-px h-full bg-slate-800" />
+                    <button onClick={() => void handlePixiesetExport()} disabled={exporting !== null || pixiesetExporting} className="px-3 h-full text-[10px] font-bold uppercase tracking-wider text-amber-200 hover:text-white hover:bg-amber-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50" title="Create a separate Pixieset package from rated JPEGs only">
+                       {pixiesetExporting ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
+                       Pixieset
+                    </button>
                 </div>
              )}
               <Button

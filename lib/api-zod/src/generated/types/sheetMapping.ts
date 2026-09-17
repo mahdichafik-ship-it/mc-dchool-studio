@@ -20,6 +20,28 @@ export interface SheetMapping {
   /** @nullable */
   secondaryEmailColumn?: string | null;
   /** @nullable */
+  schoolIdColumn?: string | null;
+  /** @nullable */
+  guardianFirstNameColumn?: string | null;
+  /** @nullable */
+  guardianLastNameColumn?: string | null;
+  /** @nullable */
+  companyColumn?: string | null;
+  /** @nullable */
+  addressLine1Column?: string | null;
+  /** @nullable */
+  addressLine2Column?: string | null;
+  /** @nullable */
+  cityColumn?: string | null;
+  /** @nullable */
+  stateProvinceColumn?: string | null;
+  /** @nullable */
+  zipPostalCodeColumn?: string | null;
+  /** @nullable */
+  countryColumn?: string | null;
+  /** @nullable */
+  contactNoteColumn?: string | null;
+  /** @nullable */
   jobTitleColumn?: string | null;
   /** @nullable */
   officeLocationColumn?: string | null;

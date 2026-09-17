@@ -1020,9 +1020,13 @@ try {
 
   await waitFor('managed photo copy and SQLite photo row', async () => {
     const project = await cdp.evaluate(`window.api.invoke('projects:get', { projectId: ${localProjectId} })`)
-    return project?.photoCount === 3 && findFiles(storageRoot).some((path) => basename(path) === managedPhotoName)
+    return project?.photoCount === 3 && findFiles(storageRoot).some((path) =>
+      new RegExp(`^John_Smith_${studentReference}(?:-\\d+)?\\.jpg$`, 'i').test(basename(path)),
+    )
   }, 40_000)
-  const managedPhoto = findFiles(storageRoot).find((path) => basename(path) === managedPhotoName)
+  const managedPhoto = findFiles(storageRoot).find((path) =>
+    new RegExp(`^John_Smith_${studentReference}(?:-\\d+)?\\.jpg$`, 'i').test(basename(path)),
+  )
   assert(managedPhoto)
   assert.deepEqual(readFileSync(managedPhoto), readFileSync(sourcePhoto))
 
@@ -1032,11 +1036,17 @@ try {
   const waitingUploads = await cdp.evaluate(
     `window.api.invoke('upload:getProjectStatus', { projectId: ${localProjectId} })`,
   )
-  const sourcePhotoUpload = waitingUploads.reduce(
-    (latest, photo) => !latest || photo.id > latest.id ? photo : latest,
-    null,
-  )
-  assert(sourcePhotoUpload, 'the later watched JPEG must have a durable upload row')
+  const watchedPhotoIds = querySqlite(
+    dbPath,
+    `SELECT id FROM photos
+       WHERE project_id = ${localProjectId}
+         AND is_matched = 1
+         AND file_path = '${managedPhoto.replaceAll("'", "''")}'
+       ORDER BY id;`,
+  ).split('\n').filter(Boolean).map(Number)
+  assert.deepEqual(watchedPhotoIds.length, 1, 'the watched JPEG path must identify exactly one durable upload row')
+  const sourcePhotoUpload = waitingUploads.find((photo) => photo.id === watchedPhotoIds[0])
+  assert(sourcePhotoUpload, 'the watched JPEG must have a durable upload row')
   assert.equal(
     sourcePhotoUpload.uploadStatus,
     null,

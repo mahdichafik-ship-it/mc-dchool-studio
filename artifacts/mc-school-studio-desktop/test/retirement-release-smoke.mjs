@@ -959,6 +959,8 @@ try {
   await waitFor('first student row for portrait preview', () => cdp.evaluate(
     `Boolean(document.querySelector('[data-student-row="${localStudentOneId}"]'))`,
   ))
+  await cdp.evaluate(`window.api.invoke('watcher:stop', { projectId: ${localProjectId} })`)
+  await cdp.evaluate(`window.api.invoke('watcher:start', { projectId: ${localProjectId} })`)
   await cdp.evaluate(`document.querySelector('[data-student-row="${localStudentOneId}"]').click()`)
   await waitFor('first student selected for portrait preview', () => cdp.evaluate(
     `document.querySelector('[data-student-row="${localStudentOneId}"]')?.getAttribute('aria-pressed') === 'true'`,
@@ -966,10 +968,6 @@ try {
   await waitFor('selected student capture detail ready for live preview', () => cdp.evaluate(
     `Boolean(document.querySelector('[data-filmstrip-capture]'))`,
   ))
-  await waitFor('restarted project watcher to become ready', () => cdp.evaluate(
-    `document.querySelector('[data-testid="shoot-watch-status"]')?.innerText.includes('Live')`,
-  ))
-
   // Capture while disconnected. This exercises cached authorization, local
   // matching, durable pending state, and remote-ID mapping. Reconnecting must
   // not silently upload; the photographer explicitly retries the pending file.

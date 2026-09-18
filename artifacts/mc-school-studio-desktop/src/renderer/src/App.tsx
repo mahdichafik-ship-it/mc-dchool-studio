@@ -47,6 +47,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('projects')
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null)
   const [activeProjectName, setActiveProjectName] = useState<string>('')
+  const [activeProjectType, setActiveProjectType] = useState<'school' | 'corporate'>('school')
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' })
   const [authBusy, setAuthBusy] = useState(false)
@@ -188,9 +189,10 @@ export default function App() {
     return <SignInScreen onSignIn={signIn} error={auth.error} busy={authBusy} />
   }
 
-  const openProject = (id: number, name: string) => {
+  const openProject = (id: number, name: string, projectType: 'school' | 'corporate') => {
     setActiveProjectId(id)
     setActiveProjectName(name)
+    setActiveProjectType(projectType)
     setSelectedClassId(null)
     setCurrentPage('project-view')
   }
@@ -205,6 +207,7 @@ export default function App() {
       currentPage={currentPage}
       onNavigate={navigate}
       projectName={activeProjectName}
+      projectType={activeProjectType}
       projectClasses={activeProjectClasses}
       selectedClassId={selectedClassId}
       onSelectClass={setSelectedClassId}

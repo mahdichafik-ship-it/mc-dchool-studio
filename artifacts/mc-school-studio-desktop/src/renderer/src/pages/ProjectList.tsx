@@ -19,7 +19,7 @@ interface CloudProject {
 }
 
 interface Props {
-  onOpenProject: (id: number, name: string) => void
+  onOpenProject: (id: number, name: string, projectType: 'school' | 'corporate') => void
   offline?: boolean
 }
 
@@ -135,7 +135,7 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
         {!loading && projects.length > 0 && (
           <div className="grid grid-cols-1 gap-3 max-w-3xl">
             {projects.map((p) => (
-              <ProjectCard key={p.id} project={p} onClick={() => onOpenProject(p.id, p.schoolName)} />
+              <ProjectCard key={p.id} project={p} onClick={() => onOpenProject(p.id, p.schoolName, p.projectType)} />
             ))}
           </div>
         )}

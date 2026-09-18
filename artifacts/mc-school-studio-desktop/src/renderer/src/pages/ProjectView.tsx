@@ -350,7 +350,11 @@ export function ProjectView({
   useEffect(() => {
     if (selectedStudent) {
       const refreshed = students.find((s) => s.id === selectedStudent.id)
-      if (refreshed) setSelectedStudent(refreshed)
+      if (refreshed) {
+        setSelectedStudent(refreshed)
+      } else {
+        setSelectedStudent(null)
+      }
     }
   }, [students])
 
@@ -907,7 +911,7 @@ export function ProjectView({
         </div>
       )}
       {/* Header bar */}
-      <header className="shoot-toolbar bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
+       <header className="shoot-toolbar bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
         <div className="flex items-center gap-5 min-w-0">
           <button onClick={onBack} aria-label="Back to projects" className="text-slate-400 hover:text-white transition-colors bg-slate-900 hover:bg-slate-800 p-1.5 rounded-md shrink-0">
             <ArrowLeft className="size-4" />
@@ -929,31 +933,88 @@ export function ProjectView({
           </div>
         </div>
 
-        <Button
-          size="sm"
-          onClick={() => void openFinishDialog()}
-          data-testid="shoot-primary-action"
-          disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
-          className={cn(
-            "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0",
-            projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
-          )}
-        >
-          {finishing ? (
-            <Loader className="size-3.5 mr-1.5 animate-spin" />
-          ) : projectSynced ? (
-            <CheckCircle className="size-3.5 mr-1.5" />
-          ) : (
-            <CloudUpload className="size-3.5 mr-1.5" />
-          )}
-          {finishing
-            ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
-            : projectSynced
-              ? 'Finished'
-              : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
-                ? 'Retry Upload & Finish'
-                : 'Finish My Shoot'}
-        </Button>
+         <div className="flex items-center gap-2 shrink-0">
+           <details className="relative">
+             <summary
+               className="flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/60"
+               title="Open photographer group-photo controls"
+             >
+               <User className="size-3.5" />
+               Photo groups
+               <Badge className="bg-slate-700 px-1.5 py-0 text-[10px] text-slate-300 hover:bg-slate-700">{groups.length}</Badge>
+             </summary>
+             <div className="absolute right-0 top-10 z-40 w-80 overflow-hidden rounded-lg border border-slate-700 bg-white text-left shadow-2xl">
+               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5">
+                 <div>
+                   <p className="text-xs font-bold text-slate-900">Group photos</p>
+                   <p className="text-[10px] text-slate-500">Separate from the {departmentLabel.toLowerCase()} roster.</p>
+                 </div>
+                 {!project?.finishedAt && (
+                   <button type="button" onClick={() => void handleCreateGroup()} className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-teal-600 hover:text-teal-700">
+                     <Plus className="size-3" /> New
+                   </button>
+                 )}
+               </div>
+               <div className="max-h-72 overflow-y-auto py-1">
+                 {groups.map((group) => (
+                   <div key={group.id} className={cn("border-b border-slate-100 last:border-0", selectedGroup?.id === group.id ? "bg-teal-50/60" : "bg-white")}>
+                     {renamingGroupId === group.id ? (
+                       <div className="px-3 py-2">
+                         <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void handleRenameGroup(group) }}>
+                           <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} className="h-7 min-w-0 flex-1 rounded border border-slate-300 px-2 text-xs font-medium focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500" />
+                           <Button type="submit" size="sm" className="h-7 px-2 bg-teal-600 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-teal-700">Save</Button>
+                         </form>
+                       </div>
+                     ) : (
+                       <div className={cn("flex items-center px-3 py-2 transition-colors", selectedGroup?.id === group.id ? "border-l-4 border-teal-500" : "border-l-4 border-transparent hover:bg-slate-50")}>
+                         <button type="button" onClick={() => void handleSelectGroup(group)} className="mr-2 flex min-w-0 flex-1 items-center justify-between gap-2 text-left">
+                           <span className={cn("truncate text-xs font-bold", selectedGroup?.id === group.id ? "text-teal-950" : "text-slate-800")}>{group.name}</span>
+                           <Badge className="bg-slate-200 px-1.5 py-0 text-[10px] font-bold text-slate-700 shadow-none hover:bg-slate-200">{group.memberStudentIds.length}</Badge>
+                         </button>
+                         {!group.isDefaultClassGroup && !project?.finishedAt && (
+                           <div className="flex items-center gap-1">
+                             <button type="button" onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }} className="p-1 text-slate-400 hover:text-teal-600" title="Rename group">
+                               <Pencil className="size-3.5" />
+                             </button>
+                             <button type="button" onClick={() => void handleDeleteGroup(group)} className="p-1 text-slate-400 hover:text-red-600" title="Delete group">
+                               <Trash2 className="size-3.5" />
+                             </button>
+                           </div>
+                         )}
+                       </div>
+                     )}
+                   </div>
+                 ))}
+                 {groups.length === 0 && <p className="px-3 py-4 text-center text-xs text-slate-500">No group photos yet.</p>}
+               </div>
+             </div>
+           </details>
+           <Button
+             size="sm"
+             onClick={() => void openFinishDialog()}
+             data-testid="shoot-primary-action"
+             disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
+             className={cn(
+               "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0",
+               projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+             )}
+           >
+             {finishing ? (
+               <Loader className="size-3.5 mr-1.5 animate-spin" />
+             ) : projectSynced ? (
+               <CheckCircle className="size-3.5 mr-1.5" />
+             ) : (
+               <CloudUpload className="size-3.5 mr-1.5" />
+             )}
+             {finishing
+               ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
+               : projectSynced
+                 ? 'Finished'
+                 : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
+                   ? 'Retry Upload & Finish'
+                   : 'Finish My Shoot'}
+           </Button>
+         </div>
       </header>
       {project && project.syncStatus !== 'active' && (
         <div className={cn(
@@ -1476,57 +1537,8 @@ export function ProjectView({
             </div>
           )}
 
-          {/* Student list */}
+           {/* People list */}
           <div className="flex-1 overflow-y-auto">
-            {groups.length > 0 && (
-              <div className="py-2 border-b border-slate-100">
-                <div className="px-4 py-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  <span>Groups</span>
-                  {!project?.finishedAt && (
-                    <button type="button" onClick={() => void handleCreateGroup()} className="text-teal-600 hover:text-teal-700 flex items-center gap-0.5">
-                      <Plus className="size-3" /> New
-                    </button>
-                  )}
-                </div>
-                {groups.map((group) => (
-                  <div key={group.id} className={cn("flex flex-col border-b border-slate-100 last:border-0", selectedGroup?.id === group.id ? "bg-teal-50/50" : "bg-white")}>
-                    {renamingGroupId === group.id ? (
-                      <div className="px-4 py-2">
-                        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void handleRenameGroup(group) }}>
-                          <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="flex-1 h-7 px-2 text-xs font-medium border border-slate-300 rounded focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
-                          <Button type="submit" size="sm" className="h-7 px-2 bg-teal-600 hover:bg-teal-700 text-white text-[10px] uppercase font-bold tracking-wider">Save</Button>
-                        </form>
-                      </div>
-                    ) : (
-                      <div className={cn("flex items-center px-4 py-2 group/group transition-colors border-l-4", selectedGroup?.id === group.id ? "border-teal-500" : "border-transparent hover:bg-slate-50")}>
-                        <button type="button" onClick={() => void handleSelectGroup(group)} className="flex-1 flex items-center justify-between text-left min-w-0 mr-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className={cn("w-6 h-6 rounded-md flex items-center justify-center shrink-0", selectedGroup?.id === group.id ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-500")}>
-                              <User className="size-3.5" />
-                            </div>
-                            <span className={cn("text-sm font-bold truncate", selectedGroup?.id === group.id ? "text-teal-950" : "text-slate-800")}>{group.name}</span>
-                          </div>
-                          <Badge className="bg-slate-200 hover:bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0 rounded font-bold shadow-none">
-                            {group.memberStudentIds.length}
-                          </Badge>
-                        </button>
-                        {!group.isDefaultClassGroup && !project?.finishedAt && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover/group:opacity-100 transition-opacity">
-                            <button type="button" onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }} className="p-1 text-slate-400 hover:text-teal-600 transition-colors" title="Rename group">
-                              <Pencil className="size-3.5" />
-                            </button>
-                            <button type="button" onClick={() => void handleDeleteGroup(group)} className="p-1 text-slate-400 hover:text-red-600 transition-colors" title="Delete group">
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
             <div className="py-2">
               <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 {employeePlural}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Camera, LayoutDashboard, Settings, ChevronRight } from 'lucide-react'
+import { Camera, LayoutDashboard, Settings, ChevronRight, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -24,6 +24,7 @@ interface AppLayoutProps {
   currentPage: Page
   onNavigate: (page: Page) => void
   projectName?: string
+  projectType?: 'school' | 'corporate'
   projectClasses?: Array<{ id: number; className: string; studentCount: number }>
   selectedClassId?: number | null
   onSelectClass?: (classId: number | null) => void
@@ -36,6 +37,7 @@ export function AppLayout({
   currentPage,
   onNavigate,
   projectName,
+  projectType = 'school',
   projectClasses = [],
   selectedClassId = null,
   onSelectClass,
@@ -43,6 +45,10 @@ export function AppLayout({
   version,
 }: AppLayoutProps) {
   const [projectNavOpen, setProjectNavOpen] = useState(false)
+  const isCorporate = projectType === 'corporate'
+  const containerLabel = isCorporate ? 'Group' : 'Class'
+  const containerPlural = isCorporate ? 'Groups' : 'Classes'
+  const peopleLabel = isCorporate ? 'employees' : 'students'
 
   useEffect(() => {
     setProjectNavOpen(false)
@@ -77,7 +83,7 @@ export function AppLayout({
 
           {projectName && currentPage === 'project-view' && (
             <div className="ml-1 mt-2">
-              <SidebarHint text={projectNavOpen ? 'Hide this project’s classes.' : 'Show this project’s classes.'}>
+              <SidebarHint text={projectNavOpen ? `Hide this project’s ${containerPlural.toLowerCase()}.` : `Show this project’s ${containerPlural.toLowerCase()}.`}>
                 <button
                   type="button"
                   aria-expanded={projectNavOpen}
@@ -91,7 +97,7 @@ export function AppLayout({
               </SidebarHint>
               {projectNavOpen && (
                 <div id="project-class-navigation" className="mt-1 space-y-0.5 pl-4">
-                  <SidebarHint text="Show students from every class.">
+                  <SidebarHint text={`Show ${peopleLabel} from every ${containerLabel.toLowerCase()}.`}>
                     <button
                       type="button"
                       onClick={() => onSelectClass?.(null)}
@@ -102,12 +108,12 @@ export function AppLayout({
                           : 'text-slate-500 hover:bg-white/5 hover:text-slate-200',
                       )}
                     >
-                      <span>All classes</span>
+                      <span>All {peopleLabel}</span>
                       <span className="text-[10px] text-slate-500">{projectClasses.reduce((total, item) => total + item.studentCount, 0)}</span>
                     </button>
                   </SidebarHint>
                   {projectClasses.map((projectClass) => (
-                    <SidebarHint key={projectClass.id} text={`Show students from ${projectClass.className}.`}>
+                    <SidebarHint key={projectClass.id} text={`Show ${peopleLabel} from ${projectClass.className}.`}>
                       <button
                         type="button"
                         onClick={() => onSelectClass?.(projectClass.id)}
@@ -124,8 +130,22 @@ export function AppLayout({
                     </SidebarHint>
                   ))}
                   {projectClasses.length === 0 && (
-                    <p className="px-2 py-1 text-[10px] text-slate-600">Loading classes…</p>
+                    <p className="px-2 py-1 text-[10px] text-slate-600">Loading {containerPlural.toLowerCase()}…</p>
                   )}
+                  <div className="mt-2 border-t border-white/10 pt-2">
+                    <SidebarHint text={`New ${containerLabel.toLowerCase()}s are managed by roster sync and cannot be added from this desktop yet.`}>
+                      <button
+                        type="button"
+                        disabled
+                        aria-disabled="true"
+                        className="flex w-full cursor-not-allowed items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-slate-600 opacity-80"
+                        title={`New ${containerLabel.toLowerCase()}s are managed by roster sync and cannot be added from this desktop yet.`}
+                      >
+                        <Plus className="size-3 shrink-0" />
+                        Add {containerLabel}
+                      </button>
+                    </SidebarHint>
+                  </div>
                 </div>
               )}
             </div>

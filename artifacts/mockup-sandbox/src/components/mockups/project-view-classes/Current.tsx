@@ -208,16 +208,11 @@ export function Current() {
                   <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
                   <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${selectedClassName?.toLowerCase() ?? "students"}...`} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm outline-none focus:border-teal-500" />
                 </div>
-                <div className="mt-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400"><span>{selectedClassName}</span><button type="button" aria-label="Add student" className="flex size-7 items-center justify-center rounded-md bg-slate-900 text-white"><Plus className="size-3.5" /></button></div>
+                <div className="mt-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400"><span>Students · {visibleStudents.length}</span><button type="button" aria-label="Add student" className="flex size-7 items-center justify-center rounded-md bg-slate-900 text-white"><Plus className="size-3.5" /></button></div>
               </div>
 
               <div className="flex-1">
-                <div className="border-b border-slate-100 py-2">
-                  <div className="flex items-center justify-between px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"><span>Groups</span><button type="button" className="text-teal-600">+ New</button></div>
-                  {["Class 5B", "Class 5A"].map((group) => <button type="button" key={group} className="flex w-full items-center justify-between border-b border-slate-100 px-4 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-50"><span className="flex items-center gap-2.5"><span className="flex size-6 items-center justify-center rounded-md bg-slate-100 text-slate-500"><User className="size-3.5" /></span>{group}</span><span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">21</span></button>)}
-                </div>
-                <div className="py-2">
-                  <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Students</div>
+                <div className="pb-2">
                   {visibleStudents.map((student) => (
                     <button type="button" key={student.id} onClick={() => setSelectedStudent(student)} className={`flex w-full items-center gap-3 border-b border-slate-100 border-l-2 px-4 py-3 text-left transition ${selectedStudent.id === student.id ? "border-l-teal-500 bg-teal-50/60" : "border-l-transparent hover:bg-slate-50"}`}>
                       <div className={`flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${selectedStudent.id === student.id ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-500"}`}><User className="size-4" /></div>

@@ -1008,6 +1008,7 @@ export function ProjectView({
                  {groups.length === 0 && <p className="px-3 py-4 text-center text-xs text-slate-500">No group photos yet.</p>}
                </div>
              </div>
+           </details>
            {/* Class and group photo targets */}
            <section data-testid="group-photo-roster" className="shrink-0 border-b border-slate-200 bg-white">
              <div className="flex items-center justify-between px-4 py-3">

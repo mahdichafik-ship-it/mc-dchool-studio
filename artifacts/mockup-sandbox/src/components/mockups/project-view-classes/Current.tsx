@@ -89,6 +89,8 @@ export function Current() {
   const [query, setQuery] = useState("");
   const [live, setLive] = useState(true);
   const [groups, setGroups] = useState<string[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [groupNotice, setGroupNotice] = useState<string | null>(null);
   const [isGroupComposerOpen, setIsGroupComposerOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
 
@@ -107,6 +109,8 @@ export function Current() {
     const trimmedName = newGroupName.trim();
     if (!trimmedName) return;
     setGroups((currentGroups) => [...currentGroups, trimmedName]);
+    setSelectedGroup(trimmedName);
+    setGroupNotice(`"${trimmedName}" added to Lincoln High School`);
     setNewGroupName("");
     setIsGroupComposerOpen(false);
   };
@@ -196,13 +200,26 @@ export function Current() {
                     <p className="px-2 py-1 text-[10px] italic text-slate-600">No groups yet</p>
                   ) : (
                     groups.map((group) => (
-                      <button key={group} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-400 transition-colors hover:bg-white/5 hover:text-white">
+                       <button
+                         key={group}
+                         type="button"
+                         onClick={() => {
+                           setSelectedGroup(group);
+                           setGroupNotice(null);
+                         }}
+                         className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${selectedGroup === group ? "bg-teal-500/15 font-semibold text-teal-300" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
+                       >
                         <UsersRound className="size-3.5 text-slate-500" />
                         <span className="truncate">{group}</span>
                       </button>
                     ))
                   )}
                 </div>
+                 {groupNotice && (
+                   <p role="status" className="mt-2 rounded-md border border-teal-400/20 bg-teal-400/10 px-2 py-1.5 text-[10px] font-semibold leading-4 text-teal-200">
+                     {groupNotice}
+                   </p>
+                 )}
               </div>
             </div>
           </nav>

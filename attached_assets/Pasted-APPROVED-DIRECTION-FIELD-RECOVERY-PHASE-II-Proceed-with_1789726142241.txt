@@ -1,0 +1,489 @@
+APPROVED DIRECTION — FIELD RECOVERY PHASE II
+
+Proceed with a narrowly scoped ONLINE field-recovery implementation.
+
+The business scenario is now established:
+
+A photographer can arrive on site and discover:
+
+- a missing Class at a school
+- a missing Group/Department at a company
+- people assigned to the wrong Class/Group
+- a completely missing person
+
+The photographer must be able to correct this from Volume Capture and
+continue photographing.
+
+This is FIELD RECOVERY, not general project administration.
+
+==================================================
+1. CORE FREEZE
+==================================================
+
+The portrait/capture core MUST remain unchanged.
+
+DO NOT modify:
+
+- watcher
+- capture arrival processing
+- capture authority
+- QR behavior
+- captureRepository
+- student capture identity
+- JPEG/RAW pairing
+- preview generation
+- source-file handling
+- upload queue
+- R2
+- Google Drive
+- Dropbox
+- Replit backup
+- Pixieset exporter
+- gallery/delivery
+- payments
+- authentication architecture
+- photographer group-photo capture architecture
+- database schema
+- release infrastructure
+
+If any of these unexpectedly needs modification:
+
+STOP.
+
+Explain why before changing it.
+
+==================================================
+2. ONLINE-FIRST ONLY
+==================================================
+
+This phase supports Class/Group structural mutation while the desktop has
+a verified server connection.
+
+DO NOT implement offline-created Classes/Groups.
+
+DO NOT create local-only Classes/Groups with cloudId=null and allow them
+to enter normal shooting/upload lifecycle.
+
+DO NOT add:
+
+- pending roster-operation tables
+- offline mutation queues
+- client container identity schema
+- new database migrations
+- upload reconciliation changes
+
+Offline Class/Group creation will be a separate future phase.
+
+==================================================
+3. ADD CLASS / ADD GROUP
+==================================================
+
+Enable the Phase I control:
+
+School:
++ Add Class
+
+Corporate:
++ Add Group
+
+Use the existing classesTable as the authoritative container.
+
+Flow:
+
+Photographer clicks Add
+→ enters name
+→ desktop sends authenticated request
+→ server creates authoritative container
+→ server returns class ID
+→ desktop persists/reconciles local class with cloudId
+→ navigation refreshes
+→ new empty Class/Group becomes selected
+
+Do not automatically add people.
+
+Do not involve photographer groupsTable.
+
+==================================================
+4. NAME UNIQUENESS
+==================================================
+
+Within one project, Class/Group names must be unique.
+
+Normalize:
+
+trim
++
+case-insensitive comparison
+
+Reject:
+
+Marketing
+marketing
+ MARKETING
+
+inside the same project.
+
+Same name in another project remains valid.
+
+Return a clear conflict:
+
+A class named “Class 2A” already exists in this project.
+
+or:
+
+A group named “Marketing” already exists in this project.
+
+Do not silently suffix names.
+
+IMPORTANT:
+
+Do NOT introduce a database migration in this phase.
+
+Implement the strongest safe authoritative protection possible using the
+existing schema and transaction model.
+
+If preventing concurrent duplicate creation safely CANNOT be achieved
+without a schema-level unique constraint:
+
+STOP.
+
+Report the exact concurrency problem and proposed migration.
+
+Do not add the migration automatically.
+
+==================================================
+5. RETRY / UNCERTAIN RESPONSE SAFETY
+==================================================
+
+Class creation must not create duplicate containers merely because the
+network response is lost and the photographer retries.
+
+Design the smallest retry-safe mechanism possible within the approved
+non-schema boundary.
+
+Do not use unsafe name-only reconciliation as permanent identity.
+
+If durable retry safety genuinely requires persisted operation IDs or a
+schema change:
+
+STOP and report it before implementing that part.
+
+Do not silently broaden the architecture.
+
+==================================================
+6. MOVE EXISTING PEOPLE
+==================================================
+
+Expose a deliberate:
+
+Add existing people
+
+or equivalent action for the selected Class/Group.
+
+The photographer can search/select people from the ENTIRE CURRENT
+PROJECT.
+
+Example:
+
+New Class D
+
+Photographer may select:
+
+Ahmed from Class A
+Sara from Class B
+Youssef from Class C
+
+and move them into Class D.
+
+This is a MOVE.
+
+It is NOT a copy.
+
+There remains exactly ONE authoritative person record.
+
+Use the existing students.classId relationship.
+
+==================================================
+7. BULK MOVE
+==================================================
+
+Prefer one deliberate bulk operation for selected people rather than
+many independent renderer calls.
+
+Before submitting, show clearly:
+
+Move 3 students to Class D?
+
+Ahmed — Class A
+Sara — Class B
+Youssef — Class C
+
+Corporate terminology should adapt accordingly.
+
+Require explicit confirmation.
+
+The authoritative server operation must validate:
+
+- current project
+- destination container belongs to project
+- every selected person belongs to project
+- finished project is rejected
+- no cross-project move
+
+The move must preserve:
+
+- student/person ID
+- generated person ID
+- portraits
+- JPEG/RAW files
+- capture history
+- review state
+- delivery identity
+
+Only the authoritative container assignment changes.
+
+==================================================
+8. LOCAL UPDATE ORDER
+==================================================
+
+For this ONLINE phase:
+
+SERVER FIRST.
+
+For Class/Group creation:
+
+server creates
+→ returns authoritative ID
+→ desktop stores/reconciles local class
+→ renderer refreshes
+
+For person movement:
+
+server validates + commits move
+→ desktop updates/reconciles local classId
+→ renderer refreshes
+
+Do not optimistically change authoritative local organization before the
+server confirms the mutation.
+
+If the request fails:
+
+keep the existing local organization unchanged
+and show a clear recoverable error.
+
+==================================================
+9. ADD COMPLETELY NEW PERSON
+==================================================
+
+Reuse the EXISTING Add Student/Add Person path.
+
+Do not rewrite it.
+
+Once the new Class/Group exists locally with its authoritative cloud
+identity:
+
+School:
++ Add Student
+
+Corporate:
++ Add Person
+
+should create the missing person using the existing flow.
+
+The inspection confirmed this flow already:
+
+- validates project/class
+- creates local person
+- generates stable person ID
+- prepares folders
+- attempts cloud synchronization
+- keeps the person usable locally
+- reloads roster
+- selects them
+- sets normal portrait target
+
+Preserve this behavior.
+
+==================================================
+10. EXISTING CAPTURES MUST NOT MOVE
+==================================================
+
+Moving:
+
+Student A
+Class 1A → Class 2B
+
+must NOT rewrite any portrait capture.
+
+Existing captures continue belonging to Student A.
+
+Do not copy files.
+
+Do not regenerate captures.
+
+Do not change studentId on captures.
+
+Do not change capturedAt.
+
+Do not change JPEG/RAW pairing.
+
+The person's organizational assignment changes, not their photographic
+identity.
+
+==================================================
+11. GROUP-PHOTO SYSTEM
+==================================================
+
+DO NOT redesign:
+
+groups
+group_members
+group_captures
+group_capture_files
+
+However, inspect the effect of moving a person on the existing automatic
+default class-photo group membership.
+
+Do NOT automatically implement new reconciliation behavior unless the
+existing production behavior already handles it safely.
+
+If moving a student requires additional mutation of default photographer
+group membership:
+
+STOP and report:
+
+- current behavior
+- desired consequence
+- exact records affected
+- whether existing exclusions/membershipDirty semantics are involved
+
+Do not risk group-photo history.
+
+==================================================
+12. DELETE
+==================================================
+
+DO NOT expose Class/Group deletion.
+
+No work on Delete in this phase.
+
+Do not connect the existing destructive server class-delete route.
+
+==================================================
+13. UI
+==================================================
+
+Preserve the approved Phase I layout:
+
+LEFT DARK SIDEBAR
+
+Project
+  Class/Group A
+  Class/Group B
+  Class/Group C
+  + Add Class/Group
+
+MIDDLE
+
+People belonging to selected container.
+
+RIGHT
+
+Existing photography area.
+
+For adding existing people, use a compact modal/panel that can search
+ALL people in the current project.
+
+Do not permanently clutter the middle roster.
+
+==================================================
+14. HOVER HELP
+==================================================
+
+Continue the approved tooltip/focus-help behavior.
+
+Examples:
+
+Add Class
+“Create a new class in this project.”
+
+Add Group
+“Create a new group in this project.”
+
+Add existing students
+“Move existing students from this project into this class.”
+
+Add existing people
+“Move existing people from this project into this group.”
+
+Make the MOVE consequence clear.
+
+Do not use language suggesting the person is copied.
+
+==================================================
+15. FINISHED PROJECT
+==================================================
+
+Reject:
+
+- Add Class
+- Add Group
+- person movement
+- structural changes
+
+when finishedAt is set.
+
+Enforce this authoritatively, not renderer-only.
+
+Finished projects remain browsable/reviewable.
+
+==================================================
+16. MINIMUM CHANGE PRINCIPLE
+==================================================
+
+Reuse existing validation and project ownership logic wherever possible.
+
+Do not duplicate large sections of:
+
+classes.ts
+students.ts
+
+into desktop.ts.
+
+Extract/share narrowly scoped validation helpers only where that produces
+a smaller and safer change.
+
+Do not perform unrelated refactoring.
+
+==================================================
+17. BEFORE IMPLEMENTATION — ONE FINAL CHECK
+==================================================
+
+Before writing production code, inspect one issue:
+
+When a person moves from one authoritative Class/Group to another, what
+EXACTLY happens today to their DEFAULT photographer class-photo group
+membership?
+
+We know portrait captures remain safe.
+
+I need the group-photo membership consequence established before the
+move feature is implemented.
+
+Return:
+
+A. Current behavior.
+B. Whether default group membership follows classId automatically.
+C. Whether the old default group retains the person.
+D. Whether the destination default group receives the person.
+E. Effect of membershipDirty.
+F. Effect of explicit exclusions.
+G. Whether historical group captures/delivery remain unchanged.
+H. Smallest safe behavior for the move.
+
+Then STOP.
+
+NO production changes yet.
+
+After I approve that final membership behavior, we will authorize the
+online implementation.

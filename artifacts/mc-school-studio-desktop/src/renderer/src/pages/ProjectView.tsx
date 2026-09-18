@@ -163,6 +163,11 @@ export function ProjectView({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const autoStartAttemptedRef = useRef<number | null>(null)
 
+  useEffect(() => {
+    if (!project) return
+    void reloadGroups()
+  }, [project?.id, reloadGroups])
+
   const actionsRef = useRef({
     handleSelectCaptureStudent,
     handleClearCaptureStudent,
@@ -1003,7 +1008,60 @@ export function ProjectView({
                  {groups.length === 0 && <p className="px-3 py-4 text-center text-xs text-slate-500">No group photos yet.</p>}
                </div>
              </div>
-           </details>
+           {/* Class and group photo targets */}
+           <section data-testid="group-photo-roster" className="shrink-0 border-b border-slate-200 bg-white">
+             <div className="flex items-center justify-between px-4 py-3">
+               <div>
+                 <div className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
+                   Class &amp; group photos
+                 </div>
+                 <p className="mt-1 text-[11px] font-medium text-slate-500">
+                   Select a class or group to photograph
+                 </p>
+               </div>
+               {!project?.finishedAt && (
+                 <button
+                   type="button"
+                   onClick={() => void handleCreateGroup()}
+                   className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-700"
+                 >
+                   <Plus className="size-3" /> New group
+                 </button>
+               )}
+             </div>
+             <div className="max-h-44 overflow-y-auto px-2 pb-2">
+               {groups.map((group) => (
+                 <button
+                   key={group.id}
+                   type="button"
+                   onClick={() => void handleSelectGroup(group)}
+                   className={cn(
+                     "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+                     selectedGroup?.id === group.id
+                       ? "border-teal-200 bg-teal-50 text-teal-950"
+                       : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
+                   )}
+                 >
+                   <Camera className={cn(
+                     "size-3.5 shrink-0",
+                     selectedGroup?.id === group.id ? "text-teal-600" : "text-slate-400",
+                   )} />
+                   <span className="min-w-0 flex-1 truncate text-xs font-bold">
+                     {group.isDefaultClassGroup ? `${departmentLabel} photo · ${group.name}` : group.name}
+                   </span>
+                   <Badge className="shrink-0 bg-slate-100 px-1.5 py-0 text-[10px] font-bold text-slate-600 shadow-none hover:bg-slate-100">
+                     {group.memberStudentIds.length}
+                   </Badge>
+                 </button>
+               ))}
+               {groups.length === 0 && (
+                 <p className="px-2 pb-2 text-center text-xs text-slate-500">
+                   No class or group photo targets yet.
+                 </p>
+               )}
+             </div>
+           </section>
+
            <Button
              size="sm"
              onClick={() => void openFinishDialog()}

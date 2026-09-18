@@ -166,6 +166,40 @@ export function Current() {
                   ))}
                 </div>
               )}
+              <div className="mt-4 border-t border-white/10 pt-3">
+                <div className="flex items-center justify-between px-2 pb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">Groups</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsGroupComposerOpen((open) => !open)}
+                    aria-expanded={isGroupComposerOpen}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold text-teal-300 transition-colors hover:bg-white/10 hover:text-teal-200"
+                  >
+                    <Plus className="size-3" /> Add
+                  </button>
+                </div>
+                {isGroupComposerOpen && (
+                  <form onSubmit={addGroup} className="mb-2 flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 p-1.5">
+                    <input
+                      autoFocus
+                      value={newGroupName}
+                      onChange={(event) => setNewGroupName(event.target.value)}
+                      placeholder="Group name"
+                      aria-label="New group name"
+                      className="min-w-0 flex-1 rounded-md border border-white/10 bg-slate-950 px-2 py-1.5 text-[11px] text-white outline-none placeholder:text-slate-600 focus:border-teal-400"
+                    />
+                    <button type="submit" className="rounded-md bg-teal-600 px-2 py-1.5 text-[9px] font-extrabold uppercase tracking-wider text-white hover:bg-teal-500">Add</button>
+                  </form>
+                )}
+                <div className="space-y-0.5">
+                  {groups.map((group) => (
+                    <button key={group} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-400 transition-colors hover:bg-white/5 hover:text-white">
+                      <UsersRound className="size-3.5 text-slate-500" />
+                      <span className="truncate">{group}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </nav>
           <div className="border-t border-white/10 px-3 pb-4 pt-3">
@@ -222,36 +256,8 @@ export function Current() {
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                   <span>Students · {visibleStudents.length}</span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setIsGroupComposerOpen((open) => !open)}
-                      aria-expanded={isGroupComposerOpen}
-                      className="flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[9px] font-extrabold uppercase tracking-wider text-slate-600 hover:border-teal-300 hover:text-teal-700"
-                    >
-                      <UsersRound className="size-3" />
-                      Add group
-                    </button>
-                    <button type="button" aria-label="Add student" className="flex size-7 items-center justify-center rounded-md bg-slate-900 text-white"><Plus className="size-3.5" /></button>
-                  </div>
+                  <button type="button" aria-label="Add student" title="Add student or person" className="flex size-7 items-center justify-center rounded-md bg-slate-900 text-white"><Plus className="size-3.5" /></button>
                 </div>
-                <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5">
-                  <span className="flex shrink-0 items-center gap-1 text-[9px] font-extrabold uppercase tracking-wider text-slate-400"><UsersRound className="size-3" /> Groups</span>
-                  {groups.map((group) => <span key={group} className="shrink-0 rounded-full border border-teal-100 bg-teal-50 px-2 py-1 text-[9px] font-bold text-teal-700">{group}</span>)}
-                </div>
-                {isGroupComposerOpen && (
-                  <form onSubmit={addGroup} className="mt-2 flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50/60 p-1.5">
-                    <input
-                      autoFocus
-                      value={newGroupName}
-                      onChange={(event) => setNewGroupName(event.target.value)}
-                      placeholder="Group name"
-                      aria-label="New group name"
-                      className="min-w-0 flex-1 rounded-md border border-teal-100 bg-white px-2 py-1.5 text-xs outline-none focus:border-teal-500"
-                    />
-                    <button type="submit" className="rounded-md bg-teal-700 px-2 py-1.5 text-[9px] font-extrabold uppercase tracking-wider text-white hover:bg-teal-800">Add</button>
-                  </form>
-                )}
               </div>
 
               <div className="flex-1">

@@ -16,6 +16,7 @@ import {
   Star,
   Upload,
   User,
+  UsersRound,
 } from "lucide-react";
 import "./_group.css";
 
@@ -87,6 +88,9 @@ export function Current() {
   const [selectedStudent, setSelectedStudent] = useState(students[0]);
   const [query, setQuery] = useState("");
   const [live, setLive] = useState(true);
+  const [groups, setGroups] = useState(["Retakes", "Priority edits"]);
+  const [isGroupComposerOpen, setIsGroupComposerOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
 
   const visibleStudents = useMemo(
     () =>
@@ -98,6 +102,14 @@ export function Current() {
     [query, selectedClass],
   );
   const selectedClassName = selectedClass ? classes.find((item) => item.id === selectedClass)?.name : "All classes";
+  const addGroup = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = newGroupName.trim();
+    if (!trimmedName) return;
+    setGroups((currentGroups) => [...currentGroups, trimmedName]);
+    setNewGroupName("");
+    setIsGroupComposerOpen(false);
+  };
 
   return (
     <main className="project-view-preview flex min-h-screen flex-col overflow-hidden bg-slate-50 text-slate-900">
@@ -208,7 +220,38 @@ export function Current() {
                   <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
                   <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${selectedClassName?.toLowerCase() ?? "students"}...`} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm outline-none focus:border-teal-500" />
                 </div>
-                <div className="mt-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400"><span>Students · {visibleStudents.length}</span><button type="button" aria-label="Add student" className="flex size-7 items-center justify-center rounded-md bg-slate-900 text-white"><Plus className="size-3.5" /></button></div>
+                <div className="mt-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  <span>Students · {visibleStudents.length}</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsGroupComposerOpen((open) => !open)}
+                      aria-expanded={isGroupComposerOpen}
+                      className="flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[9px] font-extrabold uppercase tracking-wider text-slate-600 hover:border-teal-300 hover:text-teal-700"
+                    >
+                      <UsersRound className="size-3" />
+                      Add group
+                    </button>
+                    <button type="button" aria-label="Add student" className="flex size-7 items-center justify-center rounded-md bg-slate-900 text-white"><Plus className="size-3.5" /></button>
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                  <span className="flex shrink-0 items-center gap-1 text-[9px] font-extrabold uppercase tracking-wider text-slate-400"><UsersRound className="size-3" /> Groups</span>
+                  {groups.map((group) => <span key={group} className="shrink-0 rounded-full border border-teal-100 bg-teal-50 px-2 py-1 text-[9px] font-bold text-teal-700">{group}</span>)}
+                </div>
+                {isGroupComposerOpen && (
+                  <form onSubmit={addGroup} className="mt-2 flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50/60 p-1.5">
+                    <input
+                      autoFocus
+                      value={newGroupName}
+                      onChange={(event) => setNewGroupName(event.target.value)}
+                      placeholder="Group name"
+                      aria-label="New group name"
+                      className="min-w-0 flex-1 rounded-md border border-teal-100 bg-white px-2 py-1.5 text-xs outline-none focus:border-teal-500"
+                    />
+                    <button type="submit" className="rounded-md bg-teal-700 px-2 py-1.5 text-[9px] font-extrabold uppercase tracking-wider text-white hover:bg-teal-800">Add</button>
+                  </form>
+                )}
               </div>
 
               <div className="flex-1">

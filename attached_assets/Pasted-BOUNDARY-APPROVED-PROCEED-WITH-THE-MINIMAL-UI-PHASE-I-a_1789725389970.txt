@@ -1,0 +1,377 @@
+BOUNDARY APPROVED — PROCEED WITH THE MINIMAL UI PHASE
+
+I approve the proposed implementation boundary, with one clarification.
+
+The objective of this phase is:
+
+- corrected project navigation
+- project-type terminology
+- people filtering
+- hover/focus guidance
+- preservation of the existing v1.0.71 capture/delivery core
+
+This is NOT authorization for a synchronization redesign.
+
+==================================================
+1. APPROVED NAVIGATION MODEL
+==================================================
+
+Implement:
+
+SCHOOL
+
+Project
+  Class 1A
+  Class 1B
+  Class 2A
+  + Add Class
+
+Class selected
+→ students in middle
+→ existing photography area on right
+
+
+CORPORATE
+
+Project
+  Management
+  Marketing
+  Finance
+  + Add Group
+
+Group selected
+→ people/employees in middle
+→ existing photography area on right
+
+Use the existing classesTable-backed people containers.
+
+Use projectType to determine terminology.
+
+Do not create a new corporate container model.
+
+==================================================
+2. ADD CLASS / ADD GROUP — DESIGN PRESERVED
+==================================================
+
+Keep:
+
++ Add Class
+
+and:
+
++ Add Group
+
+VISIBLE in the intended design.
+
+This is part of the approved interface.
+
+However, do NOT invent or implement a new desktop/cloud synchronization
+contract during this phase.
+
+If the current production contracts cannot safely persist a newly
+created container through the required lifecycle, do not wire the action
+to unsafe persistence.
+
+The control may remain disabled/not operational pending the separate
+class-sync decision.
+
+If disabled, provide hover/focus help explaining why, using concise
+photographer-friendly wording.
+
+Do not remove it from the design simply because its backend lifecycle is
+not yet approved.
+
+==================================================
+3. PEOPLE COLUMN
+==================================================
+
+The middle column is PEOPLE ONLY.
+
+School:
+selected Class → its students.
+
+Corporate:
+selected Group/Department → its people/employees.
+
+Remove the redundant photographer-group list from this middle navigation
+area only if doing so does not alter the existing whole-group photo
+capability.
+
+Do not delete or redesign the underlying group-photo functionality.
+
+==================================================
+4. RIGHT PHOTOGRAPHY AREA
+==================================================
+
+PRESERVE IT.
+
+Existing person selection, portraits, preview, review, JPEG/RAW,
+capture, upload and delivery behavior remain unchanged.
+
+Do not modify capture behavior to implement this navigation.
+
+==================================================
+5. EXISTING GROUP-PHOTO SYSTEM
+==================================================
+
+Leave unchanged:
+
+- groups
+- group_members
+- group_captures
+- group_capture_files
+- group capture target
+- group JPEG/RAW handling
+- group upload
+- group delivery
+
+Whole-class / whole-team photography remains an existing separate
+capture capability.
+
+Do not promote those records into the primary project navigation.
+
+==================================================
+6. PROJECT EXPANSION
+==================================================
+
+Implement the expandable/collapsible project presentation in the dark
+sidebar.
+
+Expanded:
+
+▼ Project Name
+   Class/Group A
+   Class/Group B
+   Class/Group C
+   + Add Class/Group
+
+Collapsed:
+
+▶ Project Name
+
+Preserve clear selected-container state.
+
+==================================================
+7. TERMINOLOGY
+==================================================
+
+School project:
+
+Class
+Student
+Students
+Add Class
+Add Student
+
+Corporate project:
+
+Group/Department according to the existing approved corporate
+terminology
+Person/Employee according to existing project terminology
+Add Group
+Add Person
+
+Do not change persisted entity names merely for UI terminology.
+
+==================================================
+8. UNIQUE NAME RULE REMAINS APPROVED
+==================================================
+
+When container creation/rename becomes operational:
+
+names must be unique within the project using:
+
+trim + case-insensitive comparison.
+
+Do not implement a partial renderer-only uniqueness guarantee and call
+it authoritative.
+
+If creation remains unwired in this phase, keep this requirement for the
+subsequent persistence phase.
+
+==================================================
+9. DELETE
+==================================================
+
+DO NOT expose Class/Group deletion in this phase.
+
+Do not connect the existing destructive server class-delete route to the
+new UI.
+
+Our product rule remains:
+
+A container cannot be deleted once names/people have been allocated.
+
+Capture/history dependencies also prevent deletion.
+
+We will implement authoritative deletion protection before exposing
+Delete in a future phase.
+
+==================================================
+10. HOVER / FOCUS HELP
+==================================================
+
+Implement the approved help behavior for relevant controls.
+
+Examples:
+
+Add Class
+"Create a new class in this project."
+
+Add Group
+"Create a new group in this project."
+
+Search
+"Search people in the selected class/group."
+
+Add Student / Add Person
+"Add a new person to this project."
+
+Project chevron
+"Show or hide the classes/groups in this project."
+
+Keep descriptions short and operational.
+
+Important controls still need visible labels.
+
+Do not make critical information available only through hover.
+
+==================================================
+11. FINISHED PROJECT
+==================================================
+
+Finished projects remain browsable.
+
+Project expansion, Class/Group selection, people selection and review
+remain available according to existing behavior.
+
+Do not introduce new mutation capability into finished projects.
+
+Use existing finishedAt authority.
+
+==================================================
+12. CORE FREEZE
+==================================================
+
+NO changes are authorized to:
+
+- watcher
+- filesystem capture ingestion
+- capture authority
+- QR architecture
+- JPEG/RAW pairing
+- capture identity
+- captureRepository
+- preview generation
+- local source retention
+- upload queue
+- R2
+- Google Drive
+- Dropbox
+- Replit backup
+- Pixieset exporter
+- group-photo capture pipeline
+- galleries
+- delivery
+- price sheets
+- payments/Stripe
+- authentication
+- database schema
+- cloud reconciliation protocol
+- release infrastructure
+
+No dependency upgrades.
+
+No unrelated refactoring.
+
+If implementing the approved UI unexpectedly requires touching one of
+these areas:
+
+STOP.
+
+Explain why before changing it.
+
+==================================================
+13. CHANGE BUDGET
+==================================================
+
+Keep the diff small.
+
+The expected production changes should predominantly be renderer/UI
+files.
+
+Before touching an IPC/API file that was listed as a possible future
+change in the impact report, ask:
+
+"Is this actually necessary for the approved UI-only phase?"
+
+If not, do not touch it.
+
+In particular, do not modify:
+
+artifacts/api-server/src/routes/desktop.ts
+
+to create an offline container synchronization protocol in this phase.
+
+==================================================
+14. VALIDATION
+==================================================
+
+Test at minimum:
+
+- project expand/collapse
+- existing classes appear beneath school project
+- existing corporate containers appear beneath corporate project
+- correct terminology by projectType
+- selected container state
+- selecting class filters students correctly
+- selecting corporate group/department filters people correctly
+- middle column contains people, not redundant group navigation
+- existing person selection still works
+- existing photographs still appear correctly
+- empty container state
+- finished project browsing
+- hover/focus help
+- Add Class/Add Group visual state
+- existing Project Actions remain accessible
+
+Then run the relevant existing regression tests.
+
+Run the existing capture-integrity tests to demonstrate that the
+navigation work did not regress capture behavior.
+
+Do not modify capture code to make those tests pass.
+
+==================================================
+15. COMPLETION REPORT
+==================================================
+
+After implementation, report:
+
+1. v1.0.71 baseline commit.
+2. Candidate commit.
+3. Every production file changed.
+4. Purpose of every changed file.
+5. Exact diff summary.
+6. Confirmation schema unchanged.
+7. Confirmation watcher unchanged.
+8. Confirmation captureRepository unchanged.
+9. Confirmation JPEG/RAW behavior unchanged.
+10. Confirmation upload queue/R2 unchanged.
+11. Confirmation group-photo system unchanged.
+12. Confirmation Pixieset unchanged.
+13. Confirmation gallery/delivery unchanged.
+14. UI test results.
+15. Capture-integrity regression results.
+16. Typecheck/build results.
+17. Any limitation discovered.
+18. Whether Add Class/Add Group remains unwired and exactly why.
+
+DO NOT:
+
+- version bump
+- tag
+- publish
+- start release workflow
+
+STOP after the implementation and evidence report for my review.

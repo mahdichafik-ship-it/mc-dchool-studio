@@ -60,6 +60,7 @@ import type {
   DroppedCaptureFileResult,
   DroppedCaptureProgressEvent,
   FolderMigrationPreview,
+  MoveStudentResult,
 } from '@shared/types'
 
 interface Props {
@@ -107,6 +108,7 @@ export function ProjectView({
   const { data: captureSummary } = useCaptureSummary(projectId)
   const [groupCaptureCount, setGroupCaptureCount] = useState(0)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
+  const { data: allProjectStudents, reload: reloadAllProjectStudents } = useStudents(projectId)
   const { data: groups, reload: reloadGroups } = useGroups(projectId, selectedClassId ?? undefined)
   const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
   const { data: groupCaptures, reload: reloadGroupCaptures } = useGroupCaptures(projectId, selectedGroup?.id ?? null)
@@ -135,6 +137,7 @@ export function ProjectView({
   const [search, setSearch] = useState('')
   const filteredStudents = filterRosterStudents(students, search)
   const [addStudentOpen, setAddStudentOpen] = useState(false)
+  const [moveStudentOpen, setMoveStudentOpen] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
@@ -464,7 +467,7 @@ export function ProjectView({
   }
 
   async function handleStudentCreated(result: CreateStudentResult) {
-    await Promise.all([reloadStudents(), reloadClasses(), reloadProject()])
+    await Promise.all([reloadStudents(), reloadAllProjectStudents(), reloadClasses(), reloadProject()])
     onSelectedClassIdChange(result.student.classId)
     setSelectedStudent(result.student)
     let selectedForCapture = false
@@ -486,6 +489,18 @@ export function ProjectView({
         result.cloudSynced ? 'synced to cloud' : 'saved locally; cloud sync will retry during Upload & Finish',
         selectedForCapture ? 'selected for capture' : null,
       ].filter(Boolean).join(' · '),
+    })
+  }
+
+  async function handleStudentMoved(result: MoveStudentResult) {
+    await Promise.all([reloadStudents(), reloadAllProjectStudents(), reloadClasses(), reloadProject()])
+    setSelectedStudent(null)
+    addToast({
+      type: 'success',
+      title: `${result.student.firstName} ${result.student.lastName} moved`,
+      description: result.cloudSynced
+        ? `Moved to ${result.student.className} and synced to cloud.`
+        : `Moved to ${result.student.className} locally; cloud sync will retry when connected.`,
     })
   }
 
@@ -1514,6 +1529,20 @@ export function ProjectView({
               >
                 <Plus className="size-4" />
               </button>
+               {selectedClassId !== null
+                 && !project?.finishedAt
+                 && allProjectStudents.some((student) => student.classId !== selectedClassId) && (
+                 <button
+                   type="button"
+                   onClick={() => setMoveStudentOpen(true)}
+                   aria-label={`Move ${employeeLabel.toLowerCase()} here`}
+                   className="h-[38px] rounded-lg border border-teal-200 bg-teal-50 px-3 text-[10px] font-bold uppercase tracking-wider text-teal-700 transition-colors hover:bg-teal-100"
+                   title={`Move an existing ${employeeLabel.toLowerCase()} into this ${departmentLabel.toLowerCase()}`}
+                 >
+                   <ArrowRight className="mr-1.5 inline size-3.5" />
+                   Move here
+                 </button>
+               )}
             </div>
           </div>
 
@@ -1642,6 +1671,20 @@ export function ProjectView({
           }}
         />
       )}
+      <MoveStudentDialog
+        open={moveStudentOpen}
+        projectId={projectId}
+        targetClassId={selectedClassId}
+        targetClassName={classes.find((cls) => cls.id === selectedClassId)?.className ?? departmentLabel}
+        students={allProjectStudents.filter((student) => student.classId !== selectedClassId)}
+        employeeLabel={employeeLabel}
+        departmentLabel={departmentLabel}
+        onClose={() => setMoveStudentOpen(false)}
+        onMoved={async (result) => {
+          await handleStudentMoved(result)
+          setMoveStudentOpen(false)
+        }}
+      />
       <AddStudentDialog
         open={addStudentOpen}
         projectId={projectId}
@@ -1653,6 +1696,96 @@ export function ProjectView({
         employeeLabel={employeeLabel}
       />
     </div>
+  )
+}
+
+function MoveStudentDialog({
+  open,
+  projectId,
+  targetClassId,
+  targetClassName,
+  students,
+  employeeLabel,
+  departmentLabel,
+  onClose,
+  onMoved,
+}: {
+  open: boolean
+  projectId: number
+  targetClassId: number | null
+  targetClassName: string
+  students: Student[]
+  employeeLabel: string
+  departmentLabel: string
+  onClose: () => void
+  onMoved: (result: MoveStudentResult) => Promise<void>
+}) {
+  const [studentId, setStudentId] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setStudentId(String(students[0]?.id ?? ''))
+  }, [open, students])
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    if (saving || !targetClassId || !studentId) return
+    setSaving(true)
+    try {
+      const result = await window.api.invoke('students:move', {
+        projectId,
+        studentId: Number(studentId),
+        classId: targetClassId,
+      }) as MoveStudentResult
+      await onMoved(result)
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: `Could not move ${employeeLabel.toLowerCase()}`,
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title={`Move ${employeeLabel} to ${targetClassName}`} className="max-w-md">
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        <div>
+          <label htmlFor="move-student-id" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            {employeeLabel}
+          </label>
+          <select
+            id="move-student-id"
+            value={studentId}
+            onChange={(event) => setStudentId(event.target.value)}
+            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+            required
+          >
+            {students.map((student) => (
+              <option key={student.id} value={student.id}>
+                {student.lastName}, {student.firstName} · {student.className}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs font-medium leading-relaxed text-slate-500">
+          This moves the existing {employeeLabel.toLowerCase()} without creating a duplicate. Their identity and existing photographs stay attached.
+          If you are offline, the move will sync when connectivity returns.
+        </p>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving} className="h-10 px-5 text-xs font-bold uppercase tracking-wider">
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving || !studentId || !targetClassId} className="h-10 bg-teal-600 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-sm hover:bg-teal-700">
+            {saving ? <Loader className="mr-2 size-4 animate-spin" /> : <ArrowRight className="mr-2 size-4" />}
+            {saving ? 'Moving…' : `Move to ${departmentLabel.toLowerCase()}`}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 

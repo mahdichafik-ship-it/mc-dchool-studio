@@ -28,6 +28,7 @@ interface AppLayoutProps {
   projectClasses?: Array<{ id: number; className: string; studentCount: number }>
   selectedClassId?: number | null
   onSelectClass?: (classId: number | null) => void
+  onAddClass?: () => void
   offline?: boolean
   version: string
 }
@@ -41,6 +42,7 @@ export function AppLayout({
   projectClasses = [],
   selectedClassId = null,
   onSelectClass,
+  onAddClass,
   offline = false,
   version,
 }: AppLayoutProps) {
@@ -133,13 +135,13 @@ export function AppLayout({
                     <p className="px-2 py-1 text-[10px] text-slate-600">Loading {containerPlural.toLowerCase()}…</p>
                   )}
                   <div className="mt-2 border-t border-white/10 pt-2">
-                    <SidebarHint text={`New ${containerLabel.toLowerCase()}s are managed by roster sync and cannot be added from this desktop yet.`}>
+                   <SidebarHint text={`Add a ${containerLabel.toLowerCase()} to this project.`}>
                       <button
                         type="button"
-                        disabled
-                        aria-disabled="true"
-                        className="flex w-full cursor-not-allowed items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-slate-600 opacity-80"
-                        title={`New ${containerLabel.toLowerCase()}s are managed by roster sync and cannot be added from this desktop yet.`}
+                       onClick={onAddClass}
+                       disabled={!onAddClass}
+                       className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-slate-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                       title={`Add ${containerLabel.toLowerCase()}`}
                       >
                         <Plus className="size-3 shrink-0" />
                         Add {containerLabel}

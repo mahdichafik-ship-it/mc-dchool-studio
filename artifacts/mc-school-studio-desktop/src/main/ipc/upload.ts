@@ -25,7 +25,7 @@ import {
   groupMembersTable,
 } from '../db/schema'
 import { normalizeProjectType } from '../../shared/types'
-import { eq, and, or, asc } from 'drizzle-orm'
+import { eq, and, or, asc, isNull } from 'drizzle-orm'
 import type { LiveUploadQueueItem, LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
@@ -204,53 +204,11 @@ type DesktopProjectBundle = {
   }>
 }
 
-export function disableCloudSyncForRetirement(): void {
-  cloudSyncDisabledForRetirement = true
-  cloudSessionVerified = false
-}
-
-export function enableCloudSyncAfterSignIn(): void {
-  cloudSyncDisabledForRetirement = false
-  cloudSessionVerified = true
-  kickEnabledLiveUploads()
-  retryPendingReviewsAfterConnectionRestore()
-}
-
-export function markCloudSessionUnavailable(): void {
-  cloudSessionVerified = false
-}
-
-export function markCloudSessionVerified(): void {
-  if (cloudSyncDisabledForRetirement) return
-  cloudSessionVerified = true
-  kickEnabledLiveUploads()
-  retryPendingReviewsAfterConnectionRestore()
-}
-
-export function isCloudSessionVerified(): boolean {
-  return cloudSessionVerified && !cloudSyncDisabledForRetirement
-}
-
-function retryPendingReviewsAfterConnectionRestore(): void {
-  void Promise.all([
-    syncPendingCaptureReviews(),
-    syncPendingGroupCaptureReviews(),
-  ]).catch((error) => {
-    console.warn('[Review] Could not retry pending cloud review changes:', error)
-  })
-}
-async function repairCloudIdentity(
-  projectId: number,
-  studentId: number,
+async function fetchAssignedCloudBundle(
+  project: typeof projectsTable.$inferSelect,
   apiUrl: string,
   connectionToken: string,
-): Promise<void> {
-  const db = getDb()
-  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
-  const student = db.select().from(studentsTable).where(eq(studentsTable.id, studentId)).get()
-  if (!project || !student) throw new Error('The local project or student no longer exists.')
-  if (project.cloudId !== null && student.cloudId !== null) return
-
+): Promise<{ cloudProject: DesktopProjectSummary; bundle: DesktopProjectBundle }> {
   const normalizedName = project.schoolName.trim().toLocaleLowerCase()
   const projectsResponse = await fetch(`${apiUrl.replace(/\/+$/, '')}/api/desktop/projects`, {
     headers: { Authorization: `Bearer ${connectionToken}` },
@@ -292,22 +250,159 @@ async function repairCloudIdentity(
     if (bundleResponse.status === 429 || bundleResponse.status >= 500) {
       throw new RetryableUploadError(`HTTP ${bundleResponse.status}: ${text}`)
     }
-    throw new Error(`Could not refresh student identity (HTTP ${bundleResponse.status}: ${text})`)
+    throw new Error(`Could not refresh project identity (HTTP ${bundleResponse.status}: ${text})`)
   }
-  const bundle = await bundleResponse.json() as DesktopProjectBundle
+  return { cloudProject, bundle: await bundleResponse.json() as DesktopProjectBundle }
+}
+
+async function createCloudClass(
+  cloudProjectId: number,
+  className: string,
+  apiUrl: string,
+  connectionToken: string,
+): Promise<{ id: number; className: string }> {
+  const response = await fetch(
+    `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProjectId}/classes`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ className }),
+      signal: AbortSignal.timeout(30000),
+    },
+  )
+  if (!response.ok) {
+    const text = await response.text()
+    if (response.status === 401) invalidateDesktopCredentials(true)
+    if (response.status === 429 || response.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${response.status}: ${text}`)
+    }
+    throw new Error(`Could not create the class in the cloud project (HTTP ${response.status}: ${text})`)
+  }
+  const payload = await response.json() as { id?: number; className?: string }
+  if (!Number.isInteger(payload.id)) throw new Error('The cloud project returned an invalid class identity.')
+  return { id: payload.id, className: payload.className ?? className }
+}
+
+export async function syncClassCloudIdentity(
+  projectId: number,
+  classId: number,
+): Promise<{ synced: boolean; error?: string }> {
+  const { apiUrl, connectionToken } = getUploadConfig()
+  if (!apiUrl || !connectionToken || !isCloudSessionVerified()) {
+    return { synced: false }
+  }
+  try {
+    const db = getDb()
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    const localClass = db.select().from(classesTable).where(and(
+      eq(classesTable.id, classId),
+      eq(classesTable.projectId, projectId),
+    )).get()
+    if (!project || !localClass) throw new Error('The local project or class no longer exists.')
+
+    const { cloudProject, bundle } = await fetchAssignedCloudBundle(project, apiUrl, connectionToken)
+    let cloudClass = bundle.classes.find((candidate) =>
+      candidate.id === localClass.cloudId
+      || candidate.className.trim().toLocaleLowerCase() === localClass.className.trim().toLocaleLowerCase())
+    if (!cloudClass) {
+      cloudClass = await createCloudClass(cloudProject.id, localClass.className, apiUrl, connectionToken)
+    }
+    db.transaction((tx) => {
+      tx.update(projectsTable)
+        .set({ cloudId: cloudProject.id, projectType: normalizeProjectType(bundle.project.projectType) })
+        .where(eq(projectsTable.id, projectId))
+        .run()
+      tx.update(classesTable)
+        .set({ cloudId: cloudClass!.id, className: cloudClass!.className, updatedAt: new Date().toISOString() })
+        .where(eq(classesTable.id, classId))
+        .run()
+    })
+    return { synced: true }
+  } catch (error) {
+    return { synced: false, error: getUploadErrorMessage(error) }
+  }
+}
+
+export function disableCloudSyncForRetirement(): void {
+  cloudSyncDisabledForRetirement = true
+  cloudSessionVerified = false
+}
+
+export function enableCloudSyncAfterSignIn(): void {
+  cloudSyncDisabledForRetirement = false
+  cloudSessionVerified = true
+  retryPendingRosterCloudIdentities()
+  kickEnabledLiveUploads()
+  retryPendingReviewsAfterConnectionRestore()
+}
+
+export function markCloudSessionUnavailable(): void {
+  cloudSessionVerified = false
+}
+
+export function markCloudSessionVerified(): void {
+  if (cloudSyncDisabledForRetirement) return
+  cloudSessionVerified = true
+  retryPendingRosterCloudIdentities()
+  kickEnabledLiveUploads()
+  retryPendingReviewsAfterConnectionRestore()
+}
+
+export function isCloudSessionVerified(): boolean {
+  return cloudSessionVerified && !cloudSyncDisabledForRetirement
+}
+
+function retryPendingRosterCloudIdentities(): void {
+  const db = getDb()
+  const classes = db.select({ id: classesTable.id, projectId: classesTable.projectId })
+    .from(classesTable)
+    .where(isNull(classesTable.cloudId))
+    .all()
+  const students = db.select({ id: studentsTable.id, projectId: studentsTable.projectId })
+    .from(studentsTable)
+    .all()
+  void Promise.all([
+    ...classes.map((localClass) => syncClassCloudIdentity(localClass.projectId, localClass.id)),
+    ...students.map((student) => syncStudentCloudIdentity(student.projectId, student.id)),
+  ]).catch((error) => {
+    console.warn('[Roster] Could not retry pending cloud identities:', error)
+  })
+}
+
+function retryPendingReviewsAfterConnectionRestore(): void {
+  void Promise.all([
+    syncPendingCaptureReviews(),
+    syncPendingGroupCaptureReviews(),
+  ]).catch((error) => {
+    console.warn('[Review] Could not retry pending cloud review changes:', error)
+  })
+}
+async function repairCloudIdentity(
+  projectId: number,
+  studentId: number,
+  apiUrl: string,
+  connectionToken: string,
+): Promise<void> {
+  const db = getDb()
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  const student = db.select().from(studentsTable).where(eq(studentsTable.id, studentId)).get()
+  if (!project || !student) throw new Error('The local project or student no longer exists.')
+  const { cloudProject, bundle } = await fetchAssignedCloudBundle(project, apiUrl, connectionToken)
+  const localClass = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).get()
+  if (!localClass) throw new Error(`The class for student "${student.generatedStudentId}" no longer exists locally.`)
+  let cloudClass = bundle.classes.find((candidate) =>
+    candidate.id === localClass.cloudId
+    || candidate.className.trim().toLocaleLowerCase() === localClass.className.trim().toLocaleLowerCase())
+  if (!cloudClass) {
+    cloudClass = await createCloudClass(cloudProject.id, localClass.className, apiUrl, connectionToken)
+  }
   let cloudStudent = bundle.students.find((candidate) =>
     candidate.generatedStudentId.trim().toLocaleLowerCase()
       === student.generatedStudentId.trim().toLocaleLowerCase())
   if (!cloudStudent) {
-    const localClass = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).get()
-    const cloudClass = bundle.classes.find((candidate) =>
-      candidate.id === localClass?.cloudId
-      || candidate.className.trim().toLocaleLowerCase()
-        === localClass?.className.trim().toLocaleLowerCase())
-    if (!localClass || !cloudClass) {
-      throw new Error(`The class for student "${student.generatedStudentId}" was not found in the cloud project.`)
-    }
-
     const createResponse = await fetch(
       `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProject.id}/students`,
       {
@@ -335,6 +430,29 @@ async function repairCloudIdentity(
     }
     cloudStudent = await createResponse.json() as DesktopProjectBundle['students'][number]
   }
+  if (cloudStudent.classId !== cloudClass.id) {
+    const moveResponse = await fetch(
+      `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProject.id}/students/${cloudStudent.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${connectionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ classId: cloudClass.id }),
+        signal: AbortSignal.timeout(30000),
+      },
+    )
+    if (!moveResponse.ok) {
+      const text = await moveResponse.text()
+      if (moveResponse.status === 401) invalidateDesktopCredentials(true)
+      if (moveResponse.status === 429 || moveResponse.status >= 500) {
+        throw new RetryableUploadError(`HTTP ${moveResponse.status}: ${text}`)
+      }
+      throw new Error(`Could not move the student in the cloud project (HTTP ${moveResponse.status}: ${text})`)
+    }
+    cloudStudent = await moveResponse.json() as DesktopProjectBundle['students'][number]
+  }
 
   db.transaction((tx) => {
     tx.update(projectsTable)
@@ -342,21 +460,10 @@ async function repairCloudIdentity(
       .where(eq(projectsTable.id, projectId))
       .run()
 
-    const localClasses = tx
-      .select()
-      .from(classesTable)
-      .where(eq(classesTable.projectId, projectId))
-      .all()
-    for (const cloudClass of bundle.classes) {
-      const localClass = localClasses.find((candidate) =>
-        candidate.className.trim().toLocaleLowerCase() === cloudClass.className.trim().toLocaleLowerCase())
-      if (localClass) {
-        tx.update(classesTable)
-          .set({ cloudId: cloudClass.id })
-          .where(eq(classesTable.id, localClass.id))
-          .run()
-      }
-    }
+    tx.update(classesTable)
+      .set({ cloudId: cloudClass.id, className: cloudClass.className, updatedAt: new Date().toISOString() })
+      .where(eq(classesTable.id, localClass.id))
+      .run()
 
     const localStudent = tx
       .select()

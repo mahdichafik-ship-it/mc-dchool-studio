@@ -202,6 +202,34 @@ export default function App() {
     setCurrentPage(page)
   }
 
+  const handleAddClass = async () => {
+    if (!activeProjectId) return
+    const label = activeProjectType === 'corporate' ? 'Group' : 'Class'
+    const className = window.prompt(`${label} name`)
+    if (!className?.trim()) return
+    try {
+      const result = await window.api.invoke('classes:create', {
+        projectId: activeProjectId,
+        className,
+      })
+      await reloadActiveProjectClasses()
+      setSelectedClassId(result.class.id)
+      addToast({
+        type: 'success',
+        title: `${label} created`,
+        description: result.cloudSynced
+          ? `${result.class.className} is ready and synced to cloud.`
+          : `${result.class.className} is ready locally; cloud sync will retry when connected.`,
+      })
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: `Could not create ${label.toLowerCase()}`,
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   return (
     <AppLayout
       currentPage={currentPage}
@@ -211,6 +239,7 @@ export default function App() {
       projectClasses={activeProjectClasses}
       selectedClassId={selectedClassId}
       onSelectClass={setSelectedClassId}
+      onAddClass={() => void handleAddClass()}
       offline={auth.offline}
       version={appVersion}
     >

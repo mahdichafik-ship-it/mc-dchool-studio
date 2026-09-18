@@ -8,5 +8,6 @@ export const modules: ModuleMap = {
   "./components/mockups/capture-preview-redesign/LatestFilmstrip.tsx": () => import("../components/mockups/capture-preview-redesign/LatestFilmstrip.tsx"),
   "./components/mockups/capture-preview-redesign/OriginalVsEdited.tsx": () => import("../components/mockups/capture-preview-redesign/OriginalVsEdited.tsx"),
   "./components/mockups/capture-preview-redesign/ReframeEditor.tsx": () => import("../components/mockups/capture-preview-redesign/ReframeEditor.tsx"),
-  "./components/mockups/project-action-sidebar/ProjectSidebar.tsx": () => import("../components/mockups/project-action-sidebar/ProjectSidebar.tsx")
+  "./components/mockups/project-action-sidebar/ProjectSidebar.tsx": () => import("../components/mockups/project-action-sidebar/ProjectSidebar.tsx"),
+  "./components/mockups/project-view-classes/Current.tsx": () => import("../components/mockups/project-view-classes/Current.tsx")
 };

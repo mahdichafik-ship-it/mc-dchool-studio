@@ -25,7 +25,7 @@ test('active student and group keep critical shoot regions in the compact render
   for (const className of Object.values(shootWorkspaceLayoutContract)) {
     assert.match(view, new RegExp(className), `${className} must identify its renderer region`)
   }
-  assert.match(css, /@media \(max-width: 1280px\), \(max-height: 800px\)/)
+  assert.match(css, /@media \(max-width: 1500px\), \(max-height: 800px\)/)
   assert.match(css, /@media \(max-height: 720px\)/)
   assert.match(css, /\.shoot-group-body[\s\S]*grid-template-columns:/)
   assert.match(view, /hidden xl:flex/, 'wide health detail must not displace controls at laptop widths')

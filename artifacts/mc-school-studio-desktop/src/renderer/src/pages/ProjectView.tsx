@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   useProject,
-  useClasses,
   useStudents,
   useGroups,
   useGroupCaptures,
@@ -66,6 +65,10 @@ import type {
 interface Props {
   projectId: number
   onBack: () => void
+  classes: Class[]
+  selectedClassId: number | null
+  onSelectedClassIdChange: (classId: number | null) => void
+  reloadClasses: () => Promise<void>
   offline?: boolean
 }
 
@@ -86,7 +89,15 @@ interface DropProgressState {
   results: DroppedCaptureFileResult[]
 }
 
-export function ProjectView({ projectId, onBack, offline = false }: Props) {
+export function ProjectView({
+  projectId,
+  onBack,
+  classes,
+  selectedClassId,
+  onSelectedClassIdChange,
+  reloadClasses,
+  offline = false,
+}: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
   const projectSynced = project?.syncStatus === 'synced'
   const isCorporate = project?.projectType === 'corporate'
@@ -95,8 +106,6 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const employeePlural = `${employeeLabel}s`
   const { data: captureSummary } = useCaptureSummary(projectId)
   const [groupCaptureCount, setGroupCaptureCount] = useState(0)
-  const { data: classes, reload: reloadClasses } = useClasses(projectId)
-  const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const { data: groups, reload: reloadGroups } = useGroups(projectId, selectedClassId ?? undefined)
   const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
@@ -452,7 +461,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
 
   async function handleStudentCreated(result: CreateStudentResult) {
     await Promise.all([reloadStudents(), reloadClasses(), reloadProject()])
-    setSelectedClassId(result.student.classId)
+    onSelectedClassIdChange(result.student.classId)
     setSelectedStudent(result.student)
     let selectedForCapture = false
     try {
@@ -1417,31 +1426,6 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               )}
             </div>
           </details>
-
-          {/* Class tabs */}
-          <div className="flex overflow-x-auto border-b border-slate-100 shrink-0 p-2 gap-1 hide-scrollbar">
-            <button
-              onClick={() => setSelectedClassId(null)}
-              className={cn(
-                "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
-                !selectedClassId ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              )}
-            >
-              All ({students.length})
-            </button>
-            {classes.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedClassId(c.id)}
-                className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
-                  selectedClassId === c.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                )}
-              >
-                {c.className}
-              </button>
-            ))}
-          </div>
 
           {/* Search */}
           <div className="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0">

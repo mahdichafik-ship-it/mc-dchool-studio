@@ -9,6 +9,7 @@ import {
 } from '../src/renderer/src/lib/shootWorkspace.ts'
 
 const projectViewPath = new URL('../src/renderer/src/pages/ProjectView.tsx', import.meta.url)
+const appLayoutPath = new URL('../src/renderer/src/components/layout/AppLayout.tsx', import.meta.url)
 const stylesheetPath = new URL('../src/renderer/src/index.css', import.meta.url)
 
 test('active student and group keep critical shoot regions in the compact renderer contract', async () => {
@@ -42,6 +43,19 @@ test('long active subject names wrap while controls remain native keyboard targe
   assert.match(view, /data-testid="shoot-completeness"/)
   assert.match(view, /<button[\s\S]*handleToggleWatcher/)
   assert.match(view, /<Button[\s\S]*openFinishDialog/)
+})
+
+test('project classes live in the expandable app rail instead of duplicating the roster column', async () => {
+  const [view, layout] = await Promise.all([
+    readFile(projectViewPath, 'utf8'),
+    readFile(appLayoutPath, 'utf8'),
+  ])
+
+  assert.match(layout, /id="project-class-navigation"/)
+  assert.match(layout, /aria-expanded=\{projectNavOpen\}/)
+  assert.match(layout, /onSelectClass\?\.\(projectClass\.id\)/)
+  assert.match(view, /onSelectedClassIdChange/)
+  assert.doesNotMatch(view, /Class tabs/)
 })
 
 test('JPEG-only and paired captures report truthful aggregate upload state', () => {

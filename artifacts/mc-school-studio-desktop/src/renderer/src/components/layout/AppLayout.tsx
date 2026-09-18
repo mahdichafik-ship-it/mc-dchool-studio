@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Camera, LayoutDashboard, Settings, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -10,11 +10,30 @@ interface AppLayoutProps {
   currentPage: Page
   onNavigate: (page: Page) => void
   projectName?: string
+  projectClasses?: Array<{ id: number; className: string; studentCount: number }>
+  selectedClassId?: number | null
+  onSelectClass?: (classId: number | null) => void
   offline?: boolean
   version: string
 }
 
-export function AppLayout({ children, currentPage, onNavigate, projectName, offline = false, version }: AppLayoutProps) {
+export function AppLayout({
+  children,
+  currentPage,
+  onNavigate,
+  projectName,
+  projectClasses = [],
+  selectedClassId = null,
+  onSelectClass,
+  offline = false,
+  version,
+}: AppLayoutProps) {
+  const [projectNavOpen, setProjectNavOpen] = useState(false)
+
+  useEffect(() => {
+    setProjectNavOpen(false)
+  }, [projectName])
+
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
       {/* Sidebar */}
@@ -41,11 +60,53 @@ export function AppLayout({ children, currentPage, onNavigate, projectName, offl
           </Button>
 
           {projectName && currentPage === 'project-view' && (
-            <div className="ml-3 mt-2">
-              <div className="flex items-center gap-1 text-xs text-slate-500 mb-1">
-                <ChevronRight className="size-3" />
+            <div className="ml-1 mt-2">
+              <button
+                type="button"
+                aria-expanded={projectNavOpen}
+                aria-controls="project-class-navigation"
+                onClick={() => setProjectNavOpen((open) => !open)}
+                className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+              >
+                <ChevronRight className={cn('size-3 shrink-0 transition-transform', projectNavOpen && 'rotate-90')} />
                 <span className="truncate">{projectName}</span>
-              </div>
+              </button>
+              {projectNavOpen && (
+                <div id="project-class-navigation" className="mt-1 space-y-0.5 pl-4">
+                  <button
+                    type="button"
+                    onClick={() => onSelectClass?.(null)}
+                    className={cn(
+                      'flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors',
+                      selectedClassId === null
+                        ? 'bg-white/10 font-semibold text-white'
+                        : 'text-slate-500 hover:bg-white/5 hover:text-slate-200',
+                    )}
+                  >
+                    <span>All classes</span>
+                    <span className="text-[10px] text-slate-500">{projectClasses.reduce((total, item) => total + item.studentCount, 0)}</span>
+                  </button>
+                  {projectClasses.map((projectClass) => (
+                    <button
+                      key={projectClass.id}
+                      type="button"
+                      onClick={() => onSelectClass?.(projectClass.id)}
+                      className={cn(
+                        'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors',
+                        selectedClassId === projectClass.id
+                          ? 'bg-teal-500/15 font-semibold text-teal-300'
+                          : 'text-slate-500 hover:bg-white/5 hover:text-slate-200',
+                      )}
+                    >
+                      <span className="truncate">{projectClass.className}</span>
+                      <span className="shrink-0 text-[10px] text-slate-500">{projectClass.studentCount}</span>
+                    </button>
+                  ))}
+                  {projectClasses.length === 0 && (
+                    <p className="px-2 py-1 text-[10px] text-slate-600">Loading classes…</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </nav>

@@ -949,8 +949,24 @@ async function projectCaptureJpegToDeliveryPhoto(
       clientUploadId: file.clientUploadId,
       rating: capture.rating,
       colorLabel: capture.colorLabel,
-      shareWithParents: capture.colorLabel === "green",
+      shareWithParents: capture.rating > 0,
     }).onConflictDoNothing();
+  } else {
+    // Keep a retry or a review-before-upload path aligned with the capture.
+    // Gallery eligibility is the positive rating, not the optional color label.
+    await db.update(studentPhotosTable).set({
+      fileUrl: file.fileUrl,
+      durableObjectPath: file.durableObjectPath,
+      mimeType: file.mimeType,
+      capturedAt: capture.capturedAt,
+      rating: capture.rating,
+      colorLabel: capture.colorLabel,
+      shareWithParents: capture.rating > 0,
+    }).where(and(
+      eq(studentPhotosTable.projectId, capture.projectId),
+      eq(studentPhotosTable.studentId, capture.studentId),
+      eq(studentPhotosTable.fileName, file.originalFilename),
+    ));
   }
   await projectAvailableGroupJpegsToStudent(capture.projectId, capture.studentId);
 }

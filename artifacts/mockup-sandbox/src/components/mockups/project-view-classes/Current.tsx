@@ -82,7 +82,7 @@ function StudentStatus({ student }: { student: Student }) {
 }
 
 export function Current() {
-  const [classesOpen, setClassesOpen] = useState(false);
+  const [classesOpen, setClassesOpen] = useState(true);
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState(students[0]);
   const [query, setQuery] = useState("");

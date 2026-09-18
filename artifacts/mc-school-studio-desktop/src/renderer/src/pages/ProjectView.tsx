@@ -920,192 +920,31 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 shrink-0">
-          {/* Watch Folder Control */}
-          {project?.watchFolder ? (
-            <div data-testid="shoot-watch-status" className={cn(
-              "flex items-center h-8 rounded-md border transition-colors overflow-hidden",
-              isRunning ? "bg-teal-500/10 border-teal-500/20" : "bg-slate-900 border-slate-800"
-            )}>
-               <div className="flex items-center gap-2 px-3">
-                 <div className={cn("w-2 h-2 rounded-full", isRunning ? "bg-teal-400 animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.6)]" : "bg-slate-600")} />
-                 <span className={cn("text-[10px] font-bold uppercase tracking-wider", isRunning ? "text-teal-400" : "text-slate-400")}>
-                   {isRunning ? "Live" : "Paused"}
-                 </span>
-               </div>
-               <div className={cn("w-px h-full", isRunning ? "bg-teal-500/20" : "bg-slate-800")} />
-               <button onClick={handleToggleWatcher} className={cn("px-3 h-full text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1", isRunning ? "text-teal-400 hover:text-white hover:bg-teal-500/20" : "text-slate-300 hover:text-white hover:bg-slate-800")}>
-                 {isRunning ? <Square className="size-3 fill-current" /> : <Play className="size-3 fill-current" />}
-                 {isRunning ? "Stop" : "Start"}
-               </button>
-               <div className={cn("w-px h-full", isRunning ? "bg-teal-500/20" : "bg-slate-800")} />
-               <button onClick={handleSetWatchFolder} aria-label="Change watch folder" className={cn("px-2 h-full transition-colors", isRunning ? "text-teal-600 hover:text-teal-300 hover:bg-teal-500/20" : "text-slate-400 hover:text-white hover:bg-slate-800")} title="Change folder">
-                 <Folder className="size-3" />
-               </button>
-            </div>
-          ) : (
-            <Button size="sm" variant="outline" onClick={handleSetWatchFolder} className="h-8 bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold uppercase tracking-wider">
-              <Folder className="size-3.5 mr-1.5" /> Set Watch Folder
-            </Button>
+        <Button
+          size="sm"
+          onClick={() => void openFinishDialog()}
+          data-testid="shoot-primary-action"
+          disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
+          className={cn(
+            "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0",
+            projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
           )}
-
-           <div className="w-px h-6 bg-slate-800" />
-
-           <button
-             onClick={() => void handleConsolidateStudentFolders()}
-             disabled={folderMigrationRunning}
-              className="shoot-secondary-action flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900 px-2.5 h-8 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:cursor-wait disabled:opacity-60"
-             title="Preview and consolidate legacy student folders"
-           >
-             <FolderSync className={cn("size-3.5", folderMigrationRunning && "animate-pulse")} />
-             {folderMigrationRunning ? 'Checking…' : 'Consolidate folders'}
-           </button>
-
-           <button
-             onClick={() => void openUploadDialog()}
-             aria-label={shootHealthLabel}
-              className="hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-md hover:bg-slate-800 hover:border-slate-700 transition-all text-left focus:outline-none focus:ring-2 focus:ring-teal-500/50 group"
-             title={shootHealthLabel}
-           >
-             <div className="flex flex-col gap-1">
-               <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
-                 <LocalIcon className={cn("size-3.5", localColor)} />
-                 <span className={cn(localColor === 'text-slate-400' ? 'text-slate-400' : 'text-slate-200')}>
-                   {localText}
-                 </span>
-               </div>
-               <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
-                 <CloudIcon className={cn("size-3.5", cloudColor)} />
-                 <span className={cn(cloudColor === 'text-slate-400' || cloudColor === 'text-slate-500' ? 'text-slate-400' : 'text-slate-200')}>
-                   {cloudText}
-                 </span>
-               </div>
-             </div>
-
-             {showUploadDots && (
-               <div className="flex gap-1 items-center pl-1.5 border-l border-slate-800 h-6">
-                 {[0, 1, 2].map(i => (
-                    <span
-                      key={i}
-                     className={cn(
-                        "w-1.5 h-1.5 rounded-full transition-all duration-300",
-                        i < activeDots
-                          ? "bg-teal-400 animate-pulse"
-                         : "bg-slate-800"
-                      )}
-                   />
-                 ))}
-               </div>
-             )}
-
-             {!showUploadDots && (
-               <div className="pl-0.5 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                 <ChevronRight className="size-3.5 text-slate-500" />
-               </div>
-             )}
-           </button>
-
-          {/* Exports & Finish */}
-          <div className="flex items-center gap-2">
-             <div className={cn(
-               "flex items-center h-8 rounded-md border overflow-hidden",
-               liveUpload?.enabled ? "bg-blue-500/10 border-blue-500/30" : "bg-slate-900 border-slate-800",
-             )}>
-               <button
-                 onClick={() => void handleToggleLiveUpload()}
-                 disabled={uploadActionRunning || Boolean(project?.finishedAt)}
-                 className={cn(
-                   "h-full px-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50",
-                   liveUpload?.enabled ? "text-blue-300 hover:bg-blue-500/20" : "text-slate-300 hover:bg-slate-800",
-                 )}
-                 title="Uploads captures in the background without finishing the shoot"
-               >
-                 {liveUpload?.running ? <Loader className="size-3 animate-spin" /> : <CloudUpload className="size-3" />}
-                 Live Upload {liveUpload?.enabled ? 'On' : 'Off'}
-               </button>
-               <div className={cn("w-px h-full md:hidden", liveUpload?.enabled ? "bg-blue-500/30" : "bg-slate-800")} />
-               <button
-                  onClick={() => void openUploadDialog()}
-                 className="h-full px-2.5 text-slate-300 hover:text-white hover:bg-slate-800 text-[10px] font-bold md:hidden"
-                 title="Open upload activity"
-               >
-                 {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}
-               </button>
-             </div>
-             {(captureSummary.total > 0 || groupCaptureCount > 0) && (
-                 <div className="shoot-secondary-action flex items-center h-8 rounded-md bg-slate-900 border border-slate-800 overflow-hidden">
-                   <select
-                      value={exportMode}
-                      onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
-                      className="h-full bg-transparent px-2 text-[10px] font-bold uppercase tracking-wider text-slate-300 focus:outline-none border-r border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors"
-                   >
-                     <option value="all">All</option>
-                     <option value="paired">Paired</option>
-                     <option value="jpeg_only">JPEG Only</option>
-                     <option value="raw_only">RAW Only</option>
-                     <option value="selected">Selected</option>
-                     <option value="favorite">Favorites</option>
-                     <option value="final_selection">Final</option>
-                   </select>
-                   <button onClick={() => void handleExportCaptures('capture_folders')} disabled={exporting !== null} className="px-3 h-full text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5 disabled:opacity-50">
-                      {exporting === 'capture_folders' ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
-                      Export
-                   </button>
-                   <div className="w-px h-full bg-slate-800" />
-                   <button onClick={() => void handleExportCaptures('lightroom_watch_folder')} disabled={exporting !== null} className="px-3 h-full text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5 disabled:opacity-50" title="Send to Lightroom Auto Import">
-                      {exporting === 'lightroom_watch_folder' ? <Loader className="size-3 animate-spin" /> : <Image className="size-3" />}
-                      To LR
-                   </button>
-                    <div className="w-px h-full bg-slate-800" />
-                    <button onClick={() => void handlePixiesetExport()} disabled={exporting !== null || pixiesetExporting} className="px-3 h-full text-[10px] font-bold uppercase tracking-wider text-amber-200 hover:text-white hover:bg-amber-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50" title="Create a separate Pixieset package from rated JPEGs only">
-                       {pixiesetExporting ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
-                       Pixieset
-                    </button>
-                </div>
-             )}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void openUploadDialog()}
-                disabled={uploadActionRunning || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
-                className="h-8 px-3 border-blue-500/50 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 hover:text-white text-[10px] font-bold uppercase tracking-wider"
-              >
-                {liveUpload?.running || uploadActionRunning
-                  ? <Loader className="size-3.5 mr-1.5 animate-spin" />
-                  : <Upload className="size-3.5 mr-1.5" />}
-                {liveUpload?.uploading
-                  ? `Uploading ${liveUpload.uploading}`
-                  : pendingUploadCount > 0
-                    ? `Upload ${pendingUploadCount}`
-                    : 'Upload'}
-              </Button>
-             <Button
-               size="sm"
-                onClick={() => void openFinishDialog()}
-                data-testid="shoot-primary-action"
-                disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
-               className={cn(
-                 "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors",
-                  projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
-               )}
-             >
-               {finishing ? (
-                 <Loader className="size-3.5 mr-1.5 animate-spin" />
-                ) : projectSynced ? (
-                 <CheckCircle className="size-3.5 mr-1.5" />
-               ) : (
-                 <CloudUpload className="size-3.5 mr-1.5" />
-               )}
-                {finishing
-                  ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
-                  : projectSynced
-                    ? 'Finished'
-                    : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
-                      ? 'Retry Upload & Finish'
-                      : 'Finish My Shoot'}
-             </Button>
-          </div>
-        </div>
+        >
+          {finishing ? (
+            <Loader className="size-3.5 mr-1.5 animate-spin" />
+          ) : projectSynced ? (
+            <CheckCircle className="size-3.5 mr-1.5" />
+          ) : (
+            <CloudUpload className="size-3.5 mr-1.5" />
+          )}
+          {finishing
+            ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
+            : projectSynced
+              ? 'Finished'
+              : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
+                ? 'Retry Upload & Finish'
+                : 'Finish My Shoot'}
+        </Button>
       </header>
       {project && project.syncStatus !== 'active' && (
         <div className={cn(
@@ -1428,6 +1267,157 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
       <div className="flex-1 flex overflow-hidden">
         {/* Left panel: classes + students */}
         <div className="w-[340px] flex-shrink-0 bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-10 flex flex-col">
+          <details open className="shrink-0 border-b border-slate-200 bg-slate-50/80">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[10px] font-extrabold uppercase tracking-widest text-slate-600 hover:bg-slate-100">
+              <span>Project actions</span>
+              <ChevronRight className="size-4 transition-transform [details[open]>&]:rotate-90" />
+            </summary>
+            <div className="space-y-2 px-3 pb-3">
+              {/* Watch folder control */}
+              {project?.watchFolder ? (
+                <div data-testid="shoot-watch-status" className={cn(
+                  "flex items-center h-9 rounded-md border transition-colors overflow-hidden w-full",
+                  isRunning ? "bg-teal-500/10 border-teal-500/20" : "bg-white border-slate-200"
+                )}>
+                  <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
+                    <div className={cn("w-2 h-2 rounded-full shrink-0", isRunning ? "bg-teal-400 animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.6)]" : "bg-slate-400")} />
+                    <span className={cn("truncate text-[10px] font-bold uppercase tracking-wider", isRunning ? "text-teal-700" : "text-slate-500")}>
+                      {isRunning ? "Live" : "Paused"}
+                    </span>
+                  </div>
+                  <button onClick={handleToggleWatcher} className={cn("px-3 h-full text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1", isRunning ? "text-teal-700 hover:text-teal-900 hover:bg-teal-500/20" : "text-slate-600 hover:text-slate-900 hover:bg-slate-100")}>
+                    {isRunning ? <Square className="size-3 fill-current" /> : <Play className="size-3 fill-current" />}
+                    {isRunning ? "Stop" : "Start"}
+                  </button>
+                  <button onClick={handleSetWatchFolder} aria-label="Change watch folder" className="px-2.5 h-full border-l border-slate-200 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900" title="Change folder">
+                    <Folder className="size-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <Button size="sm" variant="outline" onClick={handleSetWatchFolder} className="h-9 w-full justify-start bg-white text-slate-700 text-[10px] font-bold uppercase tracking-wider">
+                  <Folder className="size-3.5 mr-1.5" /> Set Watch Folder
+                </Button>
+              )}
+
+              <button
+                onClick={() => void handleConsolidateStudentFolders()}
+                disabled={folderMigrationRunning}
+                className="flex h-9 w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-[10px] font-bold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
+                title="Preview and consolidate legacy student folders"
+              >
+                <FolderSync className={cn("size-3.5", folderMigrationRunning && "animate-pulse")} />
+                {folderMigrationRunning ? 'Checking…' : 'Consolidate folders'}
+              </button>
+
+              <button
+                onClick={() => void openUploadDialog()}
+                aria-label={shootHealthLabel}
+                className="hidden xl:flex w-full items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition-all hover:bg-slate-100 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/50 group"
+                title={shootHealthLabel}
+              >
+                <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                    <LocalIcon className={cn("size-3.5 shrink-0", localColor)} />
+                    <span className="truncate text-slate-700">{localText}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                    <CloudIcon className={cn("size-3.5 shrink-0", cloudColor)} />
+                    <span className="truncate text-slate-700">{cloudText}</span>
+                  </div>
+                </div>
+                {showUploadDots ? (
+                  <div className="flex gap-1 items-center pl-1.5 border-l border-slate-200 h-6">
+                    {[0, 1, 2].map(i => (
+                      <span
+                        key={i}
+                        className={cn(
+                          "w-1.5 h-1.5 rounded-full transition-all duration-300",
+                          i < activeDots ? "bg-teal-400 animate-pulse" : "bg-slate-200"
+                        )}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <ChevronRight className="size-3.5 shrink-0 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                )}
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className={cn(
+                  "flex min-w-0 flex-1 items-center h-9 rounded-md border overflow-hidden",
+                  liveUpload?.enabled ? "bg-blue-50 border-blue-200" : "bg-white border-slate-200",
+                )}>
+                  <button
+                    onClick={() => void handleToggleLiveUpload()}
+                    disabled={uploadActionRunning || Boolean(project?.finishedAt)}
+                    className={cn(
+                      "h-full min-w-0 flex-1 px-3 flex items-center gap-1.5 text-left text-[10px] font-bold uppercase tracking-wider disabled:opacity-50",
+                      liveUpload?.enabled ? "text-blue-700 hover:bg-blue-100" : "text-slate-600 hover:bg-slate-100",
+                    )}
+                    title="Uploads captures in the background without finishing the shoot"
+                  >
+                    {liveUpload?.running ? <Loader className="size-3 shrink-0 animate-spin" /> : <CloudUpload className="size-3 shrink-0" />}
+                    <span className="truncate">Live Upload {liveUpload?.enabled ? 'On' : 'Off'}</span>
+                  </button>
+                  <button
+                    onClick={() => void openUploadDialog()}
+                    className="h-full border-l border-slate-200 px-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 text-[10px] font-bold"
+                    title="Open upload activity"
+                  >
+                    {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}
+                  </button>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void openUploadDialog()}
+                  disabled={uploadActionRunning || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
+                  className="h-9 border-blue-200 bg-blue-50 px-3 text-[10px] font-bold uppercase tracking-wider text-blue-700 hover:bg-blue-100 hover:text-blue-900"
+                >
+                  {liveUpload?.running || uploadActionRunning
+                    ? <Loader className="size-3.5 mr-1.5 animate-spin" />
+                    : <Upload className="size-3.5 mr-1.5" />}
+                  {liveUpload?.uploading
+                    ? `Uploading ${liveUpload.uploading}`
+                    : pendingUploadCount > 0
+                      ? `Upload ${pendingUploadCount}`
+                      : 'Upload'}
+                </Button>
+              </div>
+
+              {(captureSummary.total > 0 || groupCaptureCount > 0) && (
+                <div className="flex w-full items-center h-9 rounded-md bg-white border border-slate-200 overflow-hidden">
+                  <select
+                    aria-label="Export selection"
+                    value={exportMode}
+                    onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
+                    className="h-full min-w-0 flex-1 bg-transparent px-2 text-[10px] font-bold uppercase tracking-wider text-slate-600 focus:outline-none border-r border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors"
+                  >
+                    <option value="all">All</option>
+                    <option value="paired">Paired</option>
+                    <option value="jpeg_only">JPEG Only</option>
+                    <option value="raw_only">RAW Only</option>
+                    <option value="selected">Selected</option>
+                    <option value="favorite">Favorites</option>
+                    <option value="final_selection">Final</option>
+                  </select>
+                  <button onClick={() => void handleExportCaptures('capture_folders')} disabled={exporting !== null} className="px-2.5 h-full text-[10px] font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1 disabled:opacity-50">
+                    {exporting === 'capture_folders' ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
+                    Export
+                  </button>
+                  <button onClick={() => void handleExportCaptures('lightroom_watch_folder')} disabled={exporting !== null} className="px-2.5 h-full border-l border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1 disabled:opacity-50" title="Send to Lightroom Auto Import">
+                    {exporting === 'lightroom_watch_folder' ? <Loader className="size-3 animate-spin" /> : <Image className="size-3" />}
+                    Lightroom
+                  </button>
+                  <button onClick={() => void handlePixiesetExport()} disabled={exporting !== null || pixiesetExporting} className="px-2.5 h-full border-l border-slate-200 text-[10px] font-bold uppercase tracking-wider text-amber-700 hover:text-amber-900 hover:bg-amber-50 transition-colors flex items-center gap-1 disabled:opacity-50" title="Create a separate Pixieset package from rated JPEGs only">
+                    {pixiesetExporting ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
+                    Pixieset
+                  </button>
+                </div>
+              )}
+            </div>
+          </details>
+
           {/* Class tabs */}
           <div className="flex overflow-x-auto border-b border-slate-100 shrink-0 p-2 gap-1 hide-scrollbar">
             <button

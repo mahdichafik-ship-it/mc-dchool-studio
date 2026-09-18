@@ -1,0 +1,378 @@
+IMPLEMENTATION PHASE — GROUP WORKFLOW
+
+BASELINE
+
+v1.0.71 is now the published, validated production baseline.
+
+Do not modify or regress the working v1.0.71 capture, upload, R2, QR,
+JPEG/RAW, Pixieset, gallery, payment, or release behavior unless a change
+is explicitly required by the group workflow below.
+
+This is NOT simply a visual sidebar change.
+
+The existing group database/capture foundation should be reused.
+Do not create a parallel group system.
+
+OBJECTIVE
+
+Connect the new v1.0.71 Project Actions/sidebar design to the existing
+production group system while making group operation safe during a real
+high-volume photo shoot.
+
+--------------------------------------------------
+1. PROJECT-WIDE GROUP SIDEBAR
+--------------------------------------------------
+
+The dark sidebar must show:
+
+Project
+Classes
+Groups
++ Add group
+
+Load ALL groups belonging to the active project.
+
+Do not restrict the sidebar group list to the currently selected class.
+
+Each group should display where appropriate:
+
+- group name
+- member count
+- optional class
+- browsing/review state
+- armed-for-capture state
+
+IMPORTANT:
+
+Clicking a class changes the roster filter.
+
+Clicking a group browses/selects that group for review and membership
+management.
+
+CLICKING A GROUP MUST NOT AUTOMATICALLY CHANGE THE CAMERA CAPTURE TARGET.
+
+Browsing a group and arming a group for capture are separate states.
+
+--------------------------------------------------
+2. GROUP CREATION
+--------------------------------------------------
+
+Reuse the existing durable local group model.
+
+A custom group should contain:
+
+projectId
+classId (when applicable)
+name
+memberStudentIds
+
+New custom groups MUST start empty.
+
+Do not automatically populate a newly-created custom group with every
+student in the selected class.
+
+If useful, provide a deliberate action:
+
+"Add everyone from this class"
+
+but this must require an explicit photographer action.
+
+New groups must be created locally immediately and remain available
+offline.
+
+--------------------------------------------------
+3. ROSTER / MIDDLE COLUMN
+--------------------------------------------------
+
+The middle column remains person-focused.
+
+Support:
+
+- student/employee search
+- Add person
+- current roster
+- selected-group membership
+- add person to group
+- remove person from group
+
+If a group is being browsed, clearly show its members.
+
+Adding a new person must:
+
+1. persist locally immediately
+2. remain selectable for capture offline
+3. preserve the generated person/student code
+4. reconcile with the cloud before upload when required
+5. optionally offer "Also add to this group" when browsing a group
+
+Network availability must never determine whether the photographer can
+continue photographing.
+
+--------------------------------------------------
+4. CAPTURE AUTHORITY — CRITICAL
+--------------------------------------------------
+
+Implement two distinct group states:
+
+A. BROWSING GROUP
+
+Used for:
+- viewing members
+- editing membership
+- reviewing existing group captures
+
+This MUST NOT change the watcher/camera target.
+
+B. ARMED GROUP
+
+Requires an explicit action such as:
+
+"Use this group for capture"
+
+Only this action changes capture authority to the group.
+
+The armed state must be extremely obvious in the UI.
+
+Existing manual capture-authority principles must remain intact.
+
+An explicit student/person target is authoritative.
+
+An explicitly armed group target is authoritative.
+
+QR recognition may report/warn about a mismatch.
+
+QR MUST NOT silently replace a deliberate manual photographer target.
+
+Changing or clearing the capture target must be explicit and visible.
+
+--------------------------------------------------
+5. HISTORICAL CAPTURE IMMUTABILITY
+--------------------------------------------------
+
+CRITICAL DATA-INTEGRITY REQUIREMENT:
+
+Changing group membership after photographs have been captured MUST NOT
+rewrite, reassign, delete, or mutate the identity/history of existing
+capture records.
+
+Example:
+
+Group contains A, B, C.
+Photographer captures photograph X.
+Later C is removed and D is added.
+
+Photograph X remains the original group capture.
+
+Membership changes apply to future membership/delivery behavior according
+to the existing model and MUST NOT retroactively change the capture's
+identity.
+
+Before implementation, inspect the existing schema and explain how this
+invariant will be preserved.
+
+Do not assume that the current cascade behavior is safe.
+
+--------------------------------------------------
+6. OFFLINE-FIRST GROUP OPERATION
+--------------------------------------------------
+
+The photographer must be able to perform all of these without network
+connectivity:
+
+- create custom group
+- rename permitted custom group
+- add/remove members
+- create a late student/person
+- select that person
+- arm a group
+- capture student photographs
+- capture group photographs
+- review captures
+
+Persist locally first.
+
+Cloud synchronization is asynchronous.
+
+Capture intake MUST NOT wait for cloud synchronization.
+
+When connectivity returns:
+
+1. reconcile project identity
+2. reconcile/create cloud group
+3. reconcile member identities
+4. synchronize memberships
+5. upload group captures using stable identities
+6. preserve all local data if synchronization fails
+7. expose pending/failed synchronization clearly
+
+Do not create destructive retry behavior.
+
+Live Upload and Finish My Shoot remain separate operations.
+
+--------------------------------------------------
+7. DEFAULT CLASS GROUPS
+--------------------------------------------------
+
+Preserve the existing concept of protected default class groups.
+
+Default class groups:
+
+- are automatically associated with their class
+- cannot be renamed
+- cannot be deleted
+- may automatically receive newly-added students
+
+BUT:
+
+If the photographer explicitly removes a student from a default group,
+that exclusion must persist across:
+
+- roster refresh
+- application restart
+- offline/online transition
+- cloud synchronization
+
+Do not implement automatic membership refresh in a way that silently
+undoes a deliberate photographer exclusion.
+
+Inspect the current data model first and determine whether an explicit
+exclusion/tombstone mechanism already exists.
+
+If supporting persistent manual exclusions requires a schema/data-model
+change that does not already exist, STOP and report that before changing
+the schema.
+
+--------------------------------------------------
+8. CUSTOM GROUP DELETION
+--------------------------------------------------
+
+Never allow deleting a group in a way that destroys existing capture
+history.
+
+Before changing this behavior, inspect the current cascade relationships.
+
+If a custom group has NO captures:
+normal deletion may remain available if safe.
+
+If a custom group HAS captures:
+do not cascade-delete its capture history.
+
+Preferred UX is archive/retire rather than destructive deletion.
+
+If implementing archive requires a schema change, STOP and report the
+required change before implementing it.
+
+--------------------------------------------------
+9. FINISHED PROJECTS
+--------------------------------------------------
+
+When a project is finished:
+
+DISABLE:
+- Add group
+- Add person
+- group rename
+- membership changes
+- group deletion/archive actions that alter shoot state
+- arming new capture targets
+
+ALLOW:
+- viewing groups
+- viewing members
+- reviewing captures
+- delivery-related review permitted by existing production rules
+
+Reuse the existing project-finished authority.
+
+Do not introduce a second independent finished-state mechanism.
+
+--------------------------------------------------
+10. EMPTY STATES
+--------------------------------------------------
+
+"+ Add group" must remain available whenever the project is editable,
+including when the project currently contains zero custom groups.
+
+Do not conditionally hide group creation merely because the group list
+is empty.
+
+--------------------------------------------------
+11. TESTING
+--------------------------------------------------
+
+Add focused tests for at least:
+
+- create custom group offline
+- group survives restart
+- group remains associated with correct project
+- optional class association survives restart
+- new custom group starts empty
+- explicit Add Everyone action if implemented
+- late student creation offline
+- late student remains manually capturable
+- add/remove group membership
+- browsing group does not change capture target
+- explicitly arming group changes capture target
+- switching student → group target
+- switching group → student target
+- QR cannot silently override explicit target
+- group capture followed by membership change preserves old capture
+- group with captures cannot destructively delete capture history
+- default group cannot rename/delete
+- explicit default-group member removal survives reload
+- finished project prevents mutations
+- synchronization resumes after reconnect
+- synchronization failure retains local data
+
+Also rerun existing capture-integrity tests.
+
+--------------------------------------------------
+IMPLEMENTATION PROCESS
+--------------------------------------------------
+
+FIRST inspect the existing implementation.
+
+Before editing, report:
+
+1. Existing group-related tables/models.
+2. Existing group IPC handlers.
+3. Existing group capture-target mechanism.
+4. Existing offline/sync behavior for groups and members.
+5. Existing default-class-group behavior.
+6. Existing deletion/cascade behavior.
+7. Whether persistent manual exclusions from default groups already have
+   a representation.
+8. Whether archive/retirement of captured groups already has a
+   representation.
+9. Which requirements above can be implemented using the existing model.
+10. Which requirements, if any, require schema/API changes.
+
+IMPORTANT STOP CONDITION:
+
+If historical capture immutability, persistent default-group exclusions,
+safe captured-group archival, or offline/cloud reconciliation requires
+a database/API contract change, DO NOT improvise it.
+
+STOP after the inspection and explain:
+
+- what is missing
+- why
+- options
+- migration implications
+- compatibility with existing v1.0.71 local databases
+
+Do not make that architectural decision for me.
+
+If the existing model supports the requirements safely without those
+architectural changes, proceed with the UI/wiring implementation.
+
+VERSIONING
+
+Do not modify, recreate, or republish v1.0.71.
+
+Do not tag or publish a new release during this task.
+
+Do not choose the next public version yet.
+
+At completion, provide the exact diff from the v1.0.71 production
+baseline and STOP for review.

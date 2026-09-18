@@ -52,6 +52,8 @@ dmg:
   # This changes the mounted DMG label only; release filenames stay on the
   # legacy slug so electron-updater can find existing feeds and assets.
   title: Volume Capture
+  # Use a solid background so DMG packaging does not depend on the runner's sips utility.
+  backgroundColor: '#ffffff'
   # The x64 and arm64 builds run in parallel, so their filenames must differ.
   artifactName: ${name}-${version}-${arch}.${ext}
 

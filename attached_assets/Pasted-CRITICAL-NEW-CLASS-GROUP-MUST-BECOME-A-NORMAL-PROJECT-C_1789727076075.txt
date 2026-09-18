@@ -1,0 +1,132 @@
+CRITICAL — NEW CLASS/GROUP MUST BECOME A NORMAL PROJECT CLASS/GROUP
+
+A Class/Group created by the photographer, whether the Mac is ONLINE
+or OFFLINE, must become a normal Class/Group inside that project.
+
+It is NOT:
+
+- a temporary class
+- an offline-only class
+- a recovery-only container
+- a special capture container
+
+Once created, it must behave exactly like any Class/Group that was
+originally imported with the project.
+
+Example:
+
+Project
+├── Class 1A
+├── Class 1B
+├── Class 2A
+└── Class 2B    ← created by photographer on location
+
+Class 2B must participate in the project exactly like Class 1A,
+Class 1B and Class 2A.
+
+This means it must:
+
+- appear in the normal project Class/Group navigation
+- persist after restarting the desktop application
+- contain its assigned students/people
+- be available for normal person selection and photography
+- use the same normal project folder structure
+- appear with the other project Classes/Groups when reviewing photos
+- appear with the other Classes/Groups when preparing/uploading photos
+- have its photographs included in the normal project upload workflow
+- remain part of the project after synchronization
+- appear as the same normal Class/Group on subsequent use of the project
+
+ONLINE AND OFFLINE
+
+This behavior is required BOTH online and offline.
+
+If ONLINE:
+Create it locally, make it immediately usable, and synchronize it using
+the existing project synchronization mechanism.
+
+If OFFLINE:
+Create it locally, make it immediately usable, persist it, allow normal
+photography, and synchronize it when connectivity returns.
+
+Connectivity must not change what the Class/Group IS.
+
+It only changes when synchronization can occur.
+
+PROJECT FOLDERS
+
+This is especially important.
+
+The newly-created Class/Group and its photographs must appear in the
+same project folder structure used by existing Classes/Groups.
+
+When the photographer later uploads the project, the newly-created
+Class/Group must be there with its photographs.
+
+Do NOT create a separate folder system or separate upload workflow for
+photographer-created Classes/Groups.
+
+Use the SAME existing class/group folder and upload behavior.
+
+From that point onward, the rest of Volume Capture should treat the
+newly-created Class/Group exactly like an existing project Class/Group.
+
+MOVING PEOPLE
+
+If existing people are moved into the new Class/Group, they become
+members of that normal project Class/Group.
+
+Their existing identity and photographs remain intact.
+
+New photographs taken after selecting them must follow the same normal
+project organization and upload workflow as any other person in that
+Class/Group.
+
+DO NOT MODIFY THE PHOTOGRAPHER GROUP-PICTURE SYSTEM
+
+The separate group-picture functionality remains unchanged.
+
+This requirement concerns the normal project Class/Group structure and
+the normal photographs belonging to the people inside it.
+
+IMPLEMENTATION PRINCIPLE
+
+Do not invent a second type of Class/Group to support this.
+
+Extend the EXISTING project Class/Group mechanism so a photographer can
+create another normal Class/Group in the field.
+
+The expected result is simply:
+
+BEFORE:
+
+Project
+├── Class 1A
+├── Class 1B
+└── Class 2A
+
+PHOTOGRAPHER CREATES CLASS 2B:
+
+Project
+├── Class 1A
+├── Class 1B
+├── Class 2A
+└── Class 2B
+
+And from that moment Class 2B behaves exactly like the other three.
+
+This must remain true through:
+
+create
+→ assign people
+→ photograph
+→ restart if necessary
+→ reconnect if necessary
+→ review
+→ upload
+→ synchronization
+
+Keep the implementation as small as possible and reuse the existing
+Class/Group, folder, capture and upload behavior.
+
+Do not redesign adjacent systems.

@@ -54,6 +54,8 @@ test('project classes live in the expandable app rail instead of duplicating the
   assert.match(layout, /id="project-class-navigation"/)
   assert.match(layout, /aria-expanded=\{projectNavOpen\}/)
   assert.match(layout, /onSelectClass\?\.\(projectClass\.id\)/)
+  assert.match(layout, /role="tooltip"/)
+  assert.match(layout, /group-hover\/sidebar-hint:opacity-100/)
   assert.match(view, /onSelectedClassIdChange/)
   assert.doesNotMatch(view, /Class tabs/)
 })

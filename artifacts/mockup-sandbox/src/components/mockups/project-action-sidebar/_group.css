@@ -1,0 +1,22 @@
+.project-sidebar-mockup {
+  min-height: 720px;
+  color: #0f172a;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+.project-sidebar-mockup .sidebar-scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.project-sidebar-mockup details > summary::-webkit-details-marker { display: none; }
+.project-sidebar-mockup details[open] .summary-chevron { transform: rotate(90deg); }
+.project-sidebar-mockup .capture-card:nth-child(2) { background: linear-gradient(145deg, #dbeafe, #f8fafc 52%, #cbd5e1); }
+.project-sidebar-mockup .capture-card:nth-child(3) { background: linear-gradient(145deg, #fde68a, #fef3c7 50%, #cbd5e1); }
+.project-sidebar-mockup .capture-card:nth-child(4) { background: linear-gradient(145deg, #c7d2fe, #f1f5f9 55%, #e2e8f0); }
+@media (max-width: 760px) {
+  .project-sidebar-mockup { min-height: 680px; }
+  .project-sidebar-mockup .roster-panel { width: 255px; }
+  .project-sidebar-mockup .toolbar { padding-left: 14px; padding-right: 14px; }
+  .project-sidebar-mockup .toolbar .finish-label { display: none; }
+}
+@media (max-width: 560px) {
+  .project-sidebar-mockup .roster-panel { width: 220px; }
+  .project-sidebar-mockup .workspace-title { display: none; }
+  .project-sidebar-mockup .capture-grid { grid-template-columns: 1fr; }
+}

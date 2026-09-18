@@ -1,0 +1,514 @@
+SCOPE CORRECTION — MINIMAL CHANGE / PROTECT THE CORE APPLICATION
+
+The inspection is approved as information, but I want to significantly
+constrain the implementation scope.
+
+Volume Capture v1.0.71 is currently our known-good production baseline.
+
+The objective of this phase is primarily DESIGN / NAVIGATION.
+
+DO NOT use this work as an opportunity to redesign the application
+architecture.
+
+==================================================
+1. CORE PRINCIPLE
+==================================================
+
+PRESERVE THE CORE APPLICATION.
+
+The existing working systems for:
+
+- portrait capture
+- filesystem watcher
+- Smart Shooter/watch-folder ingestion
+- manual person selection
+- QR behavior
+- capture authority
+- JPEG/RAW pairing
+- local capture persistence
+- previews
+- upload queue
+- Live Upload
+- R2
+- Google Drive
+- Dropbox
+- Replit backup
+- Pixieset export
+- group-photo capture
+- review
+- galleries/delivery
+- payments
+- authentication
+- offline shoot recovery
+
+must remain unchanged unless an absolutely necessary direct dependency
+of this UI work is identified.
+
+Do not refactor these systems.
+
+Do not "clean up" nearby code.
+
+Do not change architecture merely because another architecture might be
+more elegant.
+
+==================================================
+2. USE THE EXISTING AUTHORITATIVE MODEL
+==================================================
+
+The inspection established that `classesTable` is already the
+authoritative people container.
+
+Use it.
+
+SCHOOL:
+
+Project
+→ Class
+→ Students
+→ Photos
+
+CORPORATE:
+
+Project
+→ Group/Department
+→ Employees/People
+→ Photos
+
+Corporate Group/Department is therefore primarily a UI terminology
+difference over the existing authoritative class/container model.
+
+DO NOT create:
+
+- departmentsTable
+- corporateGroupsTable
+- another people-container system
+- parallel membership architecture
+
+Do not repurpose the existing photographer `groupsTable` into the
+primary navigation container.
+
+==================================================
+3. EXISTING GROUP-PHOTO SYSTEM — LEAVE IT ALONE
+==================================================
+
+The inspection established that:
+
+groups
+group_members
+group_captures
+group_capture_files
+
+currently support whole-class / whole-team photography and delivery.
+
+Preserve that system.
+
+Do NOT redesign it during this phase.
+
+Do NOT migrate it into classesTable.
+
+Do NOT change its capture pipeline merely to implement the new sidebar.
+
+Whole-class/team photography remains an existing capture capability.
+
+==================================================
+4. DESIGN WE WANT
+==================================================
+
+The FAR-LEFT DARK SIDEBAR is the project navigation.
+
+SCHOOL EXAMPLE:
+
+▼ School Photography 2026
+
+    Class 1A
+    Class 1B
+    Class 2A
+    Class 2B
+
+    + Add Class
+
+
+CORPORATE EXAMPLE:
+
+▼ Corporate Headshots
+
+    Management
+    Marketing
+    Finance
+    Sales
+
+    + Add Group
+
+
+The project arrow/chevron expands and collapses its containers.
+
+This is an expandable navigation tree/list.
+
+It is NOT a floating dropdown menu.
+
+==================================================
+5. MIDDLE COLUMN
+==================================================
+
+The middle column is PEOPLE ONLY.
+
+Click:
+
+Class 2A
+
+→ middle shows students belonging to Class 2A.
+
+Click:
+
+Marketing
+
+→ middle shows employees/people belonging to Marketing.
+
+DO NOT show another Classes/Groups list in the middle.
+
+There is no reason to duplicate the navigation.
+
+==================================================
+6. RIGHT COLUMN
+==================================================
+
+Preserve the existing photography/capture/review area.
+
+Selecting a person from the middle continues to show that person's
+photographs using the EXISTING production behavior.
+
+Do not redesign the portrait capture workflow.
+
+==================================================
+7. ADD CLASS / ADD GROUP
+==================================================
+
+We DO want the photographer to be able to create the appropriate
+container from the sidebar.
+
+School:
++ Add Class
+
+Corporate:
++ Add Group
+
+Use the existing classesTable.
+
+New container:
+
+- belongs to current project
+- starts empty
+- appears immediately under the project
+- does not automatically copy people from another container
+
+However:
+
+IMPLEMENT THE SMALLEST SAFE SUPPORTING CHANGE.
+
+The inspection found that desktop currently lacks authoritative class
+create/rename/delete IPC.
+
+Before adding anything, determine the MINIMUM handlers necessary for
+the approved UI.
+
+Do not redesign desktop/cloud synchronization as part of this phase.
+
+In particular:
+
+DO NOT invent a new offline class synchronization protocol yet.
+
+DO NOT add new schema merely to support offline class creation.
+
+If fully offline Add Class/Add Group cannot safely reconcile using the
+current contracts:
+
+STOP and report that specific limitation.
+
+We can make that a separate architecture decision.
+
+The priority of this phase is preserving the known-good application.
+
+==================================================
+8. UNIQUE NAMES
+==================================================
+
+Within ONE project, Class/Group/Department names must be unique.
+
+Normalize using:
+
+- trim
+- case-insensitive comparison
+
+Therefore:
+
+Marketing
+marketing
+ MARKETING
+
+are duplicates.
+
+Reject duplicate creation.
+
+Reject rename to an existing name.
+
+Same name in DIFFERENT projects is allowed.
+
+Do not silently create:
+
+Marketing 2
+Marketing Copy
+Marketing-2
+
+Show:
+
+"A group named 'Marketing' already exists in this project."
+
+or the school equivalent:
+
+"A class named 'Class 2A' already exists in this project."
+
+Prefer enforcing this in the smallest authoritative layer needed for
+the operation.
+
+Do not broaden the change into unrelated validation systems.
+
+==================================================
+9. DELETION — VERY IMPORTANT
+==================================================
+
+Class/Group deletion is NOT generally available once names have been
+allocated.
+
+A Class/Group may be deleted ONLY when:
+
+- ZERO people are assigned
+AND
+- ZERO relevant capture/history dependencies exist.
+
+If ONE person/name is allocated:
+
+DELETE MUST BE BLOCKED.
+
+If capture history exists:
+
+DELETE MUST BE BLOCKED.
+
+Do not cascade-delete students, employees, portraits or capture history
+from this new UI.
+
+IMPORTANT:
+
+The inspection found that the CURRENT server class delete behavior can
+delete a class and queue deletion of associated student/group photos.
+
+DO NOT expose that destructive behavior through this UI.
+
+Do not rewrite the entire deletion architecture during this phase.
+
+Instead, either:
+
+A. safely guard deletion according to the rule above with a minimal
+   isolated change;
+
+OR
+
+B. if that cannot be guaranteed without broader core changes, leave
+   Delete unavailable and report it.
+
+Data protection is more important than having a Delete button.
+
+==================================================
+10. HOVER HELP
+==================================================
+
+Relevant controls must provide photographer-friendly explanations on
+mouse hover and keyboard focus.
+
+Examples:
+
+Add Class
+"Create a new class in this project."
+
+Add Group
+"Create a new group in this project."
+
+Search
+"Search for a person in this class."
+
+Add Person
+"Add a new person to this project."
+
+Use short operational descriptions.
+
+Do not use vague descriptions.
+
+Tooltips supplement visible controls.
+
+They must NOT replace important visible labels.
+
+==================================================
+11. KEEP EXISTING PROJECT ACTIONS
+==================================================
+
+Preserve the v1.0.71 Project Actions sidebar and the existing controls
+that were deliberately moved there.
+
+Do not reorganize those controls again unless necessary for this design.
+
+Finish My Shoot remains where approved.
+
+==================================================
+12. FINISHED PROJECT
+==================================================
+
+Finished projects remain browsable.
+
+Allow:
+
+- expand/collapse project
+- select Class/Group
+- see people
+- see photographs
+- review existing material
+
+Do not allow structural mutation such as Add Class/Add Group after the
+project is finished.
+
+Use existing finishedAt authority.
+
+==================================================
+13. NO CORE CHANGES WITHOUT STOPPING
+==================================================
+
+If implementation requires changing any of the following, STOP BEFORE
+DOING IT:
+
+- watcher architecture
+- capture target authority
+- capture arrival processing
+- JPEG/RAW pairing
+- capture database identity
+- student/person identity model
+- upload queue architecture
+- R2 protocol
+- Drive/Dropbox protocol
+- gallery architecture
+- delivery architecture
+- Pixieset exporter
+- payment architecture
+- authentication architecture
+- project synchronization architecture
+- database schema
+- cloud reconciliation protocol
+
+Explain:
+
+1. why it is required
+2. exact files/components affected
+3. risk
+4. smallest alternative
+
+Wait for approval.
+
+==================================================
+14. IMPLEMENTATION STRATEGY
+==================================================
+
+Prefer:
+
+EXISTING DATA
++
+EXISTING APIs/IPC
++
+RENDERER WIRING
++
+MINIMAL MISSING HANDLERS
+
+over:
+
+NEW ARCHITECTURE.
+
+The objective is NOT to make the internal architecture theoretically
+perfect.
+
+The objective is to make the photographer's interface clearer while
+preserving the proven production core.
+
+==================================================
+15. BEFORE PRODUCTION CODE
+==================================================
+
+First show the final proposed layout.
+
+Show:
+
+A. SCHOOL PROJECT
+
+▼ Project
+    Class A
+    Class B
+    Class C
+    + Add Class
+
+Middle:
+students
+
+Right:
+existing photo/capture area
+
+
+B. CORPORATE PROJECT
+
+▼ Project
+    Management
+    Marketing
+    Finance
+    + Add Group
+
+Middle:
+employees/people
+
+Right:
+existing photo/capture area
+
+
+Also show:
+
+- collapsed project
+- expanded project
+- selected Class/Group
+- empty Class/Group
+- Add Class/Add Group interaction
+- duplicate-name validation
+- hover tooltip
+- finished project
+- what happens to Delete when people are allocated
+
+Use the existing v1.0.71 visual language.
+
+Do not redesign the application.
+
+==================================================
+16. CHANGE IMPACT REPORT
+==================================================
+
+Along with the design proposal, provide a proposed change-impact table:
+
+FILE / COMPONENT
+WHY IT NEEDS TO CHANGE
+UI ONLY / IPC / API
+CORE CAPTURE IMPACT
+RISK
+
+Explicitly identify every proposed NON-UI change.
+
+I want to see the boundary before implementation.
+
+Then STOP.
+
+NO production code yet.
+NO schema migration.
+NO dependency upgrades.
+NO version bump.
+NO Git tag.
+NO release workflow.

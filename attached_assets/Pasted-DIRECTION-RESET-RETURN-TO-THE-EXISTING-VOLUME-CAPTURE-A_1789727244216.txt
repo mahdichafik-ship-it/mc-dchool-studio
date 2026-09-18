@@ -1,0 +1,295 @@
+DIRECTION RESET — RETURN TO THE EXISTING VOLUME CAPTURE ARCHITECTURE
+
+We have drifted too far from the original feature.
+
+Do not continue with the synchronization architecture proposed in your
+last response.
+
+Nothing in that proposal is approved yet.
+
+In particular, do NOT assume we need:
+
+- a new roster-operation system
+- a pending-operation table
+- a new generalized synchronization engine
+- a new server project lifecycle
+- server finishedAt
+- a synchronization gate
+- multiple implementation phases
+- a second type of Class/Group
+- changes to the capture architecture
+
+We need to return to how Volume Capture ALREADY works.
+
+==================================================
+THE ORIGINAL REQUIREMENT
+==================================================
+
+The photographer has an existing project on the desktop.
+
+Example:
+
+Project
+├── Class 1A
+├── Class 1B
+└── Class 2A
+
+The photographer discovers another real class on location.
+
+They click:
+
++ Add Class
+
+and create:
+
+Class 2B
+
+The project then simply becomes:
+
+Project
+├── Class 1A
+├── Class 1B
+├── Class 2A
+└── Class 2B
+
+Class 2B is now a NORMAL class in that project.
+
+For corporate projects the exact same principle applies using
+Group/Department terminology.
+
+==================================================
+IT MUST WORK ONLINE AND OFFLINE
+==================================================
+
+The photographer must be able to do this whether internet connectivity
+exists or not.
+
+The photographer must then be able to:
+
+- see the new Class/Group
+- add a missing person
+- move an existing person into it
+- select that person
+- photograph normally
+- restart the application and still see it
+- see it in the normal project folders
+- see its photographs with the project
+- include it when the project/photos are uploaded
+
+There must not be a special temporary/recovery/offline Class type.
+
+==================================================
+IMPORTANT: START FROM EXISTING BEHAVIOR
+==================================================
+
+Do not start by designing synchronization.
+
+Start with the current working Volume Capture implementation.
+
+Take ONE existing normal class that already works correctly.
+
+Trace only what makes that existing class work through:
+
+classesTable
+→ students
+→ project folders
+→ capture
+→ review
+→ upload/synchronization
+
+Then compare it with a photographer-created classesTable row.
+
+The question is:
+
+WHAT IS THE SMALLEST DIFFERENCE BETWEEN THEM?
+
+==================================================
+FIRST CHECK THE SIMPLE CASE
+==================================================
+
+Before proposing ANY new architecture, determine:
+
+If we create another normal local classesTable row using the same fields
+and relationships as an existing class:
+
+1. Does it automatically appear in project navigation?
+
+2. Can existing students.classId point to it?
+
+3. Can the existing Add Student/Add Person workflow use it?
+
+4. Can the existing capture workflow photograph people belonging to it?
+
+5. Do the existing project-folder functions create/use its normal
+   folders?
+
+6. Does it survive restart through the existing SQLite persistence?
+
+7. Does the existing review system see its photographs?
+
+8. Does the existing upload/project synchronization code already
+   encounter this class and its students?
+
+Answer these from the CURRENT CODE.
+
+==================================================
+THEN FIND THE ACTUAL GAP
+==================================================
+
+Only after answering those questions, identify what prevents that new
+normal class from behaving exactly like an imported class.
+
+There may be one gap.
+There may be two.
+
+Report the ACTUAL gaps found in the code.
+
+Do not turn those gaps into a generalized architecture project.
+
+If the only missing part is getting a locally-created class represented
+on the server, say exactly that.
+
+If an existing synchronization/reconciliation mechanism can be extended
+slightly, identify that existing mechanism.
+
+Prefer extending existing behavior over introducing a new subsystem.
+
+==================================================
+MOVING PEOPLE
+==================================================
+
+Keep this equally simple.
+
+A person already belongs to a class through:
+
+students.classId
+
+If Ahmed moves:
+
+Class 1A → Class 2B
+
+Ahmed remains the same person.
+
+Determine what the EXISTING application already does when classId
+changes.
+
+Do not create a new movement architecture unless the existing code
+actually requires it.
+
+His photographs and identity remain unchanged.
+
+==================================================
+PROJECT FOLDERS AND UPLOAD
+==================================================
+
+This is mandatory.
+
+A photographer-created Class/Group must show in the project exactly like
+an existing Class/Group.
+
+Its people and photographs must use the SAME normal project folders.
+
+When the photographer uploads the project/photos, the new Class/Group
+and its photographs must be present exactly like the other classes.
+
+Do not create:
+
+- special folders
+- recovery folders
+- separate upload queues
+- separate export behavior
+- separate capture behavior
+
+==================================================
+GROUP PICTURES
+==================================================
+
+Do not change the existing photographer group-picture system.
+
+Leave it exactly as it currently works.
+
+Do not redesign:
+
+groups
+group_members
+group_captures
+group_capture_files
+group delivery
+historical group photographs
+
+This feature is about adding a normal organizational Class/Group to a
+project.
+
+==================================================
+REMOVE THE FINISHED-PROJECT ISSUE FROM THIS WORK
+==================================================
+
+Do not investigate or propose:
+
+- server finishedAt
+- project lifecycle redesign
+- server project completion state
+
+That is outside this feature.
+
+Preserve existing behavior.
+
+==================================================
+DO NOT CHANGE THE WORKING CORE
+==================================================
+
+Do not modify:
+
+- watcher
+- QR
+- captureRepository
+- capture identity
+- JPEG/RAW
+- preview
+- upload architecture
+- R2
+- Drive
+- Dropbox
+- Pixieset
+- gallery
+- delivery
+- payments
+- group-picture architecture
+- project lifecycle
+
+==================================================
+NO IMPLEMENTATION YET
+==================================================
+
+I want a SHORT answer based on the existing code.
+
+Return only:
+
+A. What already works automatically if we create one additional normal
+   local classesTable row.
+
+B. What does NOT work automatically.
+
+C. The smallest missing change needed to make that class behave like an
+   existing class ONLINE.
+
+D. The smallest missing change needed to make that same class behave
+   like an existing class OFFLINE and later reconnect.
+
+E. Whether changing students.classId locally is already sufficient for
+   capture/folders/review.
+
+F. Whether the existing upload/sync code can already handle the new
+   class, and if not, the exact point where it fails.
+
+G. The minimum production files that would actually need modification.
+
+Do not propose future improvements.
+
+Do not solve theoretical problems.
+
+Do not create a multi-phase plan.
+
+Do not modify code.
+
+Then STOP.

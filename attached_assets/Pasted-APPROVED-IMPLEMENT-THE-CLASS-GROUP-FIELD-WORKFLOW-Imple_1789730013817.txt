@@ -1,0 +1,605 @@
+APPROVED — IMPLEMENT THE CLASS/GROUP FIELD WORKFLOW
+
+Implement exactly this boundary.
+
+Keep the implementation limited to the four concrete gaps already
+identified.
+
+==================================================
+GOVERNING PRODUCT RULE
+==================================================
+
+A photographer-created Class/Group, whether created while ONLINE or
+OFFLINE, becomes a NORMAL project Class/Group.
+
+From that point onward, it follows EXACTLY THE SAME journey as a
+Class/Group that was originally imported into the project.
+
+For the photographer, photographing a photographer-created Class/Group
+must be no different from photographing another imported Class/Group.
+
+There is ONE photographer workflow.
+
+Do not create separate photographer-facing online and offline workflows.
+
+Connectivity only affects when synchronization can occur in the
+background.
+
+It must not change how the photographer works.
+
+==================================================
+THE FOUR CONCRETE GAPS TO IMPLEMENT
+==================================================
+
+Keep the implementation limited to these four identified gaps:
+
+1. No desktop Class/Group creation flow.
+
+2. No desktop move-person flow.
+
+3. No cloud Class/Group creation/reconciliation when a normal local
+   class has:
+
+   cloudId = null
+
+4. No cloud update when an already synchronized student/person has been
+   moved to another Class/Group.
+
+Do not expand the implementation beyond these four gaps unless something
+outside them is proven to be directly necessary for this exact feature.
+
+==================================================
+NORMAL PROJECT DATA MODEL
+==================================================
+
+Continue using the existing normal project model:
+
+Project
+→ classesTable
+→ students.classId
+
+School terminology:
+
+Class
+→ Student
+
+Corporate terminology:
+
+Group/Department
+→ Person/Employee
+
+Do not introduce another container model.
+
+Do not introduce temporary classes, offline classes, recovery classes or
+special photographer-created class types.
+
+A photographer-created Class/Group is simply another normal
+classesTable container in the project.
+
+==================================================
+LEFT DARK SIDEBAR — PROJECT HIERARCHY
+==================================================
+
+Preserve the approved navigation design.
+
+The LEFT DARK SIDEBAR contains the project hierarchy.
+
+The Project Name must be expandable/collapsible.
+
+When the project is expanded, all of its Classes/Groups are shown
+directly underneath the Project Name.
+
+SCHOOL EXAMPLE:
+
+▼ Project Name
+    All Students
+    Class 1A
+    Class 1B
+    Class 2A
+    Class 2B
+    + Add Class
+
+CORPORATE EXAMPLE:
+
+▼ Project Name
+    All Employees
+    Management
+    Marketing
+    Finance
+    Customer Service
+    + Add Group
+
+When collapsed:
+
+▶ Project Name
+
+the Classes/Groups underneath it are hidden.
+
+When expanded:
+
+▼ Project Name
+
+they are visible again.
+
+==================================================
+CLASS/GROUP SELECTION
+==================================================
+
+Selecting a Class/Group in the LEFT DARK SIDEBAR:
+
+→ selects that normal Class/Group
+→ the MIDDLE column displays its students/people
+→ the RIGHT side remains the existing photography/capture workspace
+
+The layout remains:
+
+LEFT DARK SIDEBAR
+Project hierarchy and Classes/Groups
+
+MIDDLE
+Students/People belonging to the selected Class/Group
+
+RIGHT
+Existing photography workflow
+
+Do not redesign the right-side photography workspace.
+
+Do not turn Classes/Groups into separate screens.
+
+They remain navigation underneath the Project.
+
+==================================================
+ADD CLASS / ADD GROUP
+==================================================
+
+The photographer uses the existing project hierarchy:
+
++ Add Class
+
+or:
+
++ Add Group
+
+After creation, the new Class/Group must immediately appear underneath
+the Project Name alongside all existing imported Classes/Groups.
+
+Example:
+
+BEFORE:
+
+▼ Project Name
+    All Students
+    Class 1A
+    Class 1B
+    + Add Class
+
+Photographer creates Class 2B.
+
+AFTER:
+
+▼ Project Name
+    All Students
+    Class 1A
+    Class 1B
+    Class 2B
+    + Add Class
+
+The newly created Class/Group should be selected and usable immediately.
+
+Do not put it into:
+
+- a separate section
+- an offline section
+- a recovery section
+- a temporary section
+- different navigation
+
+It is a NORMAL project Class/Group.
+
+==================================================
+ONLINE AND OFFLINE
+==================================================
+
+The SAME Add Class/Add Group workflow must work whether the computer is
+ONLINE or OFFLINE.
+
+From the photographer's perspective:
+
++ Add Class / + Add Group
+→ create the Class/Group
+→ it appears immediately under the Project
+→ add/move people
+→ select people
+→ photograph normally
+→ review normally
+→ continue working normally
+
+The photographer must not have to choose an online or offline mode.
+
+If synchronization is currently possible, use the existing
+synchronization/reconciliation behavior and the smallest extension
+identified in the previous inspection.
+
+If synchronization cannot currently happen, the photographer continues
+working normally.
+
+When connectivity becomes available, the application reconciles the
+normal local project data with the cloud using the smallest extension of
+the existing reconciliation behavior already identified.
+
+Do not create a new synchronization subsystem.
+
+==================================================
+SAME JOURNEY AS AN IMPORTED CLASS/GROUP
+==================================================
+
+This is mandatory.
+
+Once created, the photographer-created Class/Group must follow EXACTLY
+THE SAME existing journey as an imported Class/Group.
+
+That includes:
+
+Class/Group
+→ Students/People
+→ Local project folders
+→ Student/Person folders
+→ Photography
+→ Review
+→ Upload
+→ Cloud storage/project structure
+→ Pixieset export when used
+→ Gallery preparation/publication
+→ Parent/customer gallery
+→ Product/photo selection
+→ Purchase
+→ Payment
+→ Delivery
+
+Do not create a special downstream workflow for photographer-created
+Classes/Groups.
+
+The objective is:
+
+PHOTOGRAPHER CREATES CLASS/GROUP
+                ↓
+BECOMES NORMAL PROJECT CLASS/GROUP
+                ↓
+EXISTING VOLUME CAPTURE JOURNEY TAKES OVER
+
+==================================================
+LOCAL PROJECT FOLDERS
+==================================================
+
+The photographer-created Class/Group must use the SAME existing local
+project-folder structure as an imported Class/Group.
+
+Its normal Class/Group folder must be created inside the normal project
+folder on the photographer's computer.
+
+Example:
+
+Project/
+├── Class 1A/
+├── Class 1B/
+├── Class 2A/
+└── Class 2B/       ← photographer-created normal class
+
+Students/people inside it must use the SAME existing student/person
+folder rules.
+
+Example:
+
+Project/
+└── Class 2B/
+    ├── Ahmed/
+    ├── Sara/
+    └── Youssef/
+
+Reuse the existing folder preparation and naming logic.
+
+Do not create:
+
+- temporary folders
+- recovery folders
+- offline folders
+- another folder hierarchy
+
+==================================================
+ADDING A MISSING STUDENT/PERSON
+==================================================
+
+Reuse the EXISTING:
+
+Add Student
+
+or:
+
+Add Person
+
+workflow.
+
+A missing student/person can be added to the newly created Class/Group
+and photographed normally.
+
+The person must behave exactly like someone belonging to an originally
+imported Class/Group.
+
+==================================================
+MOVING EXISTING PEOPLE
+==================================================
+
+The photographer must also be able to move existing students/people from
+other Classes/Groups into the selected Class/Group.
+
+Example:
+
+Ahmed — Class 1A
+Sara — Class 1B
+Youssef — Class 2A
+
+→ Class 2B
+
+This is a MOVE, not a copy.
+
+Continue using:
+
+students.classId
+
+The student/person remains the SAME person.
+
+Preserve:
+
+- person identity
+- generated student/person ID
+- existing portraits
+- existing captures
+- existing photographs
+- review state
+- existing upload records
+- existing delivery identity
+
+Do not duplicate the person.
+
+Do not duplicate or migrate their historical photographs into another
+identity.
+
+==================================================
+PHOTOGRAPHER EXPERIENCE
+==================================================
+
+This must feel exactly like photographing another imported Class/Group.
+
+For example:
+
+The photographer selects:
+
+Class 1A
+
+and photographs normally.
+
+Then selects:
+
+Class 2B
+
+which was created on location.
+
+The experience must be the same:
+
+select Class
+→ see students
+→ select student
+→ photograph
+→ review
+→ continue
+
+The photographer should not need to know whether Class 2B was:
+
+- imported originally
+- created five minutes earlier
+- created while online
+- created while offline
+
+Its origin must not matter.
+
+==================================================
+CAPTURE
+==================================================
+
+Reuse the EXISTING capture workflow.
+
+Do not introduce special capture handling for photographer-created
+Classes/Groups.
+
+Do not change:
+
+- watcher
+- captureRepository
+- QR
+- manual targeting
+- capture target authority
+- JPEG/RAW handling
+- capture identity
+- previews
+
+==================================================
+NORMAL PROJECT UPLOAD
+==================================================
+
+The photographer-created Class/Group, its students/people and its
+photographs must participate in the SAME normal project upload workflow
+as imported Classes/Groups.
+
+When uploading the project, the new Class/Group must be there with the
+other Classes/Groups.
+
+Do not create:
+
+- another upload button
+- another upload queue
+- a recovery upload
+- a separate destination
+- a special upload workflow
+
+==================================================
+CLOUD STORAGE
+==================================================
+
+The photographer-created Class/Group must follow the SAME existing cloud
+project/storage behavior as an imported Class/Group.
+
+Where the normal Volume Capture workflow creates or uses project,
+Class/Group and student/person organization in supported cloud storage,
+the photographer-created Class/Group must follow those SAME rules.
+
+This includes the existing Google Drive / Dropbox workflows where
+applicable.
+
+Do not create another cloud structure.
+
+==================================================
+PIXIESET EXPORT
+==================================================
+
+The photographer-created Class/Group must participate in the SAME
+existing Pixieset export workflow.
+
+Its eligible students/people and approved photographs must be processed
+using exactly the same existing Pixieset rules as imported
+Classes/Groups.
+
+Do not create:
+
+- a special Pixieset export
+- another CSV
+- another export folder structure
+- different eligibility rules
+
+==================================================
+PARENT/CUSTOMER GALLERY AND PURCHASE
+==================================================
+
+The same normal journey continues through the Volume Capture gallery.
+
+Eligible photographs from students/people belonging to the
+photographer-created Class/Group must reach the parent/customer gallery
+through the SAME existing publication/gallery workflow.
+
+The normal existing journey remains:
+
+Photography
+→ Review
+→ Upload
+→ Gallery preparation/publication
+→ Parent/customer access
+→ Photos displayed
+→ Product/photo selection
+→ Purchase
+→ Payment
+→ Delivery
+
+Parents/customers must experience no difference based on whether the
+Class/Group was imported or photographer-created.
+
+==================================================
+GROUP-PICTURE SYSTEM
+==================================================
+
+Do NOT change the existing photographer group-picture architecture.
+
+Leave unchanged:
+
+- groups
+- group_members
+- group_captures
+- group_capture_files
+- historical group photographs
+- existing group delivery behavior
+
+This feature concerns the normal organizational Class/Group structure.
+
+Do not redesign the separate photographer group-picture system.
+
+==================================================
+IMPLEMENTATION BOUNDARY
+==================================================
+
+Reuse all existing downstream behavior for:
+
+- local project/class/student folders
+- capture
+- review
+- upload
+- cloud storage
+- Pixieset export
+- gallery/publication
+- parent/customer purchasing
+- delivery
+
+Do not introduce special handling where existing normal Class/Group
+behavior already works.
+
+Do not introduce:
+
+- temporary/offline class types
+- recovery containers
+- new queues
+- new lifecycle states
+- schema changes
+- new capture architecture
+- new group-photo architecture
+
+The previous inspection already established that much of the existing
+system automatically works once a normal local classesTable row exists.
+
+Implement only the four concrete missing gaps.
+
+==================================================
+STOP CONDITION
+==================================================
+
+If implementation reveals that anything outside the four identified gaps
+must change, STOP BEFORE changing it.
+
+Report:
+
+1. The exact existing behavior that prevents the requirement.
+2. Why one of the four approved changes cannot solve it.
+3. The smallest additional change required.
+
+Do not independently broaden the implementation.
+
+==================================================
+AFTER IMPLEMENTATION
+==================================================
+
+Report:
+
+- exact files changed
+- what changed in each
+- online test result
+- offline test result
+- offline → reconnect synchronization result
+- restart persistence result
+- left-sidebar Class/Group navigation result
+- new Class/Group selection result
+- local Class/Group folder result
+- local student/person folder result
+- Add Student/Add Person result
+- move-person result
+- moved-person identity/photo preservation result
+- normal photography result
+- normal review result
+- normal upload result
+- cloud storage/project structure result
+- Pixieset export result
+- gallery/publication result
+- parent/customer purchase/delivery result
+- confirmation that capture architecture was untouched
+- confirmation that photographer group-picture architecture was untouched
+- confirmation that no schema/lifecycle/queue architecture was introduced
+
+NO VERSION BUMP.
+NO TAG.
+NO RELEASE.
+NO PUBLISH.

@@ -557,6 +557,59 @@ router.get("/projects/:projectId/groups", requireDesktopConnection, async (req, 
   })));
 });
 
+router.post("/projects/:projectId/classes", requireDesktopConnection, async (req, res): Promise<void> => {
+  const connection = getDesktopConnection(req);
+  const projectId = Number(req.params.projectId);
+  const className = typeof req.body?.className === "string" ? req.body.className.trim() : "";
+  if (!Number.isSafeInteger(projectId) || projectId <= 0 || !className || className.length > 120) {
+    res.status(400).json({ error: "A valid class or group name is required." });
+    return;
+  }
+  if (!(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [project] = await db.select({ id: projectsTable.id }).from(projectsTable).where(eq(projectsTable.id, projectId));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [existing] = await db
+    .select()
+    .from(classesTable)
+    .where(and(
+      eq(classesTable.projectId, projectId),
+      sql`lower(${classesTable.className}) = lower(${className})`,
+    ))
+    .limit(2);
+  if (existing) {
+    const matches = await db
+      .select({ id: classesTable.id })
+      .from(classesTable)
+      .where(and(
+        eq(classesTable.projectId, projectId),
+        sql`lower(${classesTable.className}) = lower(${className})`,
+      ))
+      .limit(2);
+    if (matches.length > 1) {
+      res.status(409).json({ error: "Several cloud classes already use that name." });
+      return;
+    }
+    res.json({ id: existing.id, className: existing.className });
+    return;
+  }
+  const [created] = await db
+    .insert(classesTable)
+    .values({ projectId, className })
+    .returning();
+  if (!created) {
+    res.status(500).json({ error: "The class could not be created." });
+    return;
+  }
+  await reconcileDefaultGroups(projectId);
+  res.status(201).json({ id: created.id, className: created.className });
+});
+
 router.post("/projects/:projectId/groups", requireDesktopConnection, async (req, res): Promise<void> => {
   const connection = getDesktopConnection(req);
   const projectId = Number(req.params.projectId);
@@ -863,6 +916,60 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
 // POST /api/desktop/projects/:projectId/students — add a late/new student
 // from the capture workstation. The generated student ID is supplied by the
 // desktop so an offline-created record can be reconciled idempotently later.
+router.patch("/projects/:projectId/students/:studentId", requireDesktopConnection, async (req, res): Promise<void> => {
+  const connection = getDesktopConnection(req);
+  const projectId = Number(req.params.projectId);
+  const studentId = Number(req.params.studentId);
+  const classId = Number(req.body?.classId);
+  if (
+    !Number.isSafeInteger(projectId)
+    || projectId <= 0
+    || !Number.isSafeInteger(studentId)
+    || studentId <= 0
+    || !Number.isSafeInteger(classId)
+    || classId <= 0
+  ) {
+    res.status(400).json({ error: "A valid project, student, and class are required." });
+    return;
+  }
+  if (!(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [student] = await db.select().from(studentsTable).where(and(
+    eq(studentsTable.id, studentId),
+    eq(studentsTable.projectId, projectId),
+  ));
+  const [cls] = await db.select().from(classesTable).where(and(
+    eq(classesTable.id, classId),
+    eq(classesTable.projectId, projectId),
+  ));
+  if (!student || !cls) {
+    res.status(404).json({ error: "Student or class not found in this project." });
+    return;
+  }
+  const [updated] = await db
+    .update(studentsTable)
+    .set({ classId, updatedAt: new Date() })
+    .where(eq(studentsTable.id, student.id))
+    .returning();
+  if (!updated) {
+    res.status(500).json({ error: "The student could not be moved." });
+    return;
+  }
+  await reconcileDefaultGroups(projectId);
+  res.json({
+    id: updated.id,
+    classId: updated.classId,
+    className: cls.className,
+    firstName: updated.firstName,
+    lastName: updated.lastName,
+    generatedStudentId: updated.generatedStudentId,
+    simpleQr: updated.simpleQr,
+    jsonQr: updated.jsonQr,
+  });
+});
+
 router.post("/projects/:projectId/students", requireDesktopConnection, async (req, res) => {
   const connection = getDesktopConnection(req);
   const rawProjectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId;

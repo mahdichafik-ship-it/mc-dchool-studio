@@ -1,0 +1,542 @@
+PHASE II APPROVED — IMPLEMENT ONLINE FIELD RECOVERY
+
+The final photographer-group membership inspection is accepted.
+
+Proceed with the ONLINE field-recovery implementation under the
+following approved policy.
+
+==================================================
+1. AUTHORITATIVE PRODUCT RULE
+==================================================
+
+A person's Class/Group assignment and photographer group-photo
+membership are separate concepts.
+
+ORGANIZATIONAL ASSIGNMENT:
+
+students.classId
+
+represents where the student/person currently belongs.
+
+PHOTOGRAPHER GROUP MEMBERSHIP:
+
+groups
+group_members
+
+represents existing group-photo/capture/delivery relationships.
+
+A Class/Group move changes ONLY organizational assignment.
+
+It does NOT rewrite photographic history.
+
+==================================================
+2. EXAMPLE
+==================================================
+
+Ahmed currently belongs to:
+
+Class A
+
+Ahmed may already have:
+
+- portraits
+- Class A group-photo membership
+- historical Class A group photographs
+- delivery relationships
+
+The photographer creates:
+
+Class D
+
+and moves Ahmed:
+
+Class A → Class D
+
+After the move:
+
+ORGANIZATIONAL ROSTER
+
+Class A:
+Ahmed no longer appears.
+
+Class D:
+Ahmed appears.
+
+BUT:
+
+Do NOT automatically:
+
+- remove Ahmed from the Class A photographer group
+- add Ahmed to the Class D photographer group
+- modify old group captures
+- modify group delivery
+- modify exclusions
+- modify membershipDirty
+- modify historical files
+
+This is intentional.
+
+==================================================
+3. IMPLEMENT ONLINE ADD CLASS / ADD GROUP
+==================================================
+
+Enable:
+
++ Add Class
+
+for school projects.
+
+Enable:
+
++ Add Group
+
+for corporate projects.
+
+Use the existing classesTable architecture.
+
+Flow:
+
+Add Class/Group
+→ enter name
+→ validate
+→ authenticated desktop request
+→ server creates authoritative container
+→ server returns ID
+→ desktop stores/reconciles local class with cloudId
+→ navigation refreshes
+→ select new empty container
+
+The new container starts EMPTY.
+
+Do not automatically populate it.
+
+==================================================
+4. ONLINE REQUIREMENT
+==================================================
+
+Class/Group creation requires a verified online desktop connection in
+this phase.
+
+If offline:
+
+Do not create a local-only container.
+
+Show a clear message such as:
+
+"Creating a new class requires a connection. You can continue
+photographing the existing roster offline."
+
+Corporate terminology should adapt appropriately.
+
+Do not block existing offline photography.
+
+==================================================
+5. NAME VALIDATION
+==================================================
+
+Within the same project:
+
+trim + case-insensitive comparison.
+
+Reject duplicates such as:
+
+Marketing
+marketing
+ MARKETING
+
+Do not silently rename.
+
+Same name in another project remains valid.
+
+No schema migration is authorized.
+
+If safe concurrent duplicate prevention cannot be implemented without a
+schema/database constraint:
+
+STOP before adding one.
+
+Report the issue.
+
+==================================================
+6. RETRY SAFETY
+==================================================
+
+Creation must not produce duplicate containers because of an uncertain
+network response.
+
+Use the smallest safe retry mechanism available within the existing
+architecture.
+
+Do not introduce schema changes or a new generalized synchronization
+framework.
+
+If durable retry safety cannot be achieved without persisted
+idempotency:
+
+STOP and report that limitation.
+
+==================================================
+7. MOVE EXISTING PEOPLE
+==================================================
+
+For an existing or newly-created Class/Group, provide:
+
+Add existing students
+
+or corporate equivalent:
+
+Add existing people
+
+This opens project-wide selection.
+
+The photographer can search/select people from multiple existing
+containers.
+
+Example:
+
+Ahmed — Class A
+Sara — Class B
+Youssef — Class C
+
+Destination:
+
+Class D
+
+Require explicit confirmation:
+
+Move 3 students to Class D?
+
+This is a MOVE, not a copy.
+
+==================================================
+8. MOVE OPERATION
+==================================================
+
+The server-authoritative move changes ONLY:
+
+students.classId
+
+Preserve:
+
+- student/person primary identity
+- generatedStudentId
+- portraits
+- capture records
+- JPEG/RAW
+- capture timestamps
+- review state
+- filenames
+- upload records
+- existing delivery relationships
+
+Do NOT mutate:
+
+- groups
+- group_members
+- groupMemberExclusions
+- group_captures
+- group_capture_files
+
+Do NOT call reconcileDefaultGroups() as part of the move.
+
+==================================================
+9. ATOMIC BULK MOVE
+==================================================
+
+The selected move should be atomic.
+
+Either:
+
+all selected people move
+
+or:
+
+none move.
+
+Validate before mutation:
+
+- project exists
+- project not finished
+- destination belongs to project
+- every selected person belongs to project
+- no cross-project IDs
+- valid desktop authorization
+
+Do not leave a photographer with a partially moved selection after a
+failed operation.
+
+==================================================
+10. LOCAL STATE ORDER
+==================================================
+
+SERVER FIRST.
+
+For movement:
+
+server validates
+→ transaction commits
+→ server responds
+→ desktop updates/reconciles local students.classId
+→ roster refreshes
+
+If the server operation fails:
+
+do not alter the local organizational assignment.
+
+==================================================
+11. ADD MISSING PERSON
+==================================================
+
+Reuse the EXISTING Add Student/Add Person implementation.
+
+Do not rewrite it.
+
+Once the new Class/Group exists, the photographer can:
+
++ Add Student
+
+or:
+
++ Add Person
+
+and the existing workflow creates that person directly in the selected
+container.
+
+Preserve the existing local/offline person behavior.
+
+==================================================
+12. PHOTOGRAPHER GROUPS — HARD FREEZE
+==================================================
+
+This Phase II must NOT change:
+
+groups
+group_members
+groupMemberExclusions
+group_captures
+group_capture_files
+membershipDirty
+default_group_initialized snapshots
+default group reconciliation
+group upload
+group delivery
+
+No "helpful" automatic synchronization between classId and photographer
+group membership.
+
+That requires a separate future product policy.
+
+==================================================
+13. CAPTURE CORE — HARD FREEZE
+==================================================
+
+ZERO changes authorized to:
+
+watcher
+captureRepository
+QR
+capture target authority
+capture arrival processing
+JPEG/RAW pairing
+preview pipeline
+local source retention
+upload queue
+R2
+Google Drive
+Dropbox
+Replit backup
+Pixieset exporter
+gallery/delivery
+payments
+authentication architecture
+
+If one becomes necessary:
+
+STOP before changing it.
+
+==================================================
+14. DELETE
+==================================================
+
+No Class/Group Delete.
+
+Do not expose it.
+
+Do not connect the existing destructive server delete behavior.
+
+==================================================
+15. FINISHED PROJECT
+==================================================
+
+Finished projects remain browsable.
+
+Authoritatively reject:
+
+- Add Class
+- Add Group
+- move students
+- move people
+- other structural mutations
+
+Do not rely only on disabled renderer controls.
+
+==================================================
+16. TEST THE REAL FIELD SCENARIOS
+==================================================
+
+SCENARIO A — Missing school class
+
+Existing:
+1A
+1B
+2A
+
+Create:
+2B
+
+Verify:
+2B appears immediately and is empty.
+
+Move two existing students from different classes into 2B.
+
+Verify:
+one person record each
+correct classId
+existing portraits untouched.
+
+Add one completely missing student to 2B using existing Add Student.
+
+Verify normal portrait targeting still works.
+
+
+SCENARIO B — Corporate
+
+Existing:
+Management
+Marketing
+Finance
+
+Create:
+Customer Service
+
+Move employees from multiple existing groups into Customer Service.
+
+Add one missing person.
+
+Verify corporate terminology and same identity guarantees.
+
+
+SCENARIO C — Historical photography
+
+Student has existing portraits and existing photographer-group
+membership.
+
+Move student to another Class.
+
+Verify:
+
+students.classId changes.
+
+BUT:
+
+portrait capture IDs unchanged.
+portrait files unchanged.
+group_members unchanged.
+group_captures unchanged.
+group_capture_files unchanged.
+delivery relationship unchanged.
+
+
+SCENARIO D — Offline
+
+Disconnect.
+
+Verify:
+
+Add Class/Add Group cannot create a local-only container.
+
+Existing roster and existing offline portrait photography continue to
+work normally.
+
+
+SCENARIO E — finished project
+
+Verify server rejects creation and movement regardless of renderer state.
+
+
+SCENARIO F — duplicate names
+
+Verify:
+
+Marketing
+marketing
+" MARKETING "
+
+cannot coexist in same project.
+
+Verify Marketing in another project is allowed.
+
+==================================================
+17. CHANGE BUDGET
+==================================================
+
+Keep implementation minimal.
+
+Expected areas:
+
+- desktop authenticated routes
+- minimal class/move validation
+- desktop project IPC
+- renderer creation/move UI
+- shared types if required
+
+Avoid broad refactoring.
+
+No dependency upgrades.
+
+No version bump yet.
+
+==================================================
+18. COMPLETION REPORT
+==================================================
+
+After implementation provide:
+
+1. Starting commit.
+2. Candidate commit or working-tree state.
+3. Every changed production file.
+4. Why each changed.
+5. Diff stat.
+6. Exact class creation contract.
+7. Exact bulk move contract.
+8. Retry/idempotency behavior.
+9. Duplicate-name enforcement behavior.
+10. Finished-project enforcement.
+11. Proof student/person identity remains unchanged after move.
+12. Proof portrait capture records remain unchanged.
+13. Proof group_members remain unchanged.
+14. Proof group_captures/group_capture_files remain unchanged.
+15. Proof delivery behavior remains unchanged.
+16. Offline behavior.
+17. Typecheck results.
+18. API tests.
+19. Desktop tests.
+20. Capture-integrity regression results.
+21. Any remaining limitation.
+
+Also explicitly report whether implementation required touching anything
+outside the approved boundary.
+
+==================================================
+19. STOP BEFORE RELEASE
+==================================================
+
+DO NOT:
+
+- version bump
+- tag
+- publish
+- package signed macOS release
+- start release workflow
+
+Complete implementation and tests, then STOP for review.

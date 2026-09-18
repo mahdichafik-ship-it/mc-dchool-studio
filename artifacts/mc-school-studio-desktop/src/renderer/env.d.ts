@@ -26,6 +26,8 @@ import type {
   CaptureFraming,
   ProjectSyncProgressEvent,
   CreateStudentResult,
+  CreateClassResult,
+  MoveStudentResult,
   StudentGroup,
   GroupCaptureReview,
   DroppedCaptureBatchResult,
@@ -93,6 +95,7 @@ interface ElectronAPI {
   invoke(channel: 'projects:previewFolderMigration', args: { projectId: number }): Promise<import('@shared/types').FolderMigrationPreview>
   invoke(channel: 'projects:migrateFolderMigration', args: { projectId: number; confirmed: true }): Promise<import('@shared/types').FolderMigrationResult>
   invoke(channel: 'classes:list', args: { projectId: number }): Promise<Class[]>
+  invoke(channel: 'classes:create', args: { projectId: number; className: string }): Promise<CreateClassResult>
   invoke(channel: 'students:list', args: { projectId: number; classId?: number }): Promise<Student[]>
   invoke(channel: 'students:create', args: {
     projectId: number
@@ -100,6 +103,11 @@ interface ElectronAPI {
     firstName: string
     lastName: string
   }): Promise<CreateStudentResult>
+  invoke(channel: 'students:move', args: {
+    projectId: number
+    studentId: number
+    classId: number
+  }): Promise<MoveStudentResult>
   invoke(channel: 'groups:list', args: { projectId: number; classId?: number }): Promise<StudentGroup[]>
   invoke(channel: 'groups:create', args: { projectId: number; classId?: number | null; name: string; memberStudentIds?: number[] }): Promise<StudentGroup>
   invoke(channel: 'groups:update', args: { projectId: number; groupId: number; name?: string; memberStudentIds?: number[] }): Promise<StudentGroup>

@@ -1,0 +1,164 @@
+Yes — continue with this inspection.
+
+The corrected PRODUCT MODEL is:
+
+SCHOOL
+Project → Class → Student → Photos
+
+CORPORATE
+Project → Department/Group → Person → Photos
+
+The item displayed directly underneath the project in the far-left dark
+sidebar is therefore the project's PEOPLE CONTAINER.
+
+For a school project we call that container a CLASS.
+
+For a corporate project we call that container a GROUP or DEPARTMENT.
+
+Clicking that container populates the MIDDLE column with its people.
+
+The RIGHT side remains the photography/capture/review area.
+
+However, do NOT yet assume that the existing `groups` tables can simply
+be reclassified as "whole-class/whole-team photo mode."
+
+First inspect the current authoritative implementation and tell me
+exactly what the existing:
+
+- classes
+- groups
+- group_members
+- group_captures
+- group_capture_files
+
+are responsible for today.
+
+In particular, inspect the existing CLASS creation/edit/delete path.
+
+I need to know:
+
+1. Is Class currently an authoritative persisted entity?
+
+2. Where is a Class created today?
+   - renderer only?
+   - local SQLite?
+   - IPC/main process?
+   - web/API?
+   - cloud?
+   - imported only from roster?
+
+3. Does Class already have a stable local identity?
+
+4. Can a Class currently be created completely offline?
+
+5. Does Class survive restart before cloud synchronization?
+
+6. How are students associated with a Class?
+
+7. Can a student be moved between Classes within the same project using
+   the existing authoritative model?
+
+8. What currently prevents a Class from another project being assigned?
+
+9. Does Class currently support:
+   - create
+   - rename
+   - delete
+   - duplicate-name validation?
+
+10. What currently happens if a Class contains students and somebody
+    attempts to delete it?
+
+11. For CORPORATE projects, is there already an equivalent authoritative
+    Department/Group container for people, or would we be repurposing
+    something that currently has a different meaning?
+
+12. Are the existing `groups` + `group_members` records already being
+    used as corporate people containers anywhere?
+
+13. Separately, identify exactly how the existing whole-class/group-photo
+    capture feature works and what tables/IDs it depends upon.
+
+14. Determine whether we can achieve:
+
+    School:
+    Project → Class → Students
+
+    Corporate:
+    Project → Group/Department → People
+
+    using EXISTING authoritative entities and APIs.
+
+15. If corporate Group/Department requires a new authoritative entity,
+    API, persistence field, or migration, STOP and explain why.
+
+DO NOT create a parallel data model.
+
+DO NOT repurpose `groups` blindly.
+
+DO NOT implement production code yet.
+
+Also preserve these already-approved product rules for whichever
+authoritative Class/Group container is ultimately used:
+
+- container belongs to exactly one project
+- names must be unique within that project
+- duplicate comparison is trimmed + case-insensitive
+- same name may exist in different projects
+- new container starts empty
+- people are explicitly allocated
+- container cannot be deleted once people/names are allocated
+- container cannot be deleted if capture history depends on it
+- default/protected containers cannot be deleted
+- creation and membership must work offline
+- cross-project membership must be rejected
+- historical photographs must never be reassigned because membership
+  later changes
+- relevant controls have explanatory hover/focus tooltips
+
+DESIGN REMAINS:
+
+FAR LEFT DARK SIDEBAR
+Project
+  ├─ Class 1A
+  ├─ Class 1B
+  ├─ Class 2A
+  └─ + Add Class
+
+or corporate:
+
+Project
+  ├─ Marketing
+  ├─ Finance
+  ├─ Management
+  └─ + Add Group
+
+MIDDLE
+People belonging to the selected Class/Group.
+
+RIGHT
+Selected person's photographs/capture/review.
+
+There should NOT be another list of Classes/Groups in the middle.
+
+Whole-class / whole-team photography is a capture function associated
+with the container and must not force us to create a second navigation
+concept.
+
+Return:
+
+A. Current authoritative Class architecture.
+B. Current authoritative corporate people-container architecture.
+C. Current purpose of the existing groups tables.
+D. Current whole-class/group-photo capture architecture.
+E. What can be accomplished by UI wiring only.
+F. What requires IPC/backend changes but NO schema change.
+G. Anything that genuinely requires a schema/data-model change.
+H. Your recommended minimal implementation path.
+
+Then STOP.
+
+No production changes.
+No migration.
+No version bump.
+No release workflow.

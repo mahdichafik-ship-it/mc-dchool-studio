@@ -40,6 +40,18 @@ export interface Class {
   updatedAt: string
 }
 
+export interface CreateClassResult {
+  class: Class
+  cloudSynced: boolean
+  syncError?: string
+}
+
+export interface MoveStudentResult {
+  student: Student
+  cloudSynced: boolean
+  syncError?: string
+}
+
 export interface Student {
   id: number
   projectId: number

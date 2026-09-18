@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   useProject,
-  useClasses,
   useStudents,
   useGroups,
   useGroupCaptures,
@@ -61,11 +60,16 @@ import type {
   DroppedCaptureFileResult,
   DroppedCaptureProgressEvent,
   FolderMigrationPreview,
+  MoveStudentResult,
 } from '@shared/types'
 
 interface Props {
   projectId: number
   onBack: () => void
+  classes: Class[]
+  selectedClassId: number | null
+  onSelectedClassIdChange: (classId: number | null) => void
+  reloadClasses: () => Promise<void>
   offline?: boolean
 }
 
@@ -86,7 +90,15 @@ interface DropProgressState {
   results: DroppedCaptureFileResult[]
 }
 
-export function ProjectView({ projectId, onBack, offline = false }: Props) {
+export function ProjectView({
+  projectId,
+  onBack,
+  classes,
+  selectedClassId,
+  onSelectedClassIdChange,
+  reloadClasses,
+  offline = false,
+}: Props) {
   const { data: project, reload: reloadProject } = useProject(projectId)
   const projectSynced = project?.syncStatus === 'synced'
   const isCorporate = project?.projectType === 'corporate'
@@ -95,9 +107,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const employeePlural = `${employeeLabel}s`
   const { data: captureSummary } = useCaptureSummary(projectId)
   const [groupCaptureCount, setGroupCaptureCount] = useState(0)
-  const { data: classes, reload: reloadClasses } = useClasses(projectId)
-  const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
+  const { data: allProjectStudents, reload: reloadAllProjectStudents } = useStudents(projectId)
   const { data: groups, reload: reloadGroups } = useGroups(projectId, selectedClassId ?? undefined)
   const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
   const { data: groupCaptures, reload: reloadGroupCaptures } = useGroupCaptures(projectId, selectedGroup?.id ?? null)
@@ -126,6 +137,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   const [search, setSearch] = useState('')
   const filteredStudents = filterRosterStudents(students, search)
   const [addStudentOpen, setAddStudentOpen] = useState(false)
+  const [moveStudentOpen, setMoveStudentOpen] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
@@ -341,7 +353,11 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   useEffect(() => {
     if (selectedStudent) {
       const refreshed = students.find((s) => s.id === selectedStudent.id)
-      if (refreshed) setSelectedStudent(refreshed)
+      if (refreshed) {
+        setSelectedStudent(refreshed)
+      } else {
+        setSelectedStudent(null)
+      }
     }
   }, [students])
 
@@ -451,8 +467,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
   }
 
   async function handleStudentCreated(result: CreateStudentResult) {
-    await Promise.all([reloadStudents(), reloadClasses(), reloadProject()])
-    setSelectedClassId(result.student.classId)
+    await Promise.all([reloadStudents(), reloadAllProjectStudents(), reloadClasses(), reloadProject()])
+    onSelectedClassIdChange(result.student.classId)
     setSelectedStudent(result.student)
     let selectedForCapture = false
     try {
@@ -473,6 +489,18 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         result.cloudSynced ? 'synced to cloud' : 'saved locally; cloud sync will retry during Upload & Finish',
         selectedForCapture ? 'selected for capture' : null,
       ].filter(Boolean).join(' · '),
+    })
+  }
+
+  async function handleStudentMoved(result: MoveStudentResult) {
+    await Promise.all([reloadStudents(), reloadAllProjectStudents(), reloadClasses(), reloadProject()])
+    setSelectedStudent(null)
+    addToast({
+      type: 'success',
+      title: `${result.student.firstName} ${result.student.lastName} moved`,
+      description: result.cloudSynced
+        ? `Moved to ${result.student.className} and synced to cloud.`
+        : `Moved to ${result.student.className} locally; cloud sync will retry when connected.`,
     })
   }
 
@@ -898,7 +926,7 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         </div>
       )}
       {/* Header bar */}
-      <header className="shoot-toolbar bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
+       <header className="shoot-toolbar bg-slate-950 border-b border-slate-900 px-6 py-3 shrink-0 flex flex-wrap items-center justify-between gap-y-3 shadow-sm z-20">
         <div className="flex items-center gap-5 min-w-0">
           <button onClick={onBack} aria-label="Back to projects" className="text-slate-400 hover:text-white transition-colors bg-slate-900 hover:bg-slate-800 p-1.5 rounded-md shrink-0">
             <ArrowLeft className="size-4" />
@@ -920,31 +948,89 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           </div>
         </div>
 
-        <Button
-          size="sm"
-          onClick={() => void openFinishDialog()}
-          data-testid="shoot-primary-action"
-          disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
-          className={cn(
-            "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0",
-            projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
-          )}
-        >
-          {finishing ? (
-            <Loader className="size-3.5 mr-1.5 animate-spin" />
-          ) : projectSynced ? (
-            <CheckCircle className="size-3.5 mr-1.5" />
-          ) : (
-            <CloudUpload className="size-3.5 mr-1.5" />
-          )}
-          {finishing
-            ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
-            : projectSynced
-              ? 'Finished'
-              : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
-                ? 'Retry Upload & Finish'
-                : 'Finish My Shoot'}
-        </Button>
+         <div className="flex items-center gap-2 shrink-0">
+           <details className="relative">
+             <summary
+               className="flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/60"
+               title="Open photographer group-photo controls"
+             >
+               <User className="size-3.5" />
+               Photo groups
+               <Badge className="bg-slate-700 px-1.5 py-0 text-[10px] text-slate-300 hover:bg-slate-700">{groups.length}</Badge>
+             </summary>
+             <div className="absolute right-0 top-10 z-40 w-80 overflow-hidden rounded-lg border border-slate-700 bg-white text-left shadow-2xl">
+               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5">
+                 <div>
+                   <p className="text-xs font-bold text-slate-900">Group photos</p>
+                   <p className="text-[10px] text-slate-500">Separate from the {departmentLabel.toLowerCase()} roster.</p>
+                 </div>
+                 {!project?.finishedAt && (
+                   <button type="button" onClick={() => void handleCreateGroup()} className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-teal-600 hover:text-teal-700">
+                     <Plus className="size-3" /> New
+                   </button>
+                 )}
+               </div>
+               <div className="max-h-72 overflow-y-auto py-1">
+                 {groups.map((group) => (
+                   <div key={group.id} className={cn("border-b border-slate-100 last:border-0", selectedGroup?.id === group.id ? "bg-teal-50/60" : "bg-white")}>
+                     {renamingGroupId === group.id ? (
+                       <div className="px-3 py-2">
+                         <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void handleRenameGroup(group) }}>
+                           <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} className="h-7 min-w-0 flex-1 rounded border border-slate-300 px-2 text-xs font-medium focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500" />
+                           <Button type="submit" size="sm" className="h-7 px-2 bg-teal-600 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-teal-700">Save</Button>
+                         </form>
+                       </div>
+                     ) : (
+                       <div className={cn("flex items-center px-3 py-2 transition-colors", selectedGroup?.id === group.id ? "border-l-4 border-teal-500" : "border-l-4 border-transparent hover:bg-slate-50")}>
+                         <button type="button" onClick={() => void handleSelectGroup(group)} className="mr-2 flex min-w-0 flex-1 items-center justify-between gap-2 text-left">
+                           <span className={cn("truncate text-xs font-bold", selectedGroup?.id === group.id ? "text-teal-950" : "text-slate-800")}>{group.name}</span>
+                           <Badge className="bg-slate-200 px-1.5 py-0 text-[10px] font-bold text-slate-700 shadow-none hover:bg-slate-200">{group.memberStudentIds.length}</Badge>
+                         </button>
+                         {!group.isDefaultClassGroup && !project?.finishedAt && (
+                           <div className="flex items-center gap-1">
+                             <button type="button" onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }} className="p-1 text-slate-400 hover:text-teal-600" title="Rename group">
+                               <Pencil className="size-3.5" />
+                             </button>
+                             <button type="button" onClick={() => void handleDeleteGroup(group)} className="p-1 text-slate-400 hover:text-red-600" title="Delete group">
+                               <Trash2 className="size-3.5" />
+                             </button>
+                           </div>
+                         )}
+                       </div>
+                     )}
+                   </div>
+                 ))}
+                 {groups.length === 0 && <p className="px-3 py-4 text-center text-xs text-slate-500">No group photos yet.</p>}
+               </div>
+             </div>
+           </details>
+           <Button
+             size="sm"
+             onClick={() => void openFinishDialog()}
+             data-testid="shoot-primary-action"
+             disabled={finishing || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
+             className={cn(
+               "h-8 px-4 text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0",
+               projectSynced ? "bg-slate-800 text-slate-400 hover:bg-slate-800" : "bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+             )}
+           >
+             {finishing ? (
+               <Loader className="size-3.5 mr-1.5 animate-spin" />
+             ) : projectSynced ? (
+               <CheckCircle className="size-3.5 mr-1.5" />
+             ) : (
+               <CloudUpload className="size-3.5 mr-1.5" />
+             )}
+             {finishing
+               ? (syncProgress && syncProgress.total > 0 ? `Uploading ${syncProgress.completed}/${syncProgress.total}` : 'Preparing…')
+               : projectSynced
+                 ? 'Finished'
+                 : project?.syncStatus === 'finished_local' || project?.syncStatus === 'sync_failed'
+                   ? 'Retry Upload & Finish'
+                   : 'Finish My Shoot'}
+           </Button>
+         </div>
+
       </header>
       {project && project.syncStatus !== 'active' && (
         <div className={cn(
@@ -1425,23 +1511,127 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               className={cn(
                 "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
                 !selectedClassId ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+
               )}
-            >
-              All ({students.length})
-            </button>
-            {classes.map((c) => (
+
               <button
-                key={c.id}
-                onClick={() => setSelectedClassId(c.id)}
-                className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
-                  selectedClassId === c.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                )}
+                onClick={() => void handleConsolidateStudentFolders()}
+                disabled={folderMigrationRunning}
+                className="flex h-9 w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-[10px] font-bold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
+                title="Preview and consolidate legacy student folders"
               >
-                {c.className}
+                <FolderSync className={cn("size-3.5", folderMigrationRunning && "animate-pulse")} />
+                {folderMigrationRunning ? 'Checking…' : 'Consolidate folders'}
               </button>
-            ))}
-          </div>
+
+              <button
+                onClick={() => void openUploadDialog()}
+                aria-label={shootHealthLabel}
+                className="hidden xl:flex w-full items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition-all hover:bg-slate-100 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/50 group"
+                title={shootHealthLabel}
+              >
+                <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                    <LocalIcon className={cn("size-3.5 shrink-0", localColor)} />
+                    <span className="truncate text-slate-700">{localText}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium leading-none">
+                    <CloudIcon className={cn("size-3.5 shrink-0", cloudColor)} />
+                    <span className="truncate text-slate-700">{cloudText}</span>
+                  </div>
+                </div>
+                {showUploadDots ? (
+                  <div className="flex gap-1 items-center pl-1.5 border-l border-slate-200 h-6">
+                    {[0, 1, 2].map(i => (
+                      <span
+                        key={i}
+                        className={cn(
+                          "w-1.5 h-1.5 rounded-full transition-all duration-300",
+                          i < activeDots ? "bg-teal-400 animate-pulse" : "bg-slate-200"
+                        )}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <ChevronRight className="size-3.5 shrink-0 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                )}
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className={cn(
+                  "flex min-w-0 flex-1 items-center h-9 rounded-md border overflow-hidden",
+                  liveUpload?.enabled ? "bg-blue-50 border-blue-200" : "bg-white border-slate-200",
+                )}>
+                  <button
+                    onClick={() => void handleToggleLiveUpload()}
+                    disabled={uploadActionRunning || Boolean(project?.finishedAt)}
+                    className={cn(
+                      "h-full min-w-0 flex-1 px-3 flex items-center gap-1.5 text-left text-[10px] font-bold uppercase tracking-wider disabled:opacity-50",
+                      liveUpload?.enabled ? "text-blue-700 hover:bg-blue-100" : "text-slate-600 hover:bg-slate-100",
+                    )}
+                    title="Uploads captures in the background without finishing the shoot"
+                  >
+                    {liveUpload?.running ? <Loader className="size-3 shrink-0 animate-spin" /> : <CloudUpload className="size-3 shrink-0" />}
+                    <span className="truncate">Live Upload {liveUpload?.enabled ? 'On' : 'Off'}</span>
+                  </button>
+                  <button
+                    onClick={() => void openUploadDialog()}
+                    className="h-full border-l border-slate-200 px-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 text-[10px] font-bold"
+                    title="Open upload activity"
+                  >
+                    {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}
+                  </button>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void openUploadDialog()}
+                  disabled={uploadActionRunning || projectSynced || (captureSummary.total === 0 && groupCaptureCount === 0)}
+                  className="h-9 border-blue-200 bg-blue-50 px-3 text-[10px] font-bold uppercase tracking-wider text-blue-700 hover:bg-blue-100 hover:text-blue-900"
+                >
+                  {liveUpload?.running || uploadActionRunning
+                    ? <Loader className="size-3.5 mr-1.5 animate-spin" />
+                    : <Upload className="size-3.5 mr-1.5" />}
+                  {liveUpload?.uploading
+                    ? `Uploading ${liveUpload.uploading}`
+                    : pendingUploadCount > 0
+                      ? `Upload ${pendingUploadCount}`
+                      : 'Upload'}
+                </Button>
+              </div>
+
+              {(captureSummary.total > 0 || groupCaptureCount > 0) && (
+                <div className="flex w-full items-center h-9 rounded-md bg-white border border-slate-200 overflow-hidden">
+                  <select
+                    aria-label="Export selection"
+                    value={exportMode}
+                    onChange={(event) => setExportMode(event.target.value as CaptureExportMode)}
+                    className="h-full min-w-0 flex-1 bg-transparent px-2 text-[10px] font-bold uppercase tracking-wider text-slate-600 focus:outline-none border-r border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors"
+                  >
+                    <option value="all">All</option>
+                    <option value="paired">Paired</option>
+                    <option value="jpeg_only">JPEG Only</option>
+                    <option value="raw_only">RAW Only</option>
+                    <option value="selected">Selected</option>
+                    <option value="favorite">Favorites</option>
+                    <option value="final_selection">Final</option>
+                  </select>
+                  <button onClick={() => void handleExportCaptures('capture_folders')} disabled={exporting !== null} className="px-2.5 h-full text-[10px] font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1 disabled:opacity-50">
+                    {exporting === 'capture_folders' ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
+                    Export
+                  </button>
+                  <button onClick={() => void handleExportCaptures('lightroom_watch_folder')} disabled={exporting !== null} className="px-2.5 h-full border-l border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1 disabled:opacity-50" title="Send to Lightroom Auto Import">
+                    {exporting === 'lightroom_watch_folder' ? <Loader className="size-3 animate-spin" /> : <Image className="size-3" />}
+                    Lightroom
+                  </button>
+                  <button onClick={() => void handlePixiesetExport()} disabled={exporting !== null || pixiesetExporting} className="px-2.5 h-full border-l border-slate-200 text-[10px] font-bold uppercase tracking-wider text-amber-700 hover:text-amber-900 hover:bg-amber-50 transition-colors flex items-center gap-1 disabled:opacity-50" title="Create a separate Pixieset package from rated JPEGs only">
+                    {pixiesetExporting ? <Loader className="size-3 animate-spin" /> : <Download className="size-3" />}
+                    Pixieset
+                  </button>
+                </div>
+              )}
+            </div>
+          </details>
 
           {/* Search */}
           <div className="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0">
@@ -1469,6 +1659,20 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
               >
                 <Plus className="size-4" />
               </button>
+               {selectedClassId !== null
+                 && !project?.finishedAt
+                 && allProjectStudents.some((student) => student.classId !== selectedClassId) && (
+                 <button
+                   type="button"
+                   onClick={() => setMoveStudentOpen(true)}
+                   aria-label={`Move ${employeeLabel.toLowerCase()} here`}
+                   className="h-[38px] rounded-lg border border-teal-200 bg-teal-50 px-3 text-[10px] font-bold uppercase tracking-wider text-teal-700 transition-colors hover:bg-teal-100"
+                   title={`Move an existing ${employeeLabel.toLowerCase()} into this ${departmentLabel.toLowerCase()}`}
+                 >
+                   <ArrowRight className="mr-1.5 inline size-3.5" />
+                   Move here
+                 </button>
+               )}
             </div>
           </div>
 
@@ -1492,57 +1696,8 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
             </div>
           )}
 
-          {/* Student list */}
+           {/* People list */}
           <div className="flex-1 overflow-y-auto">
-            {groups.length > 0 && (
-              <div className="py-2 border-b border-slate-100">
-                <div className="px-4 py-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  <span>Groups</span>
-                  {!project?.finishedAt && (
-                    <button type="button" onClick={() => void handleCreateGroup()} className="text-teal-600 hover:text-teal-700 flex items-center gap-0.5">
-                      <Plus className="size-3" /> New
-                    </button>
-                  )}
-                </div>
-                {groups.map((group) => (
-                  <div key={group.id} className={cn("flex flex-col border-b border-slate-100 last:border-0", selectedGroup?.id === group.id ? "bg-teal-50/50" : "bg-white")}>
-                    {renamingGroupId === group.id ? (
-                      <div className="px-4 py-2">
-                        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void handleRenameGroup(group) }}>
-                          <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="flex-1 h-7 px-2 text-xs font-medium border border-slate-300 rounded focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
-                          <Button type="submit" size="sm" className="h-7 px-2 bg-teal-600 hover:bg-teal-700 text-white text-[10px] uppercase font-bold tracking-wider">Save</Button>
-                        </form>
-                      </div>
-                    ) : (
-                      <div className={cn("flex items-center px-4 py-2 group/group transition-colors border-l-4", selectedGroup?.id === group.id ? "border-teal-500" : "border-transparent hover:bg-slate-50")}>
-                        <button type="button" onClick={() => void handleSelectGroup(group)} className="flex-1 flex items-center justify-between text-left min-w-0 mr-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className={cn("w-6 h-6 rounded-md flex items-center justify-center shrink-0", selectedGroup?.id === group.id ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-500")}>
-                              <User className="size-3.5" />
-                            </div>
-                            <span className={cn("text-sm font-bold truncate", selectedGroup?.id === group.id ? "text-teal-950" : "text-slate-800")}>{group.name}</span>
-                          </div>
-                          <Badge className="bg-slate-200 hover:bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0 rounded font-bold shadow-none">
-                            {group.memberStudentIds.length}
-                          </Badge>
-                        </button>
-                        {!group.isDefaultClassGroup && !project?.finishedAt && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover/group:opacity-100 transition-opacity">
-                            <button type="button" onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }} className="p-1 text-slate-400 hover:text-teal-600 transition-colors" title="Rename group">
-                              <Pencil className="size-3.5" />
-                            </button>
-                            <button type="button" onClick={() => void handleDeleteGroup(group)} className="p-1 text-slate-400 hover:text-red-600 transition-colors" title="Delete group">
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
             <div className="py-2">
               <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 {employeePlural}
@@ -1646,6 +1801,20 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
           }}
         />
       )}
+      <MoveStudentDialog
+        open={moveStudentOpen}
+        projectId={projectId}
+        targetClassId={selectedClassId}
+        targetClassName={classes.find((cls) => cls.id === selectedClassId)?.className ?? departmentLabel}
+        students={allProjectStudents.filter((student) => student.classId !== selectedClassId)}
+        employeeLabel={employeeLabel}
+        departmentLabel={departmentLabel}
+        onClose={() => setMoveStudentOpen(false)}
+        onMoved={async (result) => {
+          await handleStudentMoved(result)
+          setMoveStudentOpen(false)
+        }}
+      />
       <AddStudentDialog
         open={addStudentOpen}
         projectId={projectId}
@@ -1657,6 +1826,96 @@ export function ProjectView({ projectId, onBack, offline = false }: Props) {
         employeeLabel={employeeLabel}
       />
     </div>
+  )
+}
+
+function MoveStudentDialog({
+  open,
+  projectId,
+  targetClassId,
+  targetClassName,
+  students,
+  employeeLabel,
+  departmentLabel,
+  onClose,
+  onMoved,
+}: {
+  open: boolean
+  projectId: number
+  targetClassId: number | null
+  targetClassName: string
+  students: Student[]
+  employeeLabel: string
+  departmentLabel: string
+  onClose: () => void
+  onMoved: (result: MoveStudentResult) => Promise<void>
+}) {
+  const [studentId, setStudentId] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setStudentId(String(students[0]?.id ?? ''))
+  }, [open, students])
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    if (saving || !targetClassId || !studentId) return
+    setSaving(true)
+    try {
+      const result = await window.api.invoke('students:move', {
+        projectId,
+        studentId: Number(studentId),
+        classId: targetClassId,
+      }) as MoveStudentResult
+      await onMoved(result)
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: `Could not move ${employeeLabel.toLowerCase()}`,
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title={`Move ${employeeLabel} to ${targetClassName}`} className="max-w-md">
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        <div>
+          <label htmlFor="move-student-id" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            {employeeLabel}
+          </label>
+          <select
+            id="move-student-id"
+            value={studentId}
+            onChange={(event) => setStudentId(event.target.value)}
+            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+            required
+          >
+            {students.map((student) => (
+              <option key={student.id} value={student.id}>
+                {student.lastName}, {student.firstName} · {student.className}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs font-medium leading-relaxed text-slate-500">
+          This moves the existing {employeeLabel.toLowerCase()} without creating a duplicate. Their identity and existing photographs stay attached.
+          If you are offline, the move will sync when connectivity returns.
+        </p>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving} className="h-10 px-5 text-xs font-bold uppercase tracking-wider">
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving || !studentId || !targetClassId} className="h-10 bg-teal-600 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-sm hover:bg-teal-700">
+            {saving ? <Loader className="mr-2 size-4 animate-spin" /> : <ArrowRight className="mr-2 size-4" />}
+            {saving ? 'Moving…' : `Move to ${departmentLabel.toLowerCase()}`}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 

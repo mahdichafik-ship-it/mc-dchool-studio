@@ -1,0 +1,272 @@
+IMPORTANT CONCEPTUAL CORRECTION — CLASS vs GROUP
+
+Before producing the design proposal, correct the conceptual model.
+
+I do NOT want Classes and Groups treated as two fundamentally different
+photographer workflows.
+
+They represent the same operational concept for different project types:
+
+SCHOOL PROJECT
+→ CLASS
+
+CORPORATE PROJECT
+→ GROUP
+
+A Class is the school terminology.
+A Group is primarily the corporate terminology.
+
+Both are containers of people belonging to a project and should follow
+the same basic navigation and photographer workflow.
+
+==================================================
+UI TERMINOLOGY BY PROJECT TYPE
+==================================================
+
+For a SCHOOL project, the far-left dark navigation should conceptually be:
+
+▼ Project Name
+
+    Class 1A
+    Class 1B
+    Class 2A
+    Class 2B
+
+    + Add Class
+
+For a CORPORATE project:
+
+▼ Project Name
+
+    Marketing
+    Management
+    Sales
+    Finance
+
+    + Add Group
+
+Do NOT unnecessarily show separate "Classes" and "Groups" sections when
+the project type does not require both concepts.
+
+Use the appropriate terminology for the project.
+
+School
+→ Class / Add Class
+
+Corporate
+→ Group / Add Group
+
+The underlying technical storage may continue using the existing models
+where required. Do not redesign the database merely to make the
+terminology identical.
+
+==================================================
+SAME NAVIGATION PRINCIPLE
+==================================================
+
+Clicking a CLASS in a school project:
+
+LEFT
+→ Class selected
+
+MIDDLE
+→ students belonging to that class
+
+RIGHT
+→ photographs/capture/review for the selected person
+
+Clicking a GROUP in a corporate project:
+
+LEFT
+→ Group selected
+
+MIDDLE
+→ employees/persons belonging to that group
+
+RIGHT
+→ photographs/capture/review for the selected person
+
+Therefore:
+
+CLASS and GROUP use the SAME basic photographer interaction model.
+
+Do NOT create a special middle-column group-management screen.
+
+Do NOT show a redundant list of groups in the middle.
+
+The middle column is always PEOPLE.
+
+School:
+Class → Students → Photographs
+
+Corporate:
+Group → People/Employees → Photographs
+
+==================================================
+CREATION
+==================================================
+
+School project:
++ Add Class
+
+Corporate project:
++ Add Group
+
+A newly-created Class/Group:
+
+- belongs to the current project
+- appears immediately under that project in the dark sidebar
+- starts empty
+- works offline
+- receives people through explicit allocation
+
+Do not automatically populate it with every person from another
+Class/Group.
+
+==================================================
+NAME UNIQUENESS
+==================================================
+
+Within the same project, two Classes/Groups cannot have the same
+normalized name.
+
+Examples:
+
+Marketing
+marketing
+ MARKETING
+
+→ SAME NAME → reject duplicate.
+
+Class 5A
+class 5a
+
+→ SAME NAME → reject duplicate.
+
+Apply this on creation AND rename.
+
+Same name in a different project is allowed.
+
+Enforce this in the authoritative local/main-process layer as well as
+the UI.
+
+==================================================
+DELETION
+==================================================
+
+Apply the SAME deletion rule to Classes and Groups.
+
+A Class/Group may be deleted ONLY when:
+
+- ZERO people are allocated to it
+AND
+- ZERO captures/history depend on it.
+
+Once names/people have been allocated:
+
+DELETE IS NOT ALLOWED.
+
+If captures exist:
+
+DELETE IS NOT ALLOWED.
+
+Do not rely only on the UI.
+Enforce this in the authoritative local/main-process layer.
+
+Never cascade-delete real people/capture history because somebody
+clicked Delete.
+
+==================================================
+HOVER HELP
+==================================================
+
+Keep the previously approved hover/focus help requirement.
+
+When the photographer hovers over relevant controls, explain briefly
+what they do.
+
+Examples:
+
+Add Class
+"Create a new class in this school project."
+
+Add Group
+"Create a new group in this corporate project."
+
+Add Person
+"Add a new person to this project."
+
+Remove from Class
+"Remove this person from the class without deleting their photographs."
+
+The photographer should be able to understand unfamiliar controls by
+hovering over them.
+
+Important primary controls must still have visible labels; tooltips do
+not replace visible shoot-critical information.
+
+==================================================
+DO NOT OVERCOMPLICATE CAPTURE BEHAVIOR
+==================================================
+
+Do not invent a separate group-specific capture workflow simply because
+the existing database has group capture functionality.
+
+First map the existing production capture behavior to this corrected
+product model:
+
+School:
+Project → Class → Student → Capture
+
+Corporate:
+Project → Group → Person → Capture
+
+If there is an existing use case for photographing the entire
+Class/Group itself (for example a class group photograph), preserve that
+existing group-photo capability separately.
+
+That is a PHOTO TYPE / CAPTURE MODE.
+
+It is NOT a reason to make navigation Groups fundamentally different
+from Classes.
+
+==================================================
+DESIGN REVIEW
+==================================================
+
+Update the proposed design accordingly.
+
+Show me:
+
+SCHOOL PROJECT:
+Project
+→ Classes
+→ Students
+→ Photos
+
+CORPORATE PROJECT:
+Project
+→ Groups
+→ People
+→ Photos
+
+Show:
+
+- expanded project
+- collapsed project
+- selected Class/Group
+- people in middle column
+- selected person
+- photographs on right
+- Add Class / Add Group
+- duplicate-name validation
+- deletion protection
+- hover help
+- empty Class/Group
+- finished-project state
+
+Use the existing v1.0.71 design.
+
+Do NOT modify production code yet.
+
+STOP after presenting the corrected design proposal for approval.

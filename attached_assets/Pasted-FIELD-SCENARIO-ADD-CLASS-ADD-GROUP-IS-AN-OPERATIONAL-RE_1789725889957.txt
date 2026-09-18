@@ -1,0 +1,371 @@
+FIELD SCENARIO — ADD CLASS / ADD GROUP IS AN OPERATIONAL REQUIREMENT
+
+Before treating task #195 as a normal administration feature, understand
+the actual photography scenario.
+
+==================================================
+REAL-WORLD SCENARIO
+==================================================
+
+A photographer arrives at a school for a scheduled shoot.
+
+The project and roster were prepared beforehand.
+
+However, on site the photographer discovers that a class is missing from
+the project.
+
+Example:
+
+The project contains:
+
+Class 1A
+Class 1B
+Class 2A
+Class 3A
+
+But the school tells the photographer:
+
+"We also have Class 2B today."
+
+The photographer cannot stop the shoot and wait for an administrator to
+repair the project remotely.
+
+From the desktop shooting application, the photographer needs to:
+
+1. Click + Add Class.
+2. Enter "Class 2B".
+3. Create the class inside the CURRENT project.
+4. See Class 2B immediately in the dark project sidebar.
+5. Open Class 2B.
+6. Add existing students to it and/or create missing students.
+7. Photograph those students using the EXISTING portrait capture
+   workflow.
+
+Corporate equivalent:
+
+The photographer arrives for a corporate headshot project and discovers
+a missing department/group.
+
+Example:
+
+Management
+Marketing
+Finance
+
+but the client also has:
+
+Customer Service
+
+The photographer must be able to create Customer Service immediately,
+assign the appropriate existing/new people to it, and continue
+photographing.
+
+==================================================
+SECOND FIELD SCENARIO — REORGANIZATION
+==================================================
+
+Sometimes the client changes the organization on site.
+
+For example:
+
+Existing:
+
+Class A
+Class B
+Class C
+
+The school asks us to create:
+
+Class D
+
+and Class D needs people currently allocated across A, B and C.
+
+The photographer must be able to create Class D and select existing
+students from the project to MOVE into Class D.
+
+Likewise corporate:
+
+People currently in:
+
+Marketing
+Sales
+Management
+
+may need to be moved into a newly-created project Group/Department.
+
+IMPORTANT:
+
+Do not duplicate the person.
+
+There must still be ONE authoritative student/person record.
+
+Use the existing classId relationship.
+
+Moving a student/person changes their authoritative Class/Department
+assignment.
+
+Do not copy portrait captures.
+Do not create another person record.
+Do not rewrite historical capture identity.
+
+==================================================
+THIRD SCENARIO — MISSING PERSON
+==================================================
+
+The newly-created Class/Group may also contain somebody who does not
+exist anywhere in the imported roster.
+
+The photographer must be able to:
+
++ Add Student
+
+or:
+
++ Add Person
+
+using the EXISTING local person-creation architecture.
+
+The new person should be assigned to the newly-created Class/Group and
+then be photographable through the existing portrait workflow.
+
+==================================================
+WHY THIS MATTERS
+==================================================
+
++ Add Class / + Add Group is therefore NOT simply an administration
+convenience.
+
+It is a FIELD RECOVERY function.
+
+The photographer may discover incorrect/incomplete client data while
+people are physically waiting to be photographed.
+
+The application should allow the photographer to correct the project
+structure without disrupting the existing capture core.
+
+==================================================
+EXISTING ARCHITECTURE TO REUSE
+==================================================
+
+The previous inspection established:
+
+- classesTable is the authoritative people container
+- school uses Class terminology
+- corporate uses Group/Department terminology
+- students/persons use classId
+- the server already supports changing a student's classId
+- project ownership validation already exists in relevant server paths
+- desktop person creation already requires a valid class belonging to
+  the same project
+
+Therefore:
+
+DO NOT create another container architecture.
+
+DO NOT use photographer groups/group_members for this.
+
+DO NOT duplicate people to simulate membership.
+
+Use the existing:
+
+Project
+→ classesTable container
+→ students.classId
+
+architecture.
+
+==================================================
+CRITICAL DISTINCTION
+==================================================
+
+Do not confuse:
+
+CLASS / DEPARTMENT / CORPORATE GROUP
+= authoritative organizational container for PEOPLE
+
+with:
+
+photographer groups / group_members / group_captures
+= existing whole-class / whole-team PHOTO functionality
+
+Leave the latter unchanged.
+
+==================================================
+WHAT I WANT YOU TO INSPECT/DESIGN NEXT
+==================================================
+
+Do NOT implement yet.
+
+Given these concrete field scenarios, design the SMALLEST safe extension
+to the existing desktop application that supports:
+
+A. Create Class/Group from the shooting desktop.
+
+B. Immediately display it under the current project.
+
+C. Create it empty.
+
+D. Move existing people from other Classes/Groups in the SAME project
+   into it.
+
+E. Select people across the project when performing that move.
+
+F. Add a completely new person directly into the new Class/Group.
+
+G. Continue using the existing portrait capture pipeline unchanged.
+
+H. Work safely when connectivity is temporarily unavailable if this can
+   be achieved without changing the capture core.
+
+==================================================
+PERSON MOVEMENT
+==================================================
+
+Inspect the existing server student-update/classId path and determine the
+minimum desktop IPC/wiring needed to expose it safely.
+
+Required rules:
+
+- source and destination Class/Group belong to same project
+- person belongs to same project
+- no cross-project move
+- one authoritative person record
+- no duplicate person
+- no duplicate portrait records
+- existing captures remain attached to that person
+- changing classId must not change capture identity
+- operation must survive restart appropriately
+
+Show how the photographer can select people from:
+
+All Students / All Employees
+
+or search across the project and move selected people into the newly
+created Class/Group.
+
+Do not automatically move anybody.
+
+Every move is deliberate.
+
+==================================================
+NAME INTEGRITY
+==================================================
+
+New Class/Group names must be unique inside the project.
+
+Normalize:
+
+trim + case-insensitive comparison.
+
+Reject duplicates.
+
+Same name in another project is valid.
+
+==================================================
+DELETION
+==================================================
+
+Do not expose Delete as part of this work.
+
+Once people have been allocated, our rule is that the container cannot
+be deleted.
+
+Do not connect the existing destructive class-delete server behavior.
+
+==================================================
+OFFLINE QUESTION
+==================================================
+
+The field scenario makes offline capability desirable.
+
+But protecting the existing application remains more important than
+forcing an architectural change.
+
+Inspect the smallest possible method for:
+
+create locally
+→ stable identity
+→ continue shooting
+→ reconcile later
+
+WITHOUT modifying:
+
+- watcher
+- captureRepository
+- capture identity
+- JPEG/RAW pairing
+- upload queue
+- R2
+- Drive
+- Dropbox
+- Pixieset
+- gallery/delivery
+
+If supporting offline-created containers requires a new synchronization
+contract, describe that contract separately.
+
+Do NOT implement it automatically.
+
+Tell me whether we can first safely support ONLINE creation using the
+existing authenticated architecture while keeping the rest of the
+desktop local-first.
+
+If online-only creation would create operational inconsistencies or data
+loss risks, say so.
+
+==================================================
+CORE FREEZE
+==================================================
+
+No changes are authorized during this inspection to:
+
+watcher
+captureRepository
+QR
+JPEG/RAW pairing
+capture ingestion
+capture assignment
+preview
+upload queue
+R2
+Google Drive
+Dropbox
+Replit backup
+Pixieset
+group-photo system
+gallery
+delivery
+payments
+authentication
+schema
+release infrastructure
+
+==================================================
+RETURN
+==================================================
+
+Give me:
+
+1. Exact existing person-move architecture.
+2. Minimum desktop changes required to move a person between existing
+   Classes/Groups.
+3. Minimum changes required to create a new Class/Group.
+4. How a newly-created Class/Group gets a stable identity.
+5. How existing people from several containers can be selected and moved
+   into it.
+6. How a missing person can be added to it.
+7. What works with the current API contracts.
+8. What requires a new desktop synchronization contract.
+9. Whether online-first creation can safely be implemented independently
+   before offline creation.
+10. Exact files that would need to change.
+11. Risk level for each change.
+12. Proof that the portrait capture core does not need modification.
+
+Then STOP.
+
+No production changes.
+No schema migration.
+No version bump.
+No commit.
+No release workflow.

@@ -4,7 +4,7 @@ import { ProjectList } from '@/pages/ProjectList'
 import { ProjectView } from '@/pages/ProjectView'
 import { Settings } from '@/pages/Settings'
 import { Toaster } from '@/components/ui/toast'
-import { usePhotoEvents } from '@/hooks/useApi'
+import { useClasses, usePhotoEvents } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
 import type { PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent } from '@/hooks/useApi'
 
@@ -47,12 +47,18 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('projects')
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null)
   const [activeProjectName, setActiveProjectName] = useState<string>('')
+  const [activeProjectType, setActiveProjectType] = useState<'school' | 'corporate'>('school')
+  const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' })
   const [authBusy, setAuthBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
   const [captureNotificationsEnabled, setCaptureNotificationsEnabled] = useState(
     () => window.localStorage.getItem('capture-notifications-enabled') !== 'false',
   )
+  const {
+    data: activeProjectClasses,
+    reload: reloadActiveProjectClasses,
+  } = useClasses(currentPage === 'project-view' ? activeProjectId : null)
 
   const loadAuth = useCallback(async () => {
     const result = await window.api.invoke('auth:getSession')
@@ -183,14 +189,45 @@ export default function App() {
     return <SignInScreen onSignIn={signIn} error={auth.error} busy={authBusy} />
   }
 
-  const openProject = (id: number, name: string) => {
+  const openProject = (id: number, name: string, projectType: 'school' | 'corporate') => {
     setActiveProjectId(id)
     setActiveProjectName(name)
+    setActiveProjectType(projectType)
+    setSelectedClassId(null)
     setCurrentPage('project-view')
   }
 
   const navigate = (page: Page) => {
+    if (page !== 'project-view') setSelectedClassId(null)
     setCurrentPage(page)
+  }
+
+  const handleAddClass = async () => {
+    if (!activeProjectId) return
+    const label = activeProjectType === 'corporate' ? 'Group' : 'Class'
+    const className = window.prompt(`${label} name`)
+    if (!className?.trim()) return
+    try {
+      const result = await window.api.invoke('classes:create', {
+        projectId: activeProjectId,
+        className,
+      })
+      await reloadActiveProjectClasses()
+      setSelectedClassId(result.class.id)
+      addToast({
+        type: 'success',
+        title: `${label} created`,
+        description: result.cloudSynced
+          ? `${result.class.className} is ready and synced to cloud.`
+          : `${result.class.className} is ready locally; cloud sync will retry when connected.`,
+      })
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: `Could not create ${label.toLowerCase()}`,
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   return (
@@ -198,6 +235,11 @@ export default function App() {
       currentPage={currentPage}
       onNavigate={navigate}
       projectName={activeProjectName}
+      projectType={activeProjectType}
+      projectClasses={activeProjectClasses}
+      selectedClassId={selectedClassId}
+      onSelectClass={setSelectedClassId}
+      onAddClass={() => void handleAddClass()}
       offline={auth.offline}
       version={appVersion}
     >
@@ -208,6 +250,10 @@ export default function App() {
         <ProjectView
           projectId={activeProjectId}
           onBack={() => setCurrentPage('projects')}
+          classes={activeProjectClasses}
+          selectedClassId={selectedClassId}
+          onSelectedClassIdChange={setSelectedClassId}
+          reloadClasses={reloadActiveProjectClasses}
           offline={auth.offline === true}
         />
       )}

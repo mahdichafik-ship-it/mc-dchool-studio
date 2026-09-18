@@ -5,7 +5,17 @@ import { dirname, join } from 'path'
 import { eq, count, and, isNull } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { projectsTable, classesTable, studentsTable, capturesTable, groupsTable, groupMembersTable } from '../db/schema'
-import { normalizeProjectType, type Project, type Class, type Student, type ImportResult, type CreateStudentResult, type StudentGroup } from '../../shared/types'
+import {
+  normalizeProjectType,
+  type Project,
+  type Class,
+  type Student,
+  type ImportResult,
+  type CreateClassResult,
+  type CreateStudentResult,
+  type MoveStudentResult,
+  type StudentGroup,
+} from '../../shared/types'
 import { safeProjectFolderName } from '../lib/retirement'
 import {
   ensureProjectStorageLayout,
@@ -13,7 +23,7 @@ import {
   getProjectStorageLayout,
 } from '../lib/storageLayout'
 import { formatStudentFolderName } from '../lib/photoFileNaming'
-import { syncStudentCloudIdentity } from './upload'
+import { syncClassCloudIdentity, syncStudentCloudIdentity } from './upload'
 import { getSetting, setSetting } from './upload'
 import { getNewDefaultGroupMemberIds, serializeDefaultGroupRosterSnapshot } from '../lib/groupRoster'
 import {
@@ -482,6 +492,50 @@ export function registerProjectHandlers() {
       }))
   })
 
+  ipcMain.handle(
+    'classes:create',
+    async (_e, input: { projectId: number; className: string }): Promise<CreateClassResult> => {
+      const className = input.className.trim()
+      if (!className || className.length > 120) {
+        throw new Error('Enter a class or group name (maximum 120 characters).')
+      }
+
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      if (project.finishedAt) throw new Error('This project is finished and its roster can no longer be changed.')
+
+      const timestamp = now()
+      const created = db.insert(classesTable).values({
+        projectId: input.projectId,
+        className,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }).returning().get()
+
+      prepareProjectFolders(db, input.projectId)
+      reconcileDefaultGroups(input.projectId)
+      const sync = await syncClassCloudIdentity(input.projectId, created.id)
+      const refreshed = db.select().from(classesTable).where(eq(classesTable.id, created.id)).get() ?? created
+      const studentCount = db
+        .select({ studentCount: count() })
+        .from(studentsTable)
+        .where(eq(studentsTable.classId, created.id))
+        .get()?.studentCount ?? 0
+      return {
+        class: {
+          id: refreshed.id,
+          projectId: refreshed.projectId,
+          className: refreshed.className,
+          studentCount,
+          createdAt: refreshed.createdAt,
+          updatedAt: refreshed.updatedAt,
+        },
+        cloudSynced: sync.synced,
+        ...(sync.error ? { syncError: sync.error } : {}),
+      }
+    },
+  )
+
   // Students
   ipcMain.handle(
     'students:create',
@@ -523,6 +577,46 @@ export function registerProjectHandlers() {
       const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, student.id)).get() ?? student
       return {
         student: toStudent(refreshed, cls.className),
+        cloudSynced: sync.synced,
+        ...(sync.error ? { syncError: sync.error } : {}),
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'students:move',
+    async (
+      _e,
+      input: { projectId: number; studentId: number; classId: number },
+    ): Promise<MoveStudentResult> => {
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      if (project.finishedAt) throw new Error('This project is finished and its roster can no longer be changed.')
+
+      const destination = db.select().from(classesTable).where(and(
+        eq(classesTable.id, input.classId),
+        eq(classesTable.projectId, input.projectId),
+      )).get()
+      if (!destination) throw new Error('Choose a class from this project.')
+
+      const existing = db.select().from(studentsTable).where(and(
+        eq(studentsTable.id, input.studentId),
+        eq(studentsTable.projectId, input.projectId),
+      )).get()
+      if (!existing) throw new Error('Student not found in this project.')
+      if (existing.classId === destination.id) throw new Error('That student is already in this class.')
+
+      db.update(studentsTable)
+        .set({ classId: destination.id, updatedAt: now() })
+        .where(eq(studentsTable.id, existing.id))
+        .run()
+      prepareProjectFolders(db, input.projectId)
+      reconcileDefaultGroups(input.projectId)
+
+      const sync = await syncStudentCloudIdentity(input.projectId, existing.id)
+      const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, existing.id)).get() ?? existing
+      return {
+        student: toStudent(refreshed, destination.className),
         cloudSynced: sync.synced,
         ...(sync.error ? { syncError: sync.error } : {}),
       }

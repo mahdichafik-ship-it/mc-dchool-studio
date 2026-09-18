@@ -64,3 +64,4 @@
 - [SheetJS upstream releases](sheetjs-upstream-releases.md) — maintained SheetJS builds come from the vendor CDN; npm-only scanners can misclassify fixed upstream versions.
 - [Capture batch supersession](capture-batch-supersession.md) — reconnect recovery uses a new explicit batch and transfers committed file membership only after the old connection is inactive.
 - [Electron Builder plist compatibility](electron-builder-plist-compatibility.md) — remediate xmldom through a compatible plist parent; forcing xmldom 0.9.12 breaks macOS packaging.
+- [Mockup sandbox Vite versions](mockup-sandbox-vite-versions.md) — the preview can render while sandbox typecheck fails when its plugin and Vite resolve different major types.

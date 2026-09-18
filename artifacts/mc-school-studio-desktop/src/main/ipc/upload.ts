@@ -1529,6 +1529,7 @@ function getProjectSyncJobs(projectId: number, includeDone = false): ProjectSync
 }
 
 const LIVE_UPLOAD_SETTING_PREFIX = 'live_upload:'
+const LIVE_UPLOAD_DEFAULTS_MIGRATION_KEY = 'live_upload_defaults_disabled:v1'
 const CAPTURE_BATCH_FILE_KEYS_PREFIX = 'capture_batch_files:'
 const LIVE_UPLOAD_INTERVAL_MS = 2_500
 const FAILED_UPLOAD_RETRY_BASE_MS = 30_000
@@ -1979,6 +1980,17 @@ function kickEnabledLiveUploads(): void {
 }
 
 export function initializeLiveUploads(): void {
+  // Earlier builds could leave Live Upload enabled for a project. Do not let
+  // an upgrade surprise a photographer by starting transfers as soon as the
+  // project opens; a later explicit toggle or Upload Now can opt in.
+  if (getSetting(LIVE_UPLOAD_DEFAULTS_MIGRATION_KEY) !== '1') {
+    for (const row of getDb().select().from(settingsTable).all()) {
+      if (row.key.startsWith(LIVE_UPLOAD_SETTING_PREFIX) && row.value === '1') {
+        setSetting(row.key, '0')
+      }
+    }
+    setSetting(LIVE_UPLOAD_DEFAULTS_MIGRATION_KEY, '1')
+  }
   kickEnabledLiveUploads()
 }
 

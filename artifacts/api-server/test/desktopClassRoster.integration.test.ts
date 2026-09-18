@@ -209,6 +209,8 @@ test("new student can be photographed, reviewed, uploaded, and moved without los
   form.append("file", new Blob([jpegBytes], { type: "image/jpeg" }), "new-person.jpg");
   form.append("captureKey", `new-person-capture-${Date.now()}`);
   form.append("fileRole", "JPEG");
+  form.append("rating", "5");
+  form.append("colorLabel", "none");
   const upload = await fetch(`${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`, {
     method: "POST",
     headers: {
@@ -222,6 +224,14 @@ test("new student can be photographed, reviewed, uploaded, and moved without los
   const uploaded = await upload.json() as { captureId: number; file: { id: number } };
   captureId = uploaded.captureId;
   captureFileId = uploaded.file.id;
+
+  const [capturedPortrait] = await db.select().from(studentPhotosTable).where(and(
+    eq(studentPhotosTable.projectId, projectId),
+    eq(studentPhotosTable.studentId, studentId),
+    eq(studentPhotosTable.fileName, "new-person.jpg"),
+  ));
+  assert.equal(capturedPortrait?.rating, 5);
+  assert.equal(capturedPortrait?.shareWithParents, true);
 
   await db.update(capturesTable).set({
     rating: 5,

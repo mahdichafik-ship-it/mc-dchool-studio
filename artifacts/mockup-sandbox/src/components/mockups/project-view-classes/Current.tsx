@@ -88,7 +88,7 @@ export function Current() {
   const [selectedStudent, setSelectedStudent] = useState(students[0]);
   const [query, setQuery] = useState("");
   const [live, setLive] = useState(true);
-  const [groups, setGroups] = useState(["Retakes", "Priority edits"]);
+  const [groups, setGroups] = useState<string[]>([]);
   const [isGroupComposerOpen, setIsGroupComposerOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
 
@@ -192,12 +192,16 @@ export function Current() {
                   </form>
                 )}
                 <div className="space-y-0.5">
-                  {groups.map((group) => (
-                    <button key={group} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-400 transition-colors hover:bg-white/5 hover:text-white">
-                      <UsersRound className="size-3.5 text-slate-500" />
-                      <span className="truncate">{group}</span>
-                    </button>
-                  ))}
+                  {groups.length === 0 ? (
+                    <p className="px-2 py-1 text-[10px] italic text-slate-600">No groups yet</p>
+                  ) : (
+                    groups.map((group) => (
+                      <button key={group} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-400 transition-colors hover:bg-white/5 hover:text-white">
+                        <UsersRound className="size-3.5 text-slate-500" />
+                        <span className="truncate">{group}</span>
+                      </button>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

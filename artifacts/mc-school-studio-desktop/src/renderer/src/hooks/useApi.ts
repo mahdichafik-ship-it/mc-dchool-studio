@@ -480,7 +480,7 @@ export function useCaptures(studentId: number | null) {
             cropX: 0,
             cropY: 0,
             cropScale: 100,
-            aspectRatio: '5:7',
+            aspectRatio: 'original',
             straightenAngle: 0,
             rotation: 0,
             pending: false,

@@ -1,8 +1,8 @@
 appId: com.mcschoolstudio.desktop
-# Change the visible macOS product name while keeping the executable name stable
-# for installed-update and retirement smoke compatibility.
+# Keep the app identity, updater slug, and artifact names stable while using the
+# customer-facing name for the macOS bundle and executable.
 productName: Volume Capture
-executableName: MC School Studio
+executableName: Volume Capture
 copyright: Copyright © 2026 Volume Capture
 
 directories:

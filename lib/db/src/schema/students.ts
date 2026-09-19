@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { projectsTable } from "./projects";
@@ -46,6 +46,7 @@ export const studentsTable = pgTable("students", {
     table.projectId,
     sql`lower(${table.generatedStudentId})`,
   ),
+  index("students_project_class_idx").on(table.projectId, table.classId),
 ]);
 
 export const insertStudentSchema = createInsertSchema(studentsTable).omit({

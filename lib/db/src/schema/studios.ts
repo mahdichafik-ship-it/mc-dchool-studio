@@ -1,4 +1,4 @@
-import { boolean, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const studiosTable = pgTable("studios", {
   id: serial("id").primaryKey(),
@@ -64,7 +64,10 @@ export const projectAssignmentsTable = pgTable("project_assignments", {
   projectId: integer("project_id").notNull(),
   memberId: integer("member_id").notNull().references(() => studioMembersTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [uniqueIndex("project_assignments_project_member_unique").on(table.projectId, table.memberId)]);
+}, (table) => [
+  uniqueIndex("project_assignments_project_member_unique").on(table.projectId, table.memberId),
+  index("project_assignments_member_project_idx").on(table.memberId, table.projectId),
+]);
 
 export const desktopConnectionsTable = pgTable("desktop_connections", {
   id: serial("id").primaryKey(),

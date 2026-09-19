@@ -136,6 +136,13 @@ export function ProjectView({
   } = useLiveUpload(projectId)
   const [search, setSearch] = useState('')
   const filteredStudents = filterRosterStudents(students, search)
+  const selectedClass = classes.find((projectClass) => projectClass.id === selectedClassId)
+  const defaultClassGroup = selectedClassId === null
+    ? null
+    : groups.find((group) => group.isDefaultClassGroup) ?? null
+  const captureTargetGroups = groups.filter(
+    (group) => !group.isDefaultClassGroup || group.id === defaultClassGroup?.id,
+  )
   const [addStudentOpen, setAddStudentOpen] = useState(false)
   const [moveStudentOpen, setMoveStudentOpen] = useState(false)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
@@ -953,7 +960,7 @@ export function ProjectView({
           </div>
         </div>
 
-         <div className="flex items-center gap-2 shrink-0">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
            <details className="relative">
              <summary
                className="flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/60"
@@ -966,8 +973,8 @@ export function ProjectView({
              <div className="absolute right-0 top-10 z-40 w-80 overflow-hidden rounded-lg border border-slate-700 bg-white text-left shadow-2xl">
                <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5">
                  <div>
-                   <p className="text-xs font-bold text-slate-900">Group photos</p>
-                   <p className="text-[10px] text-slate-500">Separate from the {departmentLabel.toLowerCase()} roster.</p>
+                    <p className="text-xs font-bold text-slate-900">Manage groups</p>
+                    <p className="text-[10px] text-slate-500">Create, rename, or delete custom groups.</p>
                  </div>
                  {!project?.finishedAt && (
                    <button type="button" onClick={() => void handleCreateGroup()} className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-teal-600 hover:text-teal-700">
@@ -986,11 +993,11 @@ export function ProjectView({
                          </form>
                        </div>
                      ) : (
-                       <div className={cn("flex items-center px-3 py-2 transition-colors", selectedGroup?.id === group.id ? "border-l-4 border-teal-500" : "border-l-4 border-transparent hover:bg-slate-50")}>
-                         <button type="button" onClick={() => void handleSelectGroup(group)} className="mr-2 flex min-w-0 flex-1 items-center justify-between gap-2 text-left">
-                           <span className={cn("truncate text-xs font-bold", selectedGroup?.id === group.id ? "text-teal-950" : "text-slate-800")}>{group.name}</span>
+                        <div className="flex items-center px-3 py-2 transition-colors border-l-4 border-transparent hover:bg-slate-50">
+                          <div className="mr-2 flex min-w-0 flex-1 items-center justify-between gap-2 text-left">
+                            <span className="truncate text-xs font-bold text-slate-800">{group.name}</span>
                            <Badge className="bg-slate-200 px-1.5 py-0 text-[10px] font-bold text-slate-700 shadow-none hover:bg-slate-200">{group.memberStudentIds.length}</Badge>
-                         </button>
+                          </div>
                          {!group.isDefaultClassGroup && !project?.finishedAt && (
                            <div className="flex items-center gap-1">
                              <button type="button" onClick={() => { setRenamingGroupId(group.id); setRenameValue(group.name) }} className="p-1 text-slate-400 hover:text-teal-600" title="Rename group">
@@ -1009,60 +1016,6 @@ export function ProjectView({
                </div>
              </div>
            </details>
-           {/* Class and group photo targets */}
-           <section data-testid="group-photo-roster" className="shrink-0 border-b border-slate-200 bg-white">
-             <div className="flex items-center justify-between px-4 py-3">
-               <div>
-                 <div className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
-                   Class &amp; group photos
-                 </div>
-                 <p className="mt-1 text-[11px] font-medium text-slate-500">
-                   Select a class or group to photograph
-                 </p>
-               </div>
-               {!project?.finishedAt && (
-                 <button
-                   type="button"
-                   onClick={() => void handleCreateGroup()}
-                   className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-700"
-                 >
-                   <Plus className="size-3" /> New group
-                 </button>
-               )}
-             </div>
-             <div className="max-h-44 overflow-y-auto px-2 pb-2">
-               {groups.map((group) => (
-                 <button
-                   key={group.id}
-                   type="button"
-                   onClick={() => void handleSelectGroup(group)}
-                   className={cn(
-                     "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
-                     selectedGroup?.id === group.id
-                       ? "border-teal-200 bg-teal-50 text-teal-950"
-                       : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
-                   )}
-                 >
-                   <Camera className={cn(
-                     "size-3.5 shrink-0",
-                     selectedGroup?.id === group.id ? "text-teal-600" : "text-slate-400",
-                   )} />
-                   <span className="min-w-0 flex-1 truncate text-xs font-bold">
-                     {group.isDefaultClassGroup ? `${departmentLabel} photo · ${group.name}` : group.name}
-                   </span>
-                   <Badge className="shrink-0 bg-slate-100 px-1.5 py-0 text-[10px] font-bold text-slate-600 shadow-none hover:bg-slate-100">
-                     {group.memberStudentIds.length}
-                   </Badge>
-                 </button>
-               ))}
-               {groups.length === 0 && (
-                 <p className="px-2 pb-2 text-center text-xs text-slate-500">
-                   No class or group photo targets yet.
-                 </p>
-               )}
-             </div>
-           </section>
-
            <Button
              size="sm"
              onClick={() => void openFinishDialog()}
@@ -1089,7 +1042,6 @@ export function ProjectView({
                    : 'Finish My Shoot'}
            </Button>
          </div>
-
       </header>
       {project && project.syncStatus !== 'active' && (
         <div className={cn(
@@ -1409,9 +1361,9 @@ export function ProjectView({
       </Dialog>
 
       {/* Body: split panel */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="shoot-body flex-1 flex overflow-hidden">
         {/* Left panel: classes + students */}
-        <div className="w-[340px] flex-shrink-0 bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-10 flex flex-col">
+        <div className="shoot-roster-panel w-[340px] max-w-full flex-shrink-0 bg-white border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-10 flex flex-col">
           <details open className="shrink-0 border-b border-slate-200 bg-slate-50/80">
             <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[10px] font-extrabold uppercase tracking-widest text-slate-600 hover:bg-slate-100">
               <span>Project actions</span>
@@ -1563,30 +1515,6 @@ export function ProjectView({
             </div>
           </details>
 
-          {/* Class tabs */}
-          <div className="flex overflow-x-auto border-b border-slate-100 shrink-0 p-2 gap-1 hide-scrollbar">
-            <button
-              onClick={() => setSelectedClassId(null)}
-              className={cn(
-                "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
-                !selectedClassId ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              )}
-            >
-              All ({allProjectStudents.length})
-            </button>
-            {classes.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedClassId(c.id)}
-                className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md whitespace-nowrap transition-colors",
-                  selectedClassId === c.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                )}
-              >
-                {c.className}
-              </button>
-            ))}
-          </div>
           {/* Search */}
           <div className="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0">
             <div className="flex gap-2">
@@ -1650,7 +1578,46 @@ export function ProjectView({
             </div>
           )}
 
-           {/* People list */}
+          <section data-testid="group-photo-roster" className="shrink-0 border-b border-slate-200 bg-white">
+            <div className="px-3 pt-3 pb-1.5 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
+              Photo targets
+            </div>
+            <div className="space-y-1 px-2 pb-2">
+              {captureTargetGroups.map((group) => {
+                const isActive = selectedGroup?.id === group.id
+                const label = group.isDefaultClassGroup
+                  ? `${selectedClass?.className ?? group.name} — Class Photo`
+                  : group.name
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => void handleSelectGroup(group)}
+                    className={cn(
+                      "flex w-full min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+                      isActive
+                        ? "border-teal-200 bg-teal-50 text-teal-950"
+                        : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
+                    )}
+                  >
+                    <Camera className={cn(
+                      "size-3.5 shrink-0",
+                      isActive ? "text-teal-600" : "text-slate-400",
+                    )} />
+                    <span className="min-w-0 flex-1 truncate text-xs font-bold">{label}</span>
+                    <Badge className="shrink-0 bg-slate-100 px-1.5 py-0 text-[10px] font-bold text-slate-600 shadow-none hover:bg-slate-100">
+                      {group.memberStudentIds.length}
+                    </Badge>
+                  </button>
+                )
+              })}
+              {captureTargetGroups.length === 0 && (
+                <p className="px-2 pb-1 text-center text-xs text-slate-500">No photo targets yet.</p>
+              )}
+            </div>
+          </section>
+
+          {/* People list */}
           <div className="flex-1 overflow-y-auto">
             <div className="py-2">
               <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
@@ -1691,7 +1658,7 @@ export function ProjectView({
         </div>
 
         {/* Right panel: QR code + photos */}
-        <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
+        <div className="shoot-content-panel flex-1 flex flex-col min-w-0 bg-slate-50">
           {selectedGroup ? (
             <GroupDetail
               group={selectedGroup}
@@ -2429,6 +2396,9 @@ function StudentDetail({
             <span className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400 truncate">
               {student.className}
             </span>
+            <span className="rounded-md border border-teal-100 bg-teal-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">
+              Portrait · 5:7
+            </span>
           </div>
              <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words" aria-label={employeeLabel}>
             {student.firstName} {student.lastName}
@@ -2611,10 +2581,12 @@ function StudentDetail({
                 </div>
               ) : captures.length === 0 && qrMarkers.length === 0 ? (
                 <div className="h-72 flex flex-col items-center justify-center bg-white border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center shadow-sm">
-                  <div className="w-20 h-20 bg-teal-50 text-teal-600 rounded-3xl flex items-center justify-center mb-5 shadow-sm border border-teal-100">
+                  <div className="relative mb-5 flex aspect-[5/7] w-16 items-center justify-center rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 text-teal-600 shadow-sm">
+                    <div className="absolute inset-2 rounded-xl border border-teal-200" />
                     <Camera className="size-10" />
                   </div>
                   <h3 className="text-xl font-extrabold text-slate-900 mb-2 tracking-tight">Ready for photos</h3>
+                  <p className="mb-1 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">Portrait framing · 5:7</p>
                   <p className="text-slate-500 max-w-sm text-sm font-medium leading-relaxed">
                     Show the QR code to the camera, then start shooting. Captures will appear here instantly.
                   </p>
@@ -3130,7 +3102,9 @@ function ReframeEditor({
                 <option value="original">Original</option>
                 <option value="1:1">Square · 1:1</option>
                 <option value="4:5">Portrait · 4:5</option>
+                <option value="5:7">Portrait · 5:7</option>
                 <option value="3:2">Classic · 3:2</option>
+                <option value="7:5">Landscape · 7:5</option>
                 <option value="16:9">Widescreen · 16:9</option>
               </select>
             </div>
@@ -3399,6 +3373,9 @@ function GroupDetail({
               </Badge>
             )}
             <span className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Custom Group</span>
+            <span className="rounded-md border border-teal-100 bg-teal-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">
+              Landscape · 7:5
+            </span>
           </div>
           <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words">
             {group.name}
@@ -3458,10 +3435,12 @@ function GroupDetail({
 
             {groupCaptures.length === 0 ? (
               <div className="h-72 flex flex-col items-center justify-center bg-white border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center shadow-sm">
-                <div className="w-20 h-20 bg-teal-50 text-teal-600 rounded-3xl flex items-center justify-center mb-5 shadow-sm border border-teal-100">
+                <div className="relative mb-5 flex aspect-[7/5] w-32 items-center justify-center rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 text-teal-600 shadow-sm">
+                  <div className="absolute inset-2 rounded-xl border border-teal-200" />
                   <Camera className="size-10" />
                 </div>
                 <h3 className="text-xl font-extrabold text-slate-900 mb-2 tracking-tight">Ready for group photos</h3>
+                <p className="mb-1 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">Landscape framing · 7:5</p>
                 <p className="text-slate-500 max-w-sm text-sm font-medium leading-relaxed mb-4">
                   Make sure all subjects are framed, then start shooting.
                 </p>

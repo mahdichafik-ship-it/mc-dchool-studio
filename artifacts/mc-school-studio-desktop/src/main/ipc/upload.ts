@@ -177,6 +177,7 @@ function toServerFileUrl(fileUrl: string | null): string | null {
 
 let cloudSyncDisabledForRetirement = false
 let cloudSessionVerified = false
+let pendingRosterIdentityRetry: Promise<void> | null = null
 const activeUploads = new Set<Promise<void>>()
 const activePhotoUploads = new Map<number, Promise<void>>()
 const activeCaptureFileUploads = new Map<number, Promise<void>>()
@@ -356,6 +357,12 @@ export function isCloudSessionVerified(): boolean {
 }
 
 function retryPendingRosterCloudIdentities(): void {
+  // A successful session check can be followed by several other successful
+  // requests (and sign-in can call this alongside the first session check).
+  // Keep one repair pass in flight so a large roster cannot fan out into a
+  // request storm that makes the connection look offline again.
+  if (pendingRosterIdentityRetry) return
+
   const db = getDb()
   const classes = db.select({ id: classesTable.id, projectId: classesTable.projectId })
     .from(classesTable)
@@ -363,12 +370,25 @@ function retryPendingRosterCloudIdentities(): void {
     .all()
   const students = db.select({ id: studentsTable.id, projectId: studentsTable.projectId })
     .from(studentsTable)
+    .where(isNull(studentsTable.cloudId))
     .all()
-  void Promise.all([
-    ...classes.map((localClass) => syncClassCloudIdentity(localClass.projectId, localClass.id)),
-    ...students.map((student) => syncStudentCloudIdentity(student.projectId, student.id)),
-  ]).catch((error) => {
+
+  pendingRosterIdentityRetry = (async () => {
+    // Repair sequentially. Each repair refreshes the authoritative cloud
+    // bundle, so parallel repairs for a roster only compete with one another
+    // and with the upload queue.
+    for (const localClass of classes) {
+      if (!isCloudSessionVerified()) return
+      await syncClassCloudIdentity(localClass.projectId, localClass.id)
+    }
+    for (const student of students) {
+      if (!isCloudSessionVerified()) return
+      await syncStudentCloudIdentity(student.projectId, student.id)
+    }
+  })().catch((error) => {
     console.warn('[Roster] Could not retry pending cloud identities:', error)
+  }).finally(() => {
+    pendingRosterIdentityRetry = null
   })
 }
 

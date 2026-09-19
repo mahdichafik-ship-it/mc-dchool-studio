@@ -218,7 +218,7 @@ export interface ImagePipelineRendererStage {
 
 export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
 export type CaptureColorLabel = 'none' | 'red' | 'yellow' | 'green' | 'blue' | 'purple'
-export type CaptureAspectRatio = 'original' | '1:1' | '4:5' | '3:2' | '16:9'
+export type CaptureAspectRatio = 'original' | '1:1' | '4:5' | '5:7' | '3:2' | '7:5' | '16:9'
 
 export interface CaptureFraming {
   cropX: number

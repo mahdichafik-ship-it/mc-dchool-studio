@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { index, pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { studiosTable } from "./studios";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -17,7 +17,9 @@ export const projectsTable = pgTable("projects", {
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("projects_studio_idx").on(table.studioId),
+]);
 
 export const insertProjectSchema = createInsertSchema(projectsTable).omit({
   id: true,

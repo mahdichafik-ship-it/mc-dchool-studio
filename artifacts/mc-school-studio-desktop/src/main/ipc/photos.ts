@@ -11,6 +11,7 @@ import {
 } from '../lib/livePreview'
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
+import { buildCaptureReviewStatus } from '../lib/captureReviewStatus'
 import { syncCaptureReview, syncGroupCaptureReview } from './upload'
 import type {
   CaptureCompletenessSummary,
@@ -213,7 +214,15 @@ export function registerPhotoHandlers() {
     }
   })
   ipcMain.handle('captures:reviewStatus', (_e, { projectId }: { projectId: number }) => {
-    const ratedPortraitStudentIds = db.select({
+    const portraitJpegCaptureIds = new Set(
+      db.select({ captureId: imageFilesTable.captureId })
+        .from(imageFilesTable)
+        .where(eq(imageFilesTable.fileRole, 'JPEG'))
+        .all()
+        .map((file) => file.captureId),
+    )
+    const portraitCaptures = db.select({
+      captureId: capturesTable.id,
       studentId: capturesTable.studentId,
       rating: capturesTable.rating,
       rejected: capturesTable.rejected,
@@ -224,37 +233,35 @@ export function registerPhotoHandlers() {
         isNull(capturesTable.groupId),
       ))
       .all()
-      .filter((capture) =>
-        capture.studentId !== null
-        && capture.rating > 0
-        && !capture.rejected,
-      )
-      .map((capture) => capture.studentId!)
 
-    const ratedGroups = db.select({
-      id: groupCapturesTable.id,
+    const groupJpegCaptureIds = new Set(
+      db.select({ captureId: groupCaptureFilesTable.captureId })
+        .from(groupCaptureFilesTable)
+        .where(eq(groupCaptureFilesTable.fileRole, 'JPEG'))
+        .all()
+        .map((file) => file.captureId),
+    )
+    const groupCaptures = db.select({
+      captureId: groupCapturesTable.id,
       groupId: groupCapturesTable.groupId,
       rating: groupCapturesTable.rating,
     })
       .from(groupCapturesTable)
       .where(eq(groupCapturesTable.projectId, projectId))
       .all()
-      .filter((capture) => capture.rating > 0)
-    const ratedGroupIds = [...new Set(ratedGroups.map((capture) => capture.groupId))]
-    const ratedGroupStudentIds = db.select({
+    const groupMembers = db.select({
       groupId: groupMembersTable.groupId,
       studentId: groupMembersTable.studentId,
     })
       .from(groupMembersTable)
       .all()
-      .filter((member) => ratedGroupIds.includes(member.groupId))
-      .map((member) => member.studentId)
-
-    return {
-      ratedPortraitStudentIds: [...new Set(ratedPortraitStudentIds)],
-      ratedGroupStudentIds: [...new Set(ratedGroupStudentIds)],
-      ratedGroupIds,
-    }
+    return buildCaptureReviewStatus({
+      portraitCaptures,
+      portraitJpegCaptureIds,
+      groupCaptures,
+      groupJpegCaptureIds,
+      groupMembers,
+    })
   })
   ipcMain.handle('groupCaptures:updateReview', async (_e, { captureId, rating }: { captureId: number; rating: number }) => {
     const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get()

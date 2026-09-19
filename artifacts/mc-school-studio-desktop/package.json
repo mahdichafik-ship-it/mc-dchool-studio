@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.80",
+  "version": "1.0.81",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "Volume Capture",
@@ -26,6 +26,7 @@
     "test:roster-shortcuts": "node --experimental-strip-types --test test/roster-shortcuts.test.ts",
     "test:live-preview": "node --experimental-strip-types --test test/live-preview.test.ts",
     "test:blank-portrait": "node --experimental-strip-types --test test/blank-portrait.test.ts",
+    "test:review-status": "node --experimental-strip-types --test test/capture-review-status.test.ts",
     "test:shoot-layout": "pnpm run build && node --experimental-strip-types --test test/shoot-workspace-layout.test.ts && node test/shoot-workspace-rendered-layout.mjs",
     "benchmark:image-ingestion": "node --experimental-strip-types test/image-ingestion-benchmark.ts",
     "test:retirement": "node --experimental-strip-types --test test/retirement.test.ts",

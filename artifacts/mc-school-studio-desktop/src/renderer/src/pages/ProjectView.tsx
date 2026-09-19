@@ -2401,7 +2401,7 @@ function StudentDetail({
               {student.className}
             </span>
             <span className="rounded-md border border-teal-100 bg-teal-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">
-              Portrait · 5:7
+              {latestCapture ? captureFormatLabel(latestCapture.framing) : 'Original capture format'}
             </span>
           </div>
              <h2 className="shoot-subject-name text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight break-words" aria-label={employeeLabel}>
@@ -2591,7 +2591,7 @@ function StudentDetail({
                     <Camera className="size-10" />
                   </div>
                   <h3 className="text-xl font-extrabold text-slate-900 mb-2 tracking-tight">Ready for photos</h3>
-                  <p className="mb-1 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">Portrait framing · 5:7</p>
+                  <p className="mb-1 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">Original camera framing</p>
                   <p className="text-slate-500 max-w-sm text-sm font-medium leading-relaxed">
                     Show the QR code to the camera, then start shooting. Captures will appear here instantly.
                   </p>
@@ -2988,7 +2988,7 @@ const defaultCaptureFraming: Omit<CaptureFraming, 'pending'> = {
   cropX: 0,
   cropY: 0,
   cropScale: 100,
-  aspectRatio: '5:7',
+  aspectRatio: 'original',
   straightenAngle: 0,
   rotation: 0,
 }
@@ -3009,6 +3009,18 @@ function captureAspectRatioStyle(
   return { aspectRatio: `${width} / ${height}` }
 }
 
+function captureFormatLabel(framing: Pick<CaptureFraming, 'aspectRatio'>): string {
+  if (framing.aspectRatio === 'original') return 'Original capture format'
+  const labels: Record<Exclude<CaptureFraming['aspectRatio'], 'original'>, string> = {
+    '1:1': 'Square · 1:1',
+    '4:5': 'Portrait · 4:5',
+    '5:7': 'Portrait · 5:7',
+    '3:2': 'Landscape · 3:2',
+    '7:5': 'Landscape · 7:5',
+    '16:9': 'Landscape · 16:9',
+  }
+  return labels[framing.aspectRatio]
+}
 function useCapturePreviewSource(capture: CaptureReview | null): string | undefined {
   const jpegFile = capture?.files.find((file) => file.fileRole === 'JPEG')
   const immediateSource = capture?.legacyPhoto?.previewUrl
@@ -3277,7 +3289,10 @@ function CaptureFilmstrip({
               aria-pressed={isCurrent}
             >
               <div
-                className="relative aspect-[1.45] overflow-hidden bg-slate-900"
+                className={cn(
+                  'relative overflow-hidden bg-slate-900',
+                  capture.framing.aspectRatio === 'original' ? 'w-full' : 'aspect-[1.45]',
+                )}
                 style={captureAspectRatioStyle(capture.framing)}
               >
                 <GalleryThumbnail
@@ -3813,8 +3828,8 @@ function GalleryThumbnail({
         alt={alt}
         framing={framing}
         maxBlockSize="100%"
-        fill
-        className="h-full w-full"
+        fill={framing.aspectRatio !== 'original'}
+        className={cn('w-full', framing.aspectRatio !== 'original' && 'h-full')}
       />
     ) : (
       <img
@@ -3871,7 +3886,10 @@ function PhotoTile({
 }) {
   return (
     <div
-      className="group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md"
+      className={cn(
+        'group relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md',
+        framing?.aspectRatio === 'original' ? '' : 'aspect-square',
+      )}
       style={captureAspectRatioStyle(framing)}
     >
       <GalleryThumbnail
@@ -4093,7 +4111,10 @@ function CaptureTile({
 
   return (
     <div
-      className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full"
+      className={cn(
+        'group relative bg-slate-100 rounded-2xl overflow-hidden border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full',
+        capture.framing.aspectRatio === 'original' ? 'aspect-square' : '',
+      )}
       style={captureAspectRatioStyle(capture.framing)}
     >
       <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-400 bg-white">

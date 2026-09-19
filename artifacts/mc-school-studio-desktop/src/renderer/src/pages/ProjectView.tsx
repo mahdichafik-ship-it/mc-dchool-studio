@@ -2993,6 +2993,22 @@ const defaultCaptureFraming: Omit<CaptureFraming, 'pending'> = {
   rotation: 0,
 }
 
+const defaultGroupCaptureFraming: Omit<CaptureFraming, 'pending'> = {
+  ...defaultCaptureFraming,
+  aspectRatio: '7:5',
+}
+
+function captureAspectRatioStyle(
+  framing?: Pick<CaptureFraming, 'aspectRatio'> | null,
+) {
+  if (!framing || framing.aspectRatio === 'original') return undefined
+  const [width, height] = framing.aspectRatio.split(':').map(Number)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return undefined
+  }
+  return { aspectRatio: `${width} / ${height}` }
+}
+
 function useCapturePreviewSource(capture: CaptureReview | null): string | undefined {
   const jpegFile = capture?.files.find((file) => file.fileRole === 'JPEG')
   const immediateSource = capture?.legacyPhoto?.previewUrl
@@ -3260,13 +3276,17 @@ function CaptureFilmstrip({
               aria-label={`Review capture ${capture.baseFilename}`}
               aria-pressed={isCurrent}
             >
-              <div className="relative aspect-[1.45] overflow-hidden bg-slate-900">
+              <div
+                className="relative aspect-[1.45] overflow-hidden bg-slate-900"
+                style={captureAspectRatioStyle(capture.framing)}
+              >
                 <GalleryThumbnail
                   source={source}
                   fallback={fallback}
                   filePath={filePath}
                   previewKey={`gallery-capture-${capture.id}`}
                   alt={`Capture ${capture.baseFilename}`}
+                  framing={capture.framing}
                 />
                 {(source || fallback || filePath) && (
                   <span
@@ -3463,7 +3483,7 @@ function GroupDetail({
                     {capture.files.find(file => file.fileRole === 'JPEG') && (
                       <button
                         type="button"
-                        className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100"
+                         className="aspect-[7/5] w-full overflow-hidden rounded-xl bg-slate-100"
                         onClick={() => void window.api.invoke('photos:openInSystem', {
                           filePath: capture.files.find(file => file.fileRole === 'JPEG')!.storedPath,
                         })}
@@ -3474,6 +3494,7 @@ function GroupDetail({
                           filePath={capture.files.find(file => file.fileRole === 'JPEG')!.storedPath}
                           previewKey={`group-capture-${capture.id}`}
                           alt={capture.baseFilename}
+                           framing={defaultGroupCaptureFraming}
                         />
                       </button>
                     )}
@@ -3726,12 +3747,14 @@ function GalleryThumbnail({
   filePath,
   previewKey,
   alt,
+  framing,
 }: {
   source?: string
   fallback?: string | null
   filePath?: string
   previewKey?: string
   alt: string
+  framing?: Omit<CaptureFraming, 'pending'>
 }) {
   const [generatedSource, setGeneratedSource] = useState<string | null>(null)
 
@@ -3784,12 +3807,23 @@ function GalleryThumbnail({
     )
   }
   return (
-    <img
-      src={imageSource}
-      alt={alt}
-      className="h-full w-full object-cover transition-opacity duration-300 ease-in-out"
-      draggable={false}
-    />
+    framing ? (
+      <CaptureFramingPreview
+        source={imageSource}
+        alt={alt}
+        framing={framing}
+        maxBlockSize="100%"
+        fill
+        className="h-full w-full"
+      />
+    ) : (
+      <img
+        src={imageSource}
+        alt={alt}
+        className="h-full w-full object-cover transition-opacity duration-300 ease-in-out"
+        draggable={false}
+      />
+    )
   )
 }
 
@@ -3818,6 +3852,7 @@ function CaptureCompleteness({ capture }: { capture: CaptureReview }) {
 
 function PhotoTile({
   photo,
+  framing,
   uploadStatus,
   onOpen,
   onDelete,
@@ -3826,6 +3861,7 @@ function PhotoTile({
   retrying,
 }: {
   photo: Photo
+  framing?: Omit<CaptureFraming, 'pending'>
   uploadStatus?: ProjectUploadStatusRow
   onOpen: () => void
   onDelete: () => void
@@ -3834,13 +3870,17 @@ function PhotoTile({
   retrying: boolean
 }) {
   return (
-    <div className="group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md">
+    <div
+      className="group relative aspect-square w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm transition-all hover:shadow-md"
+      style={captureAspectRatioStyle(framing)}
+    >
       <GalleryThumbnail
         source={photo.previewUrl}
         fallback={photo.thumbnailData}
         filePath={photo.filePath}
         previewKey={`gallery-photo-${photo.id}`}
         alt={photo.fileName}
+        framing={framing}
       />
 
       {/* Hover overlay */}
@@ -3990,6 +4030,7 @@ function CaptureTile({
       <div className="group relative flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
         <PhotoTile
           photo={photo}
+          framing={capture.framing}
           uploadStatus={uploadStatus}
           onOpen={onOpen}
           onDelete={onDelete!}
@@ -4051,7 +4092,10 @@ function CaptureTile({
   }
 
   return (
-    <div className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full">
+    <div
+      className="group relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 shadow-sm transition-all hover:shadow-md h-full w-full"
+      style={captureAspectRatioStyle(capture.framing)}
+    >
       <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-400 bg-white">
         <div className="w-16 h-16 rounded-2xl bg-slate-50 flex flex-col items-center justify-center border border-slate-100 shadow-inner">
           <Image className="size-6 mb-1 text-slate-300" />

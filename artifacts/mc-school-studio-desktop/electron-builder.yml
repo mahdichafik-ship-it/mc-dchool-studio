@@ -1,8 +1,8 @@
 appId: com.mcschoolstudio.desktop
-# Keep the app identity, updater slug, and artifact names stable while using the
-# customer-facing name for the macOS bundle and executable.
+# Keep the internal macOS bundle and executable name stable for in-place updater
+# compatibility; the customer-facing product metadata remains Volume Capture.
 productName: Volume Capture
-executableName: Volume Capture
+executableName: MC School Studio
 copyright: Copyright © 2026 Volume Capture
 
 directories:

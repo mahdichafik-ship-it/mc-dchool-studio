@@ -17,6 +17,7 @@ import {
   useGroupCaptures,
   useCaptures,
   useCaptureSummary,
+  useCaptureReviewStatus,
   useUnmatchedPhotos,
   useWatcherStatus,
   useActiveCaptureTarget,
@@ -110,6 +111,7 @@ export function ProjectView({
   const employeeLabel = isCorporate ? 'Employee' : 'Student'
   const employeePlural = `${employeeLabel}s`
   const { data: captureSummary } = useCaptureSummary(projectId)
+  const { data: captureReviewStatus } = useCaptureReviewStatus(projectId)
   const [groupCaptureCount, setGroupCaptureCount] = useState(0)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const { data: allProjectStudents, reload: reloadAllProjectStudents } = useStudents(projectId)
@@ -1642,6 +1644,8 @@ export function ProjectView({
                    onDragLeave={() => setDraggedStudentId((current) => current === s.id ? null : current)}
                    onDrop={(event) => void handleDropForStudent(s.id, event)}
                   uploadSummary={uploadStatusMap.get(s.id)}
+                  hasRatedPortrait={captureReviewStatus.ratedPortraitStudentIds.includes(s.id)}
+                  hasRatedGroupCapture={captureReviewStatus.ratedGroupStudentIds.includes(s.id)}
                 />
               ))}
               {filteredStudents.length === 0 && (
@@ -2090,6 +2094,8 @@ function StudentRow({
   onDragLeave,
   onDrop,
   uploadSummary,
+  hasRatedPortrait,
+  hasRatedGroupCapture,
 }: {
   student: Student
   isSelected: boolean
@@ -2100,7 +2106,15 @@ function StudentRow({
   onDragLeave: () => void
   onDrop: (event: React.DragEvent<HTMLButtonElement>) => void
   uploadSummary?: StudentUploadSummary
+  hasRatedPortrait: boolean
+  hasRatedGroupCapture: boolean
 }) {
+  const ratedCaptureLabel = hasRatedPortrait && hasRatedGroupCapture
+    ? 'Rated portrait and group capture'
+    : hasRatedPortrait
+      ? 'Rated portrait'
+      : 'Rated class/group capture'
+
   return (
     <button
       data-student-row={s.id}
@@ -2128,9 +2142,20 @@ function StudentRow({
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
-           <span className={cn("font-bold text-sm truncate", isActive ? "text-teal-950" : "text-slate-900")}>
-             {s.lastName}, {s.firstName}
-           </span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className={cn("font-bold text-sm truncate", isActive ? "text-teal-950" : "text-slate-900")}>
+                {s.lastName}, {s.firstName}
+              </span>
+              {(hasRatedPortrait || hasRatedGroupCapture) && (
+                <span
+                  className="shrink-0 text-emerald-600"
+                  aria-label={ratedCaptureLabel}
+                  title={`${ratedCaptureLabel} — rated capture`}
+                >
+                  <CheckCircle className="size-3.5" />
+                </span>
+              )}
+            </span>
            <div className="flex items-center gap-1.5 shrink-0">
              {isActive && (
                <Badge className="bg-teal-600 hover:bg-teal-600 text-white text-[9px] font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded-sm shadow-sm">

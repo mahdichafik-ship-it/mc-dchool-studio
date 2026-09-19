@@ -6,6 +6,7 @@ import type {
   Photo,
   ImportResult,
   CaptureReview,
+  CaptureReviewStatus,
   StudentCaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
@@ -40,6 +41,7 @@ export type {
   Photo,
   ImportResult,
   CaptureReview,
+  CaptureReviewStatus,
   StudentCaptureReview,
   CaptureCompletenessSummary,
   CaptureUpdatedEvent,
@@ -553,6 +555,40 @@ export function useCaptureSummary(projectId: number | null) {
       unsubCapture()
       unsubMatched()
       unsubUnmatched()
+    }
+  }, [projectId, load])
+
+  return { data, reload: load }
+}
+
+export function useCaptureReviewStatus(projectId: number | null) {
+  const [data, setData] = useState<CaptureReviewStatus>({
+    ratedPortraitStudentIds: [],
+    ratedGroupStudentIds: [],
+    ratedGroupIds: [],
+  })
+
+  const load = useCallback(async () => {
+    if (!projectId) return
+    setData(await api.invoke('captures:reviewStatus', { projectId }) as CaptureReviewStatus)
+  }, [projectId])
+
+  useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (!projectId) return
+    const refreshCaptureStatus = (event: { projectId?: number }) => {
+      if (event.projectId === projectId) void load()
+    }
+    const unsubCapture = api.on('capture:updated', refreshCaptureStatus)
+    const unsubGroupCapture = api.on('groupCapture:updated', refreshCaptureStatus)
+    const unsubReassigned = api.on('photo:reassigned', refreshCaptureStatus)
+    const unsubDeleted = api.on('photo:deleted', refreshCaptureStatus)
+    return () => {
+      unsubCapture()
+      unsubGroupCapture()
+      unsubReassigned()
+      unsubDeleted()
     }
   }, [projectId, load])
 

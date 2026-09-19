@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { and, eq, count, or, isNull } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { capturesTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
+import { capturesTable, groupMembersTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
 import {
   generateLivePreview,
   getCachedLivePreview,
@@ -212,6 +212,50 @@ export function registerPhotoHandlers() {
         && capture.rating <= 0).length,
     }
   })
+  ipcMain.handle('captures:reviewStatus', (_e, { projectId }: { projectId: number }) => {
+    const ratedPortraitStudentIds = db.select({
+      studentId: capturesTable.studentId,
+      rating: capturesTable.rating,
+      rejected: capturesTable.rejected,
+    })
+      .from(capturesTable)
+      .where(and(
+        eq(capturesTable.projectId, projectId),
+        isNull(capturesTable.groupId),
+      ))
+      .all()
+      .filter((capture) =>
+        capture.studentId !== null
+        && capture.rating > 0
+        && !capture.rejected,
+      )
+      .map((capture) => capture.studentId!)
+
+    const ratedGroups = db.select({
+      id: groupCapturesTable.id,
+      groupId: groupCapturesTable.groupId,
+      rating: groupCapturesTable.rating,
+    })
+      .from(groupCapturesTable)
+      .where(eq(groupCapturesTable.projectId, projectId))
+      .all()
+      .filter((capture) => capture.rating > 0)
+    const ratedGroupIds = [...new Set(ratedGroups.map((capture) => capture.groupId))]
+    const ratedGroupStudentIds = db.select({
+      groupId: groupMembersTable.groupId,
+      studentId: groupMembersTable.studentId,
+    })
+      .from(groupMembersTable)
+      .all()
+      .filter((member) => ratedGroupIds.includes(member.groupId))
+      .map((member) => member.studentId)
+
+    return {
+      ratedPortraitStudentIds: [...new Set(ratedPortraitStudentIds)],
+      ratedGroupStudentIds: [...new Set(ratedGroupStudentIds)],
+      ratedGroupIds,
+    }
+  })
   ipcMain.handle('groupCaptures:updateReview', async (_e, { captureId, rating }: { captureId: number; rating: number }) => {
     const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get()
     if (!capture) return null
@@ -221,6 +265,10 @@ export function registerPhotoHandlers() {
       updatedAt: now(),
     }).where(eq(groupCapturesTable.id, captureId)).run()
     void syncGroupCaptureReview(captureId)
+    getMainWindow()?.webContents.send('groupCapture:updated', {
+      projectId: capture.projectId,
+      groupId: capture.groupId,
+    })
     return db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get() ?? null
   })
 
@@ -402,6 +450,13 @@ export function registerPhotoHandlers() {
         .run()
       const updated = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null
       if (updated) void syncCaptureReview(updated.id)
+      if (updated) {
+        getMainWindow()?.webContents.send('capture:updated', {
+          projectId: updated.projectId,
+          captureId: updated.id,
+          studentId: updated.studentId,
+        })
+      }
       return updated
     },
   )

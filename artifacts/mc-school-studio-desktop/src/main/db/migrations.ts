@@ -294,6 +294,22 @@ export function ensureCaptureTables(sqlite: SqliteSchemaDatabase): void {
   ensureColumn(sqlite, 'group_captures', 'rating', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(sqlite, 'group_captures', 'review_sync_pending', 'INTEGER NOT NULL DEFAULT 0')
 
+  // Early student captures were given the portrait guide as their stored
+  // aspect ratio even though no framing edit had been made. Restore those
+  // captures to their source orientation; explicit edits remain untouched.
+  sqlite.exec(`
+    UPDATE captures
+    SET aspect_ratio = 'original'
+    WHERE group_id IS NULL
+      AND aspect_ratio = '5:7'
+      AND crop_x = 0
+      AND crop_y = 0
+      AND crop_scale = 100
+      AND straighten_angle = 0
+      AND rotation = 0
+      AND reframe_pending = 0
+  `)
+
   sqlite.exec(`
     -- If a newer capture row already represents this shutter event, attach the
     -- legacy photo to it instead of creating a second gallery capture.

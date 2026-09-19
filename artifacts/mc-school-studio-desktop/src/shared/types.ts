@@ -130,6 +130,12 @@ export interface StudentGroup {
   updatedAt: string
 }
 
+export interface CaptureReviewStatus {
+  ratedPortraitStudentIds: number[]
+  ratedGroupStudentIds: number[]
+  ratedGroupIds: number[]
+}
+
 export interface GroupCaptureFileReview {
   id: number
   fileRole: 'JPEG' | 'RAW'

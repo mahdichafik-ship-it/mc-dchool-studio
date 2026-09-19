@@ -122,6 +122,7 @@ interface ElectronAPI {
     unratedPortraits: number
     unratedGroups: number
   }>
+  invoke(channel: 'captures:reviewStatus', args: { projectId: number }): Promise<import('../shared/types').CaptureReviewStatus>
   invoke(channel: 'captures:updateReview', args: {
     captureId: number
     favorite?: boolean

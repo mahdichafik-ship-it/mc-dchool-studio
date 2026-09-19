@@ -207,6 +207,7 @@ test('capture migration is repeatable and keeps legacy rows as the compatibility
   assert.match(migrationSql, /FROM photos p/)
   assert.match(migrationSql, /INSERT OR IGNORE INTO image_files/)
   assert.match(migrationSql, /WHERE NOT EXISTS/)
+  assert.match(migrationSql, /UPDATE captures[\s\S]*SET aspect_ratio = 'original'[\s\S]*group_id IS NULL/)
   assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN membership_dirty')).length, 1)
   assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN gallery_ready')).length, 1)
   assert.equal(statements.filter((statement) => statement.includes('group_captures ADD COLUMN rating')).length, 1)

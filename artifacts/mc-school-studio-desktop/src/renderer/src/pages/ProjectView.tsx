@@ -30,6 +30,10 @@ import {
   waitForPaintFrames,
 } from '@/lib/previewScheduler'
 import { CaptureFramingPreview } from '@/lib/CaptureFramingPreview'
+import {
+  capturePreviewViewportStyle,
+  getCaptureCropGeometry,
+} from '@/lib/captureFraming'
 import { captureUploadLabel } from '@/lib/shootWorkspace'
 import { getEmployeeCaptureContext } from '@/lib/employeeCaptureContext'
 import {
@@ -2456,6 +2460,7 @@ function StudentDetail({
                   <LivePreview
                     photo={livePreview.photo}
                     traceId={livePreview.pipeline?.traceId}
+                    framing={latestCapture?.framing ?? defaultCaptureFraming}
                   />
                 ) : selectedCapture ? (
                   <CaptureStage capture={selectedCapture} />
@@ -2983,7 +2988,7 @@ const defaultCaptureFraming: Omit<CaptureFraming, 'pending'> = {
   cropX: 0,
   cropY: 0,
   cropScale: 100,
-  aspectRatio: 'original',
+  aspectRatio: '5:7',
   straightenAngle: 0,
   rotation: 0,
 }
@@ -3525,14 +3530,17 @@ function GroupDetail({
 function LivePreview({
   photo,
   traceId,
+  framing,
 }: {
   photo: Photo
   traceId?: string
+  framing: Omit<CaptureFraming, 'pending'>
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [showImageFallback, setShowImageFallback] = useState(false)
   const [canvasPainted, setCanvasPainted] = useState(false)
   const [previewFailed, setPreviewFailed] = useState(false)
+  const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null)
 
   useEffect(() => {
     if (!photo.previewUrl || !traceId) return
@@ -3540,6 +3548,7 @@ function LivePreview({
     setShowImageFallback(false)
     setCanvasPainted(false)
     setPreviewFailed(false)
+    setSourceSize(null)
     const report = (
       stage:
         | 'React state update committed'
@@ -3588,6 +3597,7 @@ function LivePreview({
           }
           canvas.width = bitmap.width
           canvas.height = bitmap.height
+          setSourceSize({ width: bitmap.width, height: bitmap.height })
           context.clearRect(0, 0, canvas.width, canvas.height)
           context.drawImage(bitmap, 0, 0)
           bitmap.close()
@@ -3613,8 +3623,41 @@ function LivePreview({
     }
   }, [photo.filePath, photo.previewUrl, traceId])
 
+  const geometry = sourceSize
+    ? getCaptureCropGeometry(sourceSize.width, sourceSize.height, framing)
+    : null
+  const viewportStyle = geometry
+    ? {
+        ...capturePreviewViewportStyle(geometry, '430px'),
+        height: 'auto',
+      }
+    : {
+        width: 'min(100%, calc(430px * 0.7142857143))',
+        height: 'auto',
+        maxHeight: '430px',
+        aspectRatio: '5 / 7',
+      }
+  const framedMediaStyle = geometry
+    ? {
+        width: `${(geometry.transformedWidth / geometry.cropWidth) * 100}%`,
+        height: `${(geometry.transformedHeight / geometry.cropHeight) * 100}%`,
+        left: `${-(geometry.cropLeft / geometry.cropWidth) * 100}%`,
+        top: `${-(geometry.cropTop / geometry.cropHeight) * 100}%`,
+      }
+    : undefined
+  const sourceMediaStyle = geometry
+    ? {
+        width: `${(geometry.sourceWidth / geometry.transformedWidth) * 100}%`,
+        height: `${(geometry.sourceHeight / geometry.transformedHeight) * 100}%`,
+        transform: `translate(-50%, -50%) rotate(${geometry.rotation + geometry.straightenAngle}deg)`,
+      }
+    : undefined
+
   return (
-    <div className="shoot-preview mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg relative aspect-[16/9] md:aspect-[21/9] flex flex-col group">
+    <div
+      className="shoot-preview relative mx-auto mb-4 flex max-h-[430px] min-h-[220px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-lg"
+      style={viewportStyle}
+    >
       <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-5 z-10 flex justify-between items-start pointer-events-none transition-opacity duration-300">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-2 bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded shadow-sm">
@@ -3628,28 +3671,45 @@ function LivePreview({
         </span>
       </div>
 
-      <div className="flex-1 w-full bg-black relative flex items-center justify-center p-4">
-        <canvas
-          ref={canvasRef}
-          role="img"
-          aria-label={`Latest capture ${photo.fileName}`}
-          data-preview-url={photo.previewUrl}
+      <div className="absolute inset-0 flex items-center justify-center bg-black">
+        <div
           className={cn(
-            'block max-h-full max-w-full object-contain',
-            (!canvasPainted || showImageFallback) && 'hidden',
+            geometry
+              ? 'absolute'
+              : 'relative flex h-full w-full items-center justify-center p-4',
           )}
-        />
-        {(!canvasPainted || showImageFallback) && !previewFailed && (
-          <img
-            src={photo.previewUrl}
-            alt={`Latest capture ${photo.fileName}`}
-            className="block max-h-full max-w-full object-contain"
-            draggable={false}
-            onError={() => setPreviewFailed(true)}
+          style={framedMediaStyle}
+        >
+          <canvas
+            ref={canvasRef}
+            role="img"
+            aria-label={`Latest capture ${photo.fileName}`}
+            data-preview-url={photo.previewUrl}
+            className={cn(
+              geometry
+                ? 'absolute left-1/2 top-1/2 max-w-none'
+                : 'block max-h-full max-w-full object-contain',
+              (!canvasPainted || showImageFallback) && 'hidden',
+            )}
+            style={sourceMediaStyle}
           />
-        )}
+          {(!canvasPainted || showImageFallback) && !previewFailed && (
+            <img
+              src={photo.previewUrl}
+              alt={`Latest capture ${photo.fileName}`}
+              className={cn(
+                geometry
+                  ? 'absolute left-1/2 top-1/2 max-w-none'
+                  : 'block max-h-full max-w-full object-contain',
+              )}
+              style={sourceMediaStyle}
+              draggable={false}
+              onError={() => setPreviewFailed(true)}
+            />
+          )}
+        </div>
         {previewFailed && !canvasPainted && (
-          <div className="flex h-40 flex-col items-center justify-center px-6 text-center">
+          <div className="absolute inset-0 flex h-40 flex-col items-center justify-center px-6 text-center">
             <AlertCircle className="mb-3 size-10 text-amber-500" />
             <p className="text-base font-bold text-white">Preview could not be displayed</p>
             <p className="mt-1.5 text-xs text-slate-400 font-medium">The original photograph remains safely stored.</p>

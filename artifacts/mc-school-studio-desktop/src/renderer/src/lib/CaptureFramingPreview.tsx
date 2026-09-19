@@ -8,6 +8,7 @@ interface Props {
   alt: string
   framing: Omit<CaptureFraming, 'pending'>
   maxBlockSize: string
+  fill?: boolean
   className?: string
 }
 
@@ -17,7 +18,7 @@ interface Props {
  * is the extracted crop. This avoids object-contain's letterboxing and keeps
  * focal position semantics identical to the server.
  */
-export function CaptureFramingPreview({ source, alt, framing, maxBlockSize, className }: Props) {
+export function CaptureFramingPreview({ source, alt, framing, maxBlockSize, fill = false, className }: Props) {
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
 
   useEffect(() => {
@@ -36,7 +37,19 @@ export function CaptureFramingPreview({ source, alt, framing, maxBlockSize, clas
   return (
     <div
       className={cn('relative overflow-hidden bg-black', className)}
-      style={geometry ? capturePreviewViewportStyle(geometry, maxBlockSize) : undefined}
+      style={
+        geometry
+          ? fill
+            ? {
+                width: '100%',
+                height: '100%',
+                aspectRatio: `${geometry.cropWidth} / ${geometry.cropHeight}`,
+              }
+            : capturePreviewViewportStyle(geometry, maxBlockSize)
+          : fill
+            ? { width: '100%', height: '100%' }
+            : undefined
+      }
     >
       <img
         src={source}

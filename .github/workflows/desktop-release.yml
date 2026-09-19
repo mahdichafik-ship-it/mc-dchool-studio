@@ -484,7 +484,7 @@ jobs:
             "$smoke_dir"
           app_path="$(find "$smoke_dir" -maxdepth 1 -name '*.app' -print -quit)"
           test -n "$app_path"
-          MC_SCHOOL_STUDIO_APP_PATH="$app_path/Contents/MacOS/Volume Capture" \
+          MC_SCHOOL_STUDIO_APP_PATH="$app_path/Contents/MacOS/MC School Studio" \
             MC_SCHOOL_STUDIO_EXPECTED_ARCH="$EXPECTED_ARCHITECTURE" \
             pnpm --filter @workspace/mc-school-studio-desktop run test:retirement-release
 

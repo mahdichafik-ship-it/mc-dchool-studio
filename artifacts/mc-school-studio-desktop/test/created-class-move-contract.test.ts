@@ -44,6 +44,12 @@ test("offline/reconnect and renderer contracts keep classes usable for normal ca
   assert.match(uploadSource, /createCloudClass/);
   assert.match(uploadSource, /method: 'PATCH'/);
   assert.match(uploadSource, /retryPendingRosterCloudIdentities/);
+  assert.match(
+    uploadSource,
+    /const students = db\.select\(\{ id: studentsTable\.id, projectId: studentsTable\.projectId \}\)[\s\S]*?\.where\(isNull\(studentsTable\.cloudId\)\)/,
+  );
+  assert.match(uploadSource, /pendingRosterIdentityRetry/);
+  assert.match(uploadSource, /for \(const student of students\)/);
   assert.match(uploadSource, /cloudStudent\.classId !== cloudClass\.id/);
   assert.match(rendererSource, /onAddClass/);
   assert.match(projectViewSource, /MoveStudentDialog/);

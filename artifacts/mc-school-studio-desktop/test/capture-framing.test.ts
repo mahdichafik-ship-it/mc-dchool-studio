@@ -9,7 +9,7 @@ import { hasPendingReviewSync } from '../src/main/lib/reviewSyncBarrier.ts'
 
 const landscapeSource = { width: 4000, height: 3000 }
 
-function framing(aspectRatio: '1:1' | '4:5', cropScale: number, cropX = 0, cropY = 0) {
+function framing(aspectRatio: '1:1' | '4:5' | '5:7' | '7:5', cropScale: number, cropX = 0, cropY = 0) {
   return {
     cropX,
     cropY,
@@ -104,6 +104,16 @@ test('landscape 4:5 crop matches server fit/scale/focal geometry', () => {
     getCaptureCropGeometry(4000, 3000, framing('4:5', 200, 0, 100)),
     { ...getCaptureCropGeometry(4000, 3000, framing('4:5', 200)), cropTop: 1500 },
   )
+})
+
+test('5:7 portrait and 7:5 landscape framing preserve the requested new-photo guides', () => {
+  const portrait = getCaptureCropGeometry(4000, 3000, framing('5:7', 100))
+  const landscape = getCaptureCropGeometry(4000, 3000, framing('7:5', 100))
+
+  assert.ok(Math.abs(portrait.aspectRatio - (5 / 7)) < 0.001)
+  assert.ok(Math.abs(landscape.aspectRatio - (7 / 5)) < 0.001)
+  assert.ok(portrait.cropHeight > portrait.cropWidth)
+  assert.ok(landscape.cropWidth > landscape.cropHeight)
 })
 
 test('review barrier stays clear only when every pending queue is empty', () => {

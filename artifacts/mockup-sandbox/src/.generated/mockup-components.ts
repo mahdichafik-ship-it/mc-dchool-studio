@@ -10,5 +10,4 @@ export const modules: ModuleMap = {
   "./components/mockups/capture-preview-redesign/ReframeEditor.tsx": () => import("../components/mockups/capture-preview-redesign/ReframeEditor.tsx"),
   "./components/mockups/project-action-sidebar/ProjectSidebar.tsx": () => import("../components/mockups/project-action-sidebar/ProjectSidebar.tsx"),
   "./components/mockups/project-view-classes/Current.tsx": () => import("../components/mockups/project-view-classes/Current.tsx")
-
 };

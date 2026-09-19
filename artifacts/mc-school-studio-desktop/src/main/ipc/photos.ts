@@ -54,7 +54,7 @@ function normalizeReviewFlags(
   }
 }
 
-const captureAspectRatios: CaptureAspectRatio[] = ['original', '1:1', '4:5', '3:2', '16:9']
+const captureAspectRatios: CaptureAspectRatio[] = ['original', '1:1', '4:5', '5:7', '3:2', '7:5', '16:9']
 const captureRotations = [0, 90, 180, 270] as const
 
 function captureFraming(row: typeof capturesTable.$inferSelect): CaptureFraming {

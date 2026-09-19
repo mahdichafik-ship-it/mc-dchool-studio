@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 import { classesTable } from "./classes";
@@ -19,6 +19,7 @@ export const groupsTable = pgTable("groups", {
 }, (table) => [
   uniqueIndex("groups_one_default_per_class").on(table.classId).where(sql`${table.isDefaultClassGroup} = true`),
   uniqueIndex("groups_desktop_connection_client_unique").on(table.desktopConnectionId, table.clientGroupId),
+  index("groups_project_idx").on(table.projectId),
 ]);
 
 export const groupMembersTable = pgTable("group_members", {

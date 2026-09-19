@@ -774,28 +774,39 @@ router.get("/projects", requireDesktopConnection, async (req, res) => {
     .where(inArray(projectsTable.id, projectIds))
     .orderBy(projectsTable.updatedAt);
 
-  // Add class + student counts
-  const enriched = await Promise.all(
-    projects.map(async (p) => {
-      const classes = await db
-        .select({ id: classesTable.id })
-        .from(classesTable)
-        .where(eq(classesTable.projectId, p.id));
-
-      const students = await db
-        .select({ id: studentsTable.id })
-        .from(studentsTable)
-        .where(eq(studentsTable.projectId, p.id));
-
-      return {
-        ...p,
-        classCount: classes.length,
-        studentCount: students.length,
-        createdAt: p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt,
-        updatedAt: p.updatedAt instanceof Date ? p.updatedAt.toISOString() : p.updatedAt,
-      };
-    }),
+  // Add class + student counts with two grouped reads instead of two reads
+  // per project. This endpoint is called before every desktop project pull.
+  const [classCounts, studentCounts] = await Promise.all([
+    db
+      .select({
+        projectId: classesTable.projectId,
+        classCount: count(),
+      })
+      .from(classesTable)
+      .where(inArray(classesTable.projectId, projectIds))
+      .groupBy(classesTable.projectId),
+    db
+      .select({
+        projectId: studentsTable.projectId,
+        studentCount: count(),
+      })
+      .from(studentsTable)
+      .where(inArray(studentsTable.projectId, projectIds))
+      .groupBy(studentsTable.projectId),
+  ]);
+  const classCountByProjectId = new Map(
+    classCounts.map((row) => [row.projectId, Number(row.classCount)]),
   );
+  const studentCountByProjectId = new Map(
+    studentCounts.map((row) => [row.projectId, Number(row.studentCount)]),
+  );
+  const enriched = projects.map((p) => ({
+    ...p,
+    classCount: classCountByProjectId.get(p.id) ?? 0,
+    studentCount: studentCountByProjectId.get(p.id) ?? 0,
+    createdAt: p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt,
+    updatedAt: p.updatedAt instanceof Date ? p.updatedAt.toISOString() : p.updatedAt,
+  }));
 
   if (!(await requireStillActiveBeforeDataResponse(connection, res))) return;
   res.json(enriched);
@@ -846,6 +857,12 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
   const groupMembers = groups.length
     ? await db.select().from(groupMembersTable).where(inArray(groupMembersTable.groupId, groups.map((g) => g.id)))
     : [];
+  const memberIdsByGroupId = new Map<number, number[]>();
+  for (const member of groupMembers) {
+    const studentIds = memberIdsByGroupId.get(member.groupId) ?? [];
+    studentIds.push(member.studentId);
+    memberIdsByGroupId.set(member.groupId, studentIds);
+  }
 
   if (!(await requireStillActiveBeforeDataResponse(connection, res))) return;
   res.json({
@@ -908,7 +925,7 @@ router.get("/projects/:projectId/bundle", requireDesktopConnection, async (req, 
       isDefaultClassGroup: g.isDefaultClassGroup,
       createdAt: g.createdAt.toISOString(),
       updatedAt: g.updatedAt.toISOString(),
-      memberStudentIds: groupMembers.filter((m) => m.groupId === g.id).map((m) => m.studentId),
+      memberStudentIds: memberIdsByGroupId.get(g.id) ?? [],
     })),
   });
 });

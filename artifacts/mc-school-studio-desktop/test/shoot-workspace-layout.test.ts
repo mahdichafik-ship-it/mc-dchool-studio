@@ -30,7 +30,9 @@ test('active student and group keep critical shoot regions in the compact render
   assert.match(css, /@media \(max-height: 720px\)/)
   assert.match(css, /\.shoot-group-body[\s\S]*grid-template-columns:/)
   assert.match(view, /data-testid="group-photo-roster"/, 'class and group photo targets must remain visible in the roster column')
-  assert.match(view, /Class &amp; group photos/, 'the group-photo entry point must be explicit')
+  assert.match(view, /Photo targets/, 'the roster must expose the capture targets')
+  assert.match(view, /— Class Photo/, 'the selected class must have a direct class-photo target')
+  assert.doesNotMatch(view, /Class &amp; group photos/, 'the separate top-level selector must be removed')
   assert.match(view, /hidden xl:flex/, 'wide health detail must not displace controls at laptop widths')
 })
 

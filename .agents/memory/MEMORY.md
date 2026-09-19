@@ -1,5 +1,6 @@
 - [Clerk route integration tests](clerk-route-integration-tests.md) — fake authenticated requests must preserve Clerk's branded auth contract and session token type.
 - [Desktop release signing](desktop-release-signing.md) — Tagged desktop releases fail closed so unsigned installers never reach photographers.
+- [Desktop renderer preflight](desktop-renderer-preflight.md) — run the desktop renderer build before native signing and DMG packaging so JSX failures surface early.
 - [Desktop release discovery](desktop-release-discovery.md) — web downloads resolve validated GitHub latest-release assets instead of duplicating versions or installer URLs.
 - [Desktop field acceptance](desktop-field-acceptance.md) — hosted signed-update smoke is not a substitute for recording real Intel and Apple-silicon photographer Mac results.
 - [Desktop browser pairing](desktop-browser-pairing.md) — Browser handoff requires a public production deployment; never add a shared private-deployment bypass to the Mac app.
@@ -10,7 +11,10 @@
 - [OpenAPI Zod compatibility](openapi-zod-compatibility.md) — avoid OpenAPI email formats until the generated Zod target supports the emitted validator.
 - [Bundled Node test logging](pino-test-transport.md) — disable threaded pretty logging in Node’s bundled ESM test context because `__dirname` is unavailable.
 - [GitHub desktop release publishing](github-desktop-release-publishing.md) — this workspace’s Git remote lacks credentials; publish Mac tags through the installed GitHub integration.
+- [GitHub workflow write permissions](github-workflow-write-permissions.md) — the installed GitHub connection may publish source commits but reject `.github/workflows` changes; stop rather than bypassing it.
+- [GitHub history-preserving merges](github-history-preserving-merges.md) — recreate Git objects from raw commit message bytes when the installed integration must preserve original SHAs.
 - [Capture review compatibility](capture-review-compatibility.md) — legacy JPEG actions must synchronize capture/file records or completeness becomes stale.
+- [Group photo entry point](group-photo-entry-point.md) — class and custom group capture targets must stay visibly available in the main roster workspace, not only in a secondary menu.
 - [Desktop cloud upload identity](desktop-cloud-upload-identity.md) — imported rosters must retain cloud IDs; legacy local projects need a safe identity repair before upload.
 - [Desktop upload idempotency](desktop-upload-idempotency.md) — replay keys must remain bound to their original project, student, and file role.
 - [Upload retry durability](upload-retry-durability.md) — retries use current bytes, bounded auto-recovery, isolated queues, and explicit batch accounting.
@@ -64,4 +68,5 @@
 - [SheetJS upstream releases](sheetjs-upstream-releases.md) — maintained SheetJS builds come from the vendor CDN; npm-only scanners can misclassify fixed upstream versions.
 - [Capture batch supersession](capture-batch-supersession.md) — reconnect recovery uses a new explicit batch and transfers committed file membership only after the old connection is inactive.
 - [Electron Builder plist compatibility](electron-builder-plist-compatibility.md) — remediate xmldom through a compatible plist parent; forcing xmldom 0.9.12 breaks macOS packaging.
+- [Release branch lockfiles](release-branch-lockfiles.md) — release commits must preserve main’s platform-only packaging dependencies and matching lockfile entries.
 - [Mockup sandbox Vite versions](mockup-sandbox-vite-versions.md) — the preview can render while sandbox typecheck fails when its plugin and Vite resolve different major types.

@@ -137,6 +137,7 @@ export function recordGroupCapture(db: DesktopDb, input: CaptureFileInput & { gr
     projectId: input.projectId, studentId: null, classId: input.classId, groupId: input.groupId,
     baseFilename: normalizeBaseFilename(input.fileName), capturedAt: input.capturedAt,
     assignmentLocked: true, pairingStatus: role === 'JPEG' ? 'jpeg_only' : 'raw_only',
+    aspectRatio: '7:5',
     createdAt: input.capturedAt, updatedAt: input.capturedAt,
   }).returning().get()
   insertImageFile(db, capture.id, input)
@@ -274,6 +275,7 @@ export function recordRawCapture(db: DesktopDb, input: CaptureFileInput): {
     capturedAt: input.capturedAt,
     assignmentLocked: true,
     pairingStatus: 'raw_only',
+    aspectRatio: input.groupId ? '7:5' : '5:7',
     createdAt: input.capturedAt,
     updatedAt: input.capturedAt,
   }).returning().get()

@@ -56,3 +56,9 @@ Never transfer or replace a capture batch across desktop connections without ser
 **Why:** Retrying an already-committed file can return an idempotent success while leaving that file credited to the original batch. A replacement batch would then remain permanently below its expected count.
 
 **How to apply:** Preserve cross-connection ownership until an explicit supersession design records batch membership independently or atomically transfers every reused file.
+
+Reconnect recovery must not re-repair roster records that already have cloud identities, and one recovery pass must be shared across overlapping session-success callbacks.
+
+**Why:** A 43-student desktop launched a cloud-project lookup for every student whenever the session became verified. The resulting request storm made the server exceed the desktop's control-plane timeout, so uploads appeared disconnected even though the credentials were valid.
+
+**How to apply:** Filter automatic identity repair to missing cloud IDs, serialize the repair pass, and let upload-time identity checks repair only the specific student needed.

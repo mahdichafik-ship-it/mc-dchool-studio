@@ -275,7 +275,7 @@ export function recordRawCapture(db: DesktopDb, input: CaptureFileInput): {
     capturedAt: input.capturedAt,
     assignmentLocked: true,
     pairingStatus: 'raw_only',
-    aspectRatio: input.groupId ? '7:5' : '5:7',
+    aspectRatio: input.groupId ? '7:5' : 'original',
     createdAt: input.capturedAt,
     updatedAt: input.capturedAt,
   }).returning().get()

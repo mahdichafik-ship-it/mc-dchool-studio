@@ -79,6 +79,7 @@ interface Props {
 }
 
 type CaptureFilter = 'all' | CaptureReview['pairingStatus']
+type RosterViewFilter = 'all' | 'needs-photo' | 'captured' | 'needs-review'
 
 const captureFilterOptions: Array<{ value: CaptureFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -141,8 +142,27 @@ export function ProjectView({
     retryFailed: retryProjectFailed,
   } = useLiveUpload(projectId)
   const [search, setSearch] = useState('')
-  const filteredStudents = filterRosterStudents(students, search)
+  const [rosterViewFilter, setRosterViewFilter] = useState<RosterViewFilter>('all')
+  const searchedStudents = filterRosterStudents(students, search)
+  const filteredStudents = searchedStudents.filter((student) => {
+    if (rosterViewFilter === 'needs-photo') return student.photoCount === 0
+    if (rosterViewFilter === 'captured') return student.photoCount > 0
+    if (rosterViewFilter === 'needs-review') {
+      return student.photoCount > 0
+        && !captureReviewStatus.ratedPortraitStudentIds.includes(student.id)
+    }
+    return true
+  })
   const selectedClass = classes.find((projectClass) => projectClass.id === selectedClassId)
+  const photographedStudentCount = students.filter((student) => student.photoCount > 0).length
+  const missingStudentCount = students.length - photographedStudentCount
+  const needsReviewStudentCount = students.filter((student) => (
+    student.photoCount > 0
+    && !captureReviewStatus.ratedPortraitStudentIds.includes(student.id)
+  )).length
+  const classProgressPercent = students.length > 0
+    ? Math.round((photographedStudentCount / students.length) * 100)
+    : 0
   const defaultClassGroup = selectedClassId === null
     ? null
     : groups.find((group) => group.isDefaultClassGroup) ?? null
@@ -392,6 +412,19 @@ export function ProjectView({
     }
   }, [groups, selectedGroup, activeGroupId, setActiveGroupTarget])
 
+  useEffect(() => {
+    setRosterViewFilter('all')
+    setSearch('')
+    if (selectedStudent && selectedClassId !== null && selectedStudent.classId !== selectedClassId) {
+      setSelectedStudent(null)
+      if (activeStudentId === selectedStudent.id) void handleClearCaptureStudent()
+    }
+    if (selectedGroup && selectedClassId !== null && selectedGroup.classId !== selectedClassId) {
+      setSelectedGroup(null)
+      if (activeGroupId === selectedGroup.id) void setActiveGroupTarget(null)
+    }
+  }, [selectedClassId])
+
   async function handleSelectGroup(group: StudentGroup) {
     setSelectedGroup(group)
     setSelectedStudent(null)
@@ -470,6 +503,21 @@ export function ProjectView({
         description: String(error),
       })
     }
+  }
+
+  function handleSelectNextUnphotographed() {
+    const nextStudent = students.find((student) => student.photoCount === 0)
+    if (!nextStudent) {
+      addToast({
+        type: 'success',
+        title: selectedClass ? 'Class is fully photographed' : 'Everyone is photographed',
+        description: 'No students are waiting for a first capture.',
+      })
+      return
+    }
+    setSearch('')
+    setRosterViewFilter('needs-photo')
+    void handleSelectCaptureStudent(nextStudent)
   }
 
   async function handleClearCaptureStudent() {
@@ -1564,6 +1612,104 @@ export function ProjectView({
             </div>
           </div>
 
+           {/* Class workflow */}
+           <section
+             data-testid="class-workflow"
+             className="shrink-0 border-b border-slate-200 bg-white px-3 py-3"
+           >
+             <div className="flex items-start justify-between gap-3">
+               <div className="min-w-0 flex-1">
+                 <label htmlFor="current-class" className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
+                   Current {departmentLabel.toLowerCase()}
+                 </label>
+                 <select
+                   id="current-class"
+                   aria-label={`Current ${departmentLabel.toLowerCase()}`}
+                   value={selectedClassId ?? ''}
+                   onChange={(event) => onSelectedClassIdChange(
+                     event.target.value ? Number(event.target.value) : null,
+                   )}
+                   className="mt-1.5 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"
+                 >
+                   <option value="">All {employeePlural.toLowerCase()}</option>
+                   {classes.map((projectClass) => (
+                     <option key={projectClass.id} value={projectClass.id}>
+                       {projectClass.className}
+                     </option>
+                   ))}
+                 </select>
+               </div>
+               <button
+                 type="button"
+                 onClick={handleSelectNextUnphotographed}
+                 disabled={missingStudentCount === 0 || Boolean(project?.finishedAt)}
+                 className="mt-5 shrink-0 rounded-lg bg-teal-600 px-3 py-2 text-[10px] font-extrabold uppercase tracking-wider text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                 title={missingStudentCount > 0 ? 'Select the next student without a capture' : 'Everyone in this view has a capture'}
+               >
+                 Next student
+               </button>
+             </div>
+             <div className="mt-3 flex items-center justify-between gap-3">
+               <span className="truncate text-xs font-semibold text-slate-600">
+                 {selectedClass?.className ?? `All ${employeePlural.toLowerCase()}`}
+               </span>
+               <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                 {photographedStudentCount}/{students.length} photographed
+               </span>
+             </div>
+             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100" aria-label={`${classProgressPercent}% photographed`}>
+               <div
+                 className="h-full rounded-full bg-teal-500 transition-all"
+                 style={{ width: `${classProgressPercent}%` }}
+               />
+             </div>
+             <div className="mt-2 grid grid-cols-2 gap-1.5 text-center">
+               <button
+                 type="button"
+                 onClick={() => setRosterViewFilter('all')}
+                 className={cn(
+                   'rounded-md px-1.5 py-1.5 text-[9px] font-extrabold uppercase tracking-wider transition-colors',
+                   rosterViewFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-500 hover:bg-slate-100',
+                 )}
+               >
+                 All <span className="font-mono">{students.length}</span>
+               </button>
+               <button
+                 type="button"
+                 onClick={() => setRosterViewFilter('needs-photo')}
+                 className={cn(
+                   'rounded-md px-1.5 py-1.5 text-[9px] font-extrabold uppercase tracking-wider transition-colors',
+                   rosterViewFilter === 'needs-photo' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100',
+                 )}
+               >
+                 Missing <span className="font-mono">{missingStudentCount}</span>
+               </button>
+               <button
+                 type="button"
+                 onClick={() => setRosterViewFilter('needs-review')}
+                 className={cn(
+                   'rounded-md px-1.5 py-1.5 text-[9px] font-extrabold uppercase tracking-wider transition-colors',
+                   rosterViewFilter === 'needs-review' ? 'bg-rose-500 text-white' : 'bg-rose-50 text-rose-700 hover:bg-rose-100',
+                 )}
+               >
+                 Review <span className="font-mono">{needsReviewStudentCount}</span>
+               </button>
+               <button
+                 type="button"
+                 onClick={() => setRosterViewFilter('captured')}
+                 className={cn(
+                   'rounded-md px-1.5 py-1.5 text-[9px] font-extrabold uppercase tracking-wider transition-colors',
+                   rosterViewFilter === 'captured' ? 'bg-emerald-500 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+                 )}
+               >
+                 Done <span className="font-mono">{photographedStudentCount}</span>
+               </button>
+             </div>
+             <p className="mt-2 text-[10px] font-medium leading-4 text-slate-400">
+               Switch classes at any time. Capture selection and project upload remain independent from this view.
+             </p>
+           </section>
+
           {/* Retry failed uploads button */}
           {errorPhotoIds.length > 0 && (
             <div className="px-3 py-2 border-b border-red-100 bg-red-50 shrink-0">
@@ -1648,8 +1794,16 @@ export function ProjectView({
                   hasRatedGroupCapture={captureReviewStatus.ratedGroupStudentIds.includes(s.id)}
                 />
               ))}
-              {filteredStudents.length === 0 && (
-                <div className="p-8 text-center text-slate-400 text-xs font-medium">No {employeePlural.toLowerCase()} found</div>
+               {filteredStudents.length === 0 && (
+                 <div className="p-8 text-center text-slate-400 text-xs font-medium">
+                   {rosterViewFilter === 'needs-photo'
+                     ? `No ${employeePlural.toLowerCase()} are missing a capture`
+                     : rosterViewFilter === 'needs-review'
+                       ? `No ${employeePlural.toLowerCase()} need review`
+                       : search
+                         ? `No ${employeePlural.toLowerCase()} found`
+                         : `No ${employeePlural.toLowerCase()} in this view`}
+                 </div>
               )}
             </div>
           </div>

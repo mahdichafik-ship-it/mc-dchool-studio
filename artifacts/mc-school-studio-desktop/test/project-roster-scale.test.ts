@@ -22,10 +22,9 @@ const projectViewSource = readFileSync(
 )
 
 test('a 2500-person project keeps roster counts bounded instead of querying once per person or class', () => {
-  const classHandler = projectsSource.slice(
-    projectsSource.indexOf("ipcMain.handle('classes:list'"),
-    projectsSource.indexOf('// Students'),
-  )
+  const classListStart = projectsSource.indexOf("ipcMain.handle('classes:list'")
+  const classCreateStart = projectsSource.indexOf("ipcMain.handle(\n    'classes:create'", classListStart)
+  const classHandler = projectsSource.slice(classListStart, classCreateStart)
   const studentHandler = projectsSource.slice(
     projectsSource.indexOf("'students:list'"),
   )

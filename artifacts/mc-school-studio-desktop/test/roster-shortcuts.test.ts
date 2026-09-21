@@ -6,6 +6,7 @@ import {
   isRosterShortcutEditingTarget,
   resolveRosterShortcut,
 } from '../src/renderer/src/lib/rosterShortcuts.ts'
+import { ratingFromShortcut } from '../src/renderer/src/lib/reviewShortcuts.ts'
 
 const students = [
   { id: 11, photoCount: 2, name: 'First visible' },
@@ -114,4 +115,25 @@ test('ProjectView routes shortcut selection through the synchronized capture-tar
     source,
     /async function handleSelectCaptureStudent\(student: Student\)[\s\S]*await setActiveCaptureTarget\(student\.id\)[\s\S]*setSelectedStudent\(student\)/,
   )
+})
+
+test('number keys map to one through five star ratings only', () => {
+  assert.deepEqual(
+    ['1', '2', '3', '4', '5'].map(ratingFromShortcut),
+    [1, 2, 3, 4, 5],
+  )
+  for (const key of ['0', '6', 'a', 'ArrowLeft']) {
+    assert.equal(ratingFromShortcut(key), null)
+  }
+})
+
+test('ProjectView routes number shortcuts through the selected capture review action', async () => {
+  const source = await readFile(
+    new URL('../src/renderer/src/pages/ProjectView.tsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(source, /const rating = ratingFromShortcut\(event\.key\)/)
+  assert.match(source, /if \(rating !== null && selectedCapture\)[\s\S]*handleUpdateCaptureReview\(selectedCapture\.id/)
+  assert.match(source, /press 1–5 to rate the selected capture/)
 })

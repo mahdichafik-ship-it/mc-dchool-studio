@@ -41,6 +41,7 @@ import {
   isRosterShortcutEditingTarget,
   resolveRosterShortcut,
 } from '@/lib/rosterShortcuts'
+import { ratingFromShortcut } from '@/lib/reviewShortcuts'
 import { filterRosterStudents } from '@/lib/rosterFilter'
 import { createGroupMemberStudentIdSet } from '@/lib/groupMembership'
 import type {
@@ -2283,6 +2284,17 @@ function StudentDetail({
         quickLookCapture !== null ||
         document.querySelector('[role="dialog"], [aria-modal="true"]')
       ) return
+      const rating = ratingFromShortcut(event.key)
+      if (rating !== null && selectedCapture) {
+        event.preventDefault()
+        void handleUpdateCaptureReview(selectedCapture.id, {
+          rating: selectedCapture.rating === rating ? 0 : rating,
+          favorite: rating >= 4,
+          selected: selectedCapture.rating !== rating,
+          rejected: false,
+        })
+        return
+      }
       if (event.key.toLowerCase() === 'l' && latestCapture) {
         event.preventDefault()
         setReviewCaptureKey(null)
@@ -2564,7 +2576,7 @@ function StudentDetail({
                   <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
                     Capture review
                   </div>
-                  <p className="mt-2 text-xs font-semibold text-slate-500">Star a photo to include it in the parent gallery.</p>
+                  <p className="mt-2 text-xs font-semibold text-slate-500">Star a photo to include it in the parent gallery, or press 1–5 to rate the selected capture.</p>
                 </div>
                 <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
                   {captureFilterOptions.map((option) => (
@@ -3424,6 +3436,23 @@ function GroupDetail({
     }
   }
 
+  useEffect(() => {
+    const handleGroupRatingShortcut = (event: KeyboardEvent) => {
+      if (isRosterShortcutEditingTarget(event.target as HTMLElement)) return
+      if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return
+      const rating = ratingFromShortcut(event.key)
+      const latestGroupCapture = groupCaptures[groupCaptures.length - 1]
+      if (rating === null || !latestGroupCapture) return
+      event.preventDefault()
+      void updateGroupRating(
+        latestGroupCapture.id,
+        latestGroupCapture.rating === rating ? 0 : rating,
+      )
+    }
+    window.addEventListener('keydown', handleGroupRatingShortcut)
+    return () => window.removeEventListener('keydown', handleGroupRatingShortcut)
+  }, [groupCaptures])
+
   return (
     <div className="flex flex-col h-full relative bg-slate-50">
       <div className="shoot-subject-header bg-white border-b border-slate-200 px-8 py-6 flex flex-wrap gap-4 justify-between items-start shadow-sm z-10 shrink-0 relative">
@@ -3561,7 +3590,7 @@ function GroupDetail({
                       })}
                     </div>
                     <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery</span>
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery · press 1–5 for latest</span>
                       <div className="flex items-center gap-0.5">
                         {[1, 2, 3, 4, 5].map(rating => (
                           <button
@@ -4261,7 +4290,7 @@ function CaptureReviewControls({
           </button>
         </div>
       </div>
-      <div className="flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2">
+      <div className="flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2" aria-keyshortcuts="1 2 3 4 5">
         {[1, 2, 3, 4, 5].map((rating) => (
           <button
             key={rating}

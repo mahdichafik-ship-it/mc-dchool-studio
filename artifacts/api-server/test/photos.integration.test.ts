@@ -41,6 +41,10 @@ import {
 import {
   projectGroupJpegToPhotographedStudents,
 } from "../src/lib/groupDeliveryPhotos";
+import {
+  ObjectNotFoundError,
+  objectStorageService,
+} from "../src/lib/objectStorage";
 
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
 let authUserId = userId;
@@ -49,6 +53,27 @@ const jpegBytes = Buffer.from(
   "base64",
 );
 const rawBytes = Buffer.from("sample-raw-capture-bytes");
+const testDurablePhotoObjects = new Map<string, string>();
+let testDurablePhotoSequence = 0;
+const originalUploadLocalFile = objectStorageService.uploadLocalFile;
+const originalGetObjectEntityFile = objectStorageService.getObjectEntityFile;
+function installTestDurablePhotoStorage() {
+  objectStorageService.uploadLocalFile = async (localPath) => {
+    const objectPath = `/objects/integration-test-${++testDurablePhotoSequence}`;
+    testDurablePhotoObjects.set(objectPath, localPath);
+    return objectPath;
+  };
+  objectStorageService.getObjectEntityFile = async (objectPath) => {
+    const localPath = testDurablePhotoObjects.get(objectPath);
+    if (!localPath || !fs.existsSync(localPath)) throw new ObjectNotFoundError();
+    return { createReadStream: () => fs.createReadStream(localPath) } as any;
+  };
+}
+function restoreDurablePhotoStorage() {
+  objectStorageService.uploadLocalFile = originalUploadLocalFile;
+  objectStorageService.getObjectEntityFile = originalGetObjectEntityFile;
+  testDurablePhotoObjects.clear();
+}
 let mockDriveId = 1;
 const mockDriveRequester: DriveRequester = async (requestPath, options = {}) => {
   const method = options.method ?? "GET";
@@ -136,6 +161,7 @@ app.use("/api/desktop", desktopRouter);
 before(async () => {
   clearGoogleDriveFolderCacheForTests();
   setPlatformDriveRequesterForTests(mockDriveRequester);
+  installTestDurablePhotoStorage();
   const [studio] = await db
     .insert(studiosTable)
     .values({ name: "Photo flow integration studio", createdByUserId: userId })
@@ -257,6 +283,7 @@ before(async () => {
 after(async () => {
   setPlatformDriveRequesterForTests();
   clearGoogleDriveFolderCacheForTests();
+  restoreDurablePhotoStorage();
   if (uploadedFilePath) {
     await rm(uploadedFilePath, { force: true });
   }

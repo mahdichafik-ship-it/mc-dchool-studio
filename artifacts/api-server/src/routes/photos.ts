@@ -1985,10 +1985,6 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
       ));
     });
   }
-  await refreshAutoYearbookAfterReview(
-    projectId,
-    connectionAccessMember(refreshedConnection).userId ?? "system:yearbook-automation",
-  );
   res.json({ capture });
 });
 
@@ -2275,13 +2271,18 @@ router.get("/:studentId/captures/:captureId/files/:fileId/file", requireAuth, as
     res.status(404).json({ error: "Capture file not found" });
     return;
   }
+  res.setHeader("Content-Type", file.file.mimeType);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (file.file.durableObjectPath) {
+    const object = await objectStorageService.getObjectEntityFile(file.file.durableObjectPath);
+    object.createReadStream().pipe(res);
+    return;
+  }
   const filePath = resolveFilePath(file.file.fileUrl);
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: "Capture file not found on server" });
     return;
   }
-  res.setHeader("Content-Type", file.file.mimeType);
-  res.setHeader("Cache-Control", "private, max-age=3600");
   res.sendFile(filePath);
 });
 

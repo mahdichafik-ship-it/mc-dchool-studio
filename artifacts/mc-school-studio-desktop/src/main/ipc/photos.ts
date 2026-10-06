@@ -1,7 +1,7 @@
 import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { copyFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { and, eq, count, or, isNull } from 'drizzle-orm'
+import { and, eq, count, or, isNull, ne } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { capturesTable, groupMembersTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
 import {
@@ -12,6 +12,7 @@ import {
 import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
 import { buildCaptureReviewStatus } from '../lib/captureReviewStatus'
+import { groupFiveStarReplacementIds, portraitFiveStarReplacementIds } from '../lib/reviewRatingReplacement'
 import { syncCaptureReview, syncGroupCaptureReview } from './upload'
 import type {
   CaptureCompletenessSummary,
@@ -266,17 +267,57 @@ export function registerPhotoHandlers() {
   ipcMain.handle('groupCaptures:updateReview', async (_e, { captureId, rating }: { captureId: number; rating: number }) => {
     const capture = db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get()
     if (!capture) return null
-    db.update(groupCapturesTable).set({
-      rating: Math.max(0, Math.min(5, Math.round(rating))),
-      reviewSyncPending: true,
-      updatedAt: now(),
-    }).where(eq(groupCapturesTable.id, captureId)).run()
-    void syncGroupCaptureReview(captureId)
-    getMainWindow()?.webContents.send('groupCapture:updated', {
-      projectId: capture.projectId,
-      groupId: capture.groupId,
+    const nextRating = Math.max(0, Math.min(5, Math.round(rating)))
+    const changedAt = now()
+    const { clearedIds, updated } = db.transaction((tx) => {
+      const previous = nextRating === 5
+        ? tx.select({ id: groupCapturesTable.id })
+          .from(groupCapturesTable)
+          .where(and(
+            eq(groupCapturesTable.projectId, capture.projectId),
+            eq(groupCapturesTable.groupId, capture.groupId),
+            eq(groupCapturesTable.rating, 5),
+            // Keep the target in the same transaction even when it is already
+            // the winner, so a repeated click remains an atomic no-op.
+            ne(groupCapturesTable.id, captureId),
+          ))
+          .all()
+        : []
+        const clearedIds = groupFiveStarReplacementIds(
+          previous.map((row) => ({ ...row, projectId: capture.projectId, groupId: capture.groupId, rating: 5 })),
+          { ...capture, rating: nextRating },
+        )
+      if (previous.length > 0) {
+        tx.update(groupCapturesTable).set({
+          rating: 0,
+          reviewSyncPending: true,
+          updatedAt: changedAt,
+        }).where(and(
+          eq(groupCapturesTable.projectId, capture.projectId),
+          eq(groupCapturesTable.groupId, capture.groupId),
+          eq(groupCapturesTable.rating, 5),
+          ne(groupCapturesTable.id, captureId),
+        )).run()
+      }
+      tx.update(groupCapturesTable).set({
+        rating: nextRating,
+        reviewSyncPending: true,
+        updatedAt: changedAt,
+      }).where(eq(groupCapturesTable.id, captureId)).run()
+      return {
+        clearedIds,
+        updated: tx.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get() ?? null,
+      }
     })
-    return db.select().from(groupCapturesTable).where(eq(groupCapturesTable.id, captureId)).get() ?? null
+    for (const clearedId of clearedIds) void syncGroupCaptureReview(clearedId)
+    if (updated) void syncGroupCaptureReview(updated.id)
+    for (const groupId of new Set([capture.groupId])) {
+      getMainWindow()?.webContents.send('groupCapture:updated', {
+        projectId: capture.projectId,
+        groupId,
+      })
+    }
+    return updated
   })
 
   ipcMain.handle('photos:list', async (_e, { studentId }: { studentId: number }): Promise<Photo[]> => {
@@ -442,27 +483,73 @@ export function registerPhotoHandlers() {
     ) => {
       const capture = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get()
       if (!capture) return null
-    const review = normalizeReviewFlags(capture, { favorite, rejected, selected, rating })
-      db.update(capturesTable)
-        .set({
-        favorite: review.favorite,
-        rejected: review.rejected,
-        selected: review.selected,
-        rating: review.rating,
-          ...(colorLabel === undefined ? {} : { colorLabel }),
-          reviewSyncPending: true,
-          updatedAt: now(),
-        })
-        .where(eq(capturesTable.id, captureId))
-        .run()
-      const updated = db.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null
+      const review = normalizeReviewFlags(capture, { favorite, rejected, selected, rating })
+      const changedAt = now()
+      const { clearedIds, updated } = db.transaction((tx) => {
+        const previous = review.rating === 5 && capture.studentId !== null
+          ? tx.select({ id: capturesTable.id })
+            .from(capturesTable)
+            .where(and(
+              eq(capturesTable.projectId, capture.projectId),
+              eq(capturesTable.studentId, capture.studentId),
+              isNull(capturesTable.groupId),
+              eq(capturesTable.rating, 5),
+              ne(capturesTable.id, captureId),
+            ))
+            .all()
+          : []
+        const clearedIds = portraitFiveStarReplacementIds(
+          previous.map((row) => ({
+            ...row,
+            projectId: capture.projectId,
+            studentId: capture.studentId,
+            groupId: null,
+            rating: 5,
+          })),
+          { ...capture, rating: review.rating },
+        )
+        if (previous.length > 0) {
+          tx.update(capturesTable).set({
+            rating: 0,
+            reviewSyncPending: true,
+            updatedAt: changedAt,
+          }).where(and(
+            eq(capturesTable.projectId, capture.projectId),
+            eq(capturesTable.studentId, capture.studentId),
+            isNull(capturesTable.groupId),
+            eq(capturesTable.rating, 5),
+            ne(capturesTable.id, captureId),
+          )).run()
+        }
+        tx.update(capturesTable)
+          .set({
+            favorite: review.favorite,
+            rejected: review.rejected,
+            selected: review.selected,
+            rating: review.rating,
+            ...(colorLabel === undefined ? {} : { colorLabel }),
+            reviewSyncPending: true,
+            updatedAt: changedAt,
+          })
+          .where(eq(capturesTable.id, captureId))
+          .run()
+        return {
+          clearedIds,
+          updated: tx.select().from(capturesTable).where(eq(capturesTable.id, captureId)).get() ?? null,
+        }
+      })
+      for (const clearedId of clearedIds) void syncCaptureReview(clearedId)
       if (updated) void syncCaptureReview(updated.id)
       if (updated) {
-        getMainWindow()?.webContents.send('capture:updated', {
-          projectId: updated.projectId,
-          captureId: updated.id,
-          studentId: updated.studentId,
-        })
+        // One event per affected capture keeps other open project views from
+        // retaining the old winner after a replacement.
+        for (const affectedId of [...clearedIds, updated.id]) {
+          getMainWindow()?.webContents.send('capture:updated', {
+            projectId: updated.projectId,
+            captureId: affectedId,
+            studentId: updated.studentId,
+          })
+        }
       }
       return updated
     },

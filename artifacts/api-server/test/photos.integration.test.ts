@@ -41,6 +41,10 @@ import {
 import {
   projectGroupJpegToPhotographedStudents,
 } from "../src/lib/groupDeliveryPhotos";
+import {
+  ObjectNotFoundError,
+  objectStorageService,
+} from "../src/lib/objectStorage";
 
 const userId = `photo-flow-test-${process.pid}-${Date.now()}`;
 let authUserId = userId;
@@ -49,6 +53,27 @@ const jpegBytes = Buffer.from(
   "base64",
 );
 const rawBytes = Buffer.from("sample-raw-capture-bytes");
+const testDurablePhotoObjects = new Map<string, string>();
+let testDurablePhotoSequence = 0;
+const originalUploadLocalFile = objectStorageService.uploadLocalFile;
+const originalGetObjectEntityFile = objectStorageService.getObjectEntityFile;
+function installTestDurablePhotoStorage() {
+  objectStorageService.uploadLocalFile = async (localPath) => {
+    const objectPath = `/objects/integration-test-${++testDurablePhotoSequence}`;
+    testDurablePhotoObjects.set(objectPath, localPath);
+    return objectPath;
+  };
+  objectStorageService.getObjectEntityFile = async (objectPath) => {
+    const localPath = testDurablePhotoObjects.get(objectPath);
+    if (!localPath || !fs.existsSync(localPath)) throw new ObjectNotFoundError();
+    return { createReadStream: () => fs.createReadStream(localPath) } as any;
+  };
+}
+function restoreDurablePhotoStorage() {
+  objectStorageService.uploadLocalFile = originalUploadLocalFile;
+  objectStorageService.getObjectEntityFile = originalGetObjectEntityFile;
+  testDurablePhotoObjects.clear();
+}
 let mockDriveId = 1;
 const mockDriveRequester: DriveRequester = async (requestPath, options = {}) => {
   const method = options.method ?? "GET";
@@ -136,6 +161,7 @@ app.use("/api/desktop", desktopRouter);
 before(async () => {
   clearGoogleDriveFolderCacheForTests();
   setPlatformDriveRequesterForTests(mockDriveRequester);
+  installTestDurablePhotoStorage();
   const [studio] = await db
     .insert(studiosTable)
     .values({ name: "Photo flow integration studio", createdByUserId: userId })
@@ -257,6 +283,7 @@ before(async () => {
 after(async () => {
   setPlatformDriveRequesterForTests();
   clearGoogleDriveFolderCacheForTests();
+  restoreDurablePhotoStorage();
   if (uploadedFilePath) {
     await rm(uploadedFilePath, { force: true });
   }
@@ -944,6 +971,42 @@ test("lets a studio admin review a photo and keeps parent visibility synchronize
     eq(studentPhotosTable.fileName, fileName),
   ));
   assert(photo, "the capture should project a reviewable delivery photo");
+  const [connection] = await db.select({ id: desktopConnectionsTable.id })
+    .from(desktopConnectionsTable)
+    .where(eq(desktopConnectionsTable.tokenHash, desktopCredentials.tokenHash));
+  assert(connection);
+  const oldCaptureKey = `desktop:${connection.id}:web-old-winner-${captureKey}`;
+  const oldClientUploadId = `web-old-review:${captureKey}`;
+  const [oldCapture] = await db.insert(capturesTable).values({
+    projectId,
+    studentId,
+    captureKey: oldCaptureKey,
+    baseFilename: `web-old-winner-${captureKey}`,
+    pairingStatus: "jpeg_only",
+    rating: 5,
+  }).returning({ id: capturesTable.id });
+  const oldFileName = `web-old-winner-${captureKey}.jpg`;
+  const [oldFile] = await db.insert(captureFilesTable).values({
+    captureId: oldCapture.id,
+    fileRole: "JPEG",
+    fileFormat: "jpg",
+    originalFilename: oldFileName,
+    fileUrl: `/uploads/test/${oldFileName}`,
+    mimeType: "image/jpeg",
+    desktopConnectionId: connection.id,
+    clientUploadId: oldClientUploadId,
+  }).returning({ id: captureFilesTable.id });
+  const [oldPhoto] = await db.insert(studentPhotosTable).values({
+    projectId,
+    studentId,
+    fileName: oldFileName,
+    fileUrl: `/uploads/test/${oldFileName}`,
+    mimeType: "image/jpeg",
+    desktopConnectionId: connection.id,
+    clientUploadId: oldClientUploadId,
+    rating: 5,
+    shareWithParents: true,
+  }).returning({ id: studentPhotosTable.id });
 
   authUserId = `${userId}-admin`;
   try {
@@ -963,6 +1026,11 @@ test("lets a studio admin review a photo and keeps parent visibility synchronize
     const [selectedCapture] = await db.select().from(capturesTable).where(eq(capturesTable.id, uploaded.captureId));
     assert.equal(selectedCapture?.rating, 5);
     assert.equal(selectedCapture?.colorLabel, "green");
+    const [clearedCapture] = await db.select().from(capturesTable).where(eq(capturesTable.id, oldCapture.id));
+    const [clearedPhoto] = await db.select().from(studentPhotosTable).where(eq(studentPhotosTable.id, oldPhoto.id));
+    assert.equal(clearedCapture?.rating, 0);
+    assert.equal(clearedPhoto?.rating, 0);
+    assert.equal(clearedPhoto?.shareWithParents, false);
 
     const doNotShareResponse = await fetch(
       `${baseUrl}/api/projects/${projectId}/students/${studentId}/photos/${photo.id}/review`,
@@ -997,7 +1065,381 @@ test("lets a studio admin review a photo and keeps parent visibility synchronize
     await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photo.id));
     await db.delete(captureFilesTable).where(eq(captureFilesTable.id, uploaded.file.id));
     await db.delete(capturesTable).where(eq(capturesTable.id, uploaded.captureId));
+    await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, oldPhoto.id));
+    await db.delete(captureFilesTable).where(eq(captureFilesTable.id, oldFile.id));
+    await db.delete(capturesTable).where(eq(capturesTable.id, oldCapture.id));
     await rm(filePath, { force: true });
+  }
+});
+
+test("applies five-star replacement to initial portrait and group uploads", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const [connection] = await db.select({ id: desktopConnectionsTable.id })
+    .from(desktopConnectionsTable)
+    .where(eq(desktopConnectionsTable.tokenHash, desktopCredentials.tokenHash));
+  assert(connection);
+  const portraitCaptureKey = `upload-five-star-portrait-${suffix}`;
+  const scopedPortraitKey = `desktop:${connection.id}:${portraitCaptureKey}`;
+  const [oldPortrait] = await db.insert(capturesTable).values({
+    projectId,
+    studentId,
+    captureKey: scopedPortraitKey.replace(portraitCaptureKey, `old-${portraitCaptureKey}`),
+    baseFilename: `old-${portraitCaptureKey}`,
+    pairingStatus: "jpeg_only",
+    rating: 5,
+  }).returning({ id: capturesTable.id });
+
+  const [group] = await db.insert(groupsTable).values({
+    projectId,
+    classId,
+    name: `Upload five-star group ${suffix}`,
+  }).returning({ id: groupsTable.id });
+  const groupCaptureKey = `upload-five-star-group-${suffix}`;
+  const [oldGroupCapture] = await db.insert(groupCapturesTable).values({
+    projectId,
+    groupId: group.id,
+    captureKey: `old-${groupCaptureKey}`,
+    baseFilename: `old-${groupCaptureKey}`,
+    capturedAt: new Date().toISOString(),
+    pairingStatus: "jpeg_only",
+    rating: 5,
+  }).returning({ id: groupCapturesTable.id });
+
+  let portraitCaptureId: number | undefined;
+  let portraitFileId: number | undefined;
+  let groupCaptureId: number | undefined;
+  let groupFileId: number | undefined;
+  const portraitFileName = `${portraitCaptureKey}.jpg`;
+  const groupFileName = `${groupCaptureKey}.jpg`;
+  try {
+    const portraitForm = new (globalThis as any).FormData();
+    portraitForm.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), portraitFileName);
+    portraitForm.append("captureKey", portraitCaptureKey);
+    portraitForm.append("baseFilename", portraitCaptureKey);
+    portraitForm.append("fileRole", "JPEG");
+    portraitForm.append("rating", "5");
+    const portraitResponse = await fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${desktopCredentials.token}`,
+          "X-MC-Upload-Id": `upload-five-star:${suffix}`,
+        },
+        body: portraitForm,
+      },
+    );
+    assert.equal(portraitResponse.status, 201);
+    const uploadedPortrait = await portraitResponse.json() as {
+      captureId: number;
+      file: { id: number; fileUrl: string };
+    };
+    portraitCaptureId = uploadedPortrait.captureId;
+    portraitFileId = uploadedPortrait.file.id;
+    captureFilePaths.push(path.resolve(process.cwd(), uploadedPortrait.file.fileUrl.replace(/^\//, "")));
+    const [storedOldPortrait] = await db.select().from(capturesTable).where(eq(capturesTable.id, oldPortrait.id));
+    const [storedPortrait] = await db.select().from(capturesTable).where(eq(capturesTable.id, portraitCaptureId));
+    assert.equal(storedOldPortrait?.rating, 0);
+    assert.equal(storedPortrait?.rating, 5);
+
+    const groupForm = new (globalThis as any).FormData();
+    groupForm.append("file", new (globalThis as any).Blob([jpegBytes], { type: "image/jpeg" }), groupFileName);
+    groupForm.append("captureKey", groupCaptureKey);
+    groupForm.append("baseFilename", groupCaptureKey);
+    groupForm.append("rating", "5");
+    const groupResponse = await fetch(
+      `${baseUrl}/api/desktop/projects/${projectId}/groups/${group.id}/captures`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${desktopCredentials.token}`,
+          "X-MC-Upload-Id": `upload-five-star-group:${suffix}`,
+        },
+        body: groupForm,
+      },
+    );
+    assert.equal(groupResponse.status, 201);
+    const uploadedGroup = await groupResponse.json() as {
+      captureId: number;
+      file: { id: number; fileUrl: string };
+    };
+    groupCaptureId = uploadedGroup.captureId;
+    groupFileId = uploadedGroup.file.id;
+    captureFilePaths.push(path.resolve(process.cwd(), uploadedGroup.file.fileUrl.replace(/^\//, "")));
+    const [storedOldGroup] = await db.select().from(groupCapturesTable)
+      .where(eq(groupCapturesTable.id, oldGroupCapture.id));
+    const [storedGroup] = await db.select().from(groupCapturesTable)
+      .where(eq(groupCapturesTable.id, groupCaptureId));
+    assert.equal(storedOldGroup?.rating, 0);
+    assert.equal(storedGroup?.rating, 5);
+  } finally {
+    await db.delete(studentPhotosTable).where(and(
+      eq(studentPhotosTable.projectId, projectId),
+      eq(studentPhotosTable.studentId, studentId),
+      eq(studentPhotosTable.fileName, portraitFileName),
+    ));
+    if (groupFileId !== undefined) {
+      await db.delete(studentPhotosTable).where(eq(studentPhotosTable.sourceGroupCaptureFileId, groupFileId));
+      await db.delete(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, groupFileId));
+    }
+    if (portraitFileId !== undefined) {
+      await db.delete(captureFilesTable).where(eq(captureFilesTable.id, portraitFileId));
+    }
+    if (portraitCaptureId !== undefined) {
+      await db.delete(capturesTable).where(eq(capturesTable.id, portraitCaptureId));
+    }
+    if (groupCaptureId !== undefined) {
+      await db.delete(groupCapturesTable).where(eq(groupCapturesTable.id, groupCaptureId));
+    }
+    await db.delete(capturesTable).where(eq(capturesTable.id, oldPortrait.id));
+    await db.delete(groupCapturesTable).where(eq(groupCapturesTable.id, oldGroupCapture.id));
+    await db.delete(groupsTable).where(eq(groupsTable.id, group.id));
+  }
+});
+
+test("serializes five-star portrait choices per student and keeps projections in sync", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const [connection] = await db.select({ id: desktopConnectionsTable.id })
+    .from(desktopConnectionsTable)
+    .where(eq(desktopConnectionsTable.tokenHash, desktopCredentials.tokenHash));
+  assert(connection);
+
+  const [otherStudent] = await db.insert(studentsTable).values({
+    projectId,
+    classId,
+    firstName: "Other",
+    lastName: `Five Star ${suffix}`,
+    generatedStudentId: `FIVE-STAR-${suffix}`,
+  }).returning({ id: studentsTable.id });
+
+  const captures: Array<{ id: number; studentId: number; captureKey: string; rating: number }> = [];
+  const files: Array<{ id: number; clientUploadId: string }> = [];
+  const photos: Array<{ id: number; clientUploadId: string }> = [];
+  const addPortrait = async (name: string, targetStudentId: number, rating: number) => {
+    const captureKey = `five-star-${name}-${suffix}`;
+    const scopedKey = `desktop:${connection.id}:${captureKey}`;
+    const [capture] = await db.insert(capturesTable).values({
+      projectId,
+      studentId: targetStudentId,
+      captureKey: scopedKey,
+      baseFilename: captureKey,
+      pairingStatus: "jpeg_only",
+      rating,
+      favorite: rating === 5,
+      selected: rating > 0,
+    }).returning({ id: capturesTable.id });
+    captures.push({ id: capture.id, studentId: targetStudentId, captureKey, rating });
+
+    const clientUploadId = `review:${suffix}:${name}`;
+    const fileName = `${captureKey}.jpg`;
+    const [file] = await db.insert(captureFilesTable).values({
+      captureId: capture.id,
+      fileRole: "JPEG",
+      fileFormat: "jpg",
+      originalFilename: fileName,
+      fileUrl: `/uploads/test/${fileName}`,
+      mimeType: "image/jpeg",
+      desktopConnectionId: connection.id,
+      clientUploadId,
+    }).returning({ id: captureFilesTable.id, clientUploadId: captureFilesTable.clientUploadId });
+    files.push({ id: file.id, clientUploadId: file.clientUploadId! });
+
+    const [photo] = await db.insert(studentPhotosTable).values({
+      projectId,
+      studentId: targetStudentId,
+      fileName,
+      fileUrl: `/uploads/test/${fileName}`,
+      mimeType: "image/jpeg",
+      desktopConnectionId: connection.id,
+      clientUploadId,
+      rating,
+      shareWithParents: rating > 0,
+    }).returning({ id: studentPhotosTable.id, clientUploadId: studentPhotosTable.clientUploadId });
+    photos.push({ id: photo.id, clientUploadId: photo.clientUploadId! });
+    return { capture: { id: capture.id, captureKey }, photo };
+  };
+
+  try {
+    const oldWinner = await addPortrait("old-winner", studentId, 5);
+    const portraitA = await addPortrait("new-a", studentId, 0);
+    const portraitB = await addPortrait("new-b", studentId, 0);
+    const fourStar = await addPortrait("four-star", studentId, 4);
+    const otherStudentWinner = await addPortrait("other-student", otherStudent.id, 5);
+
+    const review = (captureKey: string) => fetch(
+      `${baseUrl}/api/projects/${projectId}/students/${studentId}/captures/${captureKey}/review`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${desktopCredentials.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ rating: 5 }),
+      },
+    );
+    const responses = await Promise.all([
+      review(portraitA.capture.captureKey),
+      review(portraitB.capture.captureKey),
+    ]);
+    assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+
+    const captureRatings = await Promise.all(captures.map(async ({ id }) => {
+      const [capture] = await db.select({
+        id: capturesTable.id,
+        rating: capturesTable.rating,
+        favorite: capturesTable.favorite,
+        selected: capturesTable.selected,
+      }).from(capturesTable).where(eq(capturesTable.id, id));
+      return capture;
+    }));
+    const studentWinners = captureRatings.filter((capture) =>
+      capture.rating === 5 && captures.find((row) => row.id === capture.id)?.studentId === studentId);
+    assert.equal(studentWinners.length, 1);
+    assert.equal(captureRatings.find((capture) => capture.id === oldWinner.capture.id)?.rating, 0);
+    assert.equal(captureRatings.find((capture) => capture.id === oldWinner.capture.id)?.favorite, true);
+    assert.equal(captureRatings.find((capture) => capture.id === oldWinner.capture.id)?.selected, true);
+    assert.equal(captureRatings.find((capture) => capture.id === fourStar.capture.id)?.rating, 4);
+    assert.equal(captureRatings.find((capture) => capture.id === otherStudentWinner.capture.id)?.rating, 5);
+
+    const projectionRows = await Promise.all(photos.map(async ({ id }) => {
+      const [photo] = await db.select({
+        id: studentPhotosTable.id,
+        rating: studentPhotosTable.rating,
+        shareWithParents: studentPhotosTable.shareWithParents,
+      }).from(studentPhotosTable).where(eq(studentPhotosTable.id, id));
+      return photo;
+    }));
+    const photoById = new Map(projectionRows.map((photo) => [photo.id, photo]));
+    const studentProjectionWinners = photos
+      .filter((row) => row.clientUploadId !== `review:${suffix}:other-student`)
+      .map((row) => photoById.get(row.id))
+      .filter((photo) => photo?.rating === 5);
+    assert.equal(studentProjectionWinners.length, 1);
+    assert.equal(photoById.get(oldWinner.photo.id)?.rating, 0);
+    assert.equal(photoById.get(oldWinner.photo.id)?.shareWithParents, false);
+    assert.equal(photoById.get(fourStar.photo.id)?.rating, 4);
+    assert.equal(photoById.get(otherStudentWinner.photo.id)?.rating, 5);
+    assert.equal(photoById.get(otherStudentWinner.photo.id)?.shareWithParents, true);
+    assert(captureRatings.find((capture) => capture.id === studentWinners[0].id)?.selected);
+  } finally {
+    for (const photo of photos) await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photo.id));
+    for (const file of files) await db.delete(captureFilesTable).where(eq(captureFilesTable.id, file.id));
+    for (const capture of captures) await db.delete(capturesTable).where(eq(capturesTable.id, capture.id));
+    await db.delete(studentsTable).where(eq(studentsTable.id, otherStudent.id));
+  }
+});
+
+test("serializes five-star group choices per group without changing other ratings", async () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const [groupA, groupB] = await db.insert(groupsTable).values([
+    { projectId, classId, name: `Five-star group A ${suffix}` },
+    { projectId, classId, name: `Five-star group B ${suffix}` },
+  ]).returning({ id: groupsTable.id });
+
+  const captures: Array<{ id: number; groupId: number; captureKey: string; rating: number }> = [];
+  const files: Array<{ id: number }> = [];
+  const photos: Array<{ id: number; groupId: number }> = [];
+  const addGroupCapture = async (name: string, groupId: number, rating: number) => {
+    const captureKey = `group-five-star-${name}-${suffix}`;
+    const [capture] = await db.insert(groupCapturesTable).values({
+      projectId,
+      groupId,
+      captureKey,
+      baseFilename: captureKey,
+      capturedAt: new Date().toISOString(),
+      pairingStatus: "jpeg_only",
+      rating,
+    }).returning({ id: groupCapturesTable.id });
+    captures.push({ id: capture.id, groupId, captureKey, rating });
+
+    const fileName = `${captureKey}.jpg`;
+    const [file] = await db.insert(groupCaptureFilesTable).values({
+      captureId: capture.id,
+      fileRole: "JPEG",
+      fileFormat: "jpg",
+      originalFilename: fileName,
+      fileUrl: `/uploads/test/${fileName}`,
+      mimeType: "image/jpeg",
+    }).returning({ id: groupCaptureFilesTable.id });
+    files.push({ id: file.id });
+    const [photo] = await db.insert(studentPhotosTable).values({
+      projectId,
+      studentId,
+      fileName,
+      fileUrl: `/uploads/test/${fileName}`,
+      mimeType: "image/jpeg",
+      sourceGroupCaptureFileId: file.id,
+      rating,
+      shareWithParents: rating > 0,
+    }).returning({ id: studentPhotosTable.id });
+    photos.push({ id: photo.id, groupId });
+    return { id: capture.id, captureKey, photoId: photo.id };
+  };
+
+  try {
+    const oldWinner = await addGroupCapture("old-winner", groupA.id, 5);
+    const groupCaptureA = await addGroupCapture("new-a", groupA.id, 0);
+    const groupCaptureB = await addGroupCapture("new-b", groupA.id, 0);
+    const fourStar = await addGroupCapture("four-star", groupA.id, 4);
+    const otherGroupWinner = await addGroupCapture("other-group", groupB.id, 5);
+
+    const review = (captureKey: string) => fetch(
+      `${baseUrl}/api/desktop/projects/${projectId}/groups/${groupA.id}/captures/${captureKey}/review`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${desktopCredentials.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ rating: 5 }),
+      },
+    );
+    const responses = await Promise.all([
+      review(groupCaptureA.captureKey),
+      review(groupCaptureB.captureKey),
+    ]);
+    assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+
+    const captureRatings = await Promise.all(captures.map(async ({ id }) => {
+      const [capture] = await db.select({
+        id: groupCapturesTable.id,
+        rating: groupCapturesTable.rating,
+      }).from(groupCapturesTable).where(eq(groupCapturesTable.id, id));
+      return capture;
+    }));
+    const groupAWinners = captureRatings.filter((capture) =>
+      capture.rating === 5 && captures.find((row) => row.id === capture.id)?.groupId === groupA.id);
+    assert.equal(groupAWinners.length, 1);
+    assert.equal(captureRatings.find((capture) => capture.id === oldWinner.id)?.rating, 0);
+    assert.equal(captureRatings.find((capture) => capture.id === fourStar.id)?.rating, 4);
+    assert.equal(captureRatings.find((capture) => capture.id === otherGroupWinner.id)?.rating, 5);
+
+    const projectionRows = await Promise.all(photos.map(async ({ id }) => {
+      const [photo] = await db.select({
+        id: studentPhotosTable.id,
+        rating: studentPhotosTable.rating,
+        shareWithParents: studentPhotosTable.shareWithParents,
+      }).from(studentPhotosTable).where(eq(studentPhotosTable.id, id));
+      return photo;
+    }));
+    const photoById = new Map(projectionRows.map((photo) => [photo.id, photo]));
+    const groupAProjectionWinners = photos
+      .filter((row) => row.groupId === groupA.id)
+      .map((row) => photoById.get(row.id))
+      .filter((photo) => photo?.rating === 5);
+    assert.equal(groupAProjectionWinners.length, 1);
+    assert.equal(photoById.get(oldWinner.photoId)?.rating, 0);
+    assert.equal(photoById.get(oldWinner.photoId)?.shareWithParents, false);
+    assert.equal(photoById.get(fourStar.photoId)?.rating, 4);
+    assert.equal(photoById.get(otherGroupWinner.photoId)?.rating, 5);
+    assert.equal(photoById.get(otherGroupWinner.photoId)?.shareWithParents, true);
+    assert(groupAWinners[0]);
+  } finally {
+    for (const photo of photos) await db.delete(studentPhotosTable).where(eq(studentPhotosTable.id, photo.id));
+    for (const file of files) await db.delete(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, file.id));
+    for (const capture of captures) await db.delete(groupCapturesTable).where(eq(groupCapturesTable.id, capture.id));
+    await db.delete(groupsTable).where(eq(groupsTable.id, groupA.id));
+    await db.delete(groupsTable).where(eq(groupsTable.id, groupB.id));
   }
 });
 

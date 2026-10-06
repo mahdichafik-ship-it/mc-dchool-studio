@@ -45,6 +45,113 @@ import { parseCaptureEditSettings } from "../lib/captureEdits";
 import { enqueueR2PhotoDeletions } from "../lib/r2PhotoDeletionOutbox";
 
 const router = Router({ mergeParams: true });
+type ReviewTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function lockPortraitFiveStarOwner(
+  tx: ReviewTransaction,
+  projectId: number,
+  studentId: number,
+): Promise<void> {
+  await tx.select({ id: studentsTable.id })
+    .from(studentsTable)
+    .where(and(eq(studentsTable.id, studentId), eq(studentsTable.projectId, projectId)))
+    .for("update");
+}
+
+async function lockGroupFiveStarOwner(
+  tx: ReviewTransaction,
+  projectId: number,
+  groupId: number,
+): Promise<void> {
+  await tx.select({ id: groupsTable.id })
+    .from(groupsTable)
+    .where(and(eq(groupsTable.id, groupId), eq(groupsTable.projectId, projectId)))
+    .for("update");
+}
+
+/**
+ * A 5-star choice is scoped to the owner row rather than the capture row.
+ * Locking that stable row makes replacing two different captures serialize.
+ * The helpers intentionally only change rating (and delivery visibility) on
+ * the old winner; all other review metadata belongs to that photographer's
+ * independent decision.
+ */
+async function clearPortraitFiveStarChoices(
+  tx: ReviewTransaction,
+  projectId: number,
+  studentId: number,
+  exceptCaptureId?: number,
+): Promise<void> {
+  await lockPortraitFiveStarOwner(tx, projectId, studentId);
+  const oldWinners = await tx.select({ id: capturesTable.id })
+    .from(capturesTable)
+    .where(and(
+      eq(capturesTable.projectId, projectId),
+      eq(capturesTable.studentId, studentId),
+      eq(capturesTable.rating, 5),
+      ...(exceptCaptureId === undefined ? [] : [ne(capturesTable.id, exceptCaptureId)]),
+    ));
+  for (const oldWinner of oldWinners) {
+    const jpegFiles = await tx.select({
+      desktopConnectionId: captureFilesTable.desktopConnectionId,
+      clientUploadId: captureFilesTable.clientUploadId,
+      originalFilename: captureFilesTable.originalFilename,
+    }).from(captureFilesTable).where(and(
+      eq(captureFilesTable.captureId, oldWinner.id),
+      eq(captureFilesTable.fileRole, "JPEG"),
+    ));
+    for (const jpeg of jpegFiles) {
+      await tx.update(studentPhotosTable).set({
+        rating: 0,
+        shareWithParents: false,
+      }).where(and(
+        eq(studentPhotosTable.projectId, projectId),
+        eq(studentPhotosTable.studentId, studentId),
+        jpeg.clientUploadId
+          ? and(
+              eq(studentPhotosTable.desktopConnectionId, jpeg.desktopConnectionId!),
+              eq(studentPhotosTable.clientUploadId, jpeg.clientUploadId),
+            )
+          : and(
+              eq(studentPhotosTable.fileName, jpeg.originalFilename),
+              eq(studentPhotosTable.rating, 5),
+            ),
+      ));
+    }
+    await tx.update(capturesTable).set({ rating: 0 }).where(eq(capturesTable.id, oldWinner.id));
+  }
+}
+
+async function clearGroupFiveStarChoices(
+  tx: ReviewTransaction,
+  projectId: number,
+  groupId: number,
+  exceptCaptureId?: number,
+): Promise<void> {
+  await lockGroupFiveStarOwner(tx, projectId, groupId);
+  const oldWinners = await tx.select({ id: groupCapturesTable.id })
+    .from(groupCapturesTable)
+    .where(and(
+      eq(groupCapturesTable.projectId, projectId),
+      eq(groupCapturesTable.groupId, groupId),
+      eq(groupCapturesTable.rating, 5),
+      ...(exceptCaptureId === undefined ? [] : [ne(groupCapturesTable.id, exceptCaptureId)]),
+    ));
+  for (const oldWinner of oldWinners) {
+    const jpegFiles = await tx.select({ id: groupCaptureFilesTable.id })
+      .from(groupCaptureFilesTable).where(and(
+        eq(groupCaptureFilesTable.captureId, oldWinner.id),
+        eq(groupCaptureFilesTable.fileRole, "JPEG"),
+      ));
+    for (const jpeg of jpegFiles) {
+      await tx.update(studentPhotosTable).set({
+        rating: 0,
+        shareWithParents: false,
+      }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, jpeg.id));
+    }
+    await tx.update(groupCapturesTable).set({ rating: 0 }).where(eq(groupCapturesTable.id, oldWinner.id));
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Member-scoped desktop authentication — desktop app → server only (POST)
@@ -968,7 +1075,50 @@ async function projectCaptureJpegToDeliveryPhoto(
       eq(studentPhotosTable.fileName, file.originalFilename),
     ));
   }
+  // Projection work can finish after a later rating request has replaced this
+  // capture. Re-read the source while holding its owner lock so a stale
+  // post-commit projector cannot restore an old 5-star gallery choice.
+  await db.transaction(async (tx) => {
+    await lockPortraitFiveStarOwner(tx, capture.projectId, capture.studentId);
+    const [latest] = await tx.select({
+      rating: capturesTable.rating,
+      colorLabel: capturesTable.colorLabel,
+    }).from(capturesTable).where(eq(capturesTable.id, capture.id)).limit(1);
+    if (!latest) return;
+    const projectionIdentity = file.clientUploadId
+      ? and(
+          eq(studentPhotosTable.desktopConnectionId, file.desktopConnectionId!),
+          eq(studentPhotosTable.clientUploadId, file.clientUploadId),
+        )
+      : eq(studentPhotosTable.fileName, file.originalFilename);
+    await tx.update(studentPhotosTable).set({
+      rating: latest.rating,
+      colorLabel: latest.colorLabel,
+      shareWithParents: latest.rating > 0,
+    }).where(and(
+      eq(studentPhotosTable.projectId, capture.projectId),
+      eq(studentPhotosTable.studentId, capture.studentId),
+      projectionIdentity,
+    ));
+  });
   await projectAvailableGroupJpegsToStudent(capture.projectId, capture.studentId);
+}
+
+async function projectGroupJpegWithCurrentRating(
+  capture: typeof groupCapturesTable.$inferSelect,
+  file: typeof groupCaptureFilesTable.$inferSelect,
+): Promise<void> {
+  await projectGroupJpegToPhotographedStudents(capture, file);
+  await db.transaction(async (tx) => {
+    await lockGroupFiveStarOwner(tx, capture.projectId, capture.groupId);
+    const [latest] = await tx.select({ rating: groupCapturesTable.rating })
+      .from(groupCapturesTable).where(eq(groupCapturesTable.id, capture.id)).limit(1);
+    if (!latest) return;
+    await tx.update(studentPhotosTable).set({
+      rating: latest.rating,
+      shareWithParents: latest.rating > 0,
+    }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, file.id));
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1000,6 +1150,7 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
     if (!refreshed) { discardUploadedFile(req); res.status(401).json({ error: "Desktop connection was revoked while uploading" }); return; }
     if (!req.file) { res.status(400).json({ error: "No capture file uploaded (use field name 'file')" }); return; }
     const body = req.body as Record<string, string | undefined>;
+     const rating = Math.max(0, Math.min(5, Number.parseInt(body.rating ?? "0", 10) || 0));
     const role = captureFileRole(req.file.originalname);
     const captureKey = body.captureKey?.trim();
     const clientUploadId = req.get("X-MC-Upload-Id")?.trim() || null;
@@ -1014,12 +1165,21 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
     const relPath = path.relative(path.resolve(process.cwd(), "uploads"), req.file.path).replace(/\\/g, "/");
     const fileUrl = `/uploads/${relPath}`;
     const result = await db.transaction(async (tx) => {
+      if (rating === 5) await lockGroupFiveStarOwner(tx, projectId, groupId);
       if (clientUploadId) {
         const [existing] = await tx.select({ file: groupCaptureFilesTable, capture: groupCapturesTable })
           .from(groupCaptureFilesTable).innerJoin(groupCapturesTable, eq(groupCaptureFilesTable.captureId, groupCapturesTable.id))
           .where(and(eq(groupCaptureFilesTable.desktopConnectionId, connection.connectionId), eq(groupCaptureFilesTable.clientUploadId, clientUploadId))).limit(1);
         if (existing) {
           if (existing.capture.projectId !== projectId || existing.capture.groupId !== groupId) throw new Error("Desktop upload identifier was reused for a different group");
+          if (rating === 5) {
+            await clearGroupFiveStarChoices(tx, projectId, groupId, existing.capture.id);
+            const [updatedCapture] = await tx.update(groupCapturesTable)
+              .set({ rating: 5, updatedAt: new Date() })
+              .where(eq(groupCapturesTable.id, existing.capture.id))
+              .returning();
+            if (updatedCapture) existing.capture = updatedCapture;
+          }
           if (captureBatch && existing.file.captureBatchId === null) {
             const [attached] = await tx.update(groupCaptureFilesTable)
               .set({ captureBatchId: captureBatch.id })
@@ -1047,8 +1207,13 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
         projectId, groupId, captureKey, baseFilename: body.baseFilename?.trim() || path.basename(req.file!.originalname, path.extname(req.file!.originalname)),
         capturedAt: body.capturedAt?.trim() || null, sequence: body.sequence ? Number(body.sequence) : null,
         pairingStatus: role === "JPEG" ? "jpeg_only" : "raw_only",
-        rating: Math.max(0, Math.min(5, Number.parseInt(body.rating ?? "0", 10) || 0)),
+         rating,
       }).returning();
+       if (rating === 5) {
+         await clearGroupFiveStarChoices(tx, projectId, groupId, capture.id);
+         [capture] = await tx.update(groupCapturesTable).set({ rating: 5, updatedAt: new Date() })
+           .where(eq(groupCapturesTable.id, capture.id)).returning();
+       }
       const [existingRole] = await tx.select().from(groupCaptureFilesTable).where(and(eq(groupCaptureFilesTable.captureId, capture.id), eq(groupCaptureFilesTable.fileRole, role))).limit(1);
       if (existingRole) {
         const resumedFile = await attachSupersededBatchFile(tx, groupCaptureFilesTable, existingRole, captureBatch, clientUploadId);
@@ -1109,7 +1274,6 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
     }
     try { await backupGroupUploadedFile(projectId, groupId, result.backupFilePath, uploadedGroupFile.originalFilename, uploadedGroupFile.fileRole as "JPEG" | "RAW", uploadedGroupFile.fileFormat, `group-capture:${result.capture.id}:${uploadedGroupFile.fileRole}`); }
     catch (error) { if (error instanceof GoogleDriveBackupError) { res.status(503).json({ error: "Capture saved locally, but Google Drive backup failed. Retry the upload.", code: "GOOGLE_DRIVE_BACKUP_FAILED" }); return; } throw error; }
-    await projectGroupJpegToPhotographedStudents(result.capture, uploadedGroupFile);
     const r2Upload = await createR2CopyUpload({
       source: {
         kind: "group",
@@ -1122,6 +1286,15 @@ router.post("/projects/:projectId/groups/:groupId/captures", requireDesktopConne
       fileSize: req.file.size,
       sha256: await sha256File(req.file.path),
     });
+    if (r2Upload === null) {
+      discardUploadedFile(req);
+      res.status(503).json({
+        error: "Group photo could not be stored safely for galleries. Please retry the upload.",
+        code: "GROUP_PHOTO_STORAGE_FAILED",
+      });
+      return;
+    }
+    await projectGroupJpegWithCurrentRating(result.capture, uploadedGroupFile);
     if (result.reused) discardUploadedFile(req);
     res.status(result.reused ? 200 : 201).json({
       captureId: result.capture.id,
@@ -1161,15 +1334,20 @@ router.patch("/projects/:projectId/groups/:groupId/captures/:captureKey/review",
     rejected: typeof req.body?.rejected === "boolean" ? req.body.rejected : false,
     selected: typeof req.body?.selected === "boolean" ? req.body.selected : rating > 0,
   });
-  const [capture] = await db.update(groupCapturesTable).set({
-    rating,
-    ...flags,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(groupCapturesTable.projectId, projectId),
-    eq(groupCapturesTable.groupId, groupId),
-    eq(groupCapturesTable.captureKey, String(req.params.captureKey)),
-  )).returning();
+  const [capture] = await db.transaction(async (tx) => {
+    const [target] = await tx.select().from(groupCapturesTable).where(and(
+      eq(groupCapturesTable.projectId, projectId),
+      eq(groupCapturesTable.groupId, groupId),
+      eq(groupCapturesTable.captureKey, String(req.params.captureKey)),
+    )).limit(1);
+    if (!target) return [];
+    if (rating === 5) await clearGroupFiveStarChoices(tx, projectId, groupId, target.id);
+    return tx.update(groupCapturesTable).set({
+      rating,
+      ...flags,
+      updatedAt: new Date(),
+    }).where(eq(groupCapturesTable.id, target.id)).returning();
+  });
   if (!capture) {
     res.status(404).json({ error: "Group capture not found" });
     return;
@@ -1179,11 +1357,7 @@ router.patch("/projects/:projectId/groups/:groupId/captures/:captureKey/review",
     eq(groupCaptureFilesTable.fileRole, "JPEG"),
   )).limit(1);
   if (jpeg) {
-    await db.update(studentPhotosTable).set({
-      rating,
-      shareWithParents: rating > 0,
-    }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, jpeg.id));
-    await projectGroupJpegToPhotographedStudents(capture, jpeg);
+    await projectGroupJpegWithCurrentRating(capture, jpeg);
   }
   res.json({ capture });
 });
@@ -1462,6 +1636,7 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
     });
 
     const result = await db.transaction(async (tx) => {
+      if (rating === 5) await lockPortraitFiveStarOwner(tx, projectId, studentId);
       if (clientUploadId) {
         const [existingByClientId] = await tx
           .select({ file: captureFilesTable, capture: capturesTable })
@@ -1575,6 +1750,13 @@ router.post("/:studentId/captures", requireDesktopConnection, validateDesktopUpl
             colorLabel,
           })
           .returning();
+      }
+      if (rating === 5) {
+        await clearPortraitFiveStarChoices(tx, projectId, studentId, capture.id);
+        if (capture.rating !== 5) {
+          [capture] = await tx.update(capturesTable).set({ rating: 5, updatedAt: new Date() })
+            .where(eq(capturesTable.id, capture.id)).returning();
+        }
       }
 
       const [existingByRole] = await tx
@@ -1752,11 +1934,16 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
         }
         : {}),
   };
-  const [capture] = await db.update(capturesTable).set(captureUpdate).where(and(
-    eq(capturesTable.projectId, projectId),
-    eq(capturesTable.studentId, studentId),
-    eq(capturesTable.captureKey, scopedCaptureKey),
-  )).returning();
+  const [capture] = await db.transaction(async (tx) => {
+    const [target] = await tx.select().from(capturesTable).where(and(
+      eq(capturesTable.projectId, projectId),
+      eq(capturesTable.studentId, studentId),
+      eq(capturesTable.captureKey, scopedCaptureKey),
+    )).limit(1);
+    if (!target) return [];
+    if (rating === 5) await clearPortraitFiveStarChoices(tx, projectId, studentId, target.id);
+    return tx.update(capturesTable).set(captureUpdate).where(eq(capturesTable.id, target.id)).returning();
+  });
   if (!capture) {
     res.status(404).json({ error: "Capture not found" });
     return;
@@ -1774,20 +1961,30 @@ router.patch("/:studentId/captures/:captureKey/review", requireDesktopConnection
     await projectCaptureJpegToDeliveryPhoto(capture, jpeg.file);
   }
   // Keep review metadata synchronized with the projected delivery JPEG.
-  await db.update(studentPhotosTable).set({
-    rating,
-    colorLabel: colorLabel as "none" | "red" | "yellow" | "green" | "blue" | "purple",
-    shareWithParents: rating > 0,
-  }).where(and(
-    eq(studentPhotosTable.projectId, projectId),
-    eq(studentPhotosTable.studentId, studentId),
-    jpeg?.clientUploadId
-      ? and(
-        eq(studentPhotosTable.desktopConnectionId, jpeg.desktopConnectionId!),
-        eq(studentPhotosTable.clientUploadId, jpeg.clientUploadId),
-      )
-      : eq(studentPhotosTable.fileName, jpeg?.originalFilename ?? capture.baseFilename),
-  ));
+  if (jpeg) {
+    await db.transaction(async (tx) => {
+      await lockPortraitFiveStarOwner(tx, projectId, studentId);
+      const [latest] = await tx.select({
+        rating: capturesTable.rating,
+        colorLabel: capturesTable.colorLabel,
+      }).from(capturesTable).where(eq(capturesTable.id, capture.id)).limit(1);
+      if (!latest) return;
+      await tx.update(studentPhotosTable).set({
+        rating: latest.rating,
+        colorLabel: latest.colorLabel,
+        shareWithParents: latest.rating > 0,
+      }).where(and(
+        eq(studentPhotosTable.projectId, projectId),
+        eq(studentPhotosTable.studentId, studentId),
+        jpeg.clientUploadId
+          ? and(
+              eq(studentPhotosTable.desktopConnectionId, jpeg.desktopConnectionId!),
+              eq(studentPhotosTable.clientUploadId, jpeg.clientUploadId),
+            )
+          : eq(studentPhotosTable.fileName, jpeg.originalFilename),
+      ));
+    });
+  }
   res.json({ capture });
 });
 
@@ -1854,31 +2051,19 @@ router.patch("/:studentId/photos/:photoId/review", requireAuth, async (req, res)
   }
 
   const [photo] = await db.transaction(async (tx) => {
-    const updatedPhotos = existingPhoto.sourceGroupCaptureFileId !== null
-      ? await tx.update(studentPhotosTable).set({
-          rating,
-          colorLabel,
-          shareWithParents,
-        }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, existingPhoto.sourceGroupCaptureFileId)).returning()
-      : await tx.update(studentPhotosTable).set({
-          rating,
-          colorLabel,
-          shareWithParents,
-        }).where(eq(studentPhotosTable.id, photoId)).returning();
-
+    let groupFile: { captureId: number; groupId: number } | undefined;
+    let portraitCaptureId: number | undefined;
     if (existingPhoto.sourceGroupCaptureFileId !== null) {
-      const [groupFile] = await tx.select({ captureId: groupCaptureFilesTable.captureId })
+      [groupFile] = await tx.select({
+        captureId: groupCaptureFilesTable.captureId,
+        groupId: groupCapturesTable.groupId,
+      })
         .from(groupCaptureFilesTable)
+        .innerJoin(groupCapturesTable, eq(groupCaptureFilesTable.captureId, groupCapturesTable.id))
         .where(eq(groupCaptureFilesTable.id, existingPhoto.sourceGroupCaptureFileId))
         .limit(1);
-      if (groupFile) {
-        await tx.update(groupCapturesTable).set({
-          rating,
-          favorite: rating >= 4,
-          selected: rating > 0,
-          rejected: false,
-          updatedAt: new Date(),
-        }).where(eq(groupCapturesTable.id, groupFile.captureId));
+      if (rating === 5 && groupFile) {
+        await clearGroupFiveStarChoices(tx, projectId, groupFile.groupId, groupFile.captureId);
       }
     } else {
       const captureIdentity = existingPhoto.clientUploadId
@@ -1897,7 +2082,35 @@ router.patch("/:studentId/photos/:photoId/review", requireAuth, async (req, res)
           captureIdentity,
         ))
         .limit(1);
-      if (captureFile) {
+      portraitCaptureId = captureFile?.captureId;
+      if (rating === 5) {
+        await clearPortraitFiveStarChoices(tx, projectId, studentId, portraitCaptureId);
+      }
+    }
+    const updatedPhotos = existingPhoto.sourceGroupCaptureFileId !== null
+      ? await tx.update(studentPhotosTable).set({
+          rating,
+          colorLabel,
+          shareWithParents,
+        }).where(eq(studentPhotosTable.sourceGroupCaptureFileId, existingPhoto.sourceGroupCaptureFileId)).returning()
+      : await tx.update(studentPhotosTable).set({
+          rating,
+          colorLabel,
+          shareWithParents,
+        }).where(eq(studentPhotosTable.id, photoId)).returning();
+
+    if (existingPhoto.sourceGroupCaptureFileId !== null) {
+      if (groupFile) {
+        await tx.update(groupCapturesTable).set({
+          rating,
+          favorite: rating >= 4,
+          selected: rating > 0,
+          rejected: false,
+          updatedAt: new Date(),
+        }).where(eq(groupCapturesTable.id, groupFile.captureId));
+      }
+    } else {
+      if (portraitCaptureId) {
         await tx.update(capturesTable).set({
           rating,
           colorLabel,
@@ -1905,7 +2118,7 @@ router.patch("/:studentId/photos/:photoId/review", requireAuth, async (req, res)
           selected: rating > 0,
           rejected: false,
           updatedAt: new Date(),
-        }).where(eq(capturesTable.id, captureFile.captureId));
+        }).where(eq(capturesTable.id, portraitCaptureId));
       }
     }
 
@@ -2058,13 +2271,18 @@ router.get("/:studentId/captures/:captureId/files/:fileId/file", requireAuth, as
     res.status(404).json({ error: "Capture file not found" });
     return;
   }
+  res.setHeader("Content-Type", file.file.mimeType);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (file.file.durableObjectPath) {
+    const object = await objectStorageService.getObjectEntityFile(file.file.durableObjectPath);
+    object.createReadStream().pipe(res);
+    return;
+  }
   const filePath = resolveFilePath(file.file.fileUrl);
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: "Capture file not found on server" });
     return;
   }
-  res.setHeader("Content-Type", file.file.mimeType);
-  res.setHeader("Cache-Control", "private, max-age=3600");
   res.sendFile(filePath);
 });
 

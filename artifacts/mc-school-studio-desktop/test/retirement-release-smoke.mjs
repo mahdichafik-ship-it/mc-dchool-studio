@@ -856,7 +856,7 @@ try {
     {
       fileRole: 'RAW',
       originalFilename: 'DSC_9000.CR3',
-      storedFilename: `John_Smith_${studentReference}.CR3`,
+      storedFilename: 'DSC_9000.CR3',
     },
   ]
   const secondDroppedFiles = [
@@ -868,7 +868,7 @@ try {
     {
       fileRole: 'RAW',
       originalFilename: 'DSC_9000.CR3',
-      storedFilename: 'Maya_Chen_005678.CR3',
+      storedFilename: 'DSC_9000.CR3',
     },
   ]
   const expectedDroppedQueue = [

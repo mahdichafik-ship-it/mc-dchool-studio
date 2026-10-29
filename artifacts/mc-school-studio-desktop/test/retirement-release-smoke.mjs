@@ -811,6 +811,13 @@ try {
     projectId: ${localProjectId},
     enabled: true
   })`)
+  await cdp.evaluate(`(() => {
+    window.__releaseSmokeDropProgress = []
+    window.__releaseSmokeDropProgressUnsubscribe?.()
+    window.__releaseSmokeDropProgressUnsubscribe = window.api.on('watcher:dropProgress', (event) => {
+      window.__releaseSmokeDropProgress.push(event)
+    })
+  })()`)
   await dropFilesOnStudent(cdp, localStudentOneId, [droppedJpegOne, droppedRawOne])
   await dropFilesOnStudent(cdp, localStudentTwoId, [droppedJpegTwo, droppedRawTwo])
   assert.equal(
@@ -893,10 +900,33 @@ try {
   }
 
   let droppedCaptureState
-  await waitFor('durable dropped captures and transfer queue', async () => {
-    droppedCaptureState = await readDroppedCaptureState()
-    return hasDurableDroppedCaptureState(droppedCaptureState)
-  }, 40_000)
+  try {
+    await waitFor('durable dropped captures and transfer queue', async () => {
+      droppedCaptureState = await readDroppedCaptureState()
+      return hasDurableDroppedCaptureState(droppedCaptureState)
+    }, 40_000)
+  } catch (error) {
+    const observed = await readDroppedCaptureState()
+    const summarize = (review) => review.captures.map((capture) => ({
+      captureId: capture.id,
+      studentId: capture.studentId,
+      pairingStatus: capture.pairingStatus,
+      files: capture.files.map((file) => ({
+        fileRole: file.fileRole,
+        originalFilename: file.originalFilename,
+        storedFilename: basename(file.storedPath),
+        uploadStatus: file.uploadStatus,
+      })),
+    }))
+    const dropProgress = await cdp.evaluate('window.__releaseSmokeDropProgress ?? []')
+    console.error('[smoke] dropped capture diagnostic', JSON.stringify({
+      first: summarize(observed.first),
+      second: summarize(observed.second),
+      queue: observed.queue.map((item) => ({ subject: item.subject, fileRole: item.fileRole, fileName: item.fileName, status: item.status })),
+      dropProgress,
+    }))
+    throw error
+  }
 
   const assertDroppedCaptures = async (state) => {
     state ??= await readDroppedCaptureState()

@@ -868,7 +868,7 @@ try {
     {
       fileRole: 'RAW',
       originalFilename: 'DSC_9000.CR3',
-      storedFilename: 'DSC_9000.CR3',
+      storedFilename: 'DSC_9000-2.CR3',
     },
   ]
   const expectedDroppedQueue = [

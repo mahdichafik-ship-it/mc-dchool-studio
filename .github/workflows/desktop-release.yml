@@ -331,6 +331,33 @@ jobs:
           set -euo pipefail
           version="${RELEASE_VERSION#v}"
 
+          validate_stapler_ticket() {
+            local app_path="$1"
+            local attempt=1
+            local max_attempts=4
+            local delay=5
+            local output
+            local status
+
+            while true; do
+              if output="$(xcrun stapler validate "$app_path" 2>&1)"; then
+                printf "%s\n" "$output"
+                return 0
+              else
+                status=$?
+              fi
+
+              printf "%s\n" "$output" >&2
+              if [[ "$output" == *"api.apple-cloudkit.com/database/1/com.apple.gk.ticket-delivery"* && "$output" == *"NSURLErrorDomain Code=-1005"* && "$output" == *"Error 68"* && "$attempt" -lt "$max_attempts" ]]; then
+                echo "::warning::Apple CloudKit ticket lookup disconnected during stapler validation; retrying in ${delay}s (attempt ${attempt}/${max_attempts})"
+                sleep "$delay"
+                attempt=$((attempt + 1))
+                delay=$((delay * 2))
+              else
+                return "$status"
+              fi
+            done
+          }
           verify_app() {
             app_path="$1"
 
@@ -350,7 +377,7 @@ jobs:
             test "$(lipo -archs "$executable")" = "$expected_macho_architecture"
             codesign --verify --deep --strict --verbose=2 "$app_path"
             spctl --assess --type execute --verbose=2 "$app_path"
-            xcrun stapler validate "$app_path"
+            validate_stapler_ticket "$app_path"
           }
 
           for arch in "$PACKAGE_ARCHITECTURE"; do

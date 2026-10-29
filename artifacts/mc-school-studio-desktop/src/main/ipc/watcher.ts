@@ -1,7 +1,7 @@
 import { app, ipcMain, BrowserWindow } from 'electron'
 import chokidar, { FSWatcher } from 'chokidar'
 import { existsSync, mkdirSync } from 'fs'
-import { copyFile, mkdir, stat as statFile } from 'fs/promises'
+import { copyFile, mkdir, stat as statFile, unlink } from 'fs/promises'
 import { basename, dirname, extname, join, parse, resolve } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
@@ -14,7 +14,7 @@ import {
   studentsTable,
   groupsTable,
 } from '../db/schema'
-import { getSetting, notifyLiveUploadJobQueued } from './upload'
+import { getSetting, notifyLiveUploadJobQueued, setSetting } from './upload'
 import {
   extractStudentReference,
   formatGroupPhotoName,
@@ -70,9 +70,8 @@ import {
   recordQrMarker,
   recordRawCapture,
   recordGroupCapture,
-  findCapturePairAssignment,
 } from '../lib/captureRepository'
-import { getCaptureFileRole } from '../lib/capturePairing'
+import { getCaptureFileRole, normalizeBaseFilename } from '../lib/capturePairing'
 import {
   ensureProjectStorageLayout,
   getPhotoSystemLayout,
@@ -80,8 +79,57 @@ import {
 } from '../lib/storageLayout'
 import { NewestLivePreviewScheduler } from '../lib/livePreviewScheduler'
 import { resolveWatchFolders } from '../lib/watchFolders'
+import { persistRawAtMarkerBoundary } from '../lib/rawMarkerPersistence'
 
 const FLUSH_DELAY_MS = 50
+const MARKER_MATE_TOLERANCE_MS = 120_000
+
+function markerMateSettingKey(projectId: number, fileName: string): string {
+  return `qr_marker_mates:${projectId}:${encodeURIComponent(normalizeBaseFilename(fileName))}`
+}
+
+function readMarkerMateTimes(projectId: number, fileName: string): number[] {
+  const raw = getSetting(markerMateSettingKey(projectId, fileName))
+  if (!raw) return []
+  try {
+    const values = JSON.parse(raw)
+    return Array.isArray(values)
+      ? values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+      : []
+  } catch {
+    return []
+  }
+}
+
+function rememberQrMarkerMate(projectId: number, capture: CaptureFile): void {
+  const cutoff = capture.capturedAtMs - MARKER_MATE_TOLERANCE_MS
+  const times = readMarkerMateTimes(projectId, capture.fileName)
+    .filter((value) => value >= cutoff)
+  times.push(capture.capturedAtMs)
+  setSetting(markerMateSettingKey(projectId, capture.fileName), JSON.stringify(times.slice(-20)))
+  const db = getDb()
+  const provisionalRawMates = db
+    .select()
+    .from(capturesTable)
+    .where(and(
+      eq(capturesTable.projectId, projectId),
+      eq(capturesTable.baseFilename, normalizeBaseFilename(capture.fileName)),
+    ))
+    .all()
+    .filter((candidate) =>
+      candidate.studentId === null
+      && candidate.pairingStatus === 'raw_only'
+      && Math.abs(Date.parse(candidate.capturedAt) - capture.capturedAtMs) <= MARKER_MATE_TOLERANCE_MS)
+  for (const candidate of provisionalRawMates) {
+    setSetting(`quarantined_capture_pair:${candidate.id}`, '1')
+  }
+}
+
+function hasQrMarkerMate(projectId: number, capture: CaptureFile): boolean {
+  return readMarkerMateTimes(projectId, capture.fileName)
+    .some((value) => Math.abs(value - capture.capturedAtMs) <= MARKER_MATE_TOLERANCE_MS)
+}
+
 interface WatchSession {
   watcher: FSWatcher | null
   pendingFiles: CaptureFile[]
@@ -442,6 +490,7 @@ async function handleQrMarker(
   win: BrowserWindow | null,
   qrResult: QrResult,
 ): Promise<CaptureProcessingStatus> {
+  rememberQrMarkerMate(projectId, capture)
   const normalizedQrStudentId = qrResult.studentId.trim().toLocaleLowerCase()
   const student = db
     .select()
@@ -1433,97 +1482,35 @@ async function handleNewRaw(
       ? 'manual'
       : capturedStudentId !== null ? 'qr' : 'none')
   const manualStudentId = assignmentSource === 'manual' ? capturedStudentId : null
-  const manualStudent = manualStudentId === null
-    ? undefined
-    : findProjectStudent(db, projectId, manualStudentId)
   const capturedTargetStudent = capturedStudentId === null
     ? undefined
     : findProjectStudent(db, projectId, capturedStudentId)
-  // Pairing is an immutable shutter identity. Resolve an existing JPEG pair
-  // before constructing any destination path; the active target at delayed
-  // RAW arrival is only a fallback when no same-shutter capture exists.
-  const pairAssignment = findCapturePairAssignment(db, {
-    projectId,
-    studentId: manualStudentId ?? capturedStudentId ?? filenameStudent?.id ?? null,
-    fileName: capture.fileName,
-    capturedAt: new Date(capture.capturedAtMs).toISOString(),
-    groupId: capture.selectedGroupId === null || capture.selectedGroupId === undefined
-      ? undefined
-      : String(capture.selectedGroupId),
-    strictStudentOwnership: capture.strictStudentOwnership,
-  })
-  const pairedStudent = pairAssignment?.studentId === null || pairAssignment === undefined
-    ? undefined
-    : findProjectStudent(db, projectId, pairAssignment.studentId)
-  // The target source captured with the filesystem event is authoritative.
-  // Filename matching is only a fallback for an event that had no active
-  // manual/QR target. Never consult the mutable target again for a delayed
-  // RAW file.
-  const student = pairAssignment
-    ? pairedStudent
-    : assignmentSource !== 'none'
-    ? (manualStudent ?? capturedTargetStudent)
+  const pairingStudent = assignmentSource !== 'none'
+    ? capturedTargetStudent
     : filenameStudent
   markImagePipeline(
     capture.diagnosticId,
     'student lookup complete',
-    `reference=${filenameReference ?? 'none'} student=${student?.id ?? 'none'} file=${capture.fileName}`,
+    `reference=${filenameReference ?? 'none'} pairingStudent=${pairingStudent?.id ?? 'none'} file=${capture.fileName}`,
   )
   markImagePipeline(
     capture.diagnosticId,
     'student assigned',
-    student ? `student=${student.id} file=${capture.fileName}` : `student=none file=${capture.fileName}`,
+    `student=provisional file=${capture.fileName}`,
   )
-  if (student) {
-    const destinationFileName = formatStudentPhotoName(
-      student.firstName,
-      student.lastName,
-      student.generatedStudentId,
-      capture.fileName,
-    )
-    enqueueLocalPreview(
-      session.previewScheduler,
-      getMainWindow(),
-      projectId,
-      capture,
-      student,
-      {
-        filePath: capture.filePath,
-        fileName: destinationFileName,
-        capturedAt: new Date(capture.capturedAtMs).toISOString(),
-      },
-    )
-  }
 
   const task = session.persistence.then(async () => {
     await session.previewScheduler.waitForIdle()
     const storage = getProjectStorage(projectId, project)
-    const destinationFileName = student
-      ? formatStudentPhotoName(
-        student.firstName,
-        student.lastName,
-        student.generatedStudentId,
-        capture.fileName,
-      )
-      : capture.fileName
-    const studentFolder = student ? getStudentPhotoFolder(db, projectId, student) : null
     const outputFileName = nextAvailableFileName(
-      [studentFolder, storage.rawOriginals]
-        .filter((directory): directory is string => directory !== null),
-      destinationFileName,
+      [storage.rawOriginals],
+      capture.fileName,
     )
     markImagePipeline(
       capture.diagnosticId,
       'file move started',
-      `destination=${student ? 'student folder' : 'RAW originals'} mode=async-copy`,
+      'destination=RAW originals mode=async-copy',
     )
-    const legacyStoredPath = student
-      ? await copyToProjectFolder(
-        capture.filePath,
-        outputFileName,
-        studentFolder!,
-      )
-      : null
     const storedPath = await copyToProjectFolder(
       capture.filePath,
       outputFileName,
@@ -1532,20 +1519,33 @@ async function handleNewRaw(
     markImagePipeline(
       capture.diagnosticId,
       'file move complete',
-      `storedPath=${storedPath} legacyPath=${legacyStoredPath ?? 'none'} mode=async-copy`,
+      `storedPath=${storedPath} legacyPath=none mode=async-copy`,
     )
+    const boundary = await persistRawAtMarkerBoundary({
+      hasMarkerMate: () => hasQrMarkerMate(projectId, capture),
+      discardCopiedFile: async () => {
+        await unlink(storedPath).catch(() => {})
+        setSetting(`discarded_capture_source:${capture.filePath}`, '1')
+      },
+      persistSynchronously: () => recordRawCapture(db, {
+        projectId,
+        studentId: null,
+        classId: null,
+        pairingStudentId: pairingStudent?.id ?? null,
+        filePath: capture.filePath,
+        storedPath,
+        fileName: capture.fileName,
+        capturedAt: new Date(capture.capturedAtMs).toISOString(),
+        strictStudentOwnership: capture.strictStudentOwnership,
+      }),
+    })
+    if (boundary.kind === 'discarded-marker-mate') {
+      console.log(`[Watcher] RAW QR marker mate discarded after copy ${capture.fileName}`)
+      return
+    }
     markImagePipeline(capture.diagnosticId, 'RAW pairing complete', `capture=${capture.fileName}`)
     markImagePipeline(capture.diagnosticId, 'database write started', `capture=${capture.fileName}`)
-    const result = recordRawCapture(db, {
-      projectId,
-      studentId: student?.id ?? null,
-      classId: student?.classId ?? null,
-      filePath: capture.filePath,
-      storedPath,
-      fileName: outputFileName,
-      capturedAt: new Date(capture.capturedAtMs).toISOString(),
-      strictStudentOwnership: capture.strictStudentOwnership,
-    })
+    const result = boundary.value
 
     if (result.kind === 'duplicate') return
     notifyLiveUploadJobQueued(projectId)
@@ -1563,7 +1563,7 @@ async function handleNewRaw(
     markImagePipeline(capture.diagnosticId, 'IPC event sent', 'RAW capture update')
     console.log(
       `[Watcher] RAW ${result.kind === 'paired' ? 'paired' : 'stored'} ${capture.fileName}`
-        + ` for project ${projectId}${student ? ` → ${student.firstName} ${student.lastName}` : ''}`,
+        + ` for project ${projectId}`,
     )
   })
   const handledTask = task.catch((error) => {

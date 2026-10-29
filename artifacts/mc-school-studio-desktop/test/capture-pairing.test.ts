@@ -5,6 +5,7 @@ import {
   getCaptureFileFormat,
   getCaptureFileRole,
   normalizeBaseFilename,
+  sourcePairingFileName,
 } from '../src/main/lib/capturePairing.ts'
 
 test('classifies supported JPEG and RAW formats', () => {
@@ -19,6 +20,12 @@ test('classifies supported JPEG and RAW formats', () => {
 test('normalizes the shared base filename for pairing', () => {
   assert.equal(normalizeBaseFilename(' DSC_8291.JPG '), 'dsc_8291')
   assert.equal(normalizeBaseFilename('DSC_8291.NEF'), 'dsc_8291')
+})
+
+test('uses the immutable camera name when a managed JPEG was renamed', () => {
+  const sourceJpeg = sourcePairingFileName('/camera/DCIM/IMG_0042.JPG')
+  assert.equal(normalizeBaseFilename(sourceJpeg), normalizeBaseFilename('IMG_0042.CR3'))
+  assert.notEqual(normalizeBaseFilename('First_Last_ID.JPG'), normalizeBaseFilename('IMG_0042.CR3'))
 })
 
 test('pairs delayed RAW with JPEG assignment after active target changes', () => {

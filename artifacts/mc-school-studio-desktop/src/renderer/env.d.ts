@@ -102,7 +102,13 @@ interface ElectronAPI {
     classId: number
     firstName: string
     lastName: string
+    generatedStudentId?: string
+    email?: string
   }): Promise<CreateStudentResult>
+  invoke(channel: 'students:ensureQr', args: {
+    projectId: number
+    studentId: number
+  }): Promise<Student>
   invoke(channel: 'students:move', args: {
     projectId: number
     studentId: number

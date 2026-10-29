@@ -1,6 +1,6 @@
 {
   "name": "@workspace/mc-school-studio-desktop",
-  "version": "1.0.87",
+  "version": "1.0.88",
   "private": true,
   "description": "Desktop photo capture and matching app for school photo days",
   "author": "Volume Capture",
@@ -54,6 +54,7 @@
     "exiftool-vendored": "^37.2.0",
     "jimp": "^1.6.0",
     "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4",
     "sharp": "^0.35.4"
   },
   "devDependencies": {
@@ -62,6 +63,7 @@
     "@tailwindcss/vite": "catalog:",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "catalog:",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",

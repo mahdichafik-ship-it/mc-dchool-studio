@@ -565,6 +565,11 @@ router.post("/projects/:projectId/classes", requireDesktopConnection, async (req
     res.status(400).json({ error: "A valid class or group name is required." });
     return;
   }
+  if (email.length > 254 || (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    res.status(400).json({ error: "Enter a valid email address (maximum 254 characters)." });
+    return;
+  }
+
   if (!(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
     res.status(404).json({ error: "Project not found" });
     return;
@@ -995,8 +1000,9 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
   const firstName = typeof req.body?.firstName === "string" ? req.body.firstName.trim() : "";
   const lastName = typeof req.body?.lastName === "string" ? req.body.lastName.trim() : "";
   const generatedStudentId = typeof req.body?.generatedStudentId === "string"
-    ? req.body.generatedStudentId.trim().toUpperCase()
+    ? req.body.generatedStudentId.normalize("NFKC").trim()
     : "";
+  const email = typeof req.body?.email === "string" ? req.body.email.normalize("NFKC").trim() : "";
 
   if (
     !Number.isInteger(projectId)
@@ -1005,9 +1011,11 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
     || !lastName
     || firstName.length > 100
     || lastName.length > 100
-    || !/^[A-Z0-9]{7}$/.test(generatedStudentId)
+    || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(generatedStudentId)
   ) {
-    res.status(400).json({ error: "A class, first name, last name, and valid student code are required." });
+    res.status(400).json({
+      error: "A class, first name, last name, and valid capture ID are required. IDs may use letters, numbers, hyphens, or underscores (maximum 100 characters).",
+    });
     return;
   }
 
@@ -1072,6 +1080,7 @@ router.post("/projects/:projectId/students", requireDesktopConnection, async (re
         firstName,
         lastName,
         generatedStudentId,
+        email: email || null,
         simpleQr,
         jsonQr,
       })

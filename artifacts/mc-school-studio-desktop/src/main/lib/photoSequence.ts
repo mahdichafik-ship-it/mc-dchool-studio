@@ -161,6 +161,13 @@ export function sortCaptureFiles(files: CaptureFile[]): CaptureFile[] {
       const arrivalDifference = a.arrivalOrder - b.arrivalOrder
       if (arrivalDifference !== 0) return arrivalDifference
     }
+    const aStem = a.fileName.replace(/\.[^.]+$/, '').toLocaleLowerCase()
+    const bStem = b.fileName.replace(/\.[^.]+$/, '').toLocaleLowerCase()
+    if (aStem === bStem) {
+      const aIsJpeg = /\.jpe?g$/i.test(a.fileName)
+      const bIsJpeg = /\.jpe?g$/i.test(b.fileName)
+      if (aIsJpeg !== bIsJpeg) return aIsJpeg ? -1 : 1
+    }
     const timestampDifference = a.capturedAtMs - b.capturedAtMs
     if (timestampDifference !== 0) return timestampDifference
 

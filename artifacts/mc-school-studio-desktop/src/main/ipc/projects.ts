@@ -30,6 +30,7 @@ import {
   migrateStudentFoldersAt,
   previewStudentFolderMigration,
 } from '../lib/studentFolderMigration'
+import { generateStudentQrCodes } from '../lib/studentQr'
 
 function now() {
   return new Date().toISOString()
@@ -541,12 +542,27 @@ export function registerProjectHandlers() {
     'students:create',
     async (
       _e,
-      input: { projectId: number; classId: number; firstName: string; lastName: string },
+      input: {
+        projectId: number
+        classId: number
+        firstName: string
+        lastName: string
+        generatedStudentId?: string
+        email?: string
+      },
     ): Promise<CreateStudentResult> => {
       const firstName = input.firstName.trim()
       const lastName = input.lastName.trim()
       if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) {
         throw new Error('Enter a first and last name (maximum 100 characters each).')
+      }
+      const email = input.email?.normalize('NFKC').trim() ?? ''
+      if (email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+        throw new Error('Enter a valid email address (maximum 254 characters).')
+      }
+      const requestedStudentId = input.generatedStudentId?.normalize('NFKC').trim() ?? ''
+      if (requestedStudentId && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(requestedStudentId)) {
+        throw new Error('Use letters, numbers, hyphens, or underscores for the capture ID (maximum 100 characters).')
       }
 
       const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
@@ -561,12 +577,32 @@ export function registerProjectHandlers() {
       if (!cls) throw new Error('Choose a class from this project.')
 
       const timestamp = now()
+      const existingIds = new Set(
+        db.select({ id: studentsTable.generatedStudentId })
+          .from(studentsTable)
+          .where(eq(studentsTable.projectId, input.projectId))
+          .all()
+          .map((row) => row.id.normalize('NFKC').trim().toLocaleLowerCase()),
+      )
+      if (requestedStudentId && existingIds.has(requestedStudentId.toLocaleLowerCase())) {
+        throw new Error('That capture ID is already used in this project.')
+      }
+      const generatedStudentId = requestedStudentId || generateUniqueLocalStudentId(input.projectId)
+      const qrCodes = await generateStudentQrCodes({
+        projectName: project.schoolName,
+        className: cls.className,
+        firstName,
+        lastName,
+        studentId: generatedStudentId,
+      })
       const student = db.insert(studentsTable).values({
         projectId: input.projectId,
         classId: input.classId,
         firstName,
         lastName,
-        generatedStudentId: generateUniqueLocalStudentId(input.projectId),
+        generatedStudentId,
+        email: email || null,
+        ...qrCodes,
         createdAt: timestamp,
         updatedAt: timestamp,
       }).returning().get()
@@ -580,6 +616,47 @@ export function registerProjectHandlers() {
         cloudSynced: sync.synced,
         ...(sync.error ? { syncError: sync.error } : {}),
       }
+    },
+  )
+
+  ipcMain.handle(
+    'students:ensureQr',
+    async (
+      _e,
+      input: { projectId: number; studentId: number },
+    ): Promise<Student> => {
+      const student = db.select().from(studentsTable).where(and(
+        eq(studentsTable.id, input.studentId),
+        eq(studentsTable.projectId, input.projectId),
+      )).get()
+      if (!student) throw new Error('Employee not found in this project.')
+      if (student.simpleQr && student.jsonQr) {
+        const cls = db.select().from(classesTable).where(eq(classesTable.id, student.classId)).get()
+        return toStudent(student, cls?.className ?? '')
+      }
+
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      const cls = db.select().from(classesTable).where(and(
+        eq(classesTable.id, student.classId),
+        eq(classesTable.projectId, input.projectId),
+      )).get()
+      if (!cls) throw new Error('The employee’s department is missing from this project.')
+
+      const qrCodes = await generateStudentQrCodes({
+        projectName: project.schoolName,
+        className: cls.className,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        studentId: student.generatedStudentId,
+      })
+      db.update(studentsTable)
+        .set({ ...qrCodes, updatedAt: now() })
+        .where(eq(studentsTable.id, student.id))
+        .run()
+      const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, student.id)).get()
+      if (!refreshed) throw new Error('The employee QR code could not be saved.')
+      return toStudent(refreshed, cls.className)
     },
   )
 

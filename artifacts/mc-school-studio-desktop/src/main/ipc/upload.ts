@@ -436,6 +436,7 @@ async function repairCloudIdentity(
           firstName: student.firstName,
           lastName: student.lastName,
           generatedStudentId: student.generatedStudentId,
+          email: student.email,
         }),
         signal: AbortSignal.timeout(30000),
       },
@@ -1118,7 +1119,7 @@ async function performSyncCaptureReview(captureId: number): Promise<void> {
   if (!project?.cloudId || !student?.cloudId || !apiUrl || !connectionToken) return
   try {
     const response = await fetch(
-      `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
+      `${apiUrl.replace(/\/+$/, '')}/api/projects/${project.cloudId}/students/${student.cloudId}/captures/${encodeURIComponent(capture.captureKey)}/review`,
       {
         method: 'PATCH',
         headers: {

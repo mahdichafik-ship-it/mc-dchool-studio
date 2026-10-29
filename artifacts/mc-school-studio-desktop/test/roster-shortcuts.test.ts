@@ -78,6 +78,16 @@ test('editing targets include inputs, textareas, selects, and contenteditable re
   assert.equal(isRosterShortcutEditingTarget({ tagName: 'BUTTON' }), false)
 })
 
+test('number keys map to one through five star ratings only', () => {
+  assert.deepEqual(
+    ['1', '2', '3', '4', '5'].map(ratingFromShortcut),
+    [1, 2, 3, 4, 5],
+  )
+  for (const key of ['0', '6', 'a', 'ArrowLeft']) {
+    assert.equal(ratingFromShortcut(key), null)
+  }
+})
+
 test('open dialogs and finished projects block every roster shortcut', () => {
   for (const key of ['/', 'ArrowUp', 'ArrowDown', 'n', 'N', 'Escape']) {
     assert.deepEqual(shortcut({
@@ -115,16 +125,6 @@ test('ProjectView routes shortcut selection through the synchronized capture-tar
     source,
     /async function handleSelectCaptureStudent\(student: Student\)[\s\S]*await setActiveCaptureTarget\(student\.id\)[\s\S]*setSelectedStudent\(student\)/,
   )
-})
-
-test('number keys map to one through five star ratings only', () => {
-  assert.deepEqual(
-    ['1', '2', '3', '4', '5'].map(ratingFromShortcut),
-    [1, 2, 3, 4, 5],
-  )
-  for (const key of ['0', '6', 'a', 'ArrowLeft']) {
-    assert.equal(ratingFromShortcut(key), null)
-  }
 })
 
 test('ProjectView routes number shortcuts through the selected capture review action', async () => {

@@ -12,7 +12,12 @@ import {
   studentsTable,
   settingsTable,
 } from '../db/schema.ts'
-import { getCaptureFileFormat, getCaptureFileRole, normalizeBaseFilename } from './capturePairing.ts'
+import {
+  getCaptureFileFormat,
+  getCaptureFileRole,
+  normalizeBaseFilename,
+  sourcePairingFileName,
+} from './capturePairing.ts'
 
 type DesktopDb = ReturnType<typeof getDb>
 type PhotoRow = typeof photosTable.$inferSelect
@@ -34,6 +39,8 @@ interface CaptureFileInput {
    * basename/timestamp pairing behavior.
    */
   strictStudentOwnership?: boolean
+  /** Student hint used only to prevent strict cross-student pairing. */
+  pairingStudentId?: number | null
 }
 
 function timestampMs(value: string): number {
@@ -59,6 +66,16 @@ function findDuplicateFile(db: DesktopDb, sourcePath: string) {
     .get()
 }
 
+function provisionalPairingStudentId(db: DesktopDb, captureId: number): number | null {
+  const row = db
+    .select()
+    .from(settingsTable)
+    .where(eq(settingsTable.key, `provisional_capture_student:${captureId}`))
+    .get()
+  if (!row) return null
+  const value = Number(row.value)
+  return Number.isInteger(value) ? value : null
+}
 function findPairCandidate(db: DesktopDb, input: CaptureFileInput) {
   const role = getCaptureFileRole(input.fileName)
   if (!role) return undefined
@@ -73,9 +90,18 @@ function findPairCandidate(db: DesktopDb, input: CaptureFileInput) {
     .all()
     .map((capture) => ({ capture, files: getCaptureFiles(db, capture.id) }))
     .filter(({ capture, files }) =>
-      sameCaptureWindow(input.capturedAt, capture.capturedAt)
+      !isPairingQuarantined(db, capture.id)
+      && sameCaptureWindow(input.capturedAt, capture.capturedAt)
       && (input.groupId === undefined || capture.groupId === input.groupId)
-      && (!input.strictStudentOwnership || capture.studentId === input.studentId)
+       && (
+         !input.strictStudentOwnership
+         || capture.studentId === (input.pairingStudentId ?? input.studentId)
+         || (
+           capture.studentId === null
+           && provisionalPairingStudentId(db, capture.id)
+             === (input.pairingStudentId ?? input.studentId)
+         )
+       )
       && !files.some((file) => file.fileRole === role),
     )
     .sort((a, b) => timestampMs(b.capture.capturedAt) - timestampMs(a.capture.capturedAt))[0]
@@ -280,6 +306,18 @@ export function recordRawCapture(db: DesktopDb, input: CaptureFileInput): {
     updatedAt: input.capturedAt,
   }).returning().get()
   insertImageFile(db, capture.id, input)
+  if (input.pairingStudentId !== null && input.pairingStudentId !== undefined) {
+    db.insert(settingsTable)
+      .values({
+        key: `provisional_capture_student:${capture.id}`,
+        value: String(input.pairingStudentId),
+      })
+      .onConflictDoUpdate({
+        target: settingsTable.key,
+        set: { value: String(input.pairingStudentId) },
+      })
+      .run()
+  }
   return { kind: 'created', captureId: capture.id }
 }
 
@@ -306,6 +344,7 @@ export function mirrorPhotoAsCapture(
 
   const role = getCaptureFileRole(photo.fileName)
   if (role !== 'JPEG') return
+  const sourceFileName = sourcePairingFileName(sourcePath)
 
   const student = photo.studentId === null
     ? undefined
@@ -327,7 +366,7 @@ export function mirrorPhotoAsCapture(
     classId: classRow?.id ?? null,
     filePath: sourcePath,
     storedPath: photo.filePath,
-    fileName: photo.fileName,
+    fileName: sourceFileName,
     capturedAt: photo.capturedAt,
     strictStudentOwnership: options.strictStudentOwnership,
   })
@@ -336,16 +375,25 @@ export function mirrorPhotoAsCapture(
     db.update(capturesTable)
       .set({
         legacyPhotoId: photo.id,
+        ...(candidate.capture.studentId === null
+          ? {
+              studentId: photo.studentId,
+              classId: classRow?.id ?? null,
+            }
+          : {}),
         updatedAt: photo.createdAt,
         pairingStatus: statusForFiles([...candidate.files, { fileRole: 'JPEG' }]),
       })
       .where(eq(capturesTable.id, candidate.capture.id))
       .run()
+    db.delete(settingsTable)
+      .where(eq(settingsTable.key, `provisional_capture_student:${candidate.capture.id}`))
+      .run()
     db.insert(imageFilesTable).values({
       captureId: candidate.capture.id,
       fileRole: role,
-      fileFormat: getCaptureFileFormat(photo.fileName),
-      originalFilename: photo.fileName,
+      fileFormat: getCaptureFileFormat(sourceFileName),
+      originalFilename: sourceFileName,
       storedPath: photo.filePath,
       sourcePath,
       fileSize,
@@ -362,7 +410,7 @@ export function mirrorPhotoAsCapture(
     projectId: photo.projectId,
     studentId: photo.studentId,
     classId: classRow?.id ?? null,
-    baseFilename: normalizeBaseFilename(photo.fileName),
+    baseFilename: normalizeBaseFilename(sourceFileName),
     capturedAt: photo.capturedAt,
     assignmentLocked: true,
     pairingStatus: photo.isMatched ? 'jpeg_only' : 'unpaired',
@@ -374,8 +422,8 @@ export function mirrorPhotoAsCapture(
   db.insert(imageFilesTable).values({
     captureId: capture.id,
     fileRole: role,
-    fileFormat: getCaptureFileFormat(photo.fileName),
-    originalFilename: photo.fileName,
+    fileFormat: getCaptureFileFormat(sourceFileName),
+    originalFilename: sourceFileName,
     storedPath: photo.filePath,
     sourcePath,
     fileSize,
@@ -398,4 +446,12 @@ export function reconcileLegacyPhotosAsCaptures(
   mirror: (db: DesktopDb, photo: PhotoRow, sourcePath?: string) => void = mirrorPhotoAsCapture,
 ): void {
   for (const photo of photos) mirror(db, photo)
+}
+
+function isPairingQuarantined(db: DesktopDb, captureId: number): boolean {
+  return Boolean(db
+    .select()
+    .from(settingsTable)
+    .where(eq(settingsTable.key, `quarantined_capture_pair:${captureId}`))
+    .get())
 }

@@ -1,4 +1,4 @@
-import { extname, parse } from 'node:path'
+import { basename, extname, parse } from 'node:path'
 
 export type CaptureFileRole = 'JPEG' | 'RAW'
 export type CapturePairingStatus = 'pending' | 'jpeg_only' | 'raw_only' | 'complete' | 'unpaired'
@@ -73,6 +73,11 @@ export function getCaptureFileFormat(fileName: string): string {
 
 export function normalizeBaseFilename(fileName: string): string {
   return parse(fileName).name.trim().normalize('NFKC').toLocaleLowerCase()
+}
+
+/** Pair on the immutable camera/source name, never a managed renamed JPEG. */
+export function sourcePairingFileName(sourcePath: string): string {
+  return basename(sourcePath)
 }
 
 function timestampMs(value: string): number {

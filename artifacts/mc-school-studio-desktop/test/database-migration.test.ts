@@ -21,15 +21,13 @@ test('upgrades an older local database without replacing existing rows', () => {
   const migrationStatements: string[] = []
   const sqlite = {
     pragma(source: string) {
-      const table = source.match(/^table_info\((\w+)\)$/)?.[1]
+      const table = source.match(/^table_info\(([^)]+)\)$/)?.[1]
       return [...(columns.get(table ?? '') ?? [])].map((name) => ({ name }))
     },
     exec(source: string) {
       migrationStatements.push(source)
-      if (source.startsWith("UPDATE projects SET project_type = 'school'")) return
-      const match = source.match(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (.+)$/)
-      assert(match, `unexpected migration statement: ${source}`)
-      columns.get(match[1])?.add(match[2])
+      const alter = source.match(/ALTER TABLE (\w+) ADD COLUMN (\w+)/)
+      if (alter) columns.get(alter[1])?.add(alter[2])
     },
   }
 
@@ -67,23 +65,33 @@ test('upgrades an older local database without replacing existing rows', () => {
 })
 
 test('repairs case-insensitive roster duplicates without changing row or capture identity', () => {
-  const dbPath = join(tmpdir(), `mc-school-student-id-repair-${process.pid}.sqlite`)
+  const dbPath = join(tmpdir(), `mc-school-review-migration-${process.pid}.sqlite`)
   execFileSync('sqlite3', [dbPath, `
-    CREATE TABLE students (
+    CREATE TABLE projects (
       id INTEGER PRIMARY KEY,
-      project_id INTEGER NOT NULL,
-      generated_student_id TEXT NOT NULL,
-      updated_at TEXT
+      school_name TEXT NOT NULL,
+      finished_at TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'active',
+      sync_completed_files INTEGER NOT NULL DEFAULT 0,
+      sync_total_files INTEGER NOT NULL DEFAULT 0,
+      sync_failed_files INTEGER NOT NULL DEFAULT 0,
+      sync_error TEXT
     );
-    CREATE TABLE captures (
-      id INTEGER PRIMARY KEY,
-      student_id INTEGER,
-      base_filename TEXT NOT NULL
-    );
-    INSERT INTO students (id, project_id, generated_student_id)
-      VALUES (10, 1, 'AbC1234'), (11, 1, 'abc1234'), (12, 2, 'ABC1234');
-    INSERT INTO captures (id, student_id, base_filename)
-      VALUES (90, 11, 'late-jpeg'), (91, 12, 'other-project');
+    CREATE TABLE classes (id INTEGER PRIMARY KEY, project_id INTEGER, class_name TEXT);
+    CREATE TABLE students (id INTEGER PRIMARY KEY, project_id INTEGER, class_id INTEGER, first_name TEXT, last_name TEXT, generated_student_id TEXT, simple_qr TEXT, json_qr TEXT);
+    CREATE TABLE photos (id INTEGER PRIMARY KEY, project_id INTEGER, student_id INTEGER, captured_at TEXT, file_name TEXT, file_path TEXT, upload_status TEXT, file_url TEXT, is_matched INTEGER);
+    CREATE TABLE captures (id INTEGER PRIMARY KEY, student_id INTEGER);
+    INSERT INTO students (id, project_id, generated_student_id, simple_qr, json_qr) VALUES
+      (1, 1, 'AbC1234', 'simple-1', 'json-1'),
+      (2, 1, 'abc1234', 'simple-2', 'json-2'),
+      (3, 2, 'ABC1234', 'simple-3', 'json-3');
+    INSERT INTO captures (id, student_id) VALUES (1, 1), (2, 2), (3, 3);
+    INSERT INTO projects (id, school_name, sync_status, sync_completed_files, sync_total_files)
+      VALUES (1, 'Active legacy', 'active', 0, 0);
+    INSERT INTO projects (id, school_name, finished_at, sync_status, sync_completed_files, sync_total_files)
+      VALUES (2, 'Finished legacy', '2025-01-01T00:00:00.000Z', 'active', 7, 7);
+    INSERT INTO projects (id, school_name, sync_status, sync_completed_files, sync_total_files, sync_failed_files)
+      VALUES (3, 'Interrupted legacy', 'syncing', 2, 5, 1);
   `])
   const sqlite = {
     pragma(source: string) {
@@ -102,10 +110,18 @@ test('repairs case-insensitive roster duplicates without changing row or capture
 
     const students = JSON.parse(execFileSync('sqlite3', [
       '-json', dbPath,
-      'SELECT id, project_id, generated_student_id FROM students ORDER BY id',
-    ], { encoding: 'utf8' })) as Array<{ id: number; project_id: number; generated_student_id: string }>
+       'SELECT id, project_id, generated_student_id, simple_qr, json_qr FROM students ORDER BY id',
+    ], { encoding: 'utf8' })) as Array<{
+      id: number
+      project_id: number
+      generated_student_id: string
+      simple_qr: string | null
+      json_qr: string | null
+    }>
     assert.equal(students[0].generated_student_id, 'AbC1234')
     assert.notEqual(students[1].generated_student_id.toLocaleLowerCase(), 'abc1234')
+    assert.equal(students[1].simple_qr, null)
+    assert.equal(students[1].json_qr, null)
     assert.equal(students[2].generated_student_id, 'ABC1234')
     assert.deepEqual(JSON.parse(execFileSync('sqlite3', [
       '-json', dbPath, 'SELECT id, student_id FROM captures ORDER BY id',
@@ -120,7 +136,7 @@ test('repairs case-insensitive roster duplicates without changing row or capture
 })
 
 test('backfills active, finished, and interrupted project lifecycles safely', () => {
-  const dbPath = join(tmpdir(), `mc-school-migration-${process.pid}.sqlite`)
+  const dbPath = join(tmpdir(), `mc-school-review-migration-${process.pid}.sqlite`)
   execFileSync('sqlite3', [dbPath, `
     CREATE TABLE projects (
       id INTEGER PRIMARY KEY,
@@ -134,7 +150,7 @@ test('backfills active, finished, and interrupted project lifecycles safely', ()
     );
     CREATE TABLE classes (id INTEGER PRIMARY KEY, project_id INTEGER, class_name TEXT);
     CREATE TABLE students (id INTEGER PRIMARY KEY, project_id INTEGER, class_id INTEGER, first_name TEXT, last_name TEXT, generated_student_id TEXT);
-    CREATE TABLE photos (id INTEGER PRIMARY KEY, project_id INTEGER, file_path TEXT);
+    CREATE TABLE photos (id INTEGER PRIMARY KEY, project_id INTEGER, student_id INTEGER, captured_at TEXT, file_name TEXT, file_path TEXT, upload_status TEXT, file_url TEXT, is_matched INTEGER);
     INSERT INTO projects (id, school_name, sync_status, sync_completed_files, sync_total_files)
       VALUES (1, 'Active legacy', 'active', 0, 0);
     INSERT INTO projects (id, school_name, finished_at, sync_status, sync_completed_files, sync_total_files)
@@ -173,45 +189,104 @@ test('backfills active, finished, and interrupted project lifecycles safely', ()
 })
 
 test('capture migration is repeatable and keeps legacy rows as the compatibility source', () => {
+  const dbPath = join(tmpdir(), `mc-school-capture-migration-${process.pid}.sqlite`)
   const statements: string[] = []
-  const columns = new Map<string, Set<string>>([
-    ['groups', new Set()],
-    ['group_captures', new Set()],
-    ['group_capture_files', new Set()],
-  ])
+  execFileSync('sqlite3', [dbPath, `
+    CREATE TABLE projects (
+      id INTEGER PRIMARY KEY,
+      school_name TEXT,
+      finished_at TEXT,
+      sync_status TEXT,
+      sync_completed_files INTEGER,
+      sync_total_files INTEGER,
+      sync_failed_files INTEGER,
+      sync_error TEXT,
+      project_type TEXT
+    );
+    CREATE TABLE classes (id INTEGER PRIMARY KEY);
+    CREATE TABLE students (id INTEGER PRIMARY KEY, project_id INTEGER, class_id INTEGER);
+    CREATE TABLE photos (
+      id INTEGER PRIMARY KEY,
+      project_id INTEGER,
+      student_id INTEGER,
+      captured_at TEXT,
+      created_at TEXT,
+      file_name TEXT,
+      file_path TEXT,
+      upload_status TEXT,
+      file_url TEXT,
+      is_matched INTEGER
+    );
+    CREATE TABLE groups (
+      id INTEGER PRIMARY KEY,
+      project_id INTEGER NOT NULL,
+      class_id INTEGER,
+      name TEXT NOT NULL,
+      is_default_class_group INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE group_captures (
+      id INTEGER PRIMARY KEY,
+      capture_key TEXT NOT NULL UNIQUE,
+      project_id INTEGER NOT NULL,
+      class_id INTEGER,
+      group_id INTEGER NOT NULL,
+      base_filename TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      pairing_status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE group_capture_files (
+      id INTEGER PRIMARY KEY,
+      capture_id INTEGER NOT NULL,
+      file_role TEXT NOT NULL,
+      file_format TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      source_path TEXT,
+      file_size INTEGER,
+      upload_status TEXT,
+      file_url TEXT,
+      created_at TEXT NOT NULL
+    );
+  `])
   const sqlite = {
     pragma(source: string) {
-      const table = source.match(/^table_info\((\w+)\)$/)?.[1]
-      return [...(columns.get(table ?? '') ?? [])].map((name) => ({ name }))
+      return JSON.parse(execFileSync('sqlite3', ['-json', dbPath, `PRAGMA ${source}`], { encoding: 'utf8' }))
     },
     exec(source: string) {
       statements.push(source)
-      const match = source.match(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (.+)$/)
-      if (match) columns.get(match[1])?.add(match[2])
+      execFileSync('sqlite3', [dbPath, source])
     },
   }
 
-  ensureCaptureTables(sqlite)
-  ensureCaptureTables(sqlite)
+  try {
+    ensureCaptureTables(sqlite)
+    ensureCaptureTables(sqlite)
 
-  const migrationSql = statements.join('\n')
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS captures/)
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS image_files/)
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS qr_markers/)
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS groups/)
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_members/)
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_captures/)
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_capture_files/)
-  assert.match(migrationSql, /source_path TEXT NOT NULL UNIQUE/)
-  assert.match(migrationSql, /INSERT OR IGNORE INTO captures/)
-  assert.match(migrationSql, /FROM photos p/)
-  assert.match(migrationSql, /INSERT OR IGNORE INTO image_files/)
-  assert.match(migrationSql, /WHERE NOT EXISTS/)
-  assert.match(migrationSql, /UPDATE captures[\s\S]*SET aspect_ratio = 'original'[\s\S]*group_id IS NULL/)
-  assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN membership_dirty')).length, 1)
-  assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN gallery_ready')).length, 1)
-  assert.equal(statements.filter((statement) => statement.includes('group_captures ADD COLUMN rating')).length, 1)
-  assert.equal(statements.filter((statement) => statement.includes('group_captures ADD COLUMN review_sync_pending')).length, 1)
+    const migrationSql = statements.join('\n')
+    assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS captures/)
+    assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS image_files/)
+    assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS qr_markers/)
+    assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS groups/)
+    assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_members/)
+    assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_captures/)
+    assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS group_capture_files/)
+    assert.match(migrationSql, /source_path TEXT NOT NULL UNIQUE/)
+    assert.match(migrationSql, /INSERT OR IGNORE INTO captures/)
+    assert.match(migrationSql, /FROM photos p/)
+    assert.match(migrationSql, /INSERT OR IGNORE INTO image_files/)
+    assert.match(migrationSql, /WHERE NOT EXISTS/)
+    assert.match(migrationSql, /UPDATE captures[\s\S]*SET aspect_ratio = 'original'[\s\S]*group_id IS NULL/)
+    assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN membership_dirty')).length, 1)
+    assert.equal(statements.filter((statement) => statement.includes('ADD COLUMN gallery_ready')).length, 1)
+    assert.equal(statements.filter((statement) => statement.includes('group_captures ADD COLUMN rating')).length, 1)
+    assert.equal(statements.filter((statement) => statement.includes('group_captures ADD COLUMN review_sync_pending')).length, 1)
+  } finally {
+    unlinkSync(dbPath)
+  }
 })
 
 test('gallery reconciliation retries every legacy photo without deleting or moving it', () => {

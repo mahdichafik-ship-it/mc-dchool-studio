@@ -115,7 +115,9 @@ export function ensureStudentIdentityConstraint(sqlite: SqliteSchemaDatabase): v
       } while (used.has(replacement.toLocaleLowerCase()))
       used.add(replacement.toLocaleLowerCase())
       sqlite.prepare?.(
-        'UPDATE students SET generated_student_id = ?, updated_at = datetime(\'now\') WHERE id = ?',
+        `UPDATE students
+         SET generated_student_id = ?, simple_qr = NULL, json_qr = NULL, updated_at = datetime('now')
+         WHERE id = ?`,
       )?.run?.(replacement, id)
       reassigned += 1
     }
@@ -124,7 +126,9 @@ export function ensureStudentIdentityConstraint(sqlite: SqliteSchemaDatabase): v
     // is still idempotent and leaves row/capture identity untouched.
     sqlite.exec(`
       UPDATE students
-      SET generated_student_id = 'REPAIRED-' || project_id || '-' || id
+      SET generated_student_id = 'REPAIRED-' || project_id || '-' || id,
+          simple_qr = NULL,
+          json_qr = NULL
       WHERE id IN (
         SELECT id FROM (
           SELECT id, ROW_NUMBER() OVER (

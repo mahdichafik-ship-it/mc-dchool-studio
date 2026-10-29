@@ -176,6 +176,7 @@ export function ProjectView({
   const [draggedStudentId, setDraggedStudentId] = useState<number | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const autoStartAttemptedRef = useRef<number | null>(null)
+  const qrRepairInFlightRef = useRef(new Set<number>())
 
   useEffect(() => {
     if (!project) return
@@ -379,6 +380,25 @@ export function ProjectView({
       }
     }
   }, [students])
+
+  useEffect(() => {
+    if (!selectedStudent || selectedStudent.simpleQr || qrRepairInFlightRef.current.has(selectedStudent.id)) return
+    const studentId = selectedStudent.id
+    qrRepairInFlightRef.current.add(studentId)
+    void window.api.invoke('students:ensureQr', { projectId, studentId })
+      .then((student) => {
+        setSelectedStudent(student as Student)
+        void reloadStudents()
+      })
+      .catch((error) => {
+        addToast({
+          type: 'error',
+          title: 'Could not generate employee QR code',
+          description: String(error),
+        })
+      })
+      .finally(() => qrRepairInFlightRef.current.delete(studentId))
+  }, [projectId, selectedStudent?.id, selectedStudent?.simpleQr, reloadStudents])
 
   useEffect(() => {
     if (activeStudentId === null) return
@@ -1868,9 +1888,12 @@ function AddStudentDialog({
   departmentLabel: string
   employeeLabel: string
 }) {
+  const emailLabel = employeeLabel === 'Student' ? 'Parent/guardian email' : 'Email address'
   const [classId, setClassId] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [generatedStudentId, setGeneratedStudentId] = useState('')
+  const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -1878,6 +1901,8 @@ function AddStudentDialog({
     setClassId(String(initialClassId ?? classes[0]?.id ?? ''))
     setFirstName('')
     setLastName('')
+    setGeneratedStudentId('')
+    setEmail('')
   }, [classes, initialClassId, open])
 
   async function handleSubmit(event: React.FormEvent) {
@@ -1890,6 +1915,8 @@ function AddStudentDialog({
         classId: Number(classId),
         firstName,
         lastName,
+        generatedStudentId: generatedStudentId.trim() || undefined,
+        email: email.trim() || undefined,
       }) as CreateStudentResult
       await onCreated(result)
       onClose()
@@ -1951,6 +1978,38 @@ function AddStudentDialog({
               className="h-10 font-medium"
             />
           </div>
+        </div>
+        <div>
+          <label htmlFor="new-student-email" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            {emailLabel}
+          </label>
+          <Input
+            id="new-student-email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            maxLength={254}
+            autoComplete="email"
+            placeholder="name@example.com"
+            className="h-10 font-medium"
+          />
+        </div>
+        <div>
+          <label htmlFor="new-student-capture-id" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            Capture ID
+          </label>
+          <Input
+            id="new-student-capture-id"
+            value={generatedStudentId}
+            onChange={(event) => setGeneratedStudentId(event.target.value)}
+            maxLength={100}
+            pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,99}"
+            placeholder="Leave blank to generate automatically"
+            className="h-10 font-mono font-medium"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Enter the ID printed on the person’s capture card. If left blank, one is generated.
+          </p>
         </div>
         <p className="text-xs font-medium leading-relaxed text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100">
            The {employeeLabel.toLowerCase()} is saved on this Mac immediately and selected as the active capture target.
@@ -2271,13 +2330,8 @@ function StudentDetail({
   useEffect(() => {
     const handleReviewShortcut = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
-      const isInput =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.tagName === 'SELECT' ||
-        target.isContentEditable
       if (
-        isInput ||
+        isRosterShortcutEditingTarget(target) ||
         showQrOpen ||
         reassignOpen ||
         framingCapture !== null ||
@@ -2315,7 +2369,7 @@ function StudentDetail({
     }
     window.addEventListener('keydown', handleReviewShortcut)
     return () => window.removeEventListener('keydown', handleReviewShortcut)
-  }, [captures, framingCapture, isFollowingLatest, latestCapture, quickLookCapture, reassignOpen, selectedCapture?.id, showQrOpen])
+  }, [captures, framingCapture, isFollowingLatest, latestCapture, quickLookCapture, reassignOpen, selectedCapture?.id, selectedCapture?.rating, showQrOpen])
 
   async function handleDeletePhoto(photoId: number) {
     await window.api.invoke('photos:delete', { photoId })
@@ -2576,7 +2630,7 @@ function StudentDetail({
                   <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
                     Capture review
                   </div>
-                  <p className="mt-2 text-xs font-semibold text-slate-500">Star a photo to include it in the parent gallery, or press 1–5 to rate the selected capture.</p>
+              <p className="mt-2 text-xs font-semibold text-slate-500">Star a photo to include it in the parent gallery, or press 1–5 to rate the selected capture.</p>
                 </div>
                 <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
                   {captureFilterOptions.map((option) => (
@@ -3589,8 +3643,8 @@ function GroupDetail({
                         )
                       })}
                     </div>
-                    <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery · press 1–5 for latest</span>
+              <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                       <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery · press 1–5 for latest</span>
                       <div className="flex items-center gap-0.5">
                         {[1, 2, 3, 4, 5].map(rating => (
                           <button
@@ -4290,7 +4344,7 @@ function CaptureReviewControls({
           </button>
         </div>
       </div>
-      <div className="flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2" aria-keyshortcuts="1 2 3 4 5">
+              <div className="flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2" aria-keyshortcuts="1 2 3 4 5">
         {[1, 2, 3, 4, 5].map((rating) => (
           <button
             key={rating}

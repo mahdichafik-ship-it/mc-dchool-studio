@@ -282,3 +282,12 @@ test('sorts a capture burst by capture time with deterministic filename ties', (
     'portrait-10.jpg',
   ])
 })
+
+test('processes a JPEG before its RAW mate even when the RAW event arrives first', () => {
+  const sorted = sortCaptureFiles([
+    { filePath: '/spool/RAW/IMG_0042.CR3', fileName: 'IMG_0042.CR3', capturedAtMs: 100 },
+    { filePath: '/spool/JPEG/IMG_0042.JPG', fileName: 'IMG_0042.JPG', capturedAtMs: 101 },
+  ])
+
+  assert.deepEqual(sorted.map((file) => file.fileName), ['IMG_0042.JPG', 'IMG_0042.CR3'])
+})

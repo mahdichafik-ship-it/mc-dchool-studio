@@ -843,32 +843,32 @@ try {
   const firstDroppedFiles = [
     {
       fileRole: 'JPEG',
-      originalFilename: `John_Smith_${studentReference}.JPG`,
+      originalFilename: 'DSC_9000.JPG',
       storedFilename: `John_Smith_${studentReference}.JPG`,
     },
     {
       fileRole: 'RAW',
-      originalFilename: `John_Smith_${studentReference}.CR3`,
+      originalFilename: 'DSC_9000.CR3',
       storedFilename: `John_Smith_${studentReference}.CR3`,
     },
   ]
   const secondDroppedFiles = [
     {
       fileRole: 'JPEG',
-      originalFilename: 'Maya_Chen_005678.JPG',
+      originalFilename: 'DSC_9000.JPG',
       storedFilename: 'Maya_Chen_005678.JPG',
     },
     {
       fileRole: 'RAW',
-      originalFilename: 'Maya_Chen_005678.CR3',
+      originalFilename: 'DSC_9000.CR3',
       storedFilename: 'Maya_Chen_005678.CR3',
     },
   ]
   const expectedDroppedQueue = [
-    `John Smith:JPEG:John_Smith_${studentReference}.JPG`,
-    `John Smith:RAW:John_Smith_${studentReference}.CR3`,
-    'Maya Chen:JPEG:Maya_Chen_005678.JPG',
-    'Maya Chen:RAW:Maya_Chen_005678.CR3',
+    'John Smith:JPEG:DSC_9000.JPG',
+    'John Smith:RAW:DSC_9000.CR3',
+    'Maya Chen:JPEG:DSC_9000.JPG',
+    'Maya Chen:RAW:DSC_9000.CR3',
   ].sort()
 
   const hasDurableDroppedCaptureState = ({ first, second, queue }) => {

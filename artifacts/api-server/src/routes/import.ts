@@ -205,6 +205,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
         officeLocation: string | null;
         photoSession: string | null;
         captureNotes: string | null;
+        customFields: Record<string, string>;
         hasEmail: boolean;
         hasSecondaryEmail: boolean;
         hasSchoolId: boolean;
@@ -223,6 +224,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
         hasOfficeLocation: boolean;
         hasPhotoSession: boolean;
         hasCaptureNotes: boolean;
+        hasCustomFields: boolean;
       };
 
       const existing = await tx
@@ -299,6 +301,8 @@ router.post("/confirm", requireAuth, async (req, res) => {
       for (const sheet of sheets) {
         const {
           className,
+          classNameColumn,
+          customFieldColumns = [],
           firstNameColumn,
           lastNameColumn,
           studentIdColumn,
@@ -329,6 +333,21 @@ router.post("/confirm", requireAuth, async (req, res) => {
             `Each roster sheet is limited to ${IMPORT_MAX_ROWS} rows and ${IMPORT_MAX_COLUMNS} columns`,
           );
         }
+        if (!Array.isArray(customFieldColumns) || customFieldColumns.length > 30) {
+          throw new ImportValidationError("A roster sheet can map at most 30 custom fields");
+        }
+        const customFieldMappings = customFieldColumns.map((field: { fieldName?: unknown; column?: unknown }) => {
+          const fieldName = typeof field?.fieldName === "string" ? field.fieldName.trim() : "";
+          const column = typeof field?.column === "string" ? field.column : "";
+          if (!fieldName || fieldName.length > 60 || !column || !headers.includes(column)) {
+            throw new ImportValidationError("Custom fields need a name and a valid source column");
+          }
+          return { fieldName, index: headers.indexOf(column) };
+        });
+        const customFieldNames = customFieldMappings.map(({ fieldName }) => fieldName.toLocaleLowerCase());
+        if (new Set(customFieldNames).size !== customFieldNames.length) {
+          throw new ImportValidationError("Custom field names must be unique within a sheet");
+        }
 
         if (!className || !firstNameColumn || !lastNameColumn) {
           continue;
@@ -337,6 +356,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
         // Map column indices.
         const firstNameIdx = headers.indexOf(firstNameColumn);
         const lastNameIdx = headers.indexOf(lastNameColumn);
+        const classNameIdx = classNameColumn ? headers.indexOf(classNameColumn) : -1;
         const studentIdIdx = studentIdColumn ? headers.indexOf(studentIdColumn) : -1;
         const emailIdx = emailColumn ? headers.indexOf(emailColumn) : -1;
         const secondaryEmailIdx = secondaryEmailColumn ? headers.indexOf(secondaryEmailColumn) : -1;
@@ -361,8 +381,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
           continue;
         }
 
-        const displayClassName = normalizeOptionalString(className);
-        if (!displayClassName) continue;
+        const fallbackClassName = normalizeOptionalString(className);
 
         for (const row of rows) {
           if (!Array.isArray(row) || row.length > IMPORT_MAX_COLUMNS) {
@@ -370,8 +389,15 @@ router.post("/confirm", requireAuth, async (req, res) => {
           }
           const firstName = boundedCell(row[firstNameIdx]);
           const lastName = boundedCell(row[lastNameIdx]);
+          const displayClassName =
+            (classNameIdx >= 0 ? normalizeOptionalString(row[classNameIdx]) : null) ?? fallbackClassName;
 
           if (!firstName && !lastName) continue;
+          if (!displayClassName) {
+            throw new ImportValidationError(
+              `A class name is missing for ${firstName || "a student"} ${lastName}`.trim(),
+            );
+          }
 
           const providedId = studentIdIdx >= 0 ? normalizeOptionalString(row[studentIdIdx]) : null;
           if (providedId) {
@@ -410,6 +436,8 @@ router.post("/confirm", requireAuth, async (req, res) => {
             photoSessionIdx >= 0 ? normalizeOptionalString(row[photoSessionIdx]) : null;
           const captureNotes =
             captureNotesIdx >= 0 ? normalizeOptionalString(row[captureNotesIdx]) : null;
+          const customFields = Object.fromEntries(customFieldMappings
+            .map(({ fieldName, index }) => [fieldName, normalizeOptionalString(row[index]) ?? ""]));
           importRows.push({
             className: displayClassName,
             firstName,
@@ -433,6 +461,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
             officeLocation,
             photoSession,
             captureNotes,
+            customFields,
             hasEmail: emailIdx >= 0,
             hasSecondaryEmail: secondaryEmailIdx >= 0,
             hasSchoolId: schoolIdIdx >= 0,
@@ -451,6 +480,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
             hasOfficeLocation: officeLocationIdx >= 0,
             hasPhotoSession: photoSessionIdx >= 0,
             hasCaptureNotes: captureNotesIdx >= 0,
+            hasCustomFields: customFieldMappings.length > 0,
           });
         }
       }
@@ -485,6 +515,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
         normalizeKey(input.officeLocation),
         normalizeKey(input.photoSession),
         normalizeKey(input.captureNotes),
+        JSON.stringify(input.customFields),
         input.hasEmail,
         input.hasSecondaryEmail,
         input.hasSchoolId,
@@ -503,6 +534,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
         input.hasOfficeLocation,
         input.hasPhotoSession,
         input.hasCaptureNotes,
+        input.hasCustomFields,
       ].join("\u0000");
       importRows.forEach((input, rowIndex) => {
         const keys = [normalizeKey(input.email), normalizeKey(input.secondaryEmail)]
@@ -620,6 +652,7 @@ router.post("/confirm", requireAuth, async (req, res) => {
             officeLocation: input.officeLocation,
             photoSession: input.photoSession,
             captureNotes: input.captureNotes,
+            customFields: input.customFields,
           }).returning();
           const row: WorkingStudent = { student: created, className: targetClassName };
           working.push(row);
@@ -653,6 +686,9 @@ router.post("/confirm", requireAuth, async (req, res) => {
           ...(input.hasOfficeLocation ? { officeLocation: input.officeLocation } : {}),
           ...(input.hasPhotoSession ? { photoSession: input.photoSession } : {}),
           ...(input.hasCaptureNotes ? { captureNotes: input.captureNotes } : {}),
+          ...(input.hasCustomFields
+            ? { customFields: { ...(old.customFields ?? {}), ...input.customFields } }
+            : {}),
         };
         const changed =
           old.firstName !== next.firstName ||
@@ -675,7 +711,8 @@ router.post("/confirm", requireAuth, async (req, res) => {
           (input.hasJobTitle && old.jobTitle !== next.jobTitle) ||
           (input.hasOfficeLocation && old.officeLocation !== next.officeLocation) ||
           (input.hasPhotoSession && old.photoSession !== next.photoSession) ||
-          (input.hasCaptureNotes && old.captureNotes !== next.captureNotes);
+          (input.hasCaptureNotes && old.captureNotes !== next.captureNotes) ||
+          (input.hasCustomFields && JSON.stringify(old.customFields ?? {}) !== JSON.stringify(next.customFields ?? {}));
         if (!changed) {
           studentsSkipped++;
           continue;

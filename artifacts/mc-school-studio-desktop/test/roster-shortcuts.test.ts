@@ -137,3 +137,17 @@ test('ProjectView routes number shortcuts through the selected capture review ac
   assert.match(source, /if \(rating !== null && selectedCapture\)[\s\S]*handleUpdateCaptureReview\(selectedCapture\.id/)
   assert.match(source, /press 1–5 to rate the selected capture/)
 })
+
+test('person context menu supports renaming, class moves, and multiple custom subgroups', async () => {
+  const source = await readFile(
+    new URL('../src/renderer/src/pages/ProjectView.tsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(source, /Rename \{employeeLabel\.toLowerCase\(\)\}/)
+  assert.match(source, /classes\.filter\(\(targetClass\) => targetClass\.id !== contextMenu\.student!\.classId\)/)
+  assert.match(source, /await window\.api\.invoke\('students:move'/)
+  assert.match(source, /captureTargetGroups\.filter\(\(group\) => !group\.isDefaultClassGroup\)/)
+  assert.match(source, /isMember \? `Remove from \$\{group\.name\}` : `Add to \$\{group\.name\}`/)
+  assert.match(source, /handleGroupMembership\(group, student\.id, !isMember\)/)
+})

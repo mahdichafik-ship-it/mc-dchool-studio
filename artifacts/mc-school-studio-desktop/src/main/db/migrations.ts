@@ -52,6 +52,8 @@ export function ensureLegacyColumns(sqlite: SqliteSchemaDatabase): void {
     ['projects', 'sync_failed_files', 'INTEGER NOT NULL DEFAULT 0'],
     ['projects', 'sync_error', 'TEXT'],
     ['projects', 'project_type', "TEXT NOT NULL DEFAULT 'school'"],
+    ['projects', 'archived_at', 'TEXT'],
+    ['projects', 'local_files_deleted_at', 'TEXT'],
   ]
   for (const [table, column, definition] of migrations) {
     ensureColumn(sqlite, table, column, definition)

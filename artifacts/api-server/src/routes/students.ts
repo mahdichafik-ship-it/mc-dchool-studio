@@ -36,6 +36,16 @@ function normalizeOptionalString(value: unknown): string | null {
   return normalized || null;
 }
 
+function sanitizeCustomFields(value: unknown): Record<string, string> | null {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 30 || entries.some(([key, item]) =>
+    !key.trim() || key.length > 60 || typeof item !== "string" || item.length > 2000
+  )) return null;
+  return Object.fromEntries(entries.map(([key, item]) => [key.trim(), (item as string).trim()]));
+}
+
 function validateEmail(value: string | null, fieldName: string): string | null {
   if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
     return `${fieldName} must be a valid email address`;
@@ -73,6 +83,7 @@ function formatStudent(
     officeLocation: s.officeLocation ?? null,
     photoSession: s.photoSession ?? null,
     captureNotes: s.captureNotes ?? null,
+    customFields: s.customFields ?? {},
     simpleQr: s.simpleQr,
     jsonQr: s.jsonQr,
     createdAt: s.createdAt.toISOString(),
@@ -136,6 +147,7 @@ router.post("/", requireAuth, async (req, res) => {
     officeLocation,
     photoSession,
     captureNotes,
+    customFields,
   } = req.body;
 
   const normalizedFirstName =
@@ -144,6 +156,11 @@ router.post("/", requireAuth, async (req, res) => {
     lastName !== undefined ? normalizeOptionalString(lastName) : undefined;
   if (!classId || !normalizedFirstName || !normalizedLastName) {
     res.status(400).json({ error: "classId, firstName, and lastName are required" });
+    return;
+  }
+  const normalizedCustomFields = sanitizeCustomFields(customFields);
+  if (!normalizedCustomFields) {
+    res.status(400).json({ error: "Custom fields must contain at most 30 named text values." });
     return;
   }
 
@@ -208,6 +225,7 @@ router.post("/", requireAuth, async (req, res) => {
         officeLocation: normalizeOptionalString(officeLocation),
         photoSession: normalizeOptionalString(photoSession),
         captureNotes: normalizeOptionalString(captureNotes),
+        customFields: normalizedCustomFields,
       })
       .returning();
   } catch (error) {
@@ -273,6 +291,7 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     officeLocation,
     photoSession,
     captureNotes,
+    customFields,
   } = req.body;
 
   const normalizedEmail = email !== undefined ? normalizeOptionalString(email) : undefined;
@@ -284,6 +303,11 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
     firstName !== undefined ? normalizeOptionalString(firstName) : undefined;
   const normalizedLastName =
     lastName !== undefined ? normalizeOptionalString(lastName) : undefined;
+  const normalizedCustomFields = customFields !== undefined ? sanitizeCustomFields(customFields) : undefined;
+  if (customFields !== undefined && !normalizedCustomFields) {
+    res.status(400).json({ error: "Custom fields must contain at most 30 named text values." });
+    return;
+  }
   if (normalizedFirstName === null || normalizedLastName === null) {
     res.status(400).json({ error: "firstName and lastName cannot be blank" });
     return;
@@ -362,6 +386,7 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
         ...(officeLocation !== undefined && { officeLocation: normalizeOptionalString(officeLocation) }),
         ...(photoSession !== undefined && { photoSession: normalizeOptionalString(photoSession) }),
         ...(captureNotes !== undefined && { captureNotes: normalizeOptionalString(captureNotes) }),
+        ...(normalizedCustomFields ? { customFields: normalizedCustomFields } : {}),
         // Regenerate QR if name or ID changed
         ...(identityChanged
           ? { simpleQr: null, jsonQr: null }

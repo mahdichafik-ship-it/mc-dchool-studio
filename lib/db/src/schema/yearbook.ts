@@ -1,0 +1,118 @@
+import { boolean, index, integer, jsonb, pgTable, real, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { projectsTable } from "./projects";
+
+export const yearbooksTable = pgTable("yearbooks", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  academicYear: text("academic_year").notNull(),
+  format: text("format").notNull().default("portrait"),
+  pageWidthMm: real("page_width_mm").notNull().default(216),
+  pageHeightMm: real("page_height_mm").notNull().default(279),
+  coverDesign: text("cover_design").notNull().default("contemporary-identity"),
+  interiorTheme: text("interior_theme").notNull().default("editorial"),
+  classPageMode: text("class_page_mode").notNull().default("group-photo-plus-portraits"),
+  status: text("status").notNull().default("draft"),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  includeActivityPhotos: boolean("include_activity_photos").notNull().default(true),
+  includeStaffPortraits: boolean("include_staff_portraits").notNull().default(false),
+  coverTitle: text("cover_title").notNull().default(""),
+  coverTagline: text("cover_tagline").notNull().default(""),
+  schoolMotto: text("school_motto").notNull().default(""),
+  coverAdditionalText: text("cover_additional_text").notNull().default(""),
+  coverPrimaryColor: text("cover_primary_color").notNull().default("#0f766e"),
+  coverSecondaryColor: text("cover_secondary_color").notNull().default("#1e293b"),
+  coverAccentColor: text("cover_accent_color").notNull().default("#d6a85f"),
+  coverNeutralColor: text("cover_neutral_color").notNull().default("#f6f1e8"),
+  coverLayoutVariant: integer("cover_layout_variant").notNull().default(0),
+  coverTypography: text("cover_typography").notNull().default("refined"),
+  coverLogoScale: real("cover_logo_scale").notNull().default(1),
+  coverLogoPosition: text("cover_logo_position").notNull().default("center"),
+  spineWidthMm: real("spine_width_mm").notNull().default(0),
+  bleedMm: real("bleed_mm").notNull().default(3),
+  safeAreaMm: real("safe_area_mm").notNull().default(5),
+  interiorPages: jsonb("interior_pages").notNull().default([]),
+  activityPageInterval: integer("activity_page_interval").notNull().default(3),
+}, (table) => [
+  uniqueIndex("yearbooks_project_unique").on(table.projectId),
+  index("yearbooks_status_idx").on(table.status),
+]);
+
+export const yearbookCoverAssetsTable = pgTable("yearbook_cover_assets", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  originalName: text("original_name").notNull(),
+  contentType: text("content_type").notNull(),
+  expectedSize: integer("expected_size").notNull(),
+  stagingObjectPath: text("staging_object_path").notNull(),
+  objectPath: text("object_path"),
+  state: text("state").notNull().default("uploading"),
+  role: text("role").notNull().default("supporting"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  width: integer("width"),
+  height: integer("height"),
+  sha256: text("sha256"),
+  cropX: real("crop_x").notNull().default(50),
+  cropY: real("crop_y").notNull().default(50),
+  zoom: real("zoom").notNull().default(1),
+  rotation: real("rotation").notNull().default(0),
+  exposure: real("exposure").notNull().default(0),
+  temperature: real("temperature").notNull().default(0),
+  tint: real("tint").notNull().default(0),
+  uploadedBy: text("uploaded_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  verifiedAt: timestamp("verified_at"),
+  storageProvider: text("storage_provider").notNull().default("replit"),
+}, (table) => [
+  uniqueIndex("yearbook_cover_assets_object_path_unique").on(table.objectPath),
+  index("yearbook_cover_assets_project_idx").on(table.projectId, table.state, table.sortOrder),
+]);
+
+export const yearbookReviewLinksTable = pgTable("yearbook_review_links", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdBy: text("created_by").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("yearbook_review_links_token_hash_unique").on(table.tokenHash),
+  index("yearbook_review_links_project_status_idx").on(table.projectId, table.status),
+]);
+
+export const yearbookReviewCommentsTable = pgTable("yearbook_review_comments", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  reviewLinkId: integer("review_link_id").references(() => yearbookReviewLinksTable.id, { onDelete: "set null" }),
+  authorType: text("author_type").notNull(),
+  authorId: text("author_id"),
+  authorEmail: text("author_email"),
+  eventType: text("event_type").notNull().default("comment"),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("yearbook_review_comments_project_created_idx").on(table.projectId, table.createdAt),
+]);
+
+export const yearbookPrintArtifactsTable = pgTable("yearbook_print_artifacts", {
+  id: serial("id").primaryKey(),
+  yearbookId: integer("yearbook_id").notNull().references(() => yearbooksTable.id, { onDelete: "cascade" }),
+  objectPath: text("object_path").notNull(),
+  fileSize: integer("file_size").notNull(),
+  sha256: text("sha256").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("yearbook_print_artifacts_yearbook_unique").on(table.yearbookId),
+  uniqueIndex("yearbook_print_artifacts_object_path_unique").on(table.objectPath),
+]);

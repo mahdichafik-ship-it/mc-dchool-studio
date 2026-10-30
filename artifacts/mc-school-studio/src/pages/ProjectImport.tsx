@@ -16,12 +16,29 @@ import { isCsvFileName } from '@/lib/importFile';
 type Step = 'upload' | 'map' | 'confirm' | 'done';
 
 function guessIdColumn(headers: string[]): string {
-  const lowerHeaders = headers.map(h => h.toLowerCase());
-  return headers.find((_, i) => {
-    const h = lowerHeaders[i];
-    if (h.includes('email') || h.includes('mail') || h.includes('courriel')) return false;
-    return /\bid\b/.test(h) || h.includes('identifier') || h.includes('number') || h.includes('matricule') || h.includes('numero');
-  }) || '';
+  return guessExactColumn(headers, [
+    'student id', 'volume capture id', 'capture id', 'learner id',
+    'employee id', 'id étudiant', 'id etudiant',
+  ]);
+}
+
+function normalizeHeader(header: string): string {
+  return header.normalize('NFKC').trim().toLocaleLowerCase().replace(/[\s_-]+/g, ' ');
+}
+
+function guessExactColumn(headers: string[], aliases: string[]): string {
+  const normalizedAliases = aliases.map(normalizeHeader);
+  return headers.find(header => normalizedAliases.includes(normalizeHeader(header))) || '';
+}
+
+function guessClassColumn(headers: string[]): string {
+  return guessExactColumn(headers, ['class', 'class name', 'classe', 'section', 'class/section', 'groupe', 'group']);
+}
+
+function guessSchoolIdColumn(headers: string[]): string {
+  return guessExactColumn(headers, [
+    'school id', 'school code', 'student number', 'student no', 'matricule', 'code',
+  ]);
 }
 
 function guessPrimaryEmailColumn(headers: string[]): string {
@@ -101,6 +118,7 @@ export default function ProjectImport() {
   // State from Map
   const [mappings, setMappings] = useState<Record<string, {
     className: string;
+    classNameColumn: string;
     firstNameColumn: string;
     lastNameColumn: string;
     studentIdColumn: string;
@@ -122,6 +140,7 @@ export default function ProjectImport() {
     officeLocationColumn: string;
     photoSessionColumn: string;
     captureNotesColumn: string;
+    customFieldColumns: { fieldName: string; column: string }[];
   }>>({});
 
   // State from Confirm
@@ -159,16 +178,17 @@ export default function ProjectImport() {
         data.sheets.forEach(sheet => {
           initialMappings[sheet.name] = {
             className: isCsvFileName(file.name) ? csvClassName : sheet.name,
+            classNameColumn: guessClassColumn(sheet.headers),
             firstNameColumn: guessColumnByKeywords(sheet.headers, ['first', 'prenom', 'prénom']),
             lastNameColumn: guessColumnByKeywords(sheet.headers, ['last', 'nom', 'surname']),
             studentIdColumn: guessIdColumn(sheet.headers),
-            schoolIdColumn: guessColumnByKeywords(sheet.headers, ['school id', 'student number', 'matricule', 'student no']),
+            schoolIdColumn: guessSchoolIdColumn(sheet.headers),
             emailColumn: guessPrimaryEmailColumn(sheet.headers),
             phoneColumn: guessColumnByKeywords(sheet.headers, ['phone', 'tel', 'mobile', 'gsm', 'portable']),
             secondaryEmailColumn: guessSecondaryEmailColumn(sheet.headers),
             guardianFirstNameColumn: guessColumnByKeywords(sheet.headers, ['guardian first', 'parent first', 'parent prénom']),
             guardianLastNameColumn: guessColumnByKeywords(sheet.headers, ['guardian last', 'parent last', 'parent nom']),
-            companyColumn: guessColumnByKeywords(sheet.headers, ['company', 'school']),
+            companyColumn: guessColumnByKeywords(sheet.headers, ['company', 'school name', 'client name']),
             addressLine1Column: guessColumnByKeywords(sheet.headers, ['address line 1', 'address', 'street']),
             addressLine2Column: guessColumnByKeywords(sheet.headers, ['address line 2', 'apt', 'unit']),
             cityColumn: guessColumnByKeywords(sheet.headers, ['city', 'ville']),
@@ -185,6 +205,7 @@ export default function ProjectImport() {
             captureNotesColumn: isCorporate
               ? guessColumnByKeywords(sheet.headers, ['capture notes', 'capture', 'notes', 'note', 'comment', 'remark'])
               : '',
+            customFieldColumns: [],
           };
         });
         setMappings(initialMappings);
@@ -202,6 +223,16 @@ export default function ProjectImport() {
       const map = mappings[sheet.name];
       if (!map.firstNameColumn || !map.lastNameColumn || !map.className) {
         toast({ title: `Missing required mapping for sheet "${sheet.name}"`, variant: 'destructive' });
+        return;
+      }
+      const customFields = map.customFieldColumns ?? [];
+      if (customFields.some(field => !field.fieldName.trim() || !field.column)) {
+        toast({ title: `Complete each client-requested field in "${sheet.name}"`, variant: 'destructive' });
+        return;
+      }
+      const names = customFields.map(field => field.fieldName.trim().toLocaleLowerCase());
+      if (new Set(names).size !== names.length) {
+        toast({ title: `Client-requested field names must be unique in "${sheet.name}"`, variant: 'destructive' });
         return;
       }
     }
@@ -264,6 +295,7 @@ export default function ProjectImport() {
         sheetsData.push({
           sheetName: sheetPreview.name,
           className: map.className,
+          classNameColumn: map.classNameColumn || null,
           firstNameColumn: map.firstNameColumn,
           lastNameColumn: map.lastNameColumn,
           studentIdColumn: map.studentIdColumn || null,
@@ -285,6 +317,7 @@ export default function ProjectImport() {
           officeLocationColumn: map.officeLocationColumn || null,
           photoSessionColumn: map.photoSessionColumn || null,
           captureNotesColumn: isCorporate ? (map.captureNotesColumn || null) : null,
+          customFieldColumns: map.customFieldColumns,
           rows: rows,
           headers: sheetPreview.headers
         });
@@ -308,13 +341,17 @@ export default function ProjectImport() {
     }
   };
 
-  const updateMapping = (sheetName: string, field: keyof typeof mappings[string], value: string) => {
+  const updateMapping = (
+    sheetName: string,
+    field: keyof typeof mappings[string],
+    value: string | { fieldName: string; column: string }[],
+  ) => {
     setMappings(prev => ({
       ...prev,
       [sheetName]: {
         ...prev[sheetName],
         [field]: value
-      }
+      } as (typeof prev)[string]
     }));
   };
 
@@ -410,7 +447,7 @@ export default function ProjectImport() {
                       Sheet: {sheet.name}
                     </h3>
                     <div className="flex items-center gap-3">
-                      <Label className="text-xs text-slate-500">Target Class:</Label>
+                      <Label className="text-xs text-slate-500">Sheet Fallback Class:</Label>
                       <Input 
                         className="w-48 h-8 text-sm"
                         value={mappings[sheet.name]?.className || ''} 
@@ -420,6 +457,12 @@ export default function ProjectImport() {
                   </div>
                   <CardContent className="p-0">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6 border-b border-slate-100 bg-white">
+                      <ColumnSelect
+                        label="Class Name Column"
+                        value={mappings[sheet.name]?.classNameColumn || ''}
+                        headers={sheet.headers}
+                        onChange={v => updateMapping(sheet.name, 'classNameColumn', v)}
+                      />
                       <div className="space-y-2">
                         <Label className="text-red-500 flex items-center gap-1">First Name Column *</Label>
                         <Select value={mappings[sheet.name]?.firstNameColumn} onValueChange={v => updateMapping(sheet.name, 'firstNameColumn', v)}>
@@ -454,6 +497,11 @@ export default function ProjectImport() {
                         headers={sheet.headers}
                         onChange={v => updateMapping(sheet.name, 'schoolIdColumn', v)}
                       />
+                      <details className="md:col-span-3">
+                        <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                          Optional contact fields
+                        </summary>
+                        <div className="mt-5 grid grid-cols-1 gap-6 md:grid-cols-3">
                       <div className="space-y-2">
                         <Label className="text-slate-500">{isCorporate ? 'Primary Delivery Email' : 'Parent/Guardian Email'} <span className="text-slate-400 font-normal">(Optional)</span></Label>
                         <Select value={mappings[sheet.name]?.emailColumn || 'none'} onValueChange={v => updateMapping(sheet.name, 'emailColumn', v === 'none' ? '' : v)}>
@@ -538,6 +586,73 @@ export default function ProjectImport() {
                           </div>
                         </>
                       )}
+                      <div className="md:col-span-3 rounded-md border border-slate-200 p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <Label>Client-requested fields</Label>
+                            <p className="text-xs text-slate-500">These appear in student details, not the roster or QR cards.</p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={(mappings[sheet.name]?.customFieldColumns?.length ?? 0) >= 30}
+                            onClick={() => updateMapping(sheet.name, 'customFieldColumns', [
+                              ...(mappings[sheet.name]?.customFieldColumns ?? []),
+                              { fieldName: '', column: '' },
+                            ])}
+                          >
+                            Add field
+                          </Button>
+                        </div>
+                        <div className="space-y-3">
+                          {(mappings[sheet.name]?.customFieldColumns ?? []).map((field, fieldIndex) => (
+                            <div key={fieldIndex} className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                              <Input
+                                value={field.fieldName}
+                                maxLength={60}
+                                placeholder="Field name (e.g. Shirt size)"
+                                aria-label={`Custom field ${fieldIndex + 1} name`}
+                                onChange={event => {
+                                  const fields = [...(mappings[sheet.name]?.customFieldColumns ?? [])];
+                                  fields[fieldIndex] = { ...fields[fieldIndex], fieldName: event.target.value };
+                                  updateMapping(sheet.name, 'customFieldColumns', fields);
+                                }}
+                              />
+                              <Select
+                                value={field.column || 'none'}
+                                onValueChange={value => {
+                                  const fields = [...(mappings[sheet.name]?.customFieldColumns ?? [])];
+                                  fields[fieldIndex] = { ...fields[fieldIndex], column: value === 'none' ? '' : value };
+                                  updateMapping(sheet.name, 'customFieldColumns', fields);
+                                }}
+                              >
+                                <SelectTrigger><SelectValue placeholder="Choose source column" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Choose source column</SelectItem>
+                                  {sheet.headers.map((header, headerIndex) => (
+                                    <SelectItem key={`custom-${fieldIndex}-${headerIndex}`} value={header}>
+                                      {header || `(column ${headerIndex + 1})`}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Remove custom field ${fieldIndex + 1}`}
+                                onClick={() => updateMapping(sheet.name, 'customFieldColumns',
+                                  (mappings[sheet.name]?.customFieldColumns ?? []).filter((_, index) => index !== fieldIndex))}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                        </div>
+                      </details>
                     </div>
                     
                     <div className="p-6 bg-slate-50/50">
@@ -584,15 +699,21 @@ export default function ProjectImport() {
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Ready to Import</h3>
                 <p className="text-slate-600 mb-8">
-                   You are about to reconcile <strong className="text-slate-900">{parsedData.sheets.length}</strong> classes or departments from this file.
+                   You are about to reconcile students from <strong className="text-slate-900">{parsedData.sheets.length}</strong> worksheet{parsedData.sheets.length === 1 ? '' : 's'}.
                    Existing {isCorporate ? 'employees' : 'students'} are matched conservatively and are never duplicated by a repeat import.
                 </p>
 
                 <div className="bg-slate-50 rounded-lg p-4 text-left mb-8 space-y-2 border border-slate-100">
                   {parsedData.sheets.map((sheet, i) => (
-                    <div key={i} className="flex justify-between text-sm">
-                      <span className="text-slate-600 font-medium">{mappings[sheet.name]?.className}</span>
-                      <span className="text-slate-400">from sheet "{sheet.name}"</span>
+                     <div key={i} className="flex flex-col gap-1 text-sm">
+                       <span className="text-slate-600 font-medium">Sheet: {sheet.name}</span>
+                       {mappings[sheet.name]?.classNameColumn ? (
+                         <span className="text-slate-500">
+                           Classes from “{mappings[sheet.name].classNameColumn}”; fallback: {mappings[sheet.name]?.className}
+                         </span>
+                       ) : (
+                         <span className="text-slate-500">All students go to {mappings[sheet.name]?.className}</span>
+                       )}
                     </div>
                   ))}
                 </div>

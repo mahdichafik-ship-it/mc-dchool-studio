@@ -1438,6 +1438,10 @@ components:
           type: ["string", "null"]
         captureNotes:
           type: ["string", "null"]
+        customFields:
+          type: object
+          additionalProperties:
+            type: string
         simpleQr:
           type: ["string", "null"]
         jsonQr:
@@ -1497,6 +1501,10 @@ components:
           type: ["string", "null"]
         captureNotes:
           type: ["string", "null"]
+        customFields:
+          type: object
+          additionalProperties:
+            type: string
 
     StudentPatch:
       type: object
@@ -1547,6 +1555,10 @@ components:
           type: ["string", "null"]
         captureNotes:
           type: ["string", "null"]
+        customFields:
+          type: object
+          additionalProperties:
+            type: string
 
     BulkStudentIds:
       type: object
@@ -1623,6 +1635,18 @@ components:
           type: string
         className:
           type: string
+        classNameColumn:
+          type: ["string", "null"]
+        customFieldColumns:
+          type: array
+          items:
+            type: object
+            required: [fieldName, column]
+            properties:
+              fieldName:
+                type: string
+              column:
+                type: string
         firstNameColumn:
           type: string
         lastNameColumn:

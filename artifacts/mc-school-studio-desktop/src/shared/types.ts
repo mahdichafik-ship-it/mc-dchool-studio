@@ -17,6 +17,8 @@ export interface Project {
   syncTotalFiles: number
   syncFailedFiles: number
   syncError: string | null
+  archivedAt: string | null
+  localFilesDeletedAt: string | null
   classCount: number
   studentCount: number
   photoCount: number

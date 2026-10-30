@@ -1,9 +1,10 @@
 import { app, ipcMain, shell, BrowserWindow } from 'electron'
-import { copyFileSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { copyFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'fs'
+import { basename, dirname, extname, join } from 'path'
+import { randomUUID } from 'crypto'
 import { and, eq, count, or, isNull, ne } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { capturesTable, groupMembersTable, imageFilesTable, photosTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
+import { capturesTable, groupMembersTable, groupsTable, imageFilesTable, photosTable, projectsTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
 import {
   generateLivePreview,
   getCachedLivePreview,
@@ -628,40 +629,73 @@ export function registerPhotoHandlers() {
     'photos:reassign',
     async (_e, { photoId, studentId }: { photoId: number; studentId: number }) => {
       const db = getDb()
-      const [photo] = db.select().from(photosTable).where(eq(photosTable.id, photoId)).all()
-      if (!photo) return
-
-      // Move file to new student's folder
-      const student = db.select().from(studentsTable).where(eq(studentsTable.id, studentId)).get()
-      if (!student) return
-
-      const destDir = join(getPhotosDir(), String(photo.projectId), student.generatedStudentId)
-      mkdirSync(destDir, { recursive: true })
-      const destPath = join(destDir, photo.fileName)
-
-      copyFileSync(photo.filePath, destPath)
-
-      db.update(photosTable)
-        .set({ studentId, filePath: destPath, isMatched: true })
-        .where(eq(photosTable.id, photoId))
-        .run()
+      const photo = db.select().from(photosTable).where(eq(photosTable.id, photoId)).get()
+      if (!photo) throw new Error('Photo not found.')
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, photo.projectId)).get()
+      if (project?.finishedAt) throw new Error('This project is finished and its captures can no longer be changed.')
+      if (photo.uploadStatus === 'done' || photo.uploadStatus === 'uploading' || photo.fileUrl) {
+        throw new Error('This photo is already uploaded. Reassign it before uploading to the cloud.')
+      }
+      const student = db.select().from(studentsTable).where(and(
+        eq(studentsTable.id, studentId),
+        eq(studentsTable.projectId, photo.projectId),
+      )).get()
+      if (!student) throw new Error('Choose a student from this project.')
       const capture = db
         .select()
         .from(capturesTable)
         .where(eq(capturesTable.legacyPhotoId, photoId))
         .get()
-      if (capture) {
-        db.update(imageFilesTable)
-          .set({ storedPath: destPath })
-          .where(and(
-            eq(imageFilesTable.captureId, capture.id),
-            eq(imageFilesTable.fileRole, 'JPEG'),
-          ))
-          .run()
-        db.update(capturesTable)
-          .set({ updatedAt: now() })
-          .where(eq(capturesTable.id, capture.id))
-          .run()
+      const imageFiles = capture
+        ? db.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, capture.id)).all()
+        : []
+      if (imageFiles.some((file) => file.uploadStatus === 'done' || file.uploadStatus === 'uploading' || file.fileUrl)) {
+        throw new Error('This capture is already uploaded. Reassign it before uploading to the cloud.')
+      }
+      const destDir = join(getPhotosDir(), String(photo.projectId), student.generatedStudentId)
+      mkdirSync(destDir, { recursive: true })
+      const moves = (imageFiles.length > 0 ? imageFiles.map((file) => ({
+        source: file.storedPath,
+        target: join(destDir, basename(file.storedPath)),
+      })) : [{ source: photo.filePath, target: join(destDir, photo.fileName) }])
+      if (!moves.some((move) => move.source === photo.filePath)) {
+        moves.push({ source: photo.filePath, target: join(destDir, photo.fileName) })
+      }
+      if (moves.some(({ target, source }) => target !== source && existsSync(target))) {
+        throw new Error('A file with that name already exists in the destination student folder.')
+      }
+      if (moves.some(({ source }) => !existsSync(source))) {
+        throw new Error('A paired photo file is missing. Nothing was reassigned.')
+      }
+      const copied: string[] = []
+      try {
+        for (const { source, target } of moves) {
+          if (source === target) continue
+          copyFileSync(source, target)
+          copied.push(target)
+        }
+        const photoPath = moves.find((move) => move.source === photo.filePath)?.target ?? join(destDir, photo.fileName)
+        db.transaction((tx) => {
+          tx.update(photosTable)
+            .set({ studentId, filePath: photoPath, isMatched: true })
+            .where(eq(photosTable.id, photoId)).run()
+          if (capture) {
+            for (const file of imageFiles) {
+              const move = moves.find((candidate) => candidate.source === file.storedPath)
+              if (move) tx.update(imageFilesTable)
+                .set({ storedPath: move.target })
+                .where(eq(imageFilesTable.id, file.id)).run()
+            }
+            tx.update(capturesTable)
+              .set({ studentId, classId: student.classId, assignmentLocked: true, updatedAt: now() })
+              .where(eq(capturesTable.id, capture.id)).run()
+          }
+        })
+      } catch (error) {
+        for (const filePath of copied) {
+          try { if (existsSync(filePath)) unlinkSync(filePath) } catch {}
+        }
+        throw error
       }
 
       // Notify renderer so sidebar counts update immediately
@@ -681,6 +715,143 @@ export function registerPhotoHandlers() {
       }
     },
   )
+
+  ipcMain.handle('photos:moveToGroup', async (_e, { photoId, groupId }: { photoId: number; groupId: number }) => {
+    const db = getDb()
+    const photo = db.select().from(photosTable).where(eq(photosTable.id, photoId)).get()
+    if (!photo) throw new Error('Photo not found.')
+    if (photo.uploadStatus === 'done' || photo.uploadStatus === 'uploading' || photo.fileUrl) {
+      throw new Error('Only photos that have not been uploaded can be moved into a group.')
+    }
+    const group = db.select().from(groupsTable).where(eq(groupsTable.id, groupId)).get()
+    if (!group || group.projectId !== photo.projectId) throw new Error('Choose a group from this project.')
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, photo.projectId)).get()
+    if (project?.finishedAt) throw new Error('This project is finished and its captures can no longer be changed.')
+    const capture = db.select().from(capturesTable).where(eq(capturesTable.legacyPhotoId, photo.id)).get()
+    const imageFiles = capture
+      ? db.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, capture.id)).all()
+      : []
+    if (imageFiles.some((file) => file.uploadStatus === 'done' || file.uploadStatus === 'uploading' || file.fileUrl)) {
+      throw new Error('Only captures that have not been uploaded can be moved into a group.')
+    }
+    const files = imageFiles.length > 0 ? imageFiles : [{
+      fileRole: 'JPEG' as const,
+      fileFormat: extname(photo.fileName).replace(/^\./, '').toLowerCase() || 'jpg',
+      originalFilename: photo.fileName,
+      storedPath: photo.filePath,
+      sourcePath: null,
+      fileSize: null,
+    }]
+    if (files.some((file) => !existsSync(file.storedPath))) {
+      throw new Error('A capture file is missing. Nothing was moved.')
+    }
+    const groupCapture = db.insert(groupCapturesTable).values({
+      captureKey: randomUUID(),
+      projectId: photo.projectId,
+      classId: group.classId ?? (photo.studentId
+        ? db.select({ classId: studentsTable.classId }).from(studentsTable).where(eq(studentsTable.id, photo.studentId)).get()?.classId ?? null
+        : null),
+      groupId,
+      baseFilename: capture?.baseFilename ?? basename(photo.fileName, extname(photo.fileName)),
+      capturedAt: capture?.capturedAt ?? photo.capturedAt,
+      pairingStatus: capture?.pairingStatus ?? 'jpeg_only',
+      rating: capture?.rating ?? 0,
+      reviewSyncPending: false,
+      updatedAt: now(),
+    }).returning().get()
+    if (!groupCapture) throw new Error('The group photo could not be created.')
+    try {
+      db.transaction((tx) => {
+        tx.insert(groupCaptureFilesTable).values(files.map((file) => ({
+          captureId: groupCapture.id,
+          fileRole: file.fileRole,
+          fileFormat: file.fileFormat,
+          originalFilename: file.originalFilename,
+          storedPath: file.storedPath,
+          sourcePath: file.sourcePath,
+          fileSize: file.fileSize,
+          uploadStatus: null,
+          fileUrl: null,
+          galleryReady: false,
+        }))).run()
+        if (photo.studentId && !tx.select({ id: groupMembersTable.id }).from(groupMembersTable)
+          .where(and(eq(groupMembersTable.groupId, groupId), eq(groupMembersTable.studentId, photo.studentId))).get()) {
+          tx.insert(groupMembersTable).values({ groupId, studentId: photo.studentId }).run()
+        }
+        if (capture) tx.delete(capturesTable).where(eq(capturesTable.id, capture.id)).run()
+        tx.delete(photosTable).where(eq(photosTable.id, photo.id)).run()
+      })
+    } catch (error) {
+      db.delete(groupCapturesTable).where(eq(groupCapturesTable.id, groupCapture.id)).run()
+      throw error
+    }
+    const win = getMainWindow()
+    win?.webContents.send('capture:updated', { projectId: photo.projectId, captureId: groupCapture.id, studentId: null, groupId })
+  })
+
+  ipcMain.handle('photos:rename', async (_e, { photoId, name }: { photoId: number; name: string }) => {
+    const db = getDb()
+    const photo = db.select().from(photosTable).where(eq(photosTable.id, photoId)).get()
+    if (!photo) throw new Error('Photo not found.')
+    if (photo.uploadStatus === 'done' || photo.uploadStatus === 'uploading' || photo.fileUrl) {
+      throw new Error('Uploaded photos cannot be renamed in the desktop app.')
+    }
+    const inputName = name.trim()
+    if (!inputName || inputName.length > 100 || basename(inputName) !== inputName || /[\u0000-\u001f]/.test(inputName)) {
+      throw new Error('Enter a file name under 100 characters without a folder path.')
+    }
+    const capture = db.select().from(capturesTable).where(eq(capturesTable.legacyPhotoId, photo.id)).get()
+    const imageFiles = capture
+      ? db.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, capture.id)).all()
+      : []
+    if (imageFiles.some((file) => file.uploadStatus === 'done' || file.uploadStatus === 'uploading' || file.fileUrl)) {
+      throw new Error('Uploaded captures cannot be renamed in the desktop app.')
+    }
+    const suppliedExtension = extname(inputName)
+    const newStem = suppliedExtension ? basename(inputName, suppliedExtension) : inputName
+    const entries = imageFiles.length > 0
+      ? imageFiles.map((file) => ({
+        id: file.id,
+        source: file.storedPath,
+        target: join(dirname(file.storedPath), `${newStem}${extname(file.storedPath)}`),
+      }))
+      : [{ id: null, source: photo.filePath, target: join(dirname(photo.filePath), `${newStem}${extname(photo.filePath)}`) }]
+    if (entries.some(({ source, target }) => !existsSync(source))) throw new Error('A capture file is missing. Nothing was renamed.')
+    if (entries.some(({ source, target }) => source !== target && existsSync(target))) {
+      throw new Error('A file with that name already exists.')
+    }
+    const renamed: Array<{ source: string; target: string }> = []
+    try {
+      for (const entry of entries) {
+        if (entry.source === entry.target) continue
+        renameSync(entry.source, entry.target)
+        renamed.push(entry)
+      }
+      const jpegEntry = entries.find((entry) => entry.source === photo.filePath)
+        ?? entries.find((entry) => extname(entry.target).toLowerCase() === '.jpg' || extname(entry.target).toLowerCase() === '.jpeg')
+      const nextPhotoPath = jpegEntry?.target ?? entries[0].target
+      db.transaction((tx) => {
+        tx.update(photosTable).set({
+          filePath: nextPhotoPath,
+          fileName: basename(nextPhotoPath),
+        }).where(eq(photosTable.id, photo.id)).run()
+        for (const entry of entries) {
+          if (entry.id !== null) tx.update(imageFilesTable).set({
+            storedPath: entry.target,
+            originalFilename: basename(entry.target),
+          }).where(eq(imageFilesTable.id, entry.id)).run()
+        }
+        if (capture) tx.update(capturesTable).set({ baseFilename: newStem, updatedAt: now() })
+          .where(eq(capturesTable.id, capture.id)).run()
+      })
+    } catch (error) {
+      for (const entry of renamed.reverse()) {
+        try { if (existsSync(entry.target)) renameSync(entry.target, entry.source) } catch {}
+      }
+      throw error
+    }
+    return { fileName: basename(nextPhotoPath) }
+  })
 
   ipcMain.handle('photos:delete', async (_e, { photoId }: { photoId: number }) => {
     // Fetch before deleting so we can include projectId in the event

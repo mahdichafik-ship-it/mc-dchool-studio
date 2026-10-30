@@ -71,3 +71,11 @@ test("access-card management includes prepare invalidation and an explicit regen
   assert.match(source, /Preparation does not publish the gallery/);
   assert.match(source, /immediately invalidates the existing code/);
 });
+
+test("parent-view preview requires a published gallery and includes that subject's code", () => {
+  const source = readFileSync(new URL("../components/project/DeliveryTab.tsx", import.meta.url), "utf8");
+  assert.match(source, /galleryIsPublished = deliverySettings\?\.gallery\?\.status === "published"/);
+  assert.match(source, /disabled=\{!galleryIsPublished \|\| !card\.accessCode\}/);
+  assert.match(source, /new URLSearchParams\(\{ code: card\.accessCode \|\| "" \}\)/);
+  assert.match(source, /requires an email address and may register a gallery visit/);
+});

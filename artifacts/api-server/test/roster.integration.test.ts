@@ -224,6 +224,73 @@ test("stable ID updates and moves a school row without replacing its identity", 
   assert.notEqual(updated.classId, created.classId);
 });
 
+test("uses each row's mapped class instead of the worksheet fallback class", async () => {
+  const response = await confirm(schoolProjectId, [{
+    sheetName: "Tous les lycéens",
+    className: "Tous les lycéens",
+    classNameColumn: "Class",
+    firstNameColumn: "First Name",
+    lastNameColumn: "Last Name",
+    studentIdColumn: null,
+    schoolIdColumn: "School ID",
+    headers: ["First Name", "Last Name", "School ID", "Class", "Grade / Level"],
+    rows: [
+      ["Roster A", suffix, "school-a", "1AB MAT", "1AB"],
+      ["Roster B", suffix, "school-b", "2AB PC BIOF", "2AB"],
+    ],
+  }]);
+  assert.equal(response.response.status, 200);
+  assert.equal(response.body.classesCreated, 2);
+  assert.equal(response.body.studentsCreated, 2);
+
+  const first = await oneStudent(schoolProjectId, "Roster A", suffix);
+  const second = await oneStudent(schoolProjectId, "Roster B", suffix);
+  assert(first && second);
+  const [firstClass] = await db.select().from(classesTable).where(eq(classesTable.id, first.classId));
+  const [secondClass] = await db.select().from(classesTable).where(eq(classesTable.id, second.classId));
+  assert.equal(firstClass.className, "1AB MAT");
+  assert.equal(secondClass.className, "2AB PC BIOF");
+  assert.equal(first.schoolId, "school-a");
+  assert.equal(second.schoolId, "school-b");
+});
+
+test("imports mapped client fields and preserves unmapped details on later imports", async () => {
+  const baseSheet = {
+    sheetName: "Client fields",
+    className: "Client fields",
+    classNameColumn: "Class",
+    firstNameColumn: "First",
+    lastNameColumn: "Last",
+    headers: ["First", "Last", "Class", "Shirt size", "Allergy note"],
+  };
+  const first = await confirm(schoolProjectId, [{
+    ...baseSheet,
+    customFieldColumns: [
+      { fieldName: "Shirt size", column: "Shirt size" },
+      { fieldName: "Allergy note", column: "Allergy note" },
+    ],
+    rows: [["Client", suffix, "1A", "Medium", "No peanuts"]],
+  }]);
+  assert.equal(first.response.status, 200);
+  const student = await oneStudent(schoolProjectId, "Client", suffix);
+  assert.deepEqual(student?.customFields, {
+    "Shirt size": "Medium",
+    "Allergy note": "No peanuts",
+  });
+
+  const second = await confirm(schoolProjectId, [{
+    ...baseSheet,
+    customFieldColumns: [{ fieldName: "Shirt size", column: "Shirt size" }],
+    rows: [["Client", suffix, "1A", "Large", ""]],
+  }]);
+  assert.equal(second.response.status, 200);
+  const updated = await oneStudent(schoolProjectId, "Client", suffix);
+  assert.deepEqual(updated?.customFields, {
+    "Shirt size": "Large",
+    "Allergy note": "No peanuts",
+  });
+});
+
 test("uses unique primary and secondary email fallbacks and does not merge ambiguous matches", async () => {
   await confirm(schoolProjectId, [
     sheet("Fallback Class", [["Primary", "Fallback", "primary@example.com"]], { email: true }),

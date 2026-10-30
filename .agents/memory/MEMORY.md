@@ -18,7 +18,7 @@
 - [Desktop cloud upload identity](desktop-cloud-upload-identity.md) — imported rosters must retain cloud IDs; legacy local projects need a safe identity repair before upload.
 - [Desktop upload idempotency](desktop-upload-idempotency.md) — replay keys must remain bound to their original project, student, and file role.
 - [Upload retry durability](upload-retry-durability.md) — retries use current bytes, bounded auto-recovery, isolated queues, and explicit batch accounting.
-- [Explicit project sync boundary](explicit-project-sync-boundary.md) — capture-time ingestion is local-only; cloud upload begins only from an explicit finish or retry action.
+- [Explicit project sync boundary](explicit-project-sync-boundary.md) — keep capture local-first; ownership/group corrections stay pre-upload unless cloud records can be updated safely.
 - [Offline finish lifecycle](offline-finish-lifecycle.md) — finishing locally is durable and distinct from successful cloud synchronization.
 - [Local preview pipeline](local-preview-pipeline.md) — emit a source-local JPEG preview before managed copy and persistence, then reconcile it by a stable preview key.
 - [Lightweight preview artifacts](lightweight-preview-artifacts.md) — renderer preview URLs must resolve to reduced JPEGs, never full originals or full RAW decodes.
@@ -38,6 +38,7 @@
 - [Roster re-import identity](roster-reimport-identity.md) — reconcile within one project by stable IDs first and fail closed on cross-slot email ambiguity.
 - [Project-type compatibility](project-type-compatibility.md) — corporate headshots reuse school data concepts internally; absent or unknown types must remain school-safe.
 - [Volume Capture delivery access](volume-capture-delivery-access.md) — private delivery uses guardian-friendly subject access codes, not child-managed accounts.
+- [Desktop project lifecycle](desktop-project-lifecycle.md) — sent projects share Archive, Deleted stays separate, and archiving never removes local data.
 - [Gallery publication boundary](gallery-publication-boundary.md) — publishing is the sole parent-sharing checkpoint; durable uploaded JPEGs need no second visibility flag.
 - [Prepublication access credentials](prepublication-access-credentials.md) — prepare stable delivery cards before photo day without publishing or changing capture QR behavior.
 - [Gallery star selection](gallery-star-selection.md) — back up every capture, but expose and sell only positively starred JPEGs; group photos follow the same rule.
@@ -70,3 +71,5 @@
 - [Electron Builder plist compatibility](electron-builder-plist-compatibility.md) — remediate xmldom through a compatible plist parent; forcing xmldom 0.9.12 breaks macOS packaging.
 - [Release branch lockfiles](release-branch-lockfiles.md) — release commits must preserve main’s platform-only packaging dependencies and matching lockfile entries.
 - [Mockup sandbox Vite versions](mockup-sandbox-vite-versions.md) — the preview can render while sandbox typecheck fails when its plugin and Vite resolve different major types.
+- [Client-requested roster fields](client-requested-roster-fields.md) — optional fields map during import and belong on student details only; keep roster and QR views unchanged.
+- [Development schema drift](development-schema-drift.md) — reconcile the checkout with populated development tables before Drizzle pushes; never force away unmatched data.

@@ -2,11 +2,16 @@ import { pgTable, serial, text, timestamp, integer, boolean, uniqueIndex } from 
 import { deliveryGalleriesTable } from "./deliveries";
 import { studentPhotosTable } from "./photos";
 import { marketingContactsTable } from "./marketing";
+import { deliveryOrganizationAccessesTable } from "./deliveryOrganizationAccesses";
+import { studentsTable } from "./students";
 
 export const deliveryOrdersTable = pgTable("delivery_orders", {
   id: serial("id").primaryKey(),
   galleryId: integer("gallery_id").notNull().references(() => deliveryGalleriesTable.id, { onDelete: "cascade" }),
-  accessId: integer("access_id").notNull(),
+  accessId: integer("access_id"),
+  organizationAccessId: integer("organization_access_id")
+    .references(() => deliveryOrganizationAccessesTable.id, { onDelete: "cascade" }),
+  accessScope: text("access_scope").notNull().default("subject"),
   contactId: integer("contact_id").references(() => marketingContactsTable.id, { onDelete: "set null" }),
   status: text("status", { enum: ["pending", "paid", "expired", "refunded", "cancelled"] }).notNull().default("pending"),
   paymentMethod: text("payment_method", { enum: ["stripe", "establishment", "bank_transfer"] }).notNull().default("stripe"),
@@ -43,6 +48,8 @@ export const deliveryOrdersTable = pgTable("delivery_orders", {
 }, (table) => ({
   orderIdempotencyKey: uniqueIndex("delivery_orders_gallery_access_idempotency_key_idx")
     .on(table.galleryId, table.accessId, table.idempotencyKey),
+  organizationOrderIdempotencyKey: uniqueIndex("delivery_orders_gallery_organization_idempotency_key_idx")
+    .on(table.galleryId, table.organizationAccessId, table.idempotencyKey),
 }));
 
 export const deliveryOrderItemsTable = pgTable("delivery_order_items", {
@@ -58,6 +65,7 @@ export const deliveryOrderItemsTable = pgTable("delivery_order_items", {
   unitAmount: integer("unit_amount").notNull(),
   currency: text("currency").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  studentId: integer("student_id").references(() => studentsTable.id, { onDelete: "set null" }),
 });
 
 /**

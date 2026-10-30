@@ -89,6 +89,8 @@ interface CloudProjectPullResult {
 
 interface ElectronAPI {
   invoke(channel: 'projects:list'): Promise<Project[]>
+  invoke(channel: 'projects:setArchived', args: { projectId: number; archived: boolean }): Promise<void>
+  invoke(channel: 'projects:deleteLocalFiles', args: { projectId: number; confirmed: true }): Promise<void>
   invoke(channel: 'projects:get', args: { projectId: number }): Promise<Project | null>
   invoke(channel: 'projects:import', args: { filePath: string }): Promise<ImportResult>
   invoke(channel: 'projects:setWatchFolder', args: { projectId: number; folderPath: string }): Promise<void>
@@ -114,6 +116,12 @@ interface ElectronAPI {
     studentId: number
     classId: number
   }): Promise<MoveStudentResult>
+  invoke(channel: 'students:rename', args: {
+    projectId: number
+    studentId: number
+    firstName: string
+    lastName: string
+  }): Promise<{ student: Student; cloudSynced: boolean; syncError?: string }>
   invoke(channel: 'groups:list', args: { projectId: number; classId?: number }): Promise<StudentGroup[]>
   invoke(channel: 'groups:create', args: { projectId: number; classId?: number | null; name: string; memberStudentIds?: number[] }): Promise<StudentGroup>
   invoke(channel: 'groups:update', args: { projectId: number; groupId: number; name?: string; memberStudentIds?: number[] }): Promise<StudentGroup>
@@ -143,6 +151,8 @@ interface ElectronAPI {
   }): Promise<CaptureReview | null>
   invoke(channel: 'photos:getThumbnail', args: { filePath: string }): Promise<string | null>
   invoke(channel: 'photos:reassign', args: { photoId: number; studentId: number }): Promise<void>
+  invoke(channel: 'photos:moveToGroup', args: { photoId: number; groupId: number }): Promise<void>
+  invoke(channel: 'photos:rename', args: { photoId: number; name: string }): Promise<{ fileName: string }>
   invoke(channel: 'photos:delete', args: { photoId: number }): Promise<void>
   invoke(channel: 'photos:unmatched', args: { projectId: number }): Promise<Photo[]>
   invoke(channel: 'photos:openInSystem', args: { filePath: string }): Promise<void>

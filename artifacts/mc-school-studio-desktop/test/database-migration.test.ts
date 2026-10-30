@@ -60,6 +60,8 @@ test('upgrades an older local database without replacing existing rows', () => {
   assert(columns.get('projects')?.has('sync_status'))
   assert(columns.get('projects')?.has('sync_completed_files'))
   assert(columns.get('projects')?.has('sync_total_files'))
+  assert(columns.get('projects')?.has('archived_at'))
+  assert(columns.get('projects')?.has('local_files_deleted_at'))
   assert(migrationStatements.some((statement) => /SET sync_status = 'synced'/.test(statement)))
   assert.equal(columns.get('students')?.size, 25)
 })

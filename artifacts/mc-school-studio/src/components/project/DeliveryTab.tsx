@@ -452,6 +452,7 @@ function OverviewTab({ projectId }: { projectId: number }) {
 function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { projectId: number; projectName?: string; isCorporate?: boolean; branding: StudioBranding }) {
   const queryClient = useQueryClient();
   const { data: cards, isLoading, refetch: refetchCards } = useListDeliveryAccessCards(projectId);
+  const { data: deliverySettings } = useGetDeliverySettings(projectId);
   const prepareMutation = usePrepareDeliveryAccessCards();
   const regenerateMutation = useRegenerateDeliveryAccess();
   const [preparation, setPreparation] = useState<{ preparedCount: number; studentCount: number; message: string } | null>(null);
@@ -463,6 +464,7 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
 
   const preparedCount = preparation?.preparedCount ?? cards?.length ?? 0;
   const studentCount = preparation?.studentCount ?? preparedCount;
+  const galleryIsPublished = deliverySettings?.gallery?.status === "published";
   const handlePrepare = () => {
     prepareMutation.mutate({ projectId }, {
       onSuccess: (result) => {
@@ -641,6 +643,9 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
           Print {filteredCards.length} Cards
         </button>
       </div>
+      <p className="text-xs leading-5 text-slate-500">
+        Preview opens the live parent-facing gallery for that subject. It requires an email address and may register a gallery visit.
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredCards.map((card: any) => (
@@ -675,13 +680,29 @@ function AccessCardsTab({ projectId, projectName, isCorporate, branding }: { pro
                      type="button"
                      data-testid={`button-copy-access-card-link-${card.studentId}`}
                   onClick={() => {
-                    navigator.clipboard.writeText(card.accessUrl!);
+                     const previewUrl = new URL(card.accessUrl!, window.location.origin);
+                     previewUrl.hash = new URLSearchParams({ code: card.accessCode || "" }).toString();
+                     navigator.clipboard.writeText(previewUrl.toString());
                     alert("Link copied!");
                   }}
                   className="flex shrink-0 items-center gap-1.5 rounded bg-white px-2 py-1 text-xs font-medium text-teal-600 border border-teal-100 hover:bg-teal-50"
                 >
                   <Copy className="size-3" /> Copy Link
                 </button>
+                 <button
+                   type="button"
+                   data-testid={`button-preview-parent-gallery-${card.studentId}`}
+                   disabled={!galleryIsPublished || !card.accessCode}
+                   title={galleryIsPublished ? "Open this person's gallery as a parent" : "Publish the gallery before previewing"}
+                   onClick={() => {
+                     const previewUrl = new URL(card.accessUrl!, window.location.origin);
+                     previewUrl.hash = new URLSearchParams({ code: card.accessCode || "" }).toString();
+                     window.open(previewUrl.toString(), "_blank", "noopener,noreferrer");
+                   }}
+                   className="ml-2 flex shrink-0 items-center gap-1.5 rounded bg-white px-2 py-1 text-xs font-medium text-slate-700 border border-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                 >
+                   <ExternalLink className="size-3" /> Preview
+                 </button>
                  <button
                    type="button"
                    data-testid={`button-regenerate-access-card-${card.studentId}`}

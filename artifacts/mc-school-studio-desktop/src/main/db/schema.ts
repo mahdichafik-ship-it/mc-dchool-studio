@@ -22,6 +22,8 @@ export const projectsTable = sqliteTable('projects', {
   syncTotalFiles: integer('sync_total_files').notNull().default(0),
   syncFailedFiles: integer('sync_failed_files').notNull().default(0),
   syncError: text('sync_error'),
+  archivedAt: text('archived_at'),
+  localFilesDeletedAt: text('local_files_deleted_at'),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })

@@ -110,6 +110,7 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
       officeLocation: data.officeLocation || null,
       photoSession: data.photoSession || null,
       captureNotes: data.captureNotes || null,
+      customFields: editingStudent?.customFields || {},
     };
 
     if (editingStudent) {
@@ -422,6 +423,22 @@ export function StudentsTab({ projectId, isCorporate }: { projectId: number, isC
                     )}
                   />
                 </div>
+              )}
+              {editingStudent && Object.keys(editingStudent.customFields ?? {}).length > 0 && (
+                <section className="space-y-3 border-t border-slate-200 pt-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">Client-requested details</h3>
+                    <p className="text-xs text-slate-500">These details are not shown in the roster or QR cards.</p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {Object.entries(editingStudent.customFields ?? {}).map(([fieldName, value]) => (
+                      <div key={fieldName} className="space-y-1">
+                        <FormLabel>{fieldName}</FormLabel>
+                        <Input value={value} readOnly aria-label={fieldName} />
+                      </div>
+                    ))}
+                  </div>
+                </section>
               )}
 
             </form>

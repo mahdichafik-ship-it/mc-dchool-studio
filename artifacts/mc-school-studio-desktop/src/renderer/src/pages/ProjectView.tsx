@@ -152,7 +152,14 @@ export function ProjectView({
   )
   const [addStudentOpen, setAddStudentOpen] = useState(false)
   const [moveStudentOpen, setMoveStudentOpen] = useState(false)
+  const [moveStudentId, setMoveStudentId] = useState<number | null>(null)
   const [reassignDialogPhoto, setReassignDialogPhoto] = useState<Photo | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    student?: Student
+    photo?: Photo
+  } | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [exportMode, setExportMode] = useState<CaptureExportMode>('all')
   const [exporting, setExporting] = useState<CaptureExportLayout | null>(null)
@@ -479,6 +486,73 @@ export function ProjectView({
     await reloadGroups()
   }
 
+  async function renameStudent(student: Student) {
+    const firstName = window.prompt('First name', student.firstName)?.trim()
+    if (!firstName) return
+    const lastName = window.prompt('Last name', student.lastName)?.trim()
+    if (!lastName) return
+    try {
+      const result = await window.api.invoke('students:rename', {
+        projectId,
+        studentId: student.id,
+        firstName,
+        lastName,
+      })
+      await Promise.all([reloadStudents(), reloadAllProjectStudents()])
+      if (selectedStudent?.id === student.id) setSelectedStudent(result.student)
+      addToast({
+        type: 'success',
+        title: 'Name updated',
+        description: result.cloudSynced ? 'The roster and QR code were updated.' : 'Saved locally; cloud sync will retry when connected.',
+      })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not rename student', description: String(error) })
+    }
+  }
+
+  async function renamePhoto(photo: Photo) {
+    const currentName = photo.fileName.replace(/\.[^.]+$/, '')
+    const name = window.prompt('New file name (extension kept)', currentName)?.trim()
+    if (!name) return
+    try {
+      await window.api.invoke('photos:rename', { photoId: photo.id, name })
+      await Promise.all([reloadStudents(), reloadUnmatchedPhotos()])
+      addToast({ type: 'success', title: 'File renamed' })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not rename file', description: String(error) })
+    }
+  }
+
+  async function handleDropOnGroup(group: StudentGroup, event: React.DragEvent<HTMLElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    const photoId = Number(event.dataTransfer.getData('application/x-volume-capture-photo'))
+    const studentId = Number(event.dataTransfer.getData('application/x-volume-capture-student'))
+    try {
+      if (photoId > 0) {
+        await window.api.invoke('photos:moveToGroup', { photoId, groupId: group.id })
+        await Promise.all([reloadStudents(), reloadUnmatchedPhotos(), reloadGroupCaptures(), reloadGroups()])
+        addToast({ type: 'success', title: `Photo moved to ${group.name}` })
+      } else if (studentId > 0 && !group.memberStudentIds.includes(studentId)) {
+        await handleGroupMembership(group, studentId, true)
+        addToast({ type: 'success', title: `Student added to ${group.name}` })
+      }
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not move item', description: String(error) })
+    }
+  }
+
+  async function movePhotoToGroup(photo: Photo, group: StudentGroup) {
+    setContextMenu(null)
+    try {
+      await window.api.invoke('photos:moveToGroup', { photoId: photo.id, groupId: group.id })
+      await Promise.all([reloadStudents(), reloadUnmatchedPhotos(), reloadGroupCaptures(), reloadGroups()])
+      addToast({ type: 'success', title: `Photo moved to ${group.name}` })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not move photo', description: String(error) })
+    }
+  }
+
   async function handleSelectCaptureStudent(student: Student) {
     try {
       await setActiveCaptureTarget(student.id)
@@ -541,6 +615,29 @@ export function ProjectView({
         ? `Moved to ${result.student.className} and synced to cloud.`
         : `Moved to ${result.student.className} locally; cloud sync will retry when connected.`,
     })
+  }
+
+  async function moveStudentToClass(student: Student, targetClass: Class) {
+    if (project?.finishedAt) return
+    const fullName = `${student.firstName} ${student.lastName}`
+    const confirmed = window.confirm(
+      `Move ${fullName} from ${student.className} to ${targetClass.className}? Their identity and existing photographs will stay attached.`,
+    )
+    if (!confirmed) return
+    try {
+      const result = await window.api.invoke('students:move', {
+        projectId,
+        studentId: student.id,
+        classId: targetClass.id,
+      }) as MoveStudentResult
+      await handleStudentMoved(result)
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: `Could not move ${employeeLabel.toLowerCase()}`,
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   async function handleSetWatchFolder() {
@@ -627,6 +724,17 @@ export function ProjectView({
     event.preventDefault()
     event.stopPropagation()
     setDraggedStudentId(null)
+    const internalPhotoId = Number(event.dataTransfer.getData('application/x-volume-capture-photo'))
+    if (internalPhotoId > 0) {
+      try {
+        await window.api.invoke('photos:reassign', { photoId: internalPhotoId, studentId })
+        await Promise.all([reloadStudents(), reloadUnmatchedPhotos()])
+        addToast({ type: 'success', title: 'Photo reassigned to student' })
+      } catch (error) {
+        addToast({ type: 'error', title: 'Could not reassign photo', description: String(error) })
+      }
+      return
+    }
     if (project?.finishedAt) {
       addToast({
         type: 'error',
@@ -641,7 +749,7 @@ export function ProjectView({
       addToast({
         type: 'error',
         title: 'No files dropped',
-        description: 'Drop JPEG or RAW files from Finder onto a student.',
+                description: 'Drop JPEG or RAW files from a camera card, desktop, or Finder onto a person row.',
       })
       return
     }
@@ -1620,6 +1728,11 @@ export function ProjectView({
                     key={group.id}
                     type="button"
                     onClick={() => void handleSelectGroup(group)}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                    }}
+                    onDrop={(event) => void handleDropOnGroup(group, event)}
                     className={cn(
                       "flex w-full min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
                       isActive
@@ -1647,8 +1760,13 @@ export function ProjectView({
           {/* People list */}
           <div className="flex-1 overflow-y-auto">
             <div className="py-2">
-              <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                {employeePlural}
+              <div className="px-4 py-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  {employeePlural}
+                </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  Drop JPEG/RAW files from a camera card or desktop onto any person, active or not. The chosen row is the destination; the active camera target stays unchanged.
+                </p>
               </div>
               {filteredStudents.map((s) => (
                 <StudentRow
@@ -1657,6 +1775,14 @@ export function ProjectView({
                   isSelected={selectedStudent?.id === s.id}
                   isActive={activeStudentId === s.id}
                   onClick={() => void handleSelectCaptureStudent(s)}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    setContextMenu({ x: event.clientX, y: event.clientY, student: s })
+                  }}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('application/x-volume-capture-student', String(s.id))
+                    event.dataTransfer.effectAllowed = 'move'
+                  }}
                    isDropActive={draggedStudentId === s.id}
                    onDragEnter={(event) => {
                      event.preventDefault()
@@ -1705,6 +1831,7 @@ export function ProjectView({
               projectId={projectId}
               photoStatusMap={photoStatusMap}
               onReassign={() => reloadStudents()}
+              onPhotoContextMenu={(photo, event) => setContextMenu({ x: event.clientX, y: event.clientY, photo })}
               isActiveCaptureTarget={activeStudentId === selectedStudent.id}
               activeStudentSource={activeStudentSource}
               onClearCaptureTarget={() => void handleClearCaptureStudent()}
@@ -1724,6 +1851,7 @@ export function ProjectView({
               loading={unmatchedLoading}
               onOpen={(filePath) => window.api.invoke('photos:openInSystem', { filePath })}
               onReassign={setReassignDialogPhoto}
+              onContextMenu={(photo, event) => setContextMenu({ x: event.clientX, y: event.clientY, photo })}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full p-12 text-center bg-slate-50">
@@ -1757,12 +1885,14 @@ export function ProjectView({
         targetClassId={selectedClassId}
         targetClassName={classes.find((cls) => cls.id === selectedClassId)?.className ?? departmentLabel}
         students={allProjectStudents.filter((student) => student.classId !== selectedClassId)}
+        initialStudentId={moveStudentId}
         employeeLabel={employeeLabel}
         departmentLabel={departmentLabel}
-        onClose={() => setMoveStudentOpen(false)}
+        onClose={() => { setMoveStudentOpen(false); setMoveStudentId(null) }}
         onMoved={async (result) => {
           await handleStudentMoved(result)
           setMoveStudentOpen(false)
+          setMoveStudentId(null)
         }}
       />
       <AddStudentDialog
@@ -1775,6 +1905,86 @@ export function ProjectView({
         departmentLabel={departmentLabel}
         employeeLabel={employeeLabel}
       />
+      {contextMenu && (
+        <div
+          className="fixed inset-0 z-[100]"
+          onMouseDown={() => setContextMenu(null)}
+          onContextMenu={(event) => { event.preventDefault(); setContextMenu(null) }}
+        >
+          <div
+            className="absolute min-w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-2xl"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {contextMenu.student && (
+              <>
+                <button type="button" className="block w-full px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => { const student = contextMenu.student!; setContextMenu(null); void renameStudent(student) }}>Rename {employeeLabel.toLowerCase()}</button>
+                {classes.some((targetClass) => targetClass.id !== contextMenu.student!.classId) && (
+                  <>
+                    <div className="my-1 border-t border-slate-100" />
+                    <div className="px-4 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Move to {departmentLabel.toLowerCase()}</div>
+                    <div className="max-h-[40vh] overflow-y-auto">
+                      {classes.filter((targetClass) => targetClass.id !== contextMenu.student!.classId).map((targetClass) => (
+                        <button
+                          key={targetClass.id}
+                          type="button"
+                          disabled={Boolean(project?.finishedAt)}
+                          className="block w-full px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => {
+                            const student = contextMenu.student!
+                            setContextMenu(null)
+                            void moveStudentToClass(student, targetClass)
+                          }}
+                        >
+                          {targetClass.className}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {captureTargetGroups.some((group) => !group.isDefaultClassGroup) && (
+                  <>
+                    <div className="my-1 border-t border-slate-100" />
+                    <div className="px-4 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Subgroups</div>
+                    {captureTargetGroups.filter((group) => !group.isDefaultClassGroup).map((group) => {
+                      const isMember = group.memberStudentIds.includes(contextMenu.student!.id)
+                      return (
+                        <button
+                          key={group.id}
+                          type="button"
+                          disabled={Boolean(project?.finishedAt)}
+                          className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => {
+                            const student = contextMenu.student!
+                            setContextMenu(null)
+                            void handleGroupMembership(group, student.id, !isMember).catch((error) => {
+                              addToast({ type: 'error', title: 'Could not update subgroup', description: String(error) })
+                            })
+                          }}
+                        >
+                          <span aria-hidden="true" className="w-4 text-teal-700">{isMember ? '✓' : '+'}</span>
+                          {isMember ? `Remove from ${group.name}` : `Add to ${group.name}`}
+                        </button>
+                      )
+                    })}
+                  </>
+                )}
+              </>
+            )}
+            {contextMenu.photo && (
+              <>
+                <button type="button" className="block w-full px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => { setReassignDialogPhoto(contextMenu.photo!); setContextMenu(null) }}>Reassign to student</button>
+                <button type="button" className="block w-full px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => { const photo = contextMenu.photo!; setContextMenu(null); void renamePhoto(photo) }}>Rename file</button>
+                <div className="my-1 border-t border-slate-100" />
+                <div className="px-4 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Move to group</div>
+                {captureTargetGroups.map((group) => (
+                  <button key={group.id} type="button" className="block w-full px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-teal-50" onClick={() => void movePhotoToGroup(contextMenu.photo!, group)}>{group.name}</button>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1785,6 +1995,7 @@ function MoveStudentDialog({
   targetClassId,
   targetClassName,
   students,
+  initialStudentId,
   employeeLabel,
   departmentLabel,
   onClose,
@@ -1795,6 +2006,7 @@ function MoveStudentDialog({
   targetClassId: number | null
   targetClassName: string
   students: Student[]
+  initialStudentId: number | null
   employeeLabel: string
   departmentLabel: string
   onClose: () => void
@@ -1805,8 +2017,8 @@ function MoveStudentDialog({
 
   useEffect(() => {
     if (!open) return
-    setStudentId(String(students[0]?.id ?? ''))
-  }, [open, students])
+    setStudentId(String(students.find((student) => student.id === initialStudentId)?.id ?? students[0]?.id ?? ''))
+  }, [open, students, initialStudentId])
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -2034,11 +2246,13 @@ function UnmatchedPhotosPanel({
   loading,
   onOpen,
   onReassign,
+  onContextMenu,
 }: {
   photos: Photo[]
   loading: boolean
   onOpen: (filePath: string) => void | Promise<unknown>
   onReassign: (photo: Photo) => void
+  onContextMenu: (photo: Photo, event: React.MouseEvent<HTMLDivElement>) => void
 }) {
   return (
     <div className="flex-1 overflow-y-auto p-8">
@@ -2062,7 +2276,19 @@ function UnmatchedPhotosPanel({
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
             {photos.map((photo) => (
-              <div key={photo.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col group transition-shadow hover:shadow-md">
+              <div
+                key={photo.id}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.setData('application/x-volume-capture-photo', String(photo.id))
+                  event.dataTransfer.effectAllowed = 'move'
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  onContextMenu(photo, event)
+                }}
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col group transition-shadow hover:shadow-md"
+              >
                 <div className="aspect-square bg-slate-100 relative">
                   {photo.thumbnailData ? (
                     <img
@@ -2149,6 +2375,8 @@ function StudentRow({
   isSelected,
   isActive,
   onClick,
+  onContextMenu,
+  onDragStart,
   isDropActive,
   onDragEnter,
   onDragLeave,
@@ -2161,6 +2389,8 @@ function StudentRow({
   isSelected: boolean
   isActive: boolean
   onClick: () => void
+  onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void
+  onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void
   isDropActive: boolean
   onDragEnter: (event: React.DragEvent<HTMLButtonElement>) => void
   onDragLeave: () => void
@@ -2180,6 +2410,9 @@ function StudentRow({
       data-student-row={s.id}
       aria-keyshortcuts="ArrowUp ArrowDown N"
       onClick={onClick}
+      onContextMenu={onContextMenu}
+      draggable
+      onDragStart={onDragStart}
       onDragEnter={onDragEnter}
       onDragOver={(event) => {
         event.preventDefault()
@@ -2198,7 +2431,11 @@ function StudentRow({
               : "hover:bg-slate-50 border-l-4 border-l-transparent border-b-slate-100"
       )}
       aria-pressed={isActive}
-      title={isDropActive ? 'Drop photos to import for this student' : isActive ? 'Active capture student' : 'Select as active capture student'}
+      title={isDropActive
+        ? 'Drop JPEG/RAW files or an existing photo here'
+        : isActive
+          ? 'Active camera target. Drop JPEG/RAW files or an existing photo here to assign it to this person'
+          : 'Click to set the active camera target, or drop JPEG/RAW files or an existing photo here to assign it to this person'}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
@@ -2249,6 +2486,7 @@ function StudentDetail({
   projectId,
   photoStatusMap,
   onReassign,
+  onPhotoContextMenu,
   isActiveCaptureTarget,
   activeStudentSource,
   onClearCaptureTarget,
@@ -2264,6 +2502,7 @@ function StudentDetail({
   projectId: number
   photoStatusMap: Map<number, ProjectUploadStatusRow>
   onReassign: () => void
+  onPhotoContextMenu: (photo: Photo, event: React.MouseEvent<HTMLDivElement>) => void
   isActiveCaptureTarget: boolean
   activeStudentSource: 'manual' | 'qr' | 'none'
   onClearCaptureTarget: () => void
@@ -2702,22 +2941,36 @@ function StudentDetail({
                     />
                   ))}
                   {filteredCaptures.map((capture) => (
-                    <CaptureTile
+                    <div
                       key={capture.id}
-                      capture={capture}
-                      uploadStatus={capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : undefined}
-                      onOpen={() => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? '')}
-                      onDelete={capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto!.id) : undefined}
-                      onRetry={capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto!.id) : undefined}
-                      retrying={capture.legacyPhoto?.id === retryingPhotoId}
-                      onRetryFile={handleRetryFile}
-                      retryingFileId={retryingFileId}
-                      onUpdateReview={handleUpdateCaptureReview}
-                      onReassign={capture.legacyPhoto ? () => {
-                        setReassignPhoto(capture.legacyPhoto)
-                        setReassignOpen(true)
-                      } : undefined}
-                    />
+                      draggable={Boolean(capture.legacyPhoto)}
+                      onDragStart={(event) => {
+                        if (!capture.legacyPhoto) return
+                        event.dataTransfer.setData('application/x-volume-capture-photo', String(capture.legacyPhoto.id))
+                        event.dataTransfer.effectAllowed = 'move'
+                      }}
+                      onContextMenu={(event) => {
+                        if (!capture.legacyPhoto) return
+                        event.preventDefault()
+                        onPhotoContextMenu(capture.legacyPhoto, event)
+                      }}
+                    >
+                      <CaptureTile
+                        capture={capture}
+                        uploadStatus={capture.legacyPhoto ? photoStatusMap.get(capture.legacyPhoto.id) : undefined}
+                        onOpen={() => handleOpenPhoto(capture.legacyPhoto?.filePath ?? capture.files[0]?.storedPath ?? '')}
+                        onDelete={capture.legacyPhoto ? () => handleDeletePhoto(capture.legacyPhoto!.id) : undefined}
+                        onRetry={capture.legacyPhoto ? () => handleRetryPhoto(capture.legacyPhoto!.id) : undefined}
+                        retrying={capture.legacyPhoto?.id === retryingPhotoId}
+                        onRetryFile={handleRetryFile}
+                        retryingFileId={retryingFileId}
+                        onUpdateReview={handleUpdateCaptureReview}
+                        onReassign={capture.legacyPhoto ? () => {
+                          setReassignPhoto(capture.legacyPhoto)
+                          setReassignOpen(true)
+                        } : undefined}
+                      />
+                    </div>
                   ))}
                 </div>
               )}

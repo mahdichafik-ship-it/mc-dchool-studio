@@ -5,7 +5,7 @@ description: Synchronization rules for automatic class groups and manual members
 
 Every class has one default photo group initially containing the class roster. New students join automatically, but a person manually removed from that group must stay removed through refreshes, offline work, restarts, and web/desktop synchronization.
 
-For delivery galleries, a default class-group photo belongs to every student in that class who has at least one durable individual portrait in the project. Roster membership alone is not enough. Custom group photos remain limited to photographed members of that group.
+For delivery galleries, a default class-group photo belongs to every student in that class who has at least one durable individual portrait in the project. Roster membership alone is not enough. Custom group photos remain limited to photographed members of that group. A person may belong to multiple custom groups; their single parent gallery should include every positively selected, eligible JPEG from each current group membership.
 
 Public gallery, order, and media authorization must check current group membership in the same database decision that grants access. Do not enforce removal by deleting projected photo rows: paid order items must keep their original photo identity so access can return if membership is restored.
 

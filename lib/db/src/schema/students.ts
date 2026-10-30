@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, pgTable, serial, text, timestamp, integer, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { projectsTable } from "./projects";
@@ -35,6 +35,7 @@ export const studentsTable = pgTable("students", {
   officeLocation: text("office_location"),
   photoSession: text("photo_session"),
   captureNotes: text("capture_notes"),
+  customFields: jsonb("custom_fields").$type<Record<string, string>>().notNull().default({}),
   simpleQr: text("simple_qr"),
   jsonQr: text("json_qr"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

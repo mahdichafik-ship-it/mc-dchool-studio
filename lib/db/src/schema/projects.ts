@@ -8,6 +8,7 @@ export const projectsTable = pgTable("projects", {
   userId: text("user_id").notNull(),
   studioId: integer("studio_id").references(() => studiosTable.id, { onDelete: "cascade" }),
   projectType: text("project_type").$type<"school" | "corporate">().notNull().default("school"),
+  emailLanguage: text("email_language").notNull().default("en"),
   schoolName: text("school_name").notNull(),
   photoDate: text("photo_date"),
   address: text("address"),

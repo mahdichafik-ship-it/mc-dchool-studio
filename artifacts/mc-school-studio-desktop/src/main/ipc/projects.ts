@@ -1,10 +1,10 @@
 import { ipcMain } from 'electron'
-import { readFileSync, mkdirSync } from 'fs'
+import { readFileSync, mkdirSync, rmSync } from 'fs'
 import { randomBytes } from 'crypto'
-import { dirname, join } from 'path'
-import { eq, count, and, isNull } from 'drizzle-orm'
+import { dirname, join, relative, resolve, sep } from 'path'
+import { eq, count, and, isNull, ne } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { projectsTable, classesTable, studentsTable, capturesTable, groupsTable, groupMembersTable } from '../db/schema'
+import { projectsTable, classesTable, studentsTable, capturesTable, groupsTable, groupMembersTable, photosTable, imageFilesTable, groupCapturesTable, groupCaptureFilesTable, qrMarkersTable } from '../db/schema'
 import {
   normalizeProjectType,
   type Project,
@@ -23,14 +23,15 @@ import {
   getProjectStorageLayout,
 } from '../lib/storageLayout'
 import { formatStudentFolderName } from '../lib/photoFileNaming'
-import { syncClassCloudIdentity, syncStudentCloudIdentity } from './upload'
-import { getSetting, setSetting } from './upload'
+import { syncClassCloudIdentity, syncStudentCloudIdentity, getSetting, setSetting, waitForActiveUploads } from './upload'
 import { getNewDefaultGroupMemberIds, serializeDefaultGroupRosterSnapshot } from '../lib/groupRoster'
 import {
   migrateStudentFoldersAt,
   previewStudentFolderMigration,
 } from '../lib/studentFolderMigration'
 import { generateStudentQrCodes } from '../lib/studentQr'
+import { stopProjectWatcher } from './watcher'
+import { hasVerifiedRemoteProjectCopy } from '../lib/projectLifecycle'
 
 function now() {
   return new Date().toISOString()
@@ -144,6 +145,8 @@ function enrichProject(
     syncTotalFiles: p.syncTotalFiles,
     syncFailedFiles: p.syncFailedFiles,
     syncError: p.syncError,
+    archivedAt: p.archivedAt,
+    localFilesDeletedAt: p.localFilesDeletedAt,
     classCount,
     studentCount,
     photoCount,
@@ -217,9 +220,80 @@ export function registerProjectHandlers() {
     })
   })
 
+  ipcMain.handle('projects:setArchived', async (_e, { projectId, archived }: { projectId: number; archived: boolean }) => {
+    const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (!project) throw new Error('Project not found')
+    if (project.localFilesDeletedAt) throw new Error('Deleted local projects cannot be archived.')
+    db.update(projectsTable)
+      .set({ archivedAt: archived ? now() : null, updatedAt: now() })
+      .where(eq(projectsTable.id, projectId))
+      .run()
+  })
+
+  ipcMain.handle('projects:deleteLocalFiles', async (_e, { projectId, confirmed }: { projectId: number; confirmed: boolean }) => {
+    if (confirmed !== true) throw new Error('Confirmation is required.')
+    let project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (!project) throw new Error('Project not found')
+    const safeToDelete = hasVerifiedRemoteProjectCopy
+    if (!safeToDelete(project)) throw new Error('Local photos can only be removed after verified cloud sync.')
+    if (project.localFilesDeletedAt) return
+
+    await stopProjectWatcher(projectId, { drain: true, clearTarget: true })
+    await waitForActiveUploads()
+    project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+    if (!safeToDelete(project)) throw new Error('Cloud sync is no longer verified; no local photos were removed.')
+
+    const managedPhotos = resolve(getPhotosDir())
+    const projectStorage = getProjectStorageLayout(
+      getPhotoSystemLayout(dirname(managedPhotos)),
+      project.id,
+      project.schoolName,
+    )
+    const safeManagedPath = (root: string, candidate: string) => {
+      const rel = relative(resolve(root), resolve(candidate))
+      return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`)
+    }
+    const paths = new Set<string>()
+    for (const row of db.select({ path: photosTable.filePath }).from(photosTable).where(eq(photosTable.projectId, projectId)).all()) paths.add(row.path)
+    for (const row of db.select({ path: imageFilesTable.storedPath }).from(imageFilesTable)
+      .innerJoin(capturesTable, eq(imageFilesTable.captureId, capturesTable.id))
+      .where(eq(capturesTable.projectId, projectId)).all()) paths.add(row.path)
+    for (const row of db.select({ path: groupCaptureFilesTable.storedPath }).from(groupCaptureFilesTable)
+      .innerJoin(groupCapturesTable, eq(groupCaptureFilesTable.captureId, groupCapturesTable.id))
+      .where(eq(groupCapturesTable.projectId, projectId)).all()) paths.add(row.path)
+    for (const row of db.select({ path: qrMarkersTable.filePath }).from(qrMarkersTable).where(eq(qrMarkersTable.projectId, projectId)).all()) paths.add(row.path)
+
+    const pathsUsedElsewhere = new Set<string>()
+    for (const row of db.select({ path: photosTable.filePath }).from(photosTable).where(ne(photosTable.projectId, projectId)).all()) pathsUsedElsewhere.add(row.path)
+    for (const row of db.select({ path: imageFilesTable.storedPath }).from(imageFilesTable)
+      .innerJoin(capturesTable, eq(imageFilesTable.captureId, capturesTable.id))
+      .where(ne(capturesTable.projectId, projectId)).all()) pathsUsedElsewhere.add(row.path)
+    for (const row of db.select({ path: groupCaptureFilesTable.storedPath }).from(groupCaptureFilesTable)
+      .innerJoin(groupCapturesTable, eq(groupCaptureFilesTable.captureId, groupCapturesTable.id))
+      .where(ne(groupCapturesTable.projectId, projectId)).all()) pathsUsedElsewhere.add(row.path)
+    for (const row of db.select({ path: qrMarkersTable.filePath }).from(qrMarkersTable).where(ne(qrMarkersTable.projectId, projectId)).all()) pathsUsedElsewhere.add(row.path)
+
+    for (const path of paths) {
+      if (!pathsUsedElsewhere.has(path) && (safeManagedPath(managedPhotos, path) || safeManagedPath(projectStorage.images, path))) {
+        rmSync(path, { force: true })
+      }
+    }
+    for (const directory of [
+      projectStorage.jpegOriginals,
+      projectStorage.jpegPreviews,
+      projectStorage.jpegThumbnails,
+      projectStorage.rawOriginals,
+    ]) rmSync(directory, { recursive: true, force: true })
+
+    db.update(projectsTable)
+      .set({ localFilesDeletedAt: now(), updatedAt: now() })
+      .where(eq(projectsTable.id, projectId))
+      .run()
+  })
+
   ipcMain.handle('projects:get', async (_e, { projectId }: { projectId: number }): Promise<Project | null> => {
     const [p] = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).all()
-    if (!p) return null
+    if (!p || p.localFilesDeletedAt) return null
     const [{ classCount }] = db.select({ classCount: count() }).from(classesTable).where(eq(classesTable.projectId, p.id)).all()
     const [{ studentCount }] = db.select({ studentCount: count() }).from(studentsTable).where(eq(studentsTable.projectId, p.id)).all()
     const [{ photoCount }] = db
@@ -694,6 +768,52 @@ export function registerProjectHandlers() {
       const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, existing.id)).get() ?? existing
       return {
         student: toStudent(refreshed, destination.className),
+        cloudSynced: sync.synced,
+        ...(sync.error ? { syncError: sync.error } : {}),
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'students:rename',
+    async (
+      _e,
+      input: { projectId: number; studentId: number; firstName: string; lastName: string },
+    ) => {
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      if (project.finishedAt) throw new Error('This project is finished and its roster can no longer be changed.')
+      const firstName = input.firstName.trim()
+      const lastName = input.lastName.trim()
+      if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) {
+        throw new Error('Enter a first and last name under 100 characters.')
+      }
+      const student = db.select().from(studentsTable).where(and(
+        eq(studentsTable.id, input.studentId),
+        eq(studentsTable.projectId, input.projectId),
+      )).get()
+      if (!student) throw new Error('Student not found in this project.')
+      const cls = db.select().from(classesTable).where(and(
+        eq(classesTable.id, student.classId),
+        eq(classesTable.projectId, input.projectId),
+      )).get()
+      if (!cls) throw new Error('The student’s class or department is missing from this project.')
+      const qrCodes = await generateStudentQrCodes({
+        projectName: project.schoolName,
+        className: cls.className,
+        firstName,
+        lastName,
+        studentId: student.generatedStudentId,
+      })
+      db.update(studentsTable)
+        .set({ firstName, lastName, ...qrCodes, updatedAt: now() })
+        .where(eq(studentsTable.id, student.id))
+        .run()
+      const sync = await syncStudentCloudIdentity(input.projectId, student.id)
+      const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, student.id)).get()
+      if (!refreshed) throw new Error('The renamed student could not be loaded.')
+      return {
+        student: toStudent(refreshed, cls.className),
         cloudSynced: sync.synced,
         ...(sync.error ? { syncError: sync.error } : {}),
       }

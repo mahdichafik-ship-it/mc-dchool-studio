@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { FolderOpen, Cloud, Camera, Users, BookOpen, Image, ChevronRight, RefreshCw, Download, AlertCircle, Loader } from 'lucide-react'
+import { FolderOpen, Cloud, Camera, Users, BookOpen, Image, ChevronRight, RefreshCw, Download, AlertCircle, Loader, Archive, Trash2, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useProjects } from '@/hooks/useApi'
@@ -25,6 +25,7 @@ interface Props {
 
 export function ProjectList({ onOpenProject, offline = false }: Props) {
   const { data: projects, loading, error, reload } = useProjects()
+  const [view, setView] = useState<'active' | 'archived' | 'deleted'>('active')
 
   // Cloud sync modal state
   const [syncOpen, setSyncOpen] = useState(false)
@@ -32,6 +33,36 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
   const [syncLoading, setSyncLoading] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [pullingId, setPullingId] = useState<number | null>(null)
+  const activeProjects = projects.filter((p) => !p.localFilesDeletedAt && !p.archivedAt && p.syncStatus !== 'synced')
+  const archivedProjects = projects.filter((p) => !p.localFilesDeletedAt && (p.archivedAt || p.syncStatus === 'synced'))
+  const deletedProjects = projects.filter((p) => Boolean(p.localFilesDeletedAt))
+  const visibleProjects = view === 'active' ? activeProjects : view === 'archived' ? archivedProjects : deletedProjects
+
+  async function setArchived(project: Project, archived: boolean) {
+    try {
+      await window.api.invoke('projects:setArchived', { projectId: project.id, archived })
+      await reload()
+    } catch (e) {
+      addToast({ type: 'error', title: 'Project update failed', description: String(e) })
+    }
+  }
+
+  async function removeLocalFiles(project: Project) {
+    const confirmed = window.confirm(
+      `Remove the app-managed photo copies for “${project.schoolName}” from this computer? ` +
+      'This only removes local copies. Nothing in Volume Capture cloud or connected backups will be deleted. ' +
+      'Verified cloud sync is required. Original camera and watch-folder files are not touched.',
+    )
+    if (!confirmed) return
+    try {
+      await window.api.invoke('projects:deleteLocalFiles', { projectId: project.id, confirmed: true })
+      await reload()
+      addToast({ type: 'success', title: 'Local photos removed', description: `${project.schoolName} is now in Deleted.` })
+      setView('deleted')
+    } catch (e) {
+      addToast({ type: 'error', title: 'Photos were not removed', description: String(e) })
+    }
+  }
 
   async function handleOpenSync() {
     setSyncOpen(true)
@@ -117,12 +148,26 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
         {error && (
           <div className="text-red-500 text-sm bg-red-50 p-4 rounded-lg">{error}</div>
         )}
-        {!loading && projects.length === 0 && (
+        <div className="mb-5 flex gap-2 border-b border-slate-200">
+          {([
+            ['active', 'Projects', activeProjects.length],
+            ['archived', 'Archive', archivedProjects.length],
+            ['deleted', 'Deleted', deletedProjects.length],
+          ] as const).map(([key, label, count]) => (
+            <button key={key} onClick={() => setView(key)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 ${view === key ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              {label} <span className="ml-1 text-xs text-slate-400">{count}</span>
+            </button>
+          ))}
+        </div>
+        {!loading && visibleProjects.length === 0 && (
           <div className="flex flex-col items-center justify-center h-64 text-center">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
               <FolderOpen className="size-8 text-slate-400" />
             </div>
-            <h3 className="font-semibold text-slate-700 mb-1">No local projects yet</h3>
+            <h3 className="font-semibold text-slate-700 mb-1">
+              {view === 'active' ? 'No active projects' : view === 'archived' ? 'No archived projects' : 'No deleted projects'}
+            </h3>
             <p className="text-sm text-slate-500 max-w-xs">
               Create and prepare your project on the web app, then pull it here to start the shoot.
             </p>
@@ -132,10 +177,22 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
             </Button>
           </div>
         )}
-        {!loading && projects.length > 0 && (
+        {!loading && visibleProjects.length > 0 && (
           <div className="grid grid-cols-1 gap-3 max-w-3xl">
-            {projects.map((p) => (
-              <ProjectCard key={p.id} project={p} onClick={() => onOpenProject(p.id, p.schoolName, p.projectType)} />
+            {visibleProjects.map((p) => (
+              <div key={p.id} className="flex items-stretch gap-2">
+                <div className="min-w-0 flex-1">
+                  <ProjectCard project={p} onClick={() => !p.localFilesDeletedAt && onOpenProject(p.id, p.schoolName, p.projectType)} />
+                </div>
+                <div className="flex shrink-0 flex-col justify-center gap-2">
+                  {view === 'active' && <button onClick={() => void setArchived(p, true)} className="rounded-lg border px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"><Archive className="mr-1 inline size-3.5" />Archive</button>}
+                  {view === 'archived' && p.archivedAt && p.syncStatus !== 'synced' && <button onClick={() => void setArchived(p, false)} className="rounded-lg border px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"><RotateCcw className="mr-1 inline size-3.5" />Restore</button>}
+                  {view === 'archived' && p.syncStatus === 'synced' && (
+                    <button onClick={() => void removeLocalFiles(p)} className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-700 hover:bg-red-50"><Trash2 className="mr-1 inline size-3.5" />Remove local photos</button>
+                  )}
+                  {view === 'deleted' && <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">Local photos removed</span>}
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -197,8 +254,11 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
                   {cloudProjects.map((cp) => {
                     const isPulling = pullingId === cp.id
                     const isCorporate = cp.projectType === 'corporate'
+                    const deletedLocal = projects.some(
+                      (lp) => lp.schoolName === cp.schoolName && Boolean(lp.localFilesDeletedAt),
+                    )
                     const alreadyLocal = projects.some(
-                      (lp) => lp.schoolName === cp.schoolName,
+                      (lp) => lp.schoolName === cp.schoolName && !lp.localFilesDeletedAt,
                     )
                     return (
                       <div
@@ -221,9 +281,12 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
                           {alreadyLocal && (
                             <Badge variant="secondary" className="text-xs text-slate-400">Local copy exists</Badge>
                           )}
+                          {deletedLocal && (
+                            <Badge variant="secondary" className="text-xs text-slate-500">Local photos removed</Badge>
+                          )}
                           <button
                             onClick={() => handlePullProject(cp)}
-                            disabled={!!pullingId}
+                            disabled={!!pullingId || deletedLocal}
                             className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white rounded-lg transition-colors"
                           >
                             {isPulling ? (
@@ -231,7 +294,7 @@ export function ProjectList({ onOpenProject, offline = false }: Props) {
                             ) : (
                               <Download className="size-3.5" />
                             )}
-                            {isPulling ? 'Pulling…' : alreadyLocal ? 'Re-sync' : 'Pull'}
+                            {isPulling ? 'Pulling…' : deletedLocal ? 'Restore unavailable' : alreadyLocal ? 'Re-sync' : 'Pull'}
                           </button>
                         </div>
                       </div>
@@ -273,7 +336,8 @@ function ProjectCard({ project: p, onClick }: { project: Project; onClick: () =>
     <button
       data-project-card={p.id}
       onClick={onClick}
-      className="group bg-white border border-slate-200 rounded-xl p-5 text-left hover:border-teal-300 hover:shadow-md transition-all"
+      disabled={Boolean(p.localFilesDeletedAt)}
+      className="group w-full bg-white border border-slate-200 rounded-xl p-5 text-left hover:border-teal-300 hover:shadow-md transition-all disabled:cursor-default disabled:opacity-80"
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
@@ -308,6 +372,8 @@ function ProjectCard({ project: p, onClick }: { project: Project; onClick: () =>
         {p.watchFolder && (
           <Badge variant="success">Watch folder set</Badge>
         )}
+        {p.syncStatus === 'synced' && <Badge variant="success">Sent</Badge>}
+        {p.localFilesDeletedAt && <Badge variant="secondary">Photos removed</Badge>}
       </div>
     </button>
   )

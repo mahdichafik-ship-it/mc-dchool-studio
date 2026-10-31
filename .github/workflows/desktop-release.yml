@@ -139,7 +139,7 @@ jobs:
             runner: macos-15-intel
             runner_architecture: x86_64
           - architecture: arm64
-            runner: macos-14
+            runner: macos-15
             runner_architecture: arm64
     runs-on: ${{ matrix.runner }}
 
@@ -461,7 +461,7 @@ jobs:
             runner: macos-15-intel
             runner_architecture: x86_64
           - architecture: arm64
-            runner: macos-14
+            runner: macos-15
             runner_architecture: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -711,7 +711,7 @@ jobs:
 
   update-smoke-arm64:
     needs: publish-release
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
     permissions:
       contents: read

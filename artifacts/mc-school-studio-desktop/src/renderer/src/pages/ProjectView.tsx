@@ -167,6 +167,10 @@ export function ProjectView({
   const [finishing, setFinishing] = useState(false)
   const [renamingGroupId, setRenamingGroupId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [addGroupDialogOpen, setAddGroupDialogOpen] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [groupCreateError, setGroupCreateError] = useState('')
+  const [creatingGroup, setCreatingGroup] = useState(false)
   const [syncProgress, setSyncProgress] = useState<ProjectSyncProgressEvent | null>(null)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [uploadQueue, setUploadQueue] = useState<LiveUploadQueueItem[]>([])
@@ -216,6 +220,7 @@ export function ProjectView({
 
       const anyDialogOpen =
         addStudentOpen ||
+        addGroupDialogOpen ||
         uploadDialogOpen ||
         finishDialogOpen ||
         reassignDialogPhoto !== null ||
@@ -265,6 +270,7 @@ export function ProjectView({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
     addStudentOpen,
+    addGroupDialogOpen,
     uploadDialogOpen,
     finishDialogOpen,
     reassignDialogPhoto,
@@ -430,9 +436,18 @@ export function ProjectView({
     }
   }
 
-  async function handleCreateGroup() {
-    const name = window.prompt('Group name')
-    if (!name?.trim()) return
+  function handleCreateGroup() {
+    setNewGroupName('')
+    setGroupCreateError('')
+    setAddGroupDialogOpen(true)
+  }
+
+  async function handleSaveNewGroup(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = newGroupName.trim()
+    if (!name) return
+    setCreatingGroup(true)
+    setGroupCreateError('')
     try {
       const group = await window.api.invoke('groups:create', {
         projectId, classId: selectedClassId, name,
@@ -440,8 +455,12 @@ export function ProjectView({
       })
       await reloadGroups()
       await handleSelectGroup(group)
+      setAddGroupDialogOpen(false)
     } catch (error) {
+      setGroupCreateError(error instanceof Error ? error.message : String(error))
       addToast({ type: 'error', title: 'Could not create group', description: String(error) })
+    } finally {
+      setCreatingGroup(false)
     }
   }
 
@@ -1985,6 +2004,40 @@ export function ProjectView({
           </div>
         </div>
       )}
+      <Dialog
+        open={addGroupDialogOpen}
+        onClose={() => setAddGroupDialogOpen(false)}
+        title={selectedClass ? `Add group to ${selectedClass.className}` : 'Add photo group'}
+      >
+        <form onSubmit={(event) => void handleSaveNewGroup(event)}>
+          <label className="block text-sm font-medium text-slate-700">
+            Group name
+            <Input
+              autoFocus
+              required
+              maxLength={120}
+              value={newGroupName}
+              onChange={(event) => setNewGroupName(event.target.value)}
+              placeholder="e.g. Choir"
+              className="mt-1.5"
+            />
+          </label>
+          {selectedClass && (
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              This group will start with the people currently in {selectedClass.className}. You can adjust members after it is created.
+            </p>
+          )}
+          {groupCreateError && <p role="alert" className="mt-2 text-sm text-red-700">{groupCreateError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setAddGroupDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={creatingGroup || !newGroupName.trim()}>
+              {creatingGroup ? 'Creating…' : 'Create group'}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   )
 }

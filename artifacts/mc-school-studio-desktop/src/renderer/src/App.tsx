@@ -4,6 +4,9 @@ import { ProjectList } from '@/pages/ProjectList'
 import { ProjectView } from '@/pages/ProjectView'
 import { Settings } from '@/pages/Settings'
 import { Toaster } from '@/components/ui/toast'
+import { Dialog } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useClasses, usePhotoEvents } from '@/hooks/useApi'
 import { addToast } from '@/components/ui/toast'
 import type { PhotoMatchedEvent, PhotoMarkerEvent, PhotoUnmatchedEvent } from '@/hooks/useApi'
@@ -52,6 +55,10 @@ export default function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' })
   const [authBusy, setAuthBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  const [addClassDialogOpen, setAddClassDialogOpen] = useState(false)
+  const [newClassName, setNewClassName] = useState('')
+  const [classCreateError, setClassCreateError] = useState('')
+  const [creatingClass, setCreatingClass] = useState(false)
   const [captureNotificationsEnabled, setCaptureNotificationsEnabled] = useState(
     () => window.localStorage.getItem('capture-notifications-enabled') !== 'false',
   )
@@ -202,11 +209,21 @@ export default function App() {
     setCurrentPage(page)
   }
 
-  const handleAddClass = async () => {
+  const handleAddClass = () => {
+    if (!activeProjectId) return
+    setNewClassName('')
+    setClassCreateError('')
+    setAddClassDialogOpen(true)
+  }
+
+  const handleCreateClass = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
     if (!activeProjectId) return
     const label = activeProjectType === 'corporate' ? 'Group' : 'Class'
-    const className = window.prompt(`${label} name`)
-    if (!className?.trim()) return
+    const className = newClassName.trim()
+    if (!className) return
+    setCreatingClass(true)
+    setClassCreateError('')
     try {
       const result = await window.api.invoke('classes:create', {
         projectId: activeProjectId,
@@ -214,6 +231,7 @@ export default function App() {
       })
       await reloadActiveProjectClasses()
       setSelectedClassId(result.class.id)
+      setAddClassDialogOpen(false)
       addToast({
         type: 'success',
         title: `${label} created`,
@@ -222,11 +240,14 @@ export default function App() {
           : `${result.class.className} is ready locally; cloud sync will retry when connected.`,
       })
     } catch (error) {
+      setClassCreateError(error instanceof Error ? error.message : String(error))
       addToast({
         type: 'error',
         title: `Could not create ${label.toLowerCase()}`,
         description: error instanceof Error ? error.message : String(error),
       })
+    } finally {
+      setCreatingClass(false)
     }
   }
 
@@ -265,6 +286,35 @@ export default function App() {
           onSignedOut={() => setAuth({ status: 'signed-out', error: 'You have signed out of this desktop.' })}
         />
       )}
+      <Dialog
+        open={addClassDialogOpen}
+        onClose={() => setAddClassDialogOpen(false)}
+        title={`Add ${activeProjectType === 'corporate' ? 'group' : 'class'}`}
+      >
+        <form onSubmit={(event) => void handleCreateClass(event)}>
+          <label className="block text-sm font-medium text-slate-700">
+            {activeProjectType === 'corporate' ? 'Group' : 'Class'} name
+            <Input
+              autoFocus
+              required
+              maxLength={120}
+              value={newClassName}
+              onChange={(event) => setNewClassName(event.target.value)}
+              placeholder={activeProjectType === 'corporate' ? 'e.g. Marketing' : 'e.g. Class 4B'}
+              className="mt-1.5"
+            />
+          </label>
+          {classCreateError && <p role="alert" className="mt-2 text-sm text-red-700">{classCreateError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setAddClassDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={creatingClass || !newClassName.trim()}>
+              {creatingClass ? 'Creating…' : 'Create'}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
       <Toaster />
     </AppLayout>
   )

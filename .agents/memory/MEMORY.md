@@ -5,6 +5,7 @@
 - [Desktop field acceptance](desktop-field-acceptance.md) — hosted signed-update smoke is not a substitute for recording real Intel and Apple-silicon photographer Mac results.
 - [Desktop browser pairing](desktop-browser-pairing.md) — Browser handoff requires a public production deployment; never add a shared private-deployment bypass to the Mac app.
 - [Desktop SQLite tests](desktop-sqlite-tests.md) — test desktop persistence through an injectable store because the workspace Node runtime lacks the native SQLite binding.
+- [Lightroom rating export](lightroom-rating-export.md) — write ratings only into exported copies: JPEG XMP in-file, RAW XMP sidecars; never mutate managed originals.
 - [Desktop retirement barrier](desktop-retirement-barrier.md) — persistently fence and drain capture work before erasing local data and acknowledging retirement.
 - [Desktop offline authorization](desktop-offline-authorization.md) — offline local work may use cached identity, but cloud writes require fresh server verification and any authoritative 401 clears eligibility.
 - [Platform-owner desktop scope](platform-owner-desktop-scope.md) — platform-owner desktop connections can pull every studio's projects; ordinary desktop roles remain studio-scoped.

@@ -854,12 +854,15 @@ export function ProjectView({
         return
       }
       const skipped = result.skippedExistingFiles ?? 0
+      const ratings = result.ratingMetadataCount ?? 0
+      const sidecars = result.xmpSidecarCount ?? 0
+      const ratingSummary = `${ratings} Lightroom rating${ratings === 1 ? '' : 's'} included${sidecars > 0 ? ` · ${sidecars} XMP sidecar${sidecars === 1 ? '' : 's'}` : ''}`
       addToast({
         type: 'success',
         title: layout === 'lightroom_watch_folder'
           ? 'Sent to Lightroom watched folder'
           : 'Capture export complete',
-        description: `${result.exportedFileCount ?? 0} file${result.exportedFileCount === 1 ? '' : 's'} from ${result.exportedCaptureCount ?? 0} capture${result.exportedCaptureCount === 1 ? '' : 's'} exported${skipped > 0 ? ` · ${skipped} already there` : ''}`,
+        description: `${result.exportedFileCount ?? 0} file${result.exportedFileCount === 1 ? '' : 's'} from ${result.exportedCaptureCount ?? 0} capture${result.exportedCaptureCount === 1 ? '' : 's'} exported · ${ratingSummary}${skipped > 0 ? ` · ${skipped} already there (not refreshed)` : ''}`,
       })
     } catch (error) {
       addToast({ type: 'error', title: 'Export failed', description: String(error) })

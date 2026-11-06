@@ -4,6 +4,8 @@ import {
   exportCaptureRecords,
   type CaptureExportRecord,
 } from '../src/main/ipc/captureExport.ts'
+import { lightroomRatingSidecarPath } from '../src/main/lib/lightroomRatingMetadata.ts'
+import { exiftool } from 'exiftool-vendored'
 import {
   syncProjectUploads,
   type ProjectSyncJob,
@@ -12,6 +14,7 @@ import { parseUploadResponseJson } from '../src/main/lib/uploadResponseValidatio
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import sharp from 'sharp'
 
 function captureJob(fileId: number): ProjectSyncJob {
   return { kind: 'capture-file', captureId: 1, fileId }
@@ -99,7 +102,7 @@ test('a reused server upload response still maps to one local capture-file job',
 function makeRecord(
   id: number,
   pairingStatus: 'complete' | 'jpeg_only' | 'raw_only',
-  options: { selected?: boolean; favorite?: boolean; rejected?: boolean } = {},
+  options: { selected?: boolean; favorite?: boolean; rejected?: boolean; rating?: number } = {},
 ): CaptureExportRecord {
   return {
     capture: {
@@ -108,6 +111,7 @@ function makeRecord(
       selected: options.selected ?? false,
       favorite: options.favorite ?? false,
       rejected: options.rejected ?? false,
+      rating: options.rating ?? 0,
       baseFilename: `capture-${id}`,
       sequence: id,
       capturedAt: '2026-09-14T12:00:00.000Z',
@@ -136,19 +140,22 @@ function addFile(
   })
 }
 
-test('exports every capture mode and keeps a JPEG/RAW pair in one sequence folder', () => {
+test('exports every capture mode and keeps Lightroom ratings with JPEG/RAW copies', async () => {
   const root = mkdtempSync(join(tmpdir(), 'volume-capture-export-modes-'))
   try {
     const jpegPath = join(root, 'source.jpg')
     const rawPath = join(root, 'source.cr3')
-    writeFileSync(jpegPath, 'jpeg-bytes')
+    const jpegBytes = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: '#334455' },
+    }).jpeg().toBuffer()
+    writeFileSync(jpegPath, jpegBytes)
     writeFileSync(rawPath, 'raw-bytes')
 
     const records = [
-      makeRecord(1, 'complete', { selected: true, favorite: true }),
+      makeRecord(1, 'complete', { selected: true, favorite: true, rating: 5 }),
       makeRecord(2, 'jpeg_only'),
       makeRecord(3, 'raw_only'),
-      makeRecord(4, 'complete', { selected: true, rejected: true }),
+      makeRecord(4, 'complete', { selected: true, rejected: true, rating: 1 }),
     ]
     addFile(records[0], 'JPEG', 'portrait.jpg', jpegPath)
     addFile(records[0], 'RAW', 'portrait.cr3', rawPath)
@@ -167,7 +174,7 @@ test('exports every capture mode and keeps a JPEG/RAW pair in one sequence folde
     }
 
     for (const [mode, ids] of Object.entries(expectedIds)) {
-      const result = exportCaptureRecords({
+      const result = await exportCaptureRecords({
         project: { schoolName: 'North: Shore School' },
         records,
         destinationDir: join(root, mode),
@@ -183,14 +190,28 @@ test('exports every capture mode and keeps a JPEG/RAW pair in one sequence folde
     }
 
     const pairFolder = join(root, 'all', 'North- Shore School-captures', '000001_capture-1')
-    assert.equal(readFileSync(join(pairFolder, 'portrait.jpg'), 'utf8'), 'jpeg-bytes')
+    assert.deepEqual(readFileSync(jpegPath), jpegBytes, 'the managed source JPEG must remain unchanged')
+    const jpegMetadata = await exiftool.read(join(pairFolder, 'portrait.jpg'))
+    assert.equal(jpegMetadata.Rating, 5)
+    const rawSidecarPath = lightroomRatingSidecarPath(join(pairFolder, 'portrait.cr3'))
+    assert.equal(existsSync(rawSidecarPath), true)
+    const rawMetadata = await exiftool.read(rawSidecarPath)
+    assert.equal(rawMetadata.Rating, 5)
     assert.equal(readFileSync(join(pairFolder, 'portrait.cr3'), 'utf8'), 'raw-bytes')
+    const ratingSummary = await exportCaptureRecords({
+      project: { schoolName: 'North: Shore School' },
+      records: [records[0]],
+      destinationDir: join(root, 'rating-summary'),
+      mode: 'all',
+    })
+    assert.equal(ratingSummary.ratingMetadataCount, 2)
+    assert.equal(ratingSummary.xmpSidecarCount, 1)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test('reports missing files and never lets an exported filename escape its capture folder', () => {
+test('reports missing files and never lets an exported filename escape its capture folder', async () => {
   const root = mkdtempSync(join(tmpdir(), 'volume-capture-export-safety-'))
   try {
     const existingPath = join(root, 'existing.jpg')
@@ -199,7 +220,7 @@ test('reports missing files and never lets an exported filename escape its captu
     addFile(record, 'JPEG', '..', existingPath)
     addFile(record, 'RAW', 'missing.cr3', join(root, 'does-not-exist.cr3'))
 
-    const result = exportCaptureRecords({
+    const result = await exportCaptureRecords({
       project: { schoolName: 'School' },
       records: [record],
       destinationDir: root,
@@ -217,12 +238,15 @@ test('reports missing files and never lets an exported filename escape its captu
   }
 })
 
-test('Lightroom exports are flat, pair-compatible, and idempotent', () => {
+test('Lightroom exports are flat, pair-compatible, and idempotent', async () => {
   const root = mkdtempSync(join(tmpdir(), 'volume-capture-lightroom-export-'))
   try {
     const sourcePath = join(root, 'source.jpg')
-    writeFileSync(sourcePath, 'jpeg-bytes')
-    const record = makeRecord(12, 'complete', { selected: true })
+    const jpegBytes = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: '#445566' },
+    }).jpeg().toBuffer()
+    writeFileSync(sourcePath, jpegBytes)
+    const record = makeRecord(12, 'complete', { selected: true, rating: 4 })
     addFile(record, 'JPEG', 'IMG_001.JPG', sourcePath)
 
     const input = {
@@ -232,13 +256,15 @@ test('Lightroom exports are flat, pair-compatible, and idempotent', () => {
       mode: 'selected' as const,
       layout: 'lightroom_watch_folder' as const,
     }
-    const first = exportCaptureRecords(input)
-    const second = exportCaptureRecords(input)
+    const first = await exportCaptureRecords(input)
+    const second = await exportCaptureRecords(input)
 
     assert.equal(first.exportedFileCount, 1)
     assert.equal(first.skippedExistingFiles, 0)
     assert.equal(second.exportedFileCount, 0)
     assert.equal(second.skippedExistingFiles, 1)
+    assert.equal(first.ratingMetadataCount, 1)
+    assert.equal(first.xmpSidecarCount, 0)
     assert.deepEqual(
       requireFileNames(input.destinationDir),
       ['School_-_One_Class_-_Blue_Olsen_Ana_STUDENT-12_000012_capture-12.JPG'],

@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { copyFileSync, existsSync, mkdirSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { join, resolve, sep } from 'path'
 import { eq, and, isNull } from 'drizzle-orm'
 import { getDb } from '../db'
@@ -11,6 +11,7 @@ import {
   studentsTable,
 } from '../db/schema'
 import { buildLightroomFilename } from '../lib/lightroomExport'
+import { lightroomRatingSidecarPath, writeLightroomRatingMetadata } from '../lib/lightroomRatingMetadata'
 import type {
   CaptureExportLayout,
   CaptureExportMode,
@@ -52,7 +53,7 @@ export function shouldExport(
 export interface CaptureExportRecord {
   capture: Pick<
     typeof capturesTable.$inferSelect,
-    'id' | 'pairingStatus' | 'selected' | 'favorite' | 'rejected' | 'baseFilename' | 'sequence' | 'capturedAt'
+    'id' | 'pairingStatus' | 'selected' | 'favorite' | 'rejected' | 'rating' | 'baseFilename' | 'sequence' | 'capturedAt'
   >
   files: Array<Pick<
     typeof imageFilesTable.$inferSelect,
@@ -82,13 +83,13 @@ function isPathInside(parentDir: string, candidatePath: string): boolean {
   return candidate === parent || candidate.startsWith(`${parent}${sep}`)
 }
 
-export function exportCaptureRecords({
+export async function exportCaptureRecords({
   project,
   records,
   destinationDir,
   mode,
   layout = 'capture_folders',
-}: CaptureExportInput): CaptureExportResult {
+}: CaptureExportInput): Promise<CaptureExportResult> {
   const outputDir = layout === 'lightroom_watch_folder'
     ? destinationDir
     : join(destinationDir, `${safeName(project.schoolName)}-captures`)
@@ -96,6 +97,8 @@ export function exportCaptureRecords({
 
   let exportedCaptureCount = 0
   let exportedFileCount = 0
+  let ratingMetadataCount = 0
+  let xmpSidecarCount = 0
   let skippedMissingFiles = 0
   let skippedExistingFiles = 0
 
@@ -135,6 +138,23 @@ export function exportCaptureRecords({
       }
       if (layout === 'capture_folders') mkdirSync(captureDir, { recursive: true })
       copyFileSync(file.storedPath, destinationPath)
+      try {
+        const metadataKind = await writeLightroomRatingMetadata(
+          destinationPath,
+          capture.rating,
+          file.fileRole,
+        )
+        ratingMetadataCount++
+        if (metadataKind === 'sidecar') xmpSidecarCount++
+      } catch (error) {
+        rmSync(destinationPath, { force: true })
+        rmSync(lightroomRatingSidecarPath(destinationPath), { force: true })
+        throw new Error(
+          `Could not write the Lightroom star rating for ${file.originalFilename}: ${
+            error instanceof Error ? error.message : String(error)
+          }. The export stopped; check the destination before retrying.`,
+        )
+      }
       exportedFileCount++
       captureExported = true
     }
@@ -146,6 +166,8 @@ export function exportCaptureRecords({
     outputDir,
     exportedCaptureCount,
     exportedFileCount,
+    ratingMetadataCount,
+    xmpSidecarCount,
     skippedMissingFiles,
     skippedExistingFiles,
   }
@@ -154,7 +176,7 @@ export function exportCaptureRecords({
 export function registerCaptureExportHandlers(): void {
   ipcMain.handle(
     'captures:export',
-    (
+    async (
       _event,
       {
         projectId,
@@ -167,7 +189,7 @@ export function registerCaptureExportHandlers(): void {
         mode: CaptureExportMode
         layout?: CaptureExportLayout
       },
-    ): CaptureExportResult => {
+    ): Promise<CaptureExportResult> => {
       if (!destinationDir || !Number.isInteger(projectId)) {
         return { ok: false, error: 'Choose a destination folder and a valid project.' }
       }
@@ -180,7 +202,7 @@ export function registerCaptureExportHandlers(): void {
           .from(capturesTable)
           .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
           .all()
-        return exportCaptureRecords({
+        return await exportCaptureRecords({
           project,
           mode,
           layout,

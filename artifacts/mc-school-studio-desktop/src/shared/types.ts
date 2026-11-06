@@ -381,6 +381,8 @@ export interface CaptureExportResult {
   outputDir?: string
   exportedCaptureCount?: number
   exportedFileCount?: number
+  ratingMetadataCount?: number
+  xmpSidecarCount?: number
   skippedMissingFiles?: number
   skippedExistingFiles?: number
   error?: string

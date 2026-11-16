@@ -48,6 +48,12 @@ export interface CreateClassResult {
   syncError?: string
 }
 
+export interface RenameClassResult {
+  class: Class
+  cloudSynced: boolean
+  syncError?: string
+}
+
 export interface MoveStudentResult {
   student: Student
   cloudSynced: boolean

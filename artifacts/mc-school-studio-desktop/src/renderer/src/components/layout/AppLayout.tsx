@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Camera, LayoutDashboard, Settings, ChevronRight, Plus } from 'lucide-react'
+import { Camera, LayoutDashboard, Settings, ChevronRight, Plus, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +29,7 @@ interface AppLayoutProps {
   selectedClassId?: number | null
   onSelectClass?: (classId: number | null) => void
   onAddClass?: () => void
+  onRenameClass?: (classId: number) => void
   offline?: boolean
   version: string
 }
@@ -43,6 +44,7 @@ export function AppLayout({
   selectedClassId = null,
   onSelectClass,
   onAddClass,
+  onRenameClass,
   offline = false,
   version,
 }: AppLayoutProps) {
@@ -115,21 +117,34 @@ export function AppLayout({
                     </button>
                   </SidebarHint>
                   {projectClasses.map((projectClass) => (
-                    <SidebarHint key={projectClass.id} text={`Show ${peopleLabel} from ${projectClass.className}.`}>
+                    <div key={projectClass.id} className="group/class flex items-center gap-1">
+                      <SidebarHint text={`Show ${peopleLabel} from ${projectClass.className}.`}>
+                        <button
+                          type="button"
+                          onClick={() => onSelectClass?.(projectClass.id)}
+                          className={cn(
+                            'flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors',
+                            selectedClassId === projectClass.id
+                              ? 'bg-teal-500/15 font-semibold text-teal-300'
+                              : 'text-slate-500 hover:bg-white/5 hover:text-slate-200',
+                          )}
+                        >
+                          <span className="truncate">{projectClass.className}</span>
+                          <span className="shrink-0 text-[10px] text-slate-500">{projectClass.studentCount}</span>
+                        </button>
+                      </SidebarHint>
                       <button
                         type="button"
-                        onClick={() => onSelectClass?.(projectClass.id)}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors',
-                          selectedClassId === projectClass.id
-                            ? 'bg-teal-500/15 font-semibold text-teal-300'
-                            : 'text-slate-500 hover:bg-white/5 hover:text-slate-200',
-                        )}
+                        onClick={() => onRenameClass?.(projectClass.id)}
+                        disabled={!onRenameClass}
+                        aria-label={`Rename ${projectClass.className}`}
+                        data-testid={`button-rename-class-${projectClass.id}`}
+                        title={`Rename ${containerLabel.toLowerCase()}`}
+                        className="rounded p-1 text-slate-500 opacity-0 transition hover:bg-white/10 hover:text-white focus:opacity-100 group-hover/class:opacity-100 disabled:hidden"
                       >
-                        <span className="truncate">{projectClass.className}</span>
-                        <span className="shrink-0 text-[10px] text-slate-500">{projectClass.studentCount}</span>
+                        <Pencil className="size-3" />
                       </button>
-                    </SidebarHint>
+                    </div>
                   ))}
                   {projectClasses.length === 0 && (
                     <p className="px-2 py-1 text-[10px] text-slate-600">Loading {containerPlural.toLowerCase()}…</p>

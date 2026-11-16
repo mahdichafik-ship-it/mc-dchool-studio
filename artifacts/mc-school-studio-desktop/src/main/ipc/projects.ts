@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto'
 import { dirname, join, relative, resolve, sep } from 'path'
 import { eq, count, and, isNull, ne } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
-import { projectsTable, classesTable, studentsTable, capturesTable, groupsTable, groupMembersTable, photosTable, imageFilesTable, groupCapturesTable, groupCaptureFilesTable, qrMarkersTable } from '../db/schema'
+import { projectsTable, classesTable, studentsTable, capturesTable, groupsTable, groupMembersTable, photosTable, imageFilesTable, groupCapturesTable, groupCaptureFilesTable, qrMarkersTable, settingsTable } from '../db/schema'
 import {
   normalizeProjectType,
   type Project,
@@ -51,6 +51,9 @@ export function reconcileDefaultGroups(projectId: number): void {
       group = db.insert(groupsTable).values({
         projectId, classId: cls.id, name: cls.className, isDefaultClassGroup: true,
       }).returning().get()
+    } else if (group.name !== cls.className) {
+      db.update(groupsTable).set({ name: cls.className, updatedAt: now() })
+        .where(eq(groupsTable.id, group.id)).run()
     }
     const markerKey = `default_group_initialized:${group.id}`
     const marker = getSetting(markerKey)
@@ -120,6 +123,99 @@ function toStudent(
     createdAt: student.createdAt,
     updatedAt: student.updatedAt,
   }
+}
+
+async function moveLocalStudentsToClass(
+  projectId: number,
+  destination: typeof classesTable.$inferSelect,
+  requestedStudentIds: number[],
+): Promise<Student[]> {
+  const db = getDb()
+  const uniqueIds = [...new Set(requestedStudentIds)]
+  if (uniqueIds.length === 0 || uniqueIds.length > 2_000) {
+    throw new Error('Select between 1 and 2,000 students to move.')
+  }
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  if (!project) throw new Error('Project not found.')
+  const students = uniqueIds.map((studentId) => {
+    const student = db.select().from(studentsTable).where(and(
+      eq(studentsTable.id, studentId),
+      eq(studentsTable.projectId, projectId),
+    )).get()
+    if (!student) throw new Error('One or more selected students are not in this project.')
+    return student
+  }).filter((student) => student.classId !== destination.id)
+  if (students.length === 0) throw new Error('All selected students are already in this class or group.')
+
+  const qrUpdates: Array<{ studentId: number; classId: number; qrCodes: Awaited<ReturnType<typeof generateStudentQrCodes>> }> = []
+  for (let index = 0; index < students.length; index += 40) {
+    const batch = students.slice(index, index + 40)
+    const generated = await Promise.all(batch.map(async (student) => ({
+      studentId: student.id,
+      classId: student.classId,
+      qrCodes: await generateStudentQrCodes({
+        projectName: project.schoolName,
+        className: destination.className,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        studentId: student.generatedStudentId,
+      }),
+    })))
+    qrUpdates.push(...generated)
+  }
+
+  const timestamp = now()
+  db.transaction((tx) => {
+    for (const item of qrUpdates) {
+      tx.update(studentsTable)
+        .set({
+          classId: destination.id,
+          classSyncPending: true,
+          ...item.qrCodes,
+          updatedAt: timestamp,
+        })
+        .where(eq(studentsTable.id, item.studentId)).run()
+      tx.update(capturesTable)
+        .set({ classId: destination.id, updatedAt: timestamp })
+        .where(and(
+          eq(capturesTable.projectId, projectId),
+          eq(capturesTable.studentId, item.studentId),
+        )).run()
+      const sourceDefaultGroup = tx.select().from(groupsTable).where(and(
+        eq(groupsTable.projectId, projectId),
+        eq(groupsTable.classId, item.classId),
+        eq(groupsTable.isDefaultClassGroup, true),
+      )).get()
+      if (sourceDefaultGroup) {
+        const previousMembership = tx.select().from(groupMembersTable).where(and(
+          eq(groupMembersTable.groupId, sourceDefaultGroup.id),
+          eq(groupMembersTable.studentId, item.studentId),
+        )).get()
+        tx.delete(groupMembersTable).where(and(
+          eq(groupMembersTable.groupId, sourceDefaultGroup.id),
+          eq(groupMembersTable.studentId, item.studentId),
+        )).run()
+        if (previousMembership) {
+          const markerKey = `default_group_initialized:${sourceDefaultGroup.id}`
+          const marker = tx.select().from(settingsTable).where(eq(settingsTable.key, markerKey)).get()
+          if (marker) {
+            const remainingSnapshot = marker.value.split(',').map(Number).filter((id) =>
+              Number.isFinite(id) && id !== item.studentId)
+            tx.update(settingsTable)
+              .set({ value: serializeDefaultGroupRosterSnapshot(remainingSnapshot) })
+              .where(eq(settingsTable.key, markerKey)).run()
+          }
+        }
+      }
+    }
+  })
+  prepareProjectFolders(db, projectId)
+  reconcileDefaultGroups(projectId)
+  return qrUpdates.map((item) => {
+    const student = db.select().from(studentsTable).where(eq(studentsTable.id, item.studentId)).get()
+    if (!student) throw new Error('A moved student could not be loaded.')
+    return toStudent(student, destination.className)
+  })
 }
 
 function enrichProject(
@@ -611,6 +707,103 @@ export function registerProjectHandlers() {
     },
   )
 
+  ipcMain.handle(
+    'classes:rename',
+    async (
+      _e,
+      input: { projectId: number; classId: number; className: string },
+    ) => {
+      const className = input.className.normalize('NFKC').trim()
+      if (!className || className.length > 120) {
+        throw new Error('Enter a class or group name (maximum 120 characters).')
+      }
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      if (project.finishedAt) throw new Error('This project is finished and its roster can no longer be changed.')
+      const cls = db.select().from(classesTable).where(and(
+        eq(classesTable.id, input.classId),
+        eq(classesTable.projectId, input.projectId),
+      )).get()
+      if (!cls) throw new Error('Class or group not found in this project.')
+      const duplicate = db.select().from(classesTable).where(and(
+        eq(classesTable.projectId, input.projectId),
+        ne(classesTable.id, cls.id),
+      )).all().some((candidate) =>
+        candidate.className.normalize('NFKC').trim().toLocaleLowerCase()
+          === className.toLocaleLowerCase())
+      if (duplicate) throw new Error('Another class or group already has that name.')
+      if (className === cls.className) {
+        const sync = await syncClassCloudIdentity(input.projectId, cls.id)
+        const refreshed = db.select().from(classesTable).where(eq(classesTable.id, cls.id)).get() ?? cls
+        const studentCount = db.select({ studentCount: count() }).from(studentsTable)
+          .where(eq(studentsTable.classId, cls.id)).get()?.studentCount ?? 0
+        return {
+          class: {
+            id: refreshed.id,
+            projectId: refreshed.projectId,
+            className: refreshed.className,
+            studentCount,
+            createdAt: refreshed.createdAt,
+            updatedAt: refreshed.updatedAt,
+          },
+          cloudSynced: sync.synced,
+          ...(sync.error ? { syncError: sync.error } : {}),
+        }
+      }
+
+      const students = db.select().from(studentsTable).where(eq(studentsTable.classId, cls.id)).all()
+      const qrUpdates: Array<{ studentId: number; qrCodes: Awaited<ReturnType<typeof generateStudentQrCodes>> }> = []
+      for (let index = 0; index < students.length; index += 40) {
+        const batch = students.slice(index, index + 40)
+        qrUpdates.push(...await Promise.all(batch.map(async (student) => ({
+          studentId: student.id,
+          qrCodes: await generateStudentQrCodes({
+            projectName: project.schoolName,
+            className,
+            firstName: student.firstName,
+            lastName: student.lastName,
+            studentId: student.generatedStudentId,
+          }),
+        }))))
+      }
+      const timestamp = now()
+      db.transaction((tx) => {
+        tx.update(classesTable)
+          .set({ className, nameSyncPending: true, updatedAt: timestamp })
+          .where(eq(classesTable.id, cls.id)).run()
+        for (const { studentId, qrCodes } of qrUpdates) {
+          tx.update(studentsTable).set({ ...qrCodes, updatedAt: timestamp })
+            .where(eq(studentsTable.id, studentId)).run()
+        }
+        tx.update(groupsTable)
+          .set({ name: className, updatedAt: timestamp })
+          .where(and(
+            eq(groupsTable.projectId, input.projectId),
+            eq(groupsTable.classId, cls.id),
+            eq(groupsTable.isDefaultClassGroup, true),
+          )).run()
+      })
+      prepareProjectFolders(db, input.projectId)
+      const sync = await syncClassCloudIdentity(input.projectId, cls.id)
+      const refreshed = db.select().from(classesTable).where(eq(classesTable.id, cls.id)).get()
+      if (!refreshed) throw new Error('The renamed class could not be loaded.')
+      const studentCount = db.select({ studentCount: count() }).from(studentsTable)
+        .where(eq(studentsTable.classId, cls.id)).get()?.studentCount ?? 0
+      return {
+        class: {
+          id: refreshed.id,
+          projectId: refreshed.projectId,
+          className: refreshed.className,
+          studentCount,
+          createdAt: refreshed.createdAt,
+          updatedAt: refreshed.updatedAt,
+        },
+        cloudSynced: sync.synced,
+        ...(sync.error ? { syncError: sync.error } : {}),
+      }
+    },
+  )
+
   // Students
   ipcMain.handle(
     'students:create',
@@ -756,14 +949,7 @@ export function registerProjectHandlers() {
       )).get()
       if (!existing) throw new Error('Student not found in this project.')
       if (existing.classId === destination.id) throw new Error('That student is already in this class.')
-
-      db.update(studentsTable)
-        .set({ classId: destination.id, updatedAt: now() })
-        .where(eq(studentsTable.id, existing.id))
-        .run()
-      prepareProjectFolders(db, input.projectId)
-      reconcileDefaultGroups(input.projectId)
-
+      await moveLocalStudentsToClass(input.projectId, destination, [existing.id])
       const sync = await syncStudentCloudIdentity(input.projectId, existing.id)
       const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, existing.id)).get() ?? existing
       return {
@@ -771,6 +957,39 @@ export function registerProjectHandlers() {
         cloudSynced: sync.synced,
         ...(sync.error ? { syncError: sync.error } : {}),
       }
+    },
+  )
+
+  ipcMain.handle(
+    'students:moveMany',
+    async (
+      _e,
+      input: { projectId: number; studentIds: number[]; classId: number },
+    ): Promise<MoveStudentResult[]> => {
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, input.projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      if (project.finishedAt) throw new Error('This project is finished and its roster can no longer be changed.')
+      const destination = db.select().from(classesTable).where(and(
+        eq(classesTable.id, input.classId),
+        eq(classesTable.projectId, input.projectId),
+      )).get()
+      if (!destination) throw new Error('Choose a class from this project.')
+      if (!Array.isArray(input.studentIds) || input.studentIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+        throw new Error('Select valid students from this project.')
+      }
+      const movedStudents = await moveLocalStudentsToClass(input.projectId, destination, input.studentIds)
+      const results: MoveStudentResult[] = []
+      for (const student of movedStudents) {
+        const sync = await syncStudentCloudIdentity(input.projectId, student.id)
+        const refreshed = db.select().from(studentsTable).where(eq(studentsTable.id, student.id)).get()
+        if (!refreshed) throw new Error(`Could not reload ${student.firstName} ${student.lastName} after moving.`)
+        results.push({
+          student: toStudent(refreshed, destination.className),
+          cloudSynced: sync.synced,
+          ...(sync.error ? { syncError: sync.error } : {}),
+        })
+      }
+      return results
     },
   )
 

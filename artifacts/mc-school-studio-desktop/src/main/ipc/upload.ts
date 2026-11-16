@@ -287,6 +287,40 @@ async function createCloudClass(
   return { id: payload.id, className: payload.className ?? className }
 }
 
+async function renameCloudClass(
+  cloudProjectId: number,
+  cloudClassId: number,
+  className: string,
+  apiUrl: string,
+  connectionToken: string,
+): Promise<{ id: number; className: string }> {
+  const response = await fetch(
+    `${apiUrl.replace(/\/+$/, '')}/api/desktop/projects/${cloudProjectId}/classes/${cloudClassId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${connectionToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ className }),
+      signal: AbortSignal.timeout(30000),
+    },
+  )
+  if (!response.ok) {
+    const text = await response.text()
+    if (response.status === 401) invalidateDesktopCredentials(true)
+    if (response.status === 429 || response.status >= 500) {
+      throw new RetryableUploadError(`HTTP ${response.status}: ${text}`)
+    }
+    throw new Error(`Could not rename the class in the cloud project (HTTP ${response.status}: ${text})`)
+  }
+  const payload = await response.json() as { id?: number; className?: string }
+  if (payload.id !== cloudClassId || typeof payload.className !== 'string') {
+    throw new Error('The cloud project returned an invalid renamed class.')
+  }
+  return { id: payload.id, className: payload.className }
+}
+
 export async function syncClassCloudIdentity(
   projectId: number,
   classId: number,
@@ -310,6 +344,14 @@ export async function syncClassCloudIdentity(
       || candidate.className.trim().toLocaleLowerCase() === localClass.className.trim().toLocaleLowerCase())
     if (!cloudClass) {
       cloudClass = await createCloudClass(cloudProject.id, localClass.className, apiUrl, connectionToken)
+    } else if (localClass.nameSyncPending && cloudClass.className !== localClass.className) {
+      cloudClass = await renameCloudClass(
+        cloudProject.id,
+        cloudClass.id,
+        localClass.className,
+        apiUrl,
+        connectionToken,
+      )
     }
     db.transaction((tx) => {
       tx.update(projectsTable)
@@ -317,7 +359,12 @@ export async function syncClassCloudIdentity(
         .where(eq(projectsTable.id, projectId))
         .run()
       tx.update(classesTable)
-        .set({ cloudId: cloudClass!.id, className: cloudClass!.className, updatedAt: new Date().toISOString() })
+        .set({
+          cloudId: cloudClass!.id,
+          className: cloudClass!.className,
+          nameSyncPending: false,
+          updatedAt: new Date().toISOString(),
+        })
         .where(eq(classesTable.id, classId))
         .run()
     })
@@ -366,11 +413,11 @@ function retryPendingRosterCloudIdentities(): void {
   const db = getDb()
   const classes = db.select({ id: classesTable.id, projectId: classesTable.projectId })
     .from(classesTable)
-    .where(isNull(classesTable.cloudId))
+    .where(or(isNull(classesTable.cloudId), eq(classesTable.nameSyncPending, true)))
     .all()
   const students = db.select({ id: studentsTable.id, projectId: studentsTable.projectId })
     .from(studentsTable)
-    .where(isNull(studentsTable.cloudId))
+    .where(or(isNull(studentsTable.cloudId), eq(studentsTable.classSyncPending, true)))
     .all()
 
   pendingRosterIdentityRetry = (async () => {
@@ -418,6 +465,16 @@ async function repairCloudIdentity(
     || candidate.className.trim().toLocaleLowerCase() === localClass.className.trim().toLocaleLowerCase())
   if (!cloudClass) {
     cloudClass = await createCloudClass(cloudProject.id, localClass.className, apiUrl, connectionToken)
+  } else if (localClass.nameSyncPending && cloudClass.className !== localClass.className) {
+    cloudClass = await renameCloudClass(
+      cloudProject.id,
+      cloudClass.id,
+      localClass.className,
+      apiUrl,
+      connectionToken,
+    )
+    const refreshedBundle = await fetchAssignedCloudBundle(project, apiUrl, connectionToken)
+    bundle.students = refreshedBundle.bundle.students
   }
   let cloudStudent = bundle.students.find((candidate) =>
     candidate.generatedStudentId.trim().toLocaleLowerCase()
@@ -482,7 +539,12 @@ async function repairCloudIdentity(
       .run()
 
     tx.update(classesTable)
-      .set({ cloudId: cloudClass.id, className: cloudClass.className, updatedAt: new Date().toISOString() })
+      .set({
+        cloudId: cloudClass.id,
+        className: cloudClass.className,
+        nameSyncPending: false,
+        updatedAt: new Date().toISOString(),
+      })
       .where(eq(classesTable.id, localClass.id))
       .run()
 
@@ -495,6 +557,7 @@ async function repairCloudIdentity(
       tx.update(studentsTable)
         .set({
           cloudId: cloudStudent.id,
+          classSyncPending: false,
           simpleQr: cloudStudent.simpleQr ?? localStudent.simpleQr,
           jsonQr: cloudStudent.jsonQr ?? localStudent.jsonQr,
           updatedAt: new Date().toISOString(),

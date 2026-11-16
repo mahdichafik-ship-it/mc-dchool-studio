@@ -11,6 +11,7 @@ import {
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { canAccessProject } from "../lib/studioAccess";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
+import { moveProjectStudent } from "../lib/rosterCorrection";
 import {
   enqueueR2PhotoDeletionsForStudents,
   lockProjectStudentIds,
@@ -367,7 +368,7 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
           normalizedGeneratedStudentId !== undefined && {
             generatedStudentId: normalizedGeneratedStudentId,
           }),
-        ...(classId !== undefined && { classId }),
+        ...(classId !== undefined && Number(classId) === existing.classId && { classId: existing.classId }),
         ...(email !== undefined && { email: normalizedEmail }),
         ...(phone !== undefined && { phone: normalizeOptionalString(phone) }),
         ...(secondaryEmail !== undefined && { secondaryEmail: normalizedSecondaryEmail }),
@@ -408,6 +409,15 @@ router.patch("/:studentId", requireAuth, async (req, res) => {
   if (!updated) {
     res.status(404).json({ error: "Student not found" });
     return;
+  }
+
+  if (classId !== undefined && Number(classId) !== existing.classId) {
+    const moved = await moveProjectStudent(projectId, studentId, Number(classId));
+    if (!moved) {
+      res.status(500).json({ error: "The student’s class could not be updated." });
+      return;
+    }
+    updated = moved.student;
   }
 
   const cls = destinationClass ?? (await db

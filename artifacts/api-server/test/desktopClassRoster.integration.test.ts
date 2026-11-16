@@ -196,6 +196,8 @@ test("new student can be photographed, reviewed, uploaded, and moved without los
   });
   assert.equal(addStudent.status, 201);
   studentId = (await addStudent.json() as { id: number }).id;
+  const [originalStudent] = await db.select().from(studentsTable).where(eq(studentsTable.id, studentId));
+  assert(originalStudent);
 
   const batchKey = `class-roster-batch-${Date.now()}`;
   const startBatch = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/capture-batches`, {
@@ -302,6 +304,8 @@ test("new student can be photographed, reviewed, uploaded, and moved without los
   const [historicalFile] = await db.select().from(groupCaptureFilesTable).where(eq(groupCaptureFilesTable.id, groupCaptureFileId));
 
   assert.equal(student.classId, secondClassId);
+  assert.equal(student.simpleQr, originalStudent.simpleQr, "the stable capture QR identity must not change during a class move");
+  assert.notEqual(student.jsonQr, originalStudent.jsonQr, "the class-aware QR details must follow the corrected class");
   assert.equal(capture?.rating, 5);
   assert.equal(capture?.favorite, true);
   assert.equal(capture?.selected, true);
@@ -311,4 +315,41 @@ test("new student can be photographed, reviewed, uploaded, and moved without los
   assert(membership, "historical group membership must survive a class move");
   assert.equal(historicalCapture?.reviewStatus, "approved");
   assert.equal(historicalFile?.fileUrl, "/uploads/follow-up/historical-group.jpg");
+
+  const [sourceDefaultGroup] = await db.select().from(groupsTable).where(and(
+    eq(groupsTable.classId, firstClassId),
+    eq(groupsTable.isDefaultClassGroup, true),
+  ));
+  const [destinationDefaultGroup] = await db.select().from(groupsTable).where(and(
+    eq(groupsTable.classId, secondClassId),
+    eq(groupsTable.isDefaultClassGroup, true),
+  ));
+  assert(sourceDefaultGroup && destinationDefaultGroup);
+  const [staleDefaultMembership] = await db.select().from(groupMembersTable).where(and(
+    eq(groupMembersTable.groupId, sourceDefaultGroup.id),
+    eq(groupMembersTable.studentId, studentId),
+  ));
+  const [destinationMembership] = await db.select().from(groupMembersTable).where(and(
+    eq(groupMembersTable.groupId, destinationDefaultGroup.id),
+    eq(groupMembersTable.studentId, studentId),
+  ));
+  assert.equal(staleDefaultMembership, undefined, "the student must leave the former class-photo group");
+  assert(destinationMembership, "the student must join the destination class-photo group");
+  const rename = await fetch(`${baseUrl}/api/desktop/projects/${projectId}/classes/${secondClassId}`, {
+    method: "PATCH",
+    headers: desktopHeaders(),
+    body: JSON.stringify({ className: "Grade 4C — Corrected" }),
+  });
+  assert.equal(rename.status, 200);
+  const renamed = await rename.json() as { className: string };
+  assert.equal(renamed.className, "Grade 4C — Corrected");
+  const [renamedDefaultGroup] = await db.select().from(groupsTable).where(and(
+    eq(groupsTable.classId, secondClassId),
+    eq(groupsTable.isDefaultClassGroup, true),
+  ));
+  const [renamedStudent] = await db.select().from(studentsTable).where(eq(studentsTable.id, studentId));
+  assert.equal(renamedDefaultGroup.name, "Grade 4C — Corrected");
+  assert.notEqual(renamedStudent.jsonQr, student.jsonQr, "renaming a class must refresh class-aware QR details");
+  const [captureAfterClassRename] = await db.select().from(capturesTable).where(eq(capturesTable.id, captureId));
+  assert.equal(captureAfterClassRename.studentId, studentId, "class corrections must not detach the existing capture");
 });

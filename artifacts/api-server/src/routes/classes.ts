@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { projectsTable, classesTable, groupsTable, studentsTable } from "@workspace/db";
-import { eq, and, count } from "drizzle-orm";
+import { eq, and, count, sql } from "drizzle-orm";
 import { requireAuth, getUserId } from "../lib/auth";
 import { canAccessProject } from "../lib/studioAccess";
+import { renameProjectClass } from "../lib/rosterCorrection";
 import {
   enqueueR2PhotoDeletionsForGroups,
   enqueueR2PhotoDeletionsForStudents,
@@ -95,18 +96,23 @@ router.patch("/:classId", requireAuth, async (req, res) => {
     return;
   }
 
-  const { className } = req.body;
-  if (!className) {
-    res.status(400).json({ error: "className is required" });
+  const className = typeof req.body?.className === "string" ? req.body.className.normalize("NFKC").trim() : "";
+  if (!className || className.length > 120) {
+    res.status(400).json({ error: "A valid className is required (maximum 120 characters)." });
     return;
   }
 
-  const [updated] = await db
-    .update(classesTable)
-    .set({ className, updatedAt: new Date() })
-    .where(and(eq(classesTable.id, classId), eq(classesTable.projectId, projectId)))
-    .returning();
+  const [duplicate] = await db.select({ id: classesTable.id }).from(classesTable).where(and(
+    eq(classesTable.projectId, projectId),
+    sql`lower(trim(${classesTable.className})) = lower(${className})`,
+    sql`${classesTable.id} <> ${classId}`,
+  )).limit(1);
+  if (duplicate) {
+    res.status(409).json({ error: "Another class already has that name." });
+    return;
+  }
 
+  const updated = await renameProjectClass(projectId, classId, className);
   if (!updated) {
     res.status(404).json({ error: "Class not found" });
     return;
@@ -119,7 +125,7 @@ router.patch("/:classId", requireAuth, async (req, res) => {
 
   res.json({
     ...updated,
-    studentCount,
+    studentCount: Number(studentCount),
     createdAt: updated.createdAt.toISOString(),
     updatedAt: updated.updatedAt.toISOString(),
   });

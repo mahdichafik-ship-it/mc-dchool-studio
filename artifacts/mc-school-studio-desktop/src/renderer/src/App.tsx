@@ -59,6 +59,11 @@ export default function App() {
   const [newClassName, setNewClassName] = useState('')
   const [classCreateError, setClassCreateError] = useState('')
   const [creatingClass, setCreatingClass] = useState(false)
+  const [classRenameDialogOpen, setClassRenameDialogOpen] = useState(false)
+  const [editingClassId, setEditingClassId] = useState<number | null>(null)
+  const [editingClassName, setEditingClassName] = useState('')
+  const [classRenameError, setClassRenameError] = useState('')
+  const [renamingClass, setRenamingClass] = useState(false)
   const [captureNotificationsEnabled, setCaptureNotificationsEnabled] = useState(
     () => window.localStorage.getItem('capture-notifications-enabled') !== 'false',
   )
@@ -251,6 +256,52 @@ export default function App() {
     }
   }
 
+  const handleOpenRenameClass = (classId: number) => {
+    const selected = activeProjectClasses.find((item) => item.id === classId)
+    if (!selected) return
+    setEditingClassId(classId)
+    setEditingClassName(selected.className)
+    setClassRenameError('')
+    setClassRenameDialogOpen(true)
+  }
+
+  const handleRenameClass = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!activeProjectId || editingClassId === null) return
+    const className = editingClassName.trim()
+    if (!className) return
+    setRenamingClass(true)
+    setClassRenameError('')
+    try {
+      const result = await window.api.invoke('classes:rename', {
+        projectId: activeProjectId,
+        classId: editingClassId,
+        className,
+      })
+      await reloadActiveProjectClasses()
+      setClassRenameDialogOpen(false)
+      addToast({
+        type: result.cloudSynced || !result.syncError ? 'success' : 'error',
+        title: result.cloudSynced
+          ? `${activeProjectType === 'corporate' ? 'Group' : 'Class'} updated`
+          : result.syncError
+            ? 'Class saved locally; cloud sync needs attention'
+            : `${activeProjectType === 'corporate' ? 'Group' : 'Class'} saved locally`,
+        description: result.cloudSynced
+          ? `${className} and its roster are synced. Existing photos remain attached.`
+          : result.syncError
+            ? `${className} is safe locally, but cloud sync failed: ${result.syncError}`
+            : `${className} is saved locally and will sync when the connection returns.`,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setClassRenameError(message)
+      addToast({ type: 'error', title: 'Could not rename class', description: message })
+    } finally {
+      setRenamingClass(false)
+    }
+  }
+
   return (
     <AppLayout
       currentPage={currentPage}
@@ -261,6 +312,7 @@ export default function App() {
       selectedClassId={selectedClassId}
       onSelectClass={setSelectedClassId}
       onAddClass={() => void handleAddClass()}
+      onRenameClass={handleOpenRenameClass}
       offline={auth.offline}
       version={appVersion}
     >
@@ -311,6 +363,38 @@ export default function App() {
             </Button>
             <Button type="submit" disabled={creatingClass || !newClassName.trim()}>
               {creatingClass ? 'Creating…' : 'Create'}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+      <Dialog
+        open={classRenameDialogOpen}
+        onClose={() => { if (!renamingClass) setClassRenameDialogOpen(false) }}
+        title={`Rename ${activeProjectType === 'corporate' ? 'group' : 'class'}`}
+      >
+        <form onSubmit={(event) => void handleRenameClass(event)}>
+          <label className="block text-sm font-medium text-slate-700">
+            New {activeProjectType === 'corporate' ? 'group' : 'class'} name
+            <Input
+              autoFocus
+              required
+              maxLength={120}
+              data-testid="input-class-name"
+              value={editingClassName}
+              onChange={(event) => setEditingClassName(event.target.value)}
+              className="mt-1.5"
+            />
+          </label>
+          <p className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+            This updates the roster, class-photo group, and student QR details together. Existing photographs and ratings are kept.
+          </p>
+          {classRenameError && <p role="alert" className="mt-2 text-sm text-red-700">{classRenameError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="outline" data-testid="button-cancel-class-rename" onClick={() => setClassRenameDialogOpen(false)} disabled={renamingClass}>
+              Cancel
+            </Button>
+            <Button type="submit" data-testid="button-save-class-name" disabled={renamingClass || !editingClassName.trim()}>
+              {renamingClass ? 'Saving…' : 'Save class name'}
             </Button>
           </div>
         </form>

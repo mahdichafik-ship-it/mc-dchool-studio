@@ -624,15 +624,40 @@ export function ProjectView({
     })
   }
 
-  async function handleStudentMoved(result: MoveStudentResult) {
+  async function handleStudentMoved(result: MoveStudentResult | MoveStudentResult[]) {
     await Promise.all([reloadStudents(), reloadAllProjectStudents(), reloadClasses(), reloadProject()])
     setSelectedStudent(null)
+    const moved = Array.isArray(result) ? result : [result]
+    if (moved.length === 0) return
+    if (moved.length > 1) {
+      const syncedCount = moved.filter((item) => item.cloudSynced).length
+      const syncErrors = moved.filter((item) => item.syncError)
+      const queuedCount = moved.length - syncedCount - syncErrors.length
+      addToast({
+        type: syncErrors.length ? 'error' : 'success',
+        title: syncErrors.length
+          ? `${moved.length} moved locally; cloud sync needs attention`
+          : `${moved.length} ${employeePlural.toLowerCase()} moved`,
+        description: syncedCount === moved.length
+          ? `Moved to ${moved[0].student.className}; all changes synced to cloud.`
+          : [
+            `Moved to ${moved[0].student.className}.`,
+            syncedCount ? `${syncedCount} synced` : null,
+            queuedCount ? `${queuedCount} queued for reconnection` : null,
+            syncErrors.length ? `${syncErrors.length} sync error(s): ${syncErrors[0].syncError}` : null,
+          ].filter(Boolean).join(' '),
+      })
+      return
+    }
+    const single = moved[0]
     addToast({
-      type: 'success',
-      title: `${result.student.firstName} ${result.student.lastName} moved`,
-      description: result.cloudSynced
-        ? `Moved to ${result.student.className} and synced to cloud.`
-        : `Moved to ${result.student.className} locally; cloud sync will retry when connected.`,
+      type: single.syncError ? 'error' : 'success',
+      title: single.syncError ? 'Moved locally; cloud sync needs attention' : `${single.student.firstName} ${single.student.lastName} moved`,
+      description: single.cloudSynced
+        ? `Moved to ${single.student.className} and synced to cloud.`
+        : single.syncError
+          ? `Moved to ${single.student.className} locally, but cloud sync failed: ${single.syncError}`
+          : `Moved to ${single.student.className} locally; cloud sync will retry when connected.`,
     })
   }
 
@@ -1911,8 +1936,8 @@ export function ProjectView({
         employeeLabel={employeeLabel}
         departmentLabel={departmentLabel}
         onClose={() => { setMoveStudentOpen(false); setMoveStudentId(null) }}
-        onMoved={async (result) => {
-          await handleStudentMoved(result)
+        onMoved={async (results) => {
+          await handleStudentMoved(results)
           setMoveStudentOpen(false)
           setMoveStudentId(null)
         }}
@@ -2066,27 +2091,36 @@ function MoveStudentDialog({
   employeeLabel: string
   departmentLabel: string
   onClose: () => void
-  onMoved: (result: MoveStudentResult) => Promise<void>
+  onMoved: (results: MoveStudentResult[]) => Promise<void>
 }) {
-  const [studentId, setStudentId] = useState('')
+  const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([])
+  const [studentSearch, setStudentSearch] = useState('')
   const [saving, setSaving] = useState(false)
+  const visibleStudents = students.filter((student) =>
+    `${student.lastName} ${student.firstName} ${student.generatedStudentId} ${student.className}`
+      .toLocaleLowerCase()
+      .includes(studentSearch.trim().toLocaleLowerCase()),
+  )
 
   useEffect(() => {
     if (!open) return
-    setStudentId(String(students.find((student) => student.id === initialStudentId)?.id ?? students[0]?.id ?? ''))
+    setStudentSearch('')
+    setSelectedStudentIds(initialStudentId && students.some((student) => student.id === initialStudentId)
+      ? [initialStudentId]
+      : [])
   }, [open, students, initialStudentId])
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
-    if (saving || !targetClassId || !studentId) return
+    if (saving || !targetClassId || selectedStudentIds.length === 0) return
     setSaving(true)
     try {
-      const result = await window.api.invoke('students:move', {
+      const results = await window.api.invoke('students:moveMany', {
         projectId,
-        studentId: Number(studentId),
+        studentIds: selectedStudentIds,
         classId: targetClassId,
-      }) as MoveStudentResult
-      await onMoved(result)
+      }) as MoveStudentResult[]
+      await onMoved(results)
     } catch (error) {
       addToast({
         type: 'error',
@@ -2099,37 +2133,72 @@ function MoveStudentDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title={`Move ${employeeLabel} to ${targetClassName}`} className="max-w-md">
+    <Dialog open={open} onClose={onClose} title={`Move ${employeeLabel}s to ${targetClassName}`} className="max-w-xl">
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
-          <label htmlFor="move-student-id" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            {employeeLabel}
+          <label htmlFor="move-student-search" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            Find and select {employeeLabel.toLowerCase()}s
           </label>
-          <select
-            id="move-student-id"
-            value={studentId}
-            onChange={(event) => setStudentId(event.target.value)}
-            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-            required
-          >
-            {students.map((student) => (
-              <option key={student.id} value={student.id}>
-                {student.lastName}, {student.firstName} · {student.className}
-              </option>
+          <Input
+            id="move-student-search"
+            data-testid="input-move-students-search"
+            value={studentSearch}
+            onChange={(event) => setStudentSearch(event.target.value)}
+            placeholder="Search by name, ID, or current class"
+          />
+          <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+            <span data-testid="text-move-student-selection-count">{selectedStudentIds.length} selected · {visibleStudents.length} shown</span>
+            <button
+              type="button"
+              data-testid="button-select-visible-students"
+              className="font-semibold text-teal-700 hover:text-teal-800"
+              onClick={() => {
+                const visibleIds = visibleStudents.map((student) => student.id)
+                const allVisibleSelected = visibleIds.every((id) => selectedStudentIds.includes(id))
+                setSelectedStudentIds((current) => allVisibleSelected
+                  ? current.filter((id) => !visibleIds.includes(id))
+                  : [...new Set([...current, ...visibleIds])])
+              }}
+              disabled={visibleStudents.length === 0}
+            >
+              {visibleStudents.length > 0 && visibleStudents.every((student) => selectedStudentIds.includes(student.id))
+                ? 'Clear visible'
+                : 'Select visible'}
+            </button>
+          </div>
+          <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-slate-200">
+            {visibleStudents.length === 0 ? (
+              <p className="p-4 text-sm text-slate-500">No matching {employeeLabel.toLowerCase()}s.</p>
+            ) : visibleStudents.map((student) => (
+              <label key={student.id} data-testid={`row-move-student-${student.id}`} className="flex cursor-pointer items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-sm last:border-b-0 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  data-testid={`checkbox-move-student-${student.id}`}
+                  checked={selectedStudentIds.includes(student.id)}
+                  onChange={(event) => setSelectedStudentIds((current) =>
+                    event.target.checked
+                      ? [...current, student.id]
+                      : current.filter((id) => id !== student.id))}
+                  className="size-4 accent-teal-600"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium text-slate-900">{student.lastName}, {student.firstName}</span>
+                  <span className="block truncate text-xs text-slate-500">{student.className} · ID {student.generatedStudentId}</span>
+                </span>
+              </label>
             ))}
-          </select>
+          </div>
         </div>
         <p className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs font-medium leading-relaxed text-slate-500">
-          This moves the existing {employeeLabel.toLowerCase()} without creating a duplicate. Their identity and existing photographs stay attached.
-          If you are offline, the move will sync when connectivity returns.
+          Moves keep each person’s ID, photographs, and ratings. They leave the previous class-photo group and join the destination class-photo group unless that membership was intentionally removed. Offline changes are saved locally and queued to sync.
         </p>
         <div className="flex justify-end gap-3 pt-2">
-          <Button type="button" variant="outline" onClick={onClose} disabled={saving} className="h-10 px-5 text-xs font-bold uppercase tracking-wider">
+          <Button type="button" variant="outline" data-testid="button-cancel-move-students" onClick={onClose} disabled={saving} className="h-10 px-5 text-xs font-bold uppercase tracking-wider">
             Cancel
           </Button>
-          <Button type="submit" disabled={saving || !studentId || !targetClassId} className="h-10 bg-teal-600 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-sm hover:bg-teal-700">
+          <Button type="submit" data-testid="button-move-students" disabled={saving || selectedStudentIds.length === 0 || !targetClassId} className="h-10 bg-teal-600 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-sm hover:bg-teal-700">
             {saving ? <Loader className="mr-2 size-4 animate-spin" /> : <ArrowRight className="mr-2 size-4" />}
-            {saving ? 'Moving…' : `Move to ${departmentLabel.toLowerCase()}`}
+            {saving ? 'Moving…' : `Move ${selectedStudentIds.length || ''} to ${departmentLabel.toLowerCase()}`}
           </Button>
         </div>
       </form>

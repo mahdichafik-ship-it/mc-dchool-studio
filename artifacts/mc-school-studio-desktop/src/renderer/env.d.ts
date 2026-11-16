@@ -27,6 +27,7 @@ import type {
   ProjectSyncProgressEvent,
   CreateStudentResult,
   CreateClassResult,
+  RenameClassResult,
   MoveStudentResult,
   StudentGroup,
   GroupCaptureReview,
@@ -98,6 +99,7 @@ interface ElectronAPI {
   invoke(channel: 'projects:migrateFolderMigration', args: { projectId: number; confirmed: true }): Promise<import('@shared/types').FolderMigrationResult>
   invoke(channel: 'classes:list', args: { projectId: number }): Promise<Class[]>
   invoke(channel: 'classes:create', args: { projectId: number; className: string }): Promise<CreateClassResult>
+  invoke(channel: 'classes:rename', args: { projectId: number; classId: number; className: string }): Promise<RenameClassResult>
   invoke(channel: 'students:list', args: { projectId: number; classId?: number }): Promise<Student[]>
   invoke(channel: 'students:create', args: {
     projectId: number
@@ -116,6 +118,11 @@ interface ElectronAPI {
     studentId: number
     classId: number
   }): Promise<MoveStudentResult>
+  invoke(channel: 'students:moveMany', args: {
+    projectId: number
+    studentIds: number[]
+    classId: number
+  }): Promise<MoveStudentResult[]>
   invoke(channel: 'students:rename', args: {
     projectId: number
     studentId: number

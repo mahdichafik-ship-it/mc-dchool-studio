@@ -35,6 +35,7 @@ export const classesTable = sqliteTable('classes', {
     .notNull()
     .references(() => projectsTable.id, { onDelete: 'cascade' }),
   className: text('class_name').notNull(),
+  nameSyncPending: integer('name_sync_pending', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull().default(new Date().toISOString()),
   updatedAt: text('updated_at').notNull().default(new Date().toISOString()),
 })
@@ -48,6 +49,7 @@ export const studentsTable = sqliteTable('students', {
   classId: integer('class_id')
     .notNull()
     .references(() => classesTable.id, { onDelete: 'cascade' }),
+  classSyncPending: integer('class_sync_pending', { mode: 'boolean' }).notNull().default(false),
   firstName: text('first_name').notNull(),
   lastName: text('last_name').notNull(),
   generatedStudentId: text('generated_student_id').notNull(),

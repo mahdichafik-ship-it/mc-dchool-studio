@@ -197,7 +197,11 @@ export function registerCloudHandlers() {
               ?? localClasses.find((row) => row.cloudId === null && row.className === cls.className)
             const localClass = existingClass
               ? tx.update(classesTable)
-                .set({ cloudId: cls.id, className: cls.className, updatedAt: now() })
+                .set({
+                  cloudId: cls.id,
+                  className: existingClass.nameSyncPending ? existingClass.className : cls.className,
+                  updatedAt: now(),
+                })
                 .where(eq(classesTable.id, existingClass.id))
                 .returning()
                 .get()
@@ -220,33 +224,39 @@ export function registerCloudHandlers() {
             const existingStudent = localStudents.find((row) => row.cloudId === student.id)
               ?? localStudents.find((row) =>
                 row.cloudId === null && row.generatedStudentId === student.generatedStudentId)
+            const existingStudentClass = existingStudent
+              ? localClasses.find((row) => row.id === existingStudent.classId)
+              : undefined
+            const preserveLocalClassIdentity = Boolean(
+              existingStudent?.classSyncPending || existingStudentClass?.nameSyncPending,
+            )
             const studentValues = {
               cloudId: student.id,
               projectId: localProject.id,
-              classId: localClassId,
+              classId: existingStudent?.classSyncPending ? existingStudent.classId : localClassId,
               firstName: student.firstName,
               lastName: student.lastName,
               generatedStudentId: student.generatedStudentId,
-               schoolId: student.schoolId ?? null,
+              schoolId: student.schoolId ?? null,
               email: student.email ?? null,
               phone: student.phone ?? null,
-               secondaryEmail: student.secondaryEmail ?? null,
-               guardianFirstName: student.guardianFirstName ?? null,
-               guardianLastName: student.guardianLastName ?? null,
-               company: student.company ?? null,
-               addressLine1: student.addressLine1 ?? null,
-               addressLine2: student.addressLine2 ?? null,
-               city: student.city ?? null,
-               stateProvince: student.stateProvince ?? null,
-               zipPostalCode: student.zipPostalCode ?? null,
-               country: student.country ?? null,
-               contactNote: student.contactNote ?? null,
-               jobTitle: student.jobTitle ?? null,
-               officeLocation: student.officeLocation ?? null,
-               photoSession: student.photoSession ?? null,
-               captureNotes: student.captureNotes ?? null,
-              simpleQr: student.simpleQr ?? null,
-              jsonQr: student.jsonQr ?? null,
+              secondaryEmail: student.secondaryEmail ?? null,
+              guardianFirstName: student.guardianFirstName ?? null,
+              guardianLastName: student.guardianLastName ?? null,
+              company: student.company ?? null,
+              addressLine1: student.addressLine1 ?? null,
+              addressLine2: student.addressLine2 ?? null,
+              city: student.city ?? null,
+              stateProvince: student.stateProvince ?? null,
+              zipPostalCode: student.zipPostalCode ?? null,
+              country: student.country ?? null,
+              contactNote: student.contactNote ?? null,
+              jobTitle: student.jobTitle ?? null,
+              officeLocation: student.officeLocation ?? null,
+              photoSession: student.photoSession ?? null,
+              captureNotes: student.captureNotes ?? null,
+              simpleQr: preserveLocalClassIdentity ? existingStudent?.simpleQr : student.simpleQr ?? null,
+              jsonQr: preserveLocalClassIdentity ? existingStudent?.jsonQr : student.jsonQr ?? null,
               updatedAt: now(),
             }
             if (existingStudent) {
@@ -260,70 +270,72 @@ export function registerCloudHandlers() {
             studentsImported++
           }
 
-           const localGroups = tx.select().from(groupsTable).where(eq(groupsTable.projectId, localProject.id)).all()
-           const localStudentRows = tx.select().from(studentsTable).where(eq(studentsTable.projectId, localProject.id)).all()
-           for (const cloudGroup of bundle.groups ?? []) {
-             const localClassId = cloudGroup.classId == null
-               ? null
-               : classIdMap.get(cloudGroup.classId) ?? null
-             const existingGroup = localGroups.find((row) => row.cloudId === cloudGroup.id)
-               ?? localGroups.find((row) => row.name === cloudGroup.name && row.classId === localClassId)
-              const keepLocalEdits = Boolean(existingGroup?.membershipDirty)
-              const localGroup = keepLocalEdits ? existingGroup! : existingGroup
-               ? tx.update(groupsTable).set({
-                 cloudId: cloudGroup.id,
-                 name: cloudGroup.name,
-                 classId: localClassId,
-                 isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup),
-                 updatedAt: now(),
-               }).where(eq(groupsTable.id, existingGroup.id)).returning().get()
-               : tx.insert(groupsTable).values({
-                 cloudId: cloudGroup.id,
-                 projectId: localProject.id,
-                 classId: localClassId,
-                 name: cloudGroup.name,
-                 isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup),
-               }).returning().get()
-              // A local group with pending edits is authoritative until the
-              // photographer explicitly uploads it; cloud pulls must not
-              // overwrite its name or membership.
-              // In particular, preserve a dirty default group's prior roster
-              // snapshot. reconcileDefaultGroups runs after this transaction
-              // and uses that old snapshot to recognize cloud-late students
-              // without restoring prior manual removals.
-              if (keepLocalEdits) continue
-             const memberIds = [
-               ...(cloudGroup.memberStudentIds ?? []).map((studentId) => ({ groupId: cloudGroup.id, studentId })),
-               ...(bundle.groupMembers ?? []),
-             ]
-               .filter((member) => member.groupId === cloudGroup.id)
-               .map((member) => localStudentRows.find((student) => student.cloudId === member.studentId)?.id)
-               .filter((id): id is number => id !== undefined)
-              if (cloudGroup.memberStudentIds || bundle.groupMembers) {
-               tx.delete(groupMembersTable).where(eq(groupMembersTable.groupId, localGroup.id)).run()
-             }
-             if (memberIds.length > 0) {
-               for (const studentId of memberIds) {
-                 tx.insert(groupMembersTable).values({ groupId: localGroup.id, studentId }).onConflictDoNothing().run()
-               }
-             }
-              if (localGroup.isDefaultClassGroup && localGroup.classId !== null) {
-                const fullClassRoster = localStudentRows
-                  .filter((student) => student.classId === localGroup.classId)
-                  .map((student) => student.id)
-                tx.insert(settingsTable)
-                  .values({
-                    key: `default_group_initialized:${localGroup.id}`,
-                    value: serializeDefaultGroupRosterSnapshot(fullClassRoster),
-                  })
-                  .onConflictDoUpdate({
-                    target: settingsTable.key,
-                    set: { value: serializeDefaultGroupRosterSnapshot(fullClassRoster) },
-                  })
-                  .run()
+          const localGroups = tx.select().from(groupsTable).where(eq(groupsTable.projectId, localProject.id)).all()
+          const localStudentRows = tx.select().from(studentsTable).where(eq(studentsTable.projectId, localProject.id)).all()
+          for (const cloudGroup of bundle.groups ?? []) {
+            const localClassId = cloudGroup.classId == null
+              ? null
+              : classIdMap.get(cloudGroup.classId) ?? null
+            const existingGroup = localGroups.find((row) => row.cloudId === cloudGroup.id)
+              ?? localGroups.find((row) => row.name === cloudGroup.name && row.classId === localClassId)
+            const hasPendingClassMoves = localStudentRows.some((student) => student.classSyncPending)
+            const keepLocalEdits = Boolean(existingGroup?.membershipDirty)
+              || (Boolean(cloudGroup.isDefaultClassGroup) && hasPendingClassMoves)
+            const localGroup = keepLocalEdits ? existingGroup! : existingGroup
+              ? tx.update(groupsTable).set({
+                cloudId: cloudGroup.id,
+                name: cloudGroup.name,
+                classId: localClassId,
+                isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup),
+                updatedAt: now(),
+              }).where(eq(groupsTable.id, existingGroup.id)).returning().get()
+              : tx.insert(groupsTable).values({
+                cloudId: cloudGroup.id,
+                projectId: localProject.id,
+                classId: localClassId,
+                name: cloudGroup.name,
+                isDefaultClassGroup: Boolean(cloudGroup.isDefaultClassGroup),
+              }).returning().get()
+            // A local group with pending edits is authoritative until the
+            // photographer explicitly uploads it; cloud pulls must not
+            // overwrite its name or membership.
+            // In particular, preserve a dirty default group's prior roster
+            // snapshot. reconcileDefaultGroups runs after this transaction
+            // and uses that old snapshot to recognize cloud-late students
+            // without restoring prior manual removals.
+            if (keepLocalEdits) continue
+            const memberIds = [
+              ...(cloudGroup.memberStudentIds ?? []).map((studentId) => ({ groupId: cloudGroup.id, studentId })),
+              ...(bundle.groupMembers ?? []),
+            ]
+              .filter((member) => member.groupId === cloudGroup.id)
+              .map((member) => localStudentRows.find((student) => student.cloudId === member.studentId)?.id)
+              .filter((id): id is number => id !== undefined)
+            if (cloudGroup.memberStudentIds || bundle.groupMembers) {
+              tx.delete(groupMembersTable).where(eq(groupMembersTable.groupId, localGroup.id)).run()
+            }
+            if (memberIds.length > 0) {
+              for (const studentId of memberIds) {
+                tx.insert(groupMembersTable).values({ groupId: localGroup.id, studentId }).onConflictDoNothing().run()
               }
-           }
-           return { projectId: localProject.id, classesImported: classes.length, studentsImported }
+            }
+            if (localGroup.isDefaultClassGroup && localGroup.classId !== null) {
+              const fullClassRoster = localStudentRows
+                .filter((student) => student.classId === localGroup.classId)
+                .map((student) => student.id)
+              tx.insert(settingsTable)
+                .values({
+                  key: `default_group_initialized:${localGroup.id}`,
+                  value: serializeDefaultGroupRosterSnapshot(fullClassRoster),
+                })
+                .onConflictDoUpdate({
+                  target: settingsTable.key,
+                  set: { value: serializeDefaultGroupRosterSnapshot(fullClassRoster) },
+                })
+                .run()
+            }
+          }
+          return { projectId: localProject.id, classesImported: classes.length, studentsImported }
         })
 
          reconcileDefaultGroups(imported.projectId)

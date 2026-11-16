@@ -56,6 +56,8 @@ test('upgrades an older local database without replacing existing rows', () => {
   assert(columns.get('students')?.has('office_location'))
   assert(columns.get('students')?.has('photo_session'))
   assert(columns.get('students')?.has('capture_notes'))
+  assert(columns.get('students')?.has('class_sync_pending'))
+  assert(columns.get('classes')?.has('name_sync_pending'))
   assert(columns.get('projects')?.has('project_type'))
   assert(columns.get('projects')?.has('sync_status'))
   assert(columns.get('projects')?.has('sync_completed_files'))
@@ -63,7 +65,7 @@ test('upgrades an older local database without replacing existing rows', () => {
   assert(columns.get('projects')?.has('archived_at'))
   assert(columns.get('projects')?.has('local_files_deleted_at'))
   assert(migrationStatements.some((statement) => /SET sync_status = 'synced'/.test(statement)))
-  assert.equal(columns.get('students')?.size, 25)
+  assert.equal(columns.get('students')?.size, 26)
 })
 
 test('repairs case-insensitive roster duplicates without changing row or capture identity', () => {

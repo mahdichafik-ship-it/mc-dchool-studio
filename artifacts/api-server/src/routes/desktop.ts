@@ -26,6 +26,7 @@ import { isPlatformOwner } from "../lib/platformAccess";
 import { generateSimpleQr, generateJsonQr } from "../lib/qrcode";
 import { isStudentIdUniqueViolation } from "../lib/studentId";
 import { reconcileDefaultGroups } from "../lib/groupReconciliation";
+import { moveProjectStudent, renameProjectClass } from "../lib/rosterCorrection";
 import { groupsTable, groupMemberExclusionsTable, groupMembersTable, groupCaptureFilesTable, groupCapturesTable } from "@workspace/db";
 import { verifyR2Copy } from "../lib/r2UploadCopies";
 import { prepareBaseR2PhotoVariants } from "../lib/photoVariants";
@@ -565,11 +566,6 @@ router.post("/projects/:projectId/classes", requireDesktopConnection, async (req
     res.status(400).json({ error: "A valid class or group name is required." });
     return;
   }
-  if (email.length > 254 || (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-    res.status(400).json({ error: "Enter a valid email address (maximum 254 characters)." });
-    return;
-  }
-
   if (!(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
     res.status(404).json({ error: "Project not found" });
     return;
@@ -613,6 +609,47 @@ router.post("/projects/:projectId/classes", requireDesktopConnection, async (req
   }
   await reconcileDefaultGroups(projectId);
   res.status(201).json({ id: created.id, className: created.className });
+});
+
+router.patch("/projects/:projectId/classes/:classId", requireDesktopConnection, async (req, res): Promise<void> => {
+  const connection = getDesktopConnection(req);
+  const projectId = Number(req.params.projectId);
+  const classId = Number(req.params.classId);
+  const className = typeof req.body?.className === "string" ? req.body.className.normalize("NFKC").trim() : "";
+  if (
+    !Number.isSafeInteger(projectId) || projectId <= 0
+    || !Number.isSafeInteger(classId) || classId <= 0
+    || !className || className.length > 120
+  ) {
+    res.status(400).json({ error: "A valid class or group name is required." });
+    return;
+  }
+  if (!(await canAccessDesktopProject(memberForAccess(connection), projectId))) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const [duplicate] = await db.select({ id: classesTable.id }).from(classesTable).where(and(
+    eq(classesTable.projectId, projectId),
+    sql`lower(trim(${classesTable.className})) = lower(${className})`,
+    sql`${classesTable.id} <> ${classId}`,
+  )).limit(1);
+  if (duplicate) {
+    res.status(409).json({ error: "Another class or group already has that name." });
+    return;
+  }
+  const updated = await renameProjectClass(projectId, classId, className);
+  if (!updated) {
+    res.status(404).json({ error: "Class not found in this project." });
+    return;
+  }
+  const [{ studentCount }] = await db.select({ studentCount: count() })
+    .from(studentsTable).where(eq(studentsTable.classId, classId));
+  res.json({
+    id: updated.id,
+    className: updated.className,
+    studentCount: Number(studentCount),
+    updatedAt: updated.updatedAt.toISOString(),
+  });
 });
 
 router.post("/projects/:projectId/groups", requireDesktopConnection, async (req, res): Promise<void> => {
@@ -970,20 +1007,16 @@ router.patch("/projects/:projectId/students/:studentId", requireDesktopConnectio
     res.status(404).json({ error: "Student or class not found in this project." });
     return;
   }
-  const [updated] = await db
-    .update(studentsTable)
-    .set({ classId, updatedAt: new Date() })
-    .where(eq(studentsTable.id, student.id))
-    .returning();
-  if (!updated) {
+  const move = await moveProjectStudent(projectId, student.id, cls.id);
+  if (!move) {
     res.status(500).json({ error: "The student could not be moved." });
     return;
   }
-  await reconcileDefaultGroups(projectId);
+  const updated = move.student;
   res.json({
     id: updated.id,
     classId: updated.classId,
-    className: cls.className,
+    className: move.className,
     firstName: updated.firstName,
     lastName: updated.lastName,
     generatedStudentId: updated.generatedStudentId,

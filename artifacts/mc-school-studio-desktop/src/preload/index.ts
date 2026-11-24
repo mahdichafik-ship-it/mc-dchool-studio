@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { randomBytes } from 'node:crypto'
-import type { DroppedCaptureBatchResult } from '../shared/types'
+import type { DroppedCaptureBatchResult, DroppedGroupCaptureBatchResult } from '../shared/types'
 
 export type IpcChannel = string
 
@@ -37,6 +37,34 @@ const api = {
       capabilityToken: dropCapabilityToken,
       projectId,
       studentId,
+      filePaths,
+    })
+  },
+
+  ingestDroppedGroupFiles: async (
+    projectId: number,
+    groupId: number,
+    files: File[],
+  ): Promise<DroppedGroupCaptureBatchResult> => {
+    if (!Array.isArray(files) || files.length === 0) {
+      throw new Error('No dropped files were provided')
+    }
+    const filePaths = files.map((file, index) => {
+      let filePath = ''
+      try {
+        filePath = webUtils.getPathForFile(file)
+      } catch {
+        filePath = ''
+      }
+      if (!filePath.trim()) {
+        throw new Error(`Dropped file ${index + 1} has no local filesystem path`)
+      }
+      return filePath
+    })
+    return ipcRenderer.invoke('watcher:ingestDroppedGroupFiles', {
+      capabilityToken: dropCapabilityToken,
+      projectId,
+      groupId,
       filePaths,
     })
   },

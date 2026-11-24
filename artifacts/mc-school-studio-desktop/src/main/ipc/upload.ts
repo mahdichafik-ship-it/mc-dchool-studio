@@ -1785,6 +1785,8 @@ function getUploadStatusCounts(projectId: number) {
   }
   return {
     pending: statuses.filter((status) => status === 'pending' || status === null).length,
+    readyToUpload: statuses.filter((status) => status === null).length,
+    retryWaiting: statuses.filter((status) => status === 'pending').length,
     uploading: statuses.filter((status) => status === 'uploading').length,
     done: statuses.filter((status) => status === 'done').length,
     error: statuses.filter((status) => status === 'error').length,
@@ -1825,6 +1827,7 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
         status: file?.uploadStatus === 'uploading'
           ? 'uploading'
           : file?.uploadStatus === 'error' ? 'failed' : 'queued',
+        retryPending: file?.uploadStatus === 'pending',
         attempts,
         ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}),
         ...(lastError ? { lastError } : {}),
@@ -1846,6 +1849,7 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
           : file?.uploadStatus === 'uploading'
             ? 'uploading'
             : file?.uploadStatus === 'error' ? 'failed' : 'queued',
+        retryPending: file?.uploadStatus === 'pending',
         attempts,
         ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}),
         ...(lastError ? { lastError } : {}),
@@ -1863,6 +1867,7 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
       status: photo?.photo.uploadStatus === 'uploading'
         ? 'uploading'
         : photo?.photo.uploadStatus === 'error' ? 'failed' : 'queued',
+        retryPending: photo?.photo.uploadStatus === 'pending',
       attempts,
       ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}),
       ...(lastError ? { lastError } : {}),

@@ -14,7 +14,9 @@ import { createLocalPreviewUrl } from '../lib/localPreviewProtocol'
 import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
 import { buildCaptureReviewStatus } from '../lib/captureReviewStatus'
 import { groupFiveStarReplacementIds, portraitFiveStarReplacementIds } from '../lib/reviewRatingReplacement'
+import { photoReassignmentMoveBlockReason } from '../lib/photoReassignmentMovePolicy'
 import { syncCaptureReview, syncGroupCaptureReview } from './upload'
+import { groupCaptureMoveBlockReason } from '../lib/groupCaptureMovePolicy'
 import type {
   CaptureCompletenessSummary,
   CaptureAspectRatio,
@@ -632,15 +634,6 @@ export function registerPhotoHandlers() {
       const photo = db.select().from(photosTable).where(eq(photosTable.id, photoId)).get()
       if (!photo) throw new Error('Photo not found.')
       const project = db.select().from(projectsTable).where(eq(projectsTable.id, photo.projectId)).get()
-      if (project?.finishedAt) throw new Error('This project is finished and its captures can no longer be changed.')
-      if (photo.uploadStatus === 'done' || photo.uploadStatus === 'uploading' || photo.fileUrl) {
-        throw new Error('This photo is already uploaded. Reassign it before uploading to the cloud.')
-      }
-      const student = db.select().from(studentsTable).where(and(
-        eq(studentsTable.id, studentId),
-        eq(studentsTable.projectId, photo.projectId),
-      )).get()
-      if (!student) throw new Error('Choose a student from this project.')
       const capture = db
         .select()
         .from(capturesTable)
@@ -649,9 +642,16 @@ export function registerPhotoHandlers() {
       const imageFiles = capture
         ? db.select().from(imageFilesTable).where(eq(imageFilesTable.captureId, capture.id)).all()
         : []
-      if (imageFiles.some((file) => file.uploadStatus === 'done' || file.uploadStatus === 'uploading' || file.fileUrl)) {
-        throw new Error('This capture is already uploaded. Reassign it before uploading to the cloud.')
-      }
+      const blockReason = photoReassignmentMoveBlockReason({
+        projectFinished: Boolean(project?.finishedAt),
+        files: [photo, ...imageFiles],
+      })
+      if (blockReason) throw new Error(blockReason)
+      const student = db.select().from(studentsTable).where(and(
+        eq(studentsTable.id, studentId),
+        eq(studentsTable.projectId, photo.projectId),
+      )).get()
+      if (!student) throw new Error('Choose a student from this project.')
       const destDir = join(getPhotosDir(), String(photo.projectId), student.generatedStudentId)
       mkdirSync(destDir, { recursive: true })
       const moves = (imageFiles.length > 0 ? imageFiles.map((file) => ({
@@ -713,6 +713,94 @@ export function registerPhotoHandlers() {
           studentId,
         })
       }
+    },
+  )
+
+  ipcMain.handle(
+    'groupCaptures:move',
+    async (
+      _e,
+      { projectId, captureId, groupId }: { projectId: number; captureId: number; groupId: number },
+    ) => {
+      const db = getDb()
+      if (![projectId, captureId, groupId].every((value) => Number.isSafeInteger(value) && value > 0)) {
+        throw new Error('Choose a valid class photo and destination class.')
+      }
+      const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+      if (!project) throw new Error('Project not found.')
+      const source = db.select().from(groupCapturesTable).where(and(
+        eq(groupCapturesTable.id, captureId),
+        eq(groupCapturesTable.projectId, projectId),
+      )).get()
+      if (!source) throw new Error('Class photo not found in this project.')
+      const destination = db.select().from(groupsTable).where(and(
+        eq(groupsTable.id, groupId),
+        eq(groupsTable.projectId, projectId),
+      )).get()
+      if (!destination) {
+        throw new Error('Choose a class-photo target from this project.')
+      }
+      const sourceGroup = db.select().from(groupsTable).where(and(
+        eq(groupsTable.id, source.groupId),
+        eq(groupsTable.projectId, projectId),
+      )).get()
+      const sourceFiles = db.select().from(groupCaptureFilesTable)
+        .where(eq(groupCaptureFilesTable.captureId, captureId)).all()
+      const destinationWinners = source.rating === 5
+        ? db.select().from(groupCapturesTable).where(and(
+            eq(groupCapturesTable.projectId, projectId),
+            eq(groupCapturesTable.groupId, groupId),
+            eq(groupCapturesTable.rating, 5),
+          )).all()
+        : []
+      const destinationWinnerFiles = destinationWinners.map((winner) =>
+        db.select().from(groupCaptureFilesTable)
+          .where(eq(groupCaptureFilesTable.captureId, winner.id)).all()
+      )
+      const blockReason = groupCaptureMoveBlockReason({
+        projectFinished: Boolean(project.finishedAt),
+        sourceGroupId: source.groupId,
+        targetGroupId: groupId,
+        sourceIsClassGroup: Boolean(sourceGroup?.isDefaultClassGroup && sourceGroup.classId !== null),
+        targetIsClassGroup: Boolean(destination.isDefaultClassGroup && destination.classId !== null),
+        sourceFiles,
+        sourceRating: source.rating,
+        destinationFiveStarFiles: destinationWinnerFiles,
+      })
+      if (blockReason) throw new Error(blockReason)
+
+      const updatedAt = now()
+      db.transaction((tx) => {
+        for (const winner of destinationWinners) {
+          tx.update(groupCapturesTable).set({
+            rating: 0,
+            reviewSyncPending: true,
+            updatedAt,
+          }).where(eq(groupCapturesTable.id, winner.id)).run()
+        }
+        tx.update(capturesTable).set({
+          groupId: String(groupId),
+          classId: destination.classId,
+          updatedAt,
+        }).where(and(
+          eq(capturesTable.projectId, projectId),
+          eq(capturesTable.captureKey, source.captureKey),
+        )).run()
+        tx.update(groupCapturesTable).set({
+          groupId,
+          classId: destination.classId,
+          reviewSyncPending: true,
+          updatedAt,
+        }).where(and(
+          eq(groupCapturesTable.id, captureId),
+          eq(groupCapturesTable.projectId, projectId),
+        )).run()
+      })
+
+      const win = getMainWindow()
+      win?.webContents.send('groupCapture:updated', { projectId, groupId: source.groupId })
+      win?.webContents.send('groupCapture:updated', { projectId, groupId })
+      return { captureId, fromGroupId: source.groupId, toGroupId: groupId, classId: destination.classId }
     },
   )
 

@@ -355,6 +355,17 @@ export interface DroppedCaptureBatchResult {
   files: DroppedCaptureFileResult[]
 }
 
+export interface DroppedGroupCaptureBatchResult {
+  projectId: number
+  groupId: number
+  total: number
+  imported: number
+  duplicates: number
+  skipped: number
+  errors: number
+  files: DroppedCaptureFileResult[]
+}
+
 export interface DroppedCaptureProgressEvent {
   projectId: number
   studentId: number
@@ -424,6 +435,8 @@ export interface LiveUploadState {
   running: boolean
   cloudReady: boolean
   pending: number
+  readyToUpload?: number
+  retryWaiting?: number
   uploading: number
   done: number
   error: number
@@ -442,6 +455,7 @@ export interface LiveUploadQueueItem {
   capturedAt: string
   status: 'queued' | 'uploading' | 'failed' | 'preparing_gallery' | 'blocked'
   blockedReason?: string
+  retryPending?: boolean
   attempts: number
   retryAt?: string
   lastError?: string

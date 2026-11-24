@@ -117,6 +117,7 @@ export function ProjectView({
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const { data: allProjectStudents, reload: reloadAllProjectStudents } = useStudents(projectId)
   const { data: groups, reload: reloadGroups } = useGroups(projectId, selectedClassId ?? undefined)
+  const { data: allProjectGroups } = useGroups(projectId)
   const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
   const { data: groupCaptures, reload: reloadGroupCaptures } = useGroupCaptures(projectId, selectedGroup?.id ?? null)
   const {
@@ -150,6 +151,7 @@ export function ProjectView({
   const captureTargetGroups = groups.filter(
     (group) => !group.isDefaultClassGroup || group.id === defaultClassGroup?.id,
   )
+  const allClassGroupTargets = (allProjectGroups ?? []).filter((group) => group.isDefaultClassGroup)
   const [addStudentOpen, setAddStudentOpen] = useState(false)
   const [moveStudentOpen, setMoveStudentOpen] = useState(false)
   const [moveStudentId, setMoveStudentId] = useState<number | null>(null)
@@ -293,6 +295,14 @@ export function ProjectView({
     }
   }, [selectedStudent])
 
+  const uploadRequested = Boolean(liveUpload?.enabled || liveUpload?.running)
+  const readyToUploadCount = liveUpload?.readyToUpload
+    ?? uploadQueue.filter((item) => item.status === 'queued' && !item.retryPending).length
+  const retryWaitingCount = liveUpload?.retryWaiting
+    ?? uploadQueue.filter((item) => item.retryPending).length
+  const waitingCount = uploadRequested
+    ? liveUpload?.pending ?? uploadQueue.length
+    : readyToUploadCount
   const pendingUploadCount = liveUpload
     ? liveUpload.pending + liveUpload.uploading
     : [...uploadStatusMap.values()].reduce(
@@ -312,6 +322,8 @@ export function ProjectView({
     uploadDialogOpen,
     projectId,
     liveUpload?.pending,
+    liveUpload?.readyToUpload,
+    liveUpload?.retryWaiting,
     liveUpload?.uploading,
     liveUpload?.error,
     liveUpload?.blocked,
@@ -545,6 +557,26 @@ export function ProjectView({
   async function handleDropOnGroup(group: StudentGroup, event: React.DragEvent<HTMLElement>) {
     event.preventDefault()
     event.stopPropagation()
+    const groupCaptureId = Number(event.dataTransfer.getData('application/x-volume-capture-group-capture'))
+    const droppedFiles = Array.from(event.dataTransfer.files ?? [])
+    if (groupCaptureId > 0) {
+      if (!group.isDefaultClassGroup) {
+        addToast({ type: 'error', title: 'Choose a class-photo target', description: 'Group photos can only be moved between class-photo targets.' })
+        return
+      }
+      try {
+        await window.api.invoke('groupCaptures:move', { projectId, captureId: groupCaptureId, groupId: group.id })
+        await Promise.all([reloadGroupCaptures(), reloadGroups()])
+        addToast({ type: 'success', title: `Class photo moved to ${group.name}`, description: 'It remains local and will upload under the corrected class when you choose Upload.' })
+      } catch (error) {
+        addToast({ type: 'error', title: 'Could not move class photo', description: String(error) })
+      }
+      return
+    }
+    if (droppedFiles.length > 0) {
+      await ingestDroppedGroupFiles(group, droppedFiles)
+      return
+    }
     const photoId = Number(event.dataTransfer.getData('application/x-volume-capture-photo'))
     const studentId = Number(event.dataTransfer.getData('application/x-volume-capture-student'))
     try {
@@ -558,6 +590,20 @@ export function ProjectView({
       }
     } catch (error) {
       addToast({ type: 'error', title: 'Could not move item', description: String(error) })
+    }
+  }
+
+  async function ingestDroppedGroupFiles(group: StudentGroup, files: File[]) {
+    try {
+      const result = await window.api.ingestDroppedGroupFiles(projectId, group.id, files)
+      await Promise.all([reloadGroupCaptures(), reloadGroups()])
+      addToast({
+        type: result.errors > 0 ? 'error' : 'success',
+        title: `${result.imported} photo${result.imported === 1 ? '' : 's'} added to ${group.name}`,
+        description: `${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} · ${result.skipped} unsupported · ${result.errors} failed. Files stay local until Upload.`,
+      })
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not add class photo', description: String(error) })
     }
   }
 
@@ -1080,9 +1126,12 @@ export function ProjectView({
     cloudColor = "text-teal-400"
     cloudText = `${uploadingCount}/3 uploading${(liveUpload?.pending ?? 0) > 0 ? ` · ${liveUpload?.pending} queued` : ""}`
     showUploadDots = true
-  } else if ((liveUpload?.pending ?? 0) > 0) {
-    cloudColor = liveUpload?.enabled ? "text-blue-400" : "text-amber-400"
-    cloudText = `${liveUpload?.pending} queued${liveUpload?.enabled ? "" : " · Live Upload off"}`
+  } else if (uploadRequested && (liveUpload?.pending ?? 0) > 0) {
+    cloudColor = "text-blue-400"
+    cloudText = `${liveUpload?.pending} queued`
+  } else if (readyToUploadCount > 0 || retryWaitingCount > 0) {
+    cloudColor = "text-amber-400"
+    cloudText = `${readyToUploadCount} ready${retryWaitingCount > 0 ? ` · ${retryWaitingCount} retry waiting` : ''} · Live Upload off`
   } else if (captureSummary.total === 0) {
     cloudColor = "text-slate-500"
     cloudText = "Ready when captures arrive"
@@ -1278,7 +1327,7 @@ export function ProjectView({
             {[
               ['Uploaded', liveUpload?.done ?? 0, 'text-emerald-700 bg-emerald-50'],
               ['Uploading', liveUpload?.uploading ?? 0, 'text-blue-700 bg-blue-50'],
-              ['Queued', liveUpload?.pending ?? 0, 'text-amber-700 bg-amber-50'],
+              [uploadRequested ? 'Queued' : 'Ready', waitingCount, uploadRequested ? 'text-amber-700 bg-amber-50' : 'text-slate-700 bg-slate-100'],
               ['Failed', liveUpload?.error ?? 0, 'text-red-700 bg-red-50'],
               ['Blocked', liveUpload?.blocked ?? 0, 'text-slate-700 bg-slate-100'],
             ].map(([label, value, color]) => (
@@ -1288,6 +1337,11 @@ export function ProjectView({
               </div>
             ))}
           </div>
+          {retryWaitingCount > 0 && (
+            <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800">
+              {retryWaitingCount} photo{retryWaitingCount === 1 ? '' : 's'} waiting to retry after a previous upload attempt. These are kept separate from photos that have not been sent.
+            </p>
+          )}
           {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
               <div className="flex gap-3">
@@ -1310,16 +1364,19 @@ export function ProjectView({
           <div>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Files still waiting
+                {uploadRequested ? 'Upload queue' : 'Ready to upload'}
               </span>
               <span className="text-xs text-slate-400">
-                {liveUpload?.pending ?? uploadQueue.length} uploadable
+                {waitingCount} {uploadRequested ? 'queued' : 'ready'}
+                {retryWaitingCount > 0 ? ` · ${retryWaitingCount} retry waiting` : ''}
                 {(liveUpload?.blocked ?? 0) > 0 ? ` · ${liveUpload?.blocked} blocked` : ''}
               </span>
             </div>
             <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
               {uploadQueue.length === 0 ? (
-                <p className="px-2 py-4 text-center text-sm text-slate-500">No files are waiting.</p>
+                <p className="px-2 py-4 text-center text-sm text-slate-500">
+                  {uploadRequested ? 'No files are queued.' : 'No files are ready to upload.'}
+                </p>
               ) : uploadQueue.map((item) => {
                 const waitingForRetry = item.retryAt && new Date(item.retryAt).getTime() > Date.now()
                 const statusLabel = item.status === 'preparing_gallery'
@@ -1330,7 +1387,7 @@ export function ProjectView({
                       ? 'Uploading'
                       : item.status === 'failed'
                         ? 'Failed'
-                        : waitingForRetry ? 'Retry scheduled' : 'Queued'
+                        : item.retryPending || waitingForRetry ? 'Retry waiting' : uploadRequested ? 'Queued' : 'Ready to upload'
                 return (
                   <div key={item.key} className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
                     <div className="flex items-start justify-between gap-3">
@@ -1346,18 +1403,21 @@ export function ProjectView({
                           : item.status === 'failed' ? "bg-red-100 text-red-700"
                           : item.status === 'uploading' ? "bg-blue-100 text-blue-700"
                             : item.status === 'preparing_gallery' ? "bg-violet-100 text-violet-700"
-                              : waitingForRetry ? "bg-orange-100 text-orange-700"
-                                : "bg-amber-100 text-amber-700",
+                              : item.retryPending || waitingForRetry ? "bg-orange-100 text-orange-700"
+                                : uploadRequested ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-700",
                       )}>
                         {statusLabel}
                       </Badge>
                     </div>
-                    {(item.attempts > 0 || item.lastError || item.blockedReason) && (
+                    {(item.attempts > 0 || item.retryPending || item.lastError || item.blockedReason) && (
                       <div className="mt-1.5 text-xs text-slate-500">
                         {item.attempts > 0 && (
                           <span>{item.attempts} attempt{item.attempts === 1 ? '' : 's'}</span>
                         )}
-                        {waitingForRetry && (
+                        {item.retryPending && (
+                          <p className="mt-1 text-orange-700">An earlier upload attempt may have reached the server. Wait for its retry before moving this photo.</p>
+                        )}
+                        {!item.retryPending && waitingForRetry && (
                           <span> · retry at {new Date(item.retryAt!).toLocaleTimeString()}</span>
                         )}
                         {item.blockedReason && (
@@ -1643,7 +1703,13 @@ export function ProjectView({
                     className="h-full border-l border-slate-200 px-2.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 text-[10px] font-bold"
                     title="Open upload activity"
                   >
-                    {liveUpload?.uploading ? `${liveUpload.uploading} ↑` : liveUpload?.pending ? `${liveUpload.pending} queued` : 'Status'}
+                    {liveUpload?.uploading
+                      ? `${liveUpload.uploading} ↑`
+                      : uploadRequested && liveUpload?.pending
+                        ? `${liveUpload.pending} queued`
+                        : pendingUploadCount > 0
+                          ? `Upload ${pendingUploadCount}`
+                          : 'Status'}
                   </button>
                 </div>
                 <Button
@@ -1801,6 +1867,38 @@ export function ProjectView({
               {captureTargetGroups.length === 0 && (
                 <p className="px-2 pb-1 text-center text-xs text-slate-500">No photo targets yet.</p>
               )}
+              {allClassGroupTargets.length > 0 && (
+                <details className="rounded-lg border border-slate-200 bg-slate-50">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Move local class photo
+                  </summary>
+                  <div className="max-h-48 space-y-1 overflow-y-auto border-t border-slate-200 p-2">
+                    <p className="px-1 pb-1 text-[10px] leading-4 text-slate-500">
+                      Drag an unuploaded class photo onto its correct class. Uploads already started are locked.
+                    </p>
+                    {allClassGroupTargets.map((group) => {
+                      const className = classes.find((item) => item.id === group.classId)?.className ?? group.name
+                      return (
+                        <div
+                          key={`move-target-${group.id}`}
+                          role="listitem"
+                          aria-label={`Drop class photo to ${className}`}
+                          onDragOver={(event) => {
+                            event.preventDefault()
+                            event.dataTransfer.dropEffect = 'move'
+                          }}
+                          onDrop={(event) => void handleDropOnGroup(group, event)}
+                          className="flex min-w-0 items-center gap-2 rounded-md border border-dashed border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:border-teal-400 hover:bg-teal-50"
+                        >
+                          <Camera className="size-3.5 shrink-0 text-teal-600" />
+                          <span className="truncate">{className}</span>
+                          <span className="ml-auto shrink-0 text-[9px] font-bold uppercase text-slate-400">Drop here</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </details>
+              )}
             </div>
           </section>
 
@@ -1867,9 +1965,11 @@ export function ProjectView({
               students={students}
               groupCaptures={groupCaptures}
               isActiveCaptureTarget={activeGroupId === selectedGroup.id}
+              uploadRequested={Boolean(liveUpload?.enabled || liveUpload?.running)}
               onMembershipChange={handleGroupMembership}
               onClearCaptureTarget={() => void setActiveGroupTarget(null)}
               onRefreshCaptures={() => void reloadGroupCaptures()}
+              onDropFiles={(targetGroup, files) => void ingestDroppedGroupFiles(targetGroup, files)}
             />
           ) : selectedStudent ? (
             <StudentDetail
@@ -2480,7 +2580,7 @@ function UploadBadge({ summary }: { summary: StudentUploadSummary }) {
   }
   if (summary.pending > 0) {
     return (
-      <span title={`${summary.pending} upload(s) queued`} className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+      <span title={`${summary.pending} upload(s) waiting`} className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
         <Upload className="size-3" /> {summary.pending}
       </span>
     )
@@ -3179,7 +3279,7 @@ function captureUploadSummary(
             : null)
   if (status === 'error') return { label: 'Upload error', className: 'text-rose-600', icon: <XCircle className="size-3.5" /> }
   if (status === 'uploading') return { label: 'Uploading', className: 'text-blue-600', icon: <Loader className="size-3.5 animate-spin" /> }
-  if (status === 'pending') return { label: 'Queued', className: 'text-amber-600', icon: <CloudUpload className="size-3.5" /> }
+  if (status === 'pending') return { label: 'Retry scheduled', className: 'text-orange-600', icon: <CloudUpload className="size-3.5" /> }
   if (status === 'done') return { label: 'Synced', className: 'text-emerald-600', icon: <CheckCircle className="size-3.5" /> }
   return { label: 'Local', className: 'text-slate-500', icon: <Image className="size-3.5" /> }
 }
@@ -3820,25 +3920,48 @@ function GroupDetail({
   students,
   groupCaptures,
   isActiveCaptureTarget,
+  uploadRequested,
   onMembershipChange,
   onClearCaptureTarget,
   onRefreshCaptures,
+  onDropFiles,
 }: {
   group: StudentGroup
   students: Student[]
   groupCaptures: GroupCaptureReview[]
   isActiveCaptureTarget: boolean
+  uploadRequested: boolean
   onMembershipChange: (group: StudentGroup, studentId: number, checked: boolean) => void
   onClearCaptureTarget: () => void
   onRefreshCaptures: () => void
+  onDropFiles: (group: StudentGroup, files: File[]) => void
 }) {
   const memberStudentIds = createGroupMemberStudentIdSet(group.memberStudentIds)
+  const [fileDropActive, setFileDropActive] = useState(false)
+  const [activeCaptureId, setActiveCaptureId] = useState<number | null>(null)
+  const filmstripRef = useRef<HTMLDivElement>(null)
+  const activeCapture = groupCaptures.find((capture) => capture.id === activeCaptureId)
+  const activeCaptureIndex = activeCapture
+    ? groupCaptures.findIndex((capture) => capture.id === activeCapture.id)
+    : -1
+
+  useEffect(() => {
+    if (groupCaptures.length === 0) {
+      setActiveCaptureId(null)
+      return
+    }
+    if (!groupCaptures.some((capture) => capture.id === activeCaptureId)) {
+      setActiveCaptureId(groupCaptures[groupCaptures.length - 1].id)
+    }
+  }, [groupCaptures, activeCaptureId])
 
   function captureUploadState(capture: GroupCaptureReview) {
-    const label = captureUploadLabel(capture.files)
+    const label = captureUploadLabel(capture.files, uploadRequested)
     if (label === 'Upload failed') return { label, className: 'bg-red-50 text-red-700 border-red-200' }
     if (label === 'Uploading') return { label, className: 'bg-blue-50 text-blue-700 border-blue-200' }
     if (label === 'Queued') return { label, className: 'bg-amber-50 text-amber-700 border-amber-200' }
+    if (label === 'Retry scheduled') return { label, className: 'bg-orange-50 text-orange-700 border-orange-200' }
+    if (label === 'Ready to upload') return { label, className: 'bg-slate-50 text-slate-700 border-slate-200' }
     if (label === 'Preparing gallery') return { label, className: 'bg-violet-50 text-violet-700 border-violet-200' }
     return { label, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
   }
@@ -3856,7 +3979,13 @@ function GroupDetail({
     if (file.uploadStatus === 'error') {
       return { label: 'Failed', className: 'text-red-700', icon: <XCircle className="size-3" /> }
     }
-    return { label: 'Queued', className: 'text-amber-700', icon: <CloudUpload className="size-3" /> }
+    if (file.uploadStatus === 'pending') {
+      return { label: 'Retry scheduled', className: 'text-orange-700', icon: <CloudUpload className="size-3" /> }
+    }
+    if (uploadRequested) {
+      return { label: 'Queued', className: 'text-amber-700', icon: <CloudUpload className="size-3" /> }
+    }
+    return { label: 'Ready to upload', className: 'text-slate-600', icon: <CloudUpload className="size-3" /> }
   }
 
   async function updateGroupRating(captureId: number, rating: number) {
@@ -3873,17 +4002,32 @@ function GroupDetail({
       if (isRosterShortcutEditingTarget(event.target as HTMLElement)) return
       if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return
       const rating = ratingFromShortcut(event.key)
-      const latestGroupCapture = groupCaptures[groupCaptures.length - 1]
-      if (rating === null || !latestGroupCapture) return
+      if (rating === null || !activeCapture) return
       event.preventDefault()
       void updateGroupRating(
-        latestGroupCapture.id,
-        latestGroupCapture.rating === rating ? 0 : rating,
+        activeCapture.id,
+        activeCapture.rating === rating ? 0 : rating,
       )
     }
     window.addEventListener('keydown', handleGroupRatingShortcut)
     return () => window.removeEventListener('keydown', handleGroupRatingShortcut)
-  }, [groupCaptures])
+  }, [activeCapture])
+
+  function moveFilmstripSelection(direction: 'previous' | 'next' | 'first' | 'last') {
+    if (groupCaptures.length === 0) return
+    const nextIndex = direction === 'first'
+      ? 0
+      : direction === 'last'
+        ? groupCaptures.length - 1
+        : Math.max(0, Math.min(groupCaptures.length - 1, activeCaptureIndex + (direction === 'next' ? 1 : -1)))
+    const nextCapture = groupCaptures[nextIndex]
+    setActiveCaptureId(nextCapture.id)
+    requestAnimationFrame(() => {
+      filmstripRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-group-capture-id="${nextCapture.id}"]`)
+        ?.focus()
+    })
+  }
 
   return (
     <div className="flex flex-col h-full relative bg-slate-50">
@@ -3949,7 +4093,37 @@ function GroupDetail({
           </div>
 
           {/* Captures Column */}
-          <div className="shoot-capture-area flex-1 min-w-0 flex flex-col gap-4">
+          <div
+            className={cn(
+              "shoot-capture-area relative flex-1 min-w-0 min-h-[560px] xl:min-h-[calc(100dvh-280px)] flex flex-col gap-4 rounded-2xl transition-colors",
+              fileDropActive && "bg-teal-50 ring-2 ring-inset ring-teal-400",
+            )}
+            onDragOver={(event) => {
+              if (Array.from(event.dataTransfer.types).includes("Files")) {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = "copy"
+                setFileDropActive(true)
+              }
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setFileDropActive(false)
+              }
+            }}
+            onDrop={(event) => {
+              if (!Array.from(event.dataTransfer.types).includes("Files")) return
+              event.preventDefault()
+              event.stopPropagation()
+              setFileDropActive(false)
+              const files = Array.from(event.dataTransfer.files ?? [])
+              if (files.length > 0) onDropFiles(group, files)
+            }}
+          >
+            {fileDropActive && (
+              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-teal-500 bg-teal-50/90 text-sm font-bold text-teal-800">
+                Drop JPEG or RAW files here · stays local until Upload
+              </div>
+            )}
             <div className="flex items-center justify-between mb-1">
               <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 shadow-sm w-fit">
                 2. Group Captures
@@ -3968,79 +4142,195 @@ function GroupDetail({
                 <h3 className="text-xl font-extrabold text-slate-900 mb-2 tracking-tight">Ready for group photos</h3>
                 <p className="mb-1 text-[10px] font-extrabold uppercase tracking-widest text-teal-700">Landscape framing · 7:5</p>
                 <p className="text-slate-500 max-w-sm text-sm font-medium leading-relaxed mb-4">
-                  Make sure all subjects are framed, then start shooting.
+                  Drop JPEG/RAW files here as a local recovery option, or make sure all subjects are framed and start shooting.
                 </p>
                 <Button onClick={onRefreshCaptures} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold uppercase tracking-wider px-6 shadow-sm">
                   <RefreshCw className="size-4 mr-2" /> Check for Captures
                 </Button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6">
-                {groupCaptures.map(capture => {
-                  const overallUploadState = captureUploadState(capture)
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                {activeCapture && (() => {
+                  const overallUploadState = captureUploadState(activeCapture)
+                  const jpegFile = activeCapture.files.find((file) => file.fileRole === 'JPEG')
                   return (
-                  <div key={capture.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-4 relative overflow-hidden transition-shadow hover:shadow-md">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-teal-500" />
-                    {capture.files.find(file => file.fileRole === 'JPEG') && (
-                      <button
-                        type="button"
-                         className="aspect-[7/5] w-full overflow-hidden rounded-xl bg-slate-100"
-                        onClick={() => void window.api.invoke('photos:openInSystem', {
-                          filePath: capture.files.find(file => file.fileRole === 'JPEG')!.storedPath,
-                        })}
-                        title="Open full-size image to inspect focus and zoom"
-                      >
-                        <GalleryThumbnail
-                          source={capture.files.find(file => file.fileRole === 'JPEG')!.previewUrl}
-                          filePath={capture.files.find(file => file.fileRole === 'JPEG')!.storedPath}
-                          previewKey={`group-capture-${capture.id}`}
-                          alt={capture.baseFilename}
-                           framing={defaultGroupCaptureFraming}
-                        />
-                      </button>
-                    )}
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="font-extrabold text-base text-slate-900 truncate">{capture.baseFilename}</span>
-                        <Badge data-testid="shoot-completeness" className={cn('shoot-completeness shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none', overallUploadState.className)}>
-                          {overallUploadState.label}
-                        </Badge>
+                    <div
+                      key={activeCapture.id}
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('application/x-volume-capture-group-capture', String(activeCapture.id))
+                        event.dataTransfer.effectAllowed = 'move'
+                      }}
+                      className="flex min-h-0 flex-1 flex-col p-3 sm:p-5"
+                      title="Drag this class photo to another class target before upload"
+                    >
+                      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-base font-extrabold text-slate-900 sm:text-lg">{activeCapture.baseFilename}</span>
+                            <Badge data-testid="shoot-completeness" className={cn('shoot-completeness shrink-0 border font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none', overallUploadState.className)}>
+                              {overallUploadState.label}
+                            </Badge>
+                            <Badge className="border-none bg-slate-100 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-slate-600 shadow-none">{activeCapture.pairingStatus}</Badge>
+                          </div>
+                          <p className="mt-1 font-mono text-[10px] text-slate-500">
+                            Frame {activeCaptureIndex + 1} of {groupCaptures.length}
+                            {' · '}
+                            {new Date(activeCapture.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-md border border-teal-100 bg-teal-50 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-teal-700">
+                          Landscape · 7:5
+                        </span>
                       </div>
-                      <Badge className="bg-slate-100 text-slate-600 border-none font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shadow-none">{capture.pairingStatus}</Badge>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {capture.files.map(file => {
-                        const uploadState = fileUploadState(file)
-                        return (
-                          <button key={file.id} type="button" onClick={() => void window.api.invoke('photos:openInSystem', { filePath: file.storedPath })} className="hover:bg-teal-50 transition-colors flex min-w-[140px] flex-1 items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
-                            <span className="flex items-center gap-1.5"><ExternalLink className="size-3" /> {file.fileRole}</span>
-                            <span className={cn('flex items-center gap-1 normal-case tracking-normal', uploadState.className)}>
-                              {uploadState.icon} {uploadState.label}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-              <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                       <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery · press 1–5 for latest</span>
-                      <div className="flex items-center gap-0.5">
-                        {[1, 2, 3, 4, 5].map(rating => (
+
+                      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
+                        {jpegFile ? (
                           <button
-                            key={rating}
                             type="button"
-                            aria-label={`Rate group photo ${rating} stars`}
-                            onClick={() => void updateGroupRating(capture.id, capture.rating === rating ? 0 : rating)}
-                            className="p-1 text-amber-500 hover:text-amber-600"
+                            className="relative aspect-[7/5] max-h-full w-full max-w-full overflow-hidden bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600"
+                            onClick={() => void window.api.invoke('photos:openInSystem', { filePath: jpegFile.storedPath })}
+                            title="Open full-size image to inspect focus and zoom"
                           >
-                            <Star className="size-5" fill={capture.rating >= rating ? 'currentColor' : 'none'} />
+                            <GalleryThumbnail
+                              source={jpegFile.previewUrl}
+                              filePath={jpegFile.storedPath}
+                              previewKey={`group-capture-${activeCapture.id}`}
+                              alt={activeCapture.baseFilename}
+                              framing={defaultGroupCaptureFraming}
+                            />
                           </button>
-                        ))}
+                        ) : (
+                          <div className="flex aspect-[7/5] w-full max-w-3xl flex-col items-center justify-center gap-3 border-2 border-dashed border-slate-300 bg-slate-50 text-slate-500">
+                            <Image className="size-9" />
+                            <span className="text-xs font-bold">JPEG preview unavailable</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {activeCapture.files.map((file) => {
+                          const uploadState = fileUploadState(file)
+                          return (
+                            <button key={file.id} type="button" onClick={() => void window.api.invoke('photos:openInSystem', { filePath: file.storedPath })} className="flex min-w-[140px] flex-1 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 transition-colors hover:bg-teal-50">
+                              <span className="flex items-center gap-1.5"><ExternalLink className="size-3" /> {file.fileRole}</span>
+                              <span className={cn('flex items-center gap-1 normal-case tracking-normal', uploadState.className)}>
+                                {uploadState.icon} {uploadState.label}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Parent gallery · active photo · keys 1–5</span>
+                        <div className="flex items-center gap-0.5" aria-label="Rate active class photo">
+                          {[1, 2, 3, 4, 5].map((rating) => (
+                            <button
+                              key={rating}
+                              type="button"
+                              aria-label={`Rate active group photo ${rating} stars`}
+                              aria-pressed={activeCapture.rating === rating}
+                              onClick={() => void updateGroupRating(activeCapture.id, activeCapture.rating === rating ? 0 : rating)}
+                              className="rounded p-1 text-amber-500 hover:bg-amber-100 hover:text-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                            >
+                              <Star className="size-5" fill={activeCapture.rating >= rating ? 'currentColor' : 'none'} />
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  </div>
                   )
-                })}
+                })()}
+
+                <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-3 pb-3 pt-2 sm:px-4">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500">Camera roll</span>
+                    <span className="text-[9px] font-bold text-slate-400">Use ← → to compare · Enter to select</span>
+                  </div>
+                  <div
+                    ref={filmstripRef}
+                    role="listbox"
+                    aria-label="Class photo captures"
+                    aria-activedescendant={activeCapture ? `group-filmstrip-${activeCapture.id}` : undefined}
+                    className="flex gap-2 overflow-x-auto pb-1 focus-visible:outline-none"
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowLeft') {
+                        event.preventDefault()
+                        moveFilmstripSelection('previous')
+                      } else if (event.key === 'ArrowRight') {
+                        event.preventDefault()
+                        moveFilmstripSelection('next')
+                      } else if (event.key === 'Home') {
+                        event.preventDefault()
+                        moveFilmstripSelection('first')
+                      } else if (event.key === 'End') {
+                        event.preventDefault()
+                        moveFilmstripSelection('last')
+                      }
+                    }}
+                  >
+                    {groupCaptures.map((capture, index) => {
+                      const jpegFile = capture.files.find((file) => file.fileRole === 'JPEG')
+                      const isActive = capture.id === activeCapture?.id
+                      return (
+                        <button
+                          key={capture.id}
+                          id={`group-filmstrip-${capture.id}`}
+                          data-group-capture-id={capture.id}
+                          role="option"
+                          aria-selected={isActive}
+                          aria-label={`Frame ${index + 1}, ${capture.baseFilename}${capture.rating ? `, rated ${capture.rating} stars` : ', unrated'}`}
+                          tabIndex={isActive ? 0 : -1}
+                          type="button"
+                          onClick={() => setActiveCaptureId(capture.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              setActiveCaptureId(capture.id)
+                            }
+                          }}
+                          className={cn(
+                            'group relative w-32 shrink-0 overflow-hidden rounded-lg border-2 bg-white text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-1 sm:w-40',
+                            isActive ? 'border-teal-600 shadow-sm' : 'border-transparent hover:border-slate-300',
+                          )}
+                        >
+                          <div className="relative aspect-[7/5] overflow-hidden bg-slate-200">
+                            {jpegFile ? (
+                              <GalleryThumbnail
+                                source={jpegFile.previewUrl}
+                                filePath={jpegFile.storedPath}
+                                previewKey={`group-capture-${capture.id}`}
+                                alt=""
+                                framing={defaultGroupCaptureFraming}
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-slate-500"><Image className="size-5" /></div>
+                            )}
+                            <span className={cn('absolute left-1.5 top-1.5 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-white', isActive ? 'bg-teal-700' : 'bg-slate-900/70')}>
+                              {index + 1}
+                            </span>
+                            {capture.rating > 0 && <span className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-slate-900/75 px-1.5 py-0.5 text-[8px] font-extrabold text-amber-300"><Star className="size-2.5" fill="currentColor" /> {capture.rating}</span>}
+                          </div>
+                          <div className="flex items-center justify-between gap-1 px-2 py-1.5">
+                            <span className="truncate font-mono text-[8px] text-slate-500">
+                              {new Date(capture.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                            <span className={cn('shrink-0 text-[8px] font-extrabold uppercase', capture.pairingStatus === 'complete' ? 'text-emerald-600' : capture.pairingStatus === 'unpaired' ? 'text-rose-600' : 'text-slate-500')}>
+                              {capture.pairingStatus === 'complete' ? 'JPG+RAW' : capture.pairingStatus === 'jpeg_only' ? 'JPG' : capture.pairingStatus.replace('_', ' ')}
+                            </span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
+            )}
+            {groupCaptures.length > 0 && (
+              <p className="text-[11px] text-slate-500">
+                Drag a class photo to another class target before its upload starts. After upload, correct it in the web photo library.
+              </p>
             )}
           </div>
         </div>

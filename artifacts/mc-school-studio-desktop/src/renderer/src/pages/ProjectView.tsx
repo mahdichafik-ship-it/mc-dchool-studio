@@ -44,6 +44,10 @@ import {
 import { ratingFromShortcut } from '@/lib/reviewShortcuts'
 import { filterRosterStudents } from '@/lib/rosterFilter'
 import { createGroupMemberStudentIdSet } from '@/lib/groupMembership'
+import {
+  captureIdsForDrag,
+  selectCaptureRange,
+} from '@/lib/groupCaptureSelection'
 import type {
   Student,
   Class,
@@ -554,23 +558,54 @@ export function ProjectView({
     }
   }
 
+  async function moveGroupCaptures(captureIds: number[], group: StudentGroup): Promise<boolean> {
+    try {
+      const result = await window.api.invoke('groupCaptures:moveMany', {
+        projectId,
+        captureIds,
+        groupId: group.id,
+      })
+      await Promise.all([reloadGroupCaptures(), reloadGroups()])
+      addToast({
+        type: 'success',
+        title: `${result.captureIds.length} class photo${result.captureIds.length === 1 ? '' : 's'} moved`,
+        description: `They are now assigned to ${group.name} and follow the project's upload setting.`,
+      })
+      return true
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not move class photo', description: String(error) })
+      return false
+    }
+  }
+
   async function handleDropOnGroup(group: StudentGroup, event: React.DragEvent<HTMLElement>) {
     event.preventDefault()
     event.stopPropagation()
-    const groupCaptureId = Number(event.dataTransfer.getData('application/x-volume-capture-group-capture'))
+    const groupCaptureIdsData = event.dataTransfer.getData('application/x-volume-capture-group-captures')
+    let groupCaptureIds: number[] = []
+    if (groupCaptureIdsData) {
+      try {
+        const parsed = JSON.parse(groupCaptureIdsData)
+        if (Array.isArray(parsed)) {
+          groupCaptureIds = [...new Set(parsed.filter((value) => Number.isSafeInteger(value) && value > 0))]
+        }
+      } catch {
+        groupCaptureIds = []
+      }
+    }
+    if (groupCaptureIds.length === 0) {
+      const groupCaptureId = Number(event.dataTransfer.getData('application/x-volume-capture-group-capture'))
+      if (Number.isSafeInteger(groupCaptureId) && groupCaptureId > 0) {
+        groupCaptureIds = [groupCaptureId]
+      }
+    }
     const droppedFiles = Array.from(event.dataTransfer.files ?? [])
-    if (groupCaptureId > 0) {
+    if (groupCaptureIds.length > 0) {
       if (!group.isDefaultClassGroup) {
         addToast({ type: 'error', title: 'Choose a class-photo target', description: 'Group photos can only be moved between class-photo targets.' })
         return
       }
-      try {
-        await window.api.invoke('groupCaptures:move', { projectId, captureId: groupCaptureId, groupId: group.id })
-        await Promise.all([reloadGroupCaptures(), reloadGroups()])
-        addToast({ type: 'success', title: `Class photo moved to ${group.name}`, description: 'It remains local and will upload under the corrected class when you choose Upload.' })
-      } catch (error) {
-        addToast({ type: 'error', title: 'Could not move class photo', description: String(error) })
-      }
+      await moveGroupCaptures(groupCaptureIds, group)
       return
     }
     if (droppedFiles.length > 0) {
@@ -1961,15 +1996,19 @@ export function ProjectView({
         <div className="shoot-content-panel flex-1 flex flex-col min-w-0 bg-slate-50">
           {selectedGroup ? (
             <GroupDetail
+              key={selectedGroup.id}
               group={selectedGroup}
               students={students}
               groupCaptures={groupCaptures}
+              classTargets={allClassGroupTargets}
+              projectFinished={Boolean(project?.finishedAt)}
               isActiveCaptureTarget={activeGroupId === selectedGroup.id}
               uploadRequested={Boolean(liveUpload?.enabled || liveUpload?.running)}
               onMembershipChange={handleGroupMembership}
               onClearCaptureTarget={() => void setActiveGroupTarget(null)}
               onRefreshCaptures={() => void reloadGroupCaptures()}
               onDropFiles={(targetGroup, files) => void ingestDroppedGroupFiles(targetGroup, files)}
+              onMoveCaptures={moveGroupCaptures}
             />
           ) : selectedStudent ? (
             <StudentDetail
@@ -3919,40 +3958,79 @@ function GroupDetail({
   group,
   students,
   groupCaptures,
+  classTargets,
+  projectFinished,
   isActiveCaptureTarget,
   uploadRequested,
   onMembershipChange,
   onClearCaptureTarget,
   onRefreshCaptures,
   onDropFiles,
+  onMoveCaptures,
 }: {
   group: StudentGroup
   students: Student[]
   groupCaptures: GroupCaptureReview[]
+  classTargets: StudentGroup[]
+  projectFinished: boolean
   isActiveCaptureTarget: boolean
   uploadRequested: boolean
   onMembershipChange: (group: StudentGroup, studentId: number, checked: boolean) => void
   onClearCaptureTarget: () => void
   onRefreshCaptures: () => void
   onDropFiles: (group: StudentGroup, files: File[]) => void
+  onMoveCaptures: (captureIds: number[], group: StudentGroup) => Promise<boolean>
 }) {
   const memberStudentIds = createGroupMemberStudentIdSet(group.memberStudentIds)
   const [fileDropActive, setFileDropActive] = useState(false)
   const [activeCaptureId, setActiveCaptureId] = useState<number | null>(null)
+  const [selectedCaptureIds, setSelectedCaptureIds] = useState<number[]>([])
+  const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null)
+  const [memberListExpanded, setMemberListExpanded] = useState(false)
+  const [moveMenu, setMoveMenu] = useState<{ x: number; y: number; captureIds: number[] } | null>(null)
   const filmstripRef = useRef<HTMLDivElement>(null)
   const activeCapture = groupCaptures.find((capture) => capture.id === activeCaptureId)
   const activeCaptureIndex = activeCapture
     ? groupCaptures.findIndex((capture) => capture.id === activeCapture.id)
     : -1
+  const contextMenuCaptures = moveMenu
+    ? groupCaptures.filter((capture) => moveMenu.captureIds.includes(capture.id))
+    : []
+  const contextMenuMoveBlocked = projectFinished
+    || contextMenuCaptures.length !== (moveMenu?.captureIds.length ?? 0)
+    || contextMenuCaptures.some((capture) =>
+      capture.files.length === 0
+      || capture.files.some((file) =>
+        file.uploadStatus === 'uploading'
+        || file.uploadStatus === 'pending'
+        || file.uploadStatus === 'done'
+        || Boolean(file.fileUrl)
+        || file.galleryReady === true
+      )
+    )
 
   useEffect(() => {
     if (groupCaptures.length === 0) {
       setActiveCaptureId(null)
+      setSelectedCaptureIds([])
+      setSelectionAnchorId(null)
+      setMoveMenu(null)
       return
     }
-    if (!groupCaptures.some((capture) => capture.id === activeCaptureId)) {
-      setActiveCaptureId(groupCaptures[groupCaptures.length - 1].id)
+    const availableIds = new Set(groupCaptures.map((capture) => capture.id))
+    const nextActiveId = availableIds.has(activeCaptureId ?? -1)
+      ? activeCaptureId!
+      : groupCaptures[groupCaptures.length - 1].id
+    if (nextActiveId !== activeCaptureId) {
+      setActiveCaptureId(nextActiveId)
     }
+    setSelectedCaptureIds((current) => {
+      const next = current.filter((captureId) => availableIds.has(captureId))
+      if (next.length === 0) return [nextActiveId]
+      if (next.length === current.length && next.every((captureId, index) => captureId === current[index])) return current
+      return next
+    })
+    setSelectionAnchorId((current) => current !== null && availableIds.has(current) ? current : nextActiveId)
   }, [groupCaptures, activeCaptureId])
 
   function captureUploadState(capture: GroupCaptureReview) {
@@ -4022,12 +4100,67 @@ function GroupDetail({
         : Math.max(0, Math.min(groupCaptures.length - 1, activeCaptureIndex + (direction === 'next' ? 1 : -1)))
     const nextCapture = groupCaptures[nextIndex]
     setActiveCaptureId(nextCapture.id)
+    setSelectedCaptureIds([nextCapture.id])
+    setSelectionAnchorId(nextCapture.id)
     requestAnimationFrame(() => {
       filmstripRef.current
         ?.querySelector<HTMLButtonElement>(`[data-group-capture-id="${nextCapture.id}"]`)
         ?.focus()
     })
   }
+
+  function selectFilmstripCapture(captureId: number, extendRange: boolean) {
+    setActiveCaptureId(captureId)
+    if (extendRange) {
+      const next = selectCaptureRange(
+        groupCaptures.map((capture) => capture.id),
+        selectionAnchorId,
+        captureId,
+      )
+      setSelectedCaptureIds(next)
+      if (selectionAnchorId === null) setSelectionAnchorId(captureId)
+      return
+    }
+    setSelectedCaptureIds([captureId])
+    setSelectionAnchorId(captureId)
+  }
+
+  function openMoveMenu(event: React.MouseEvent<HTMLElement>, captureId: number) {
+    event.preventDefault()
+    event.stopPropagation()
+    const captureIds = selectedCaptureIds.includes(captureId)
+      ? selectedCaptureIds
+      : [captureId]
+    if (!selectedCaptureIds.includes(captureId)) {
+      setSelectedCaptureIds(captureIds)
+      setSelectionAnchorId(captureId)
+    }
+    setActiveCaptureId(captureId)
+    setMoveMenu({
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 300)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 408)),
+      captureIds,
+    })
+  }
+
+  async function moveFromContextMenu(targetGroup: StudentGroup) {
+    if (!moveMenu) return
+    const moved = await onMoveCaptures(moveMenu.captureIds, targetGroup)
+    setMoveMenu(null)
+    if (moved) {
+      setSelectedCaptureIds([])
+      setSelectionAnchorId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!moveMenu) return
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMoveMenu(null)
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [moveMenu])
 
   return (
     <div className="flex flex-col h-full relative bg-slate-50">
@@ -4064,19 +4197,36 @@ function GroupDetail({
       </div>
 
       <div className="flex-1 overflow-y-auto p-8">
-        <div className="shoot-group-body max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8">
-          {/* Members Column */}
-          <div className="w-full xl:w-[340px] shrink-0">
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[300px] xl:max-h-[calc(100vh-250px)]">
-              <div className="p-6 border-b border-slate-100 bg-slate-50 shrink-0">
-                <div className="text-[10px] font-extrabold text-teal-600 uppercase tracking-widest mb-3 bg-teal-50 px-3.5 py-1.5 rounded-full border border-teal-100 w-fit shadow-sm">
-                  1. Roster
-                </div>
-                <p className="text-base font-extrabold text-slate-900">Select group members</p>
-                <p className="text-xs font-medium text-slate-500 mt-1.5 leading-relaxed">Photos will be assigned to all selected students.</p>
-              </div>
-              <div className="flex-1 overflow-y-auto p-3">
-                {students.map(student => {
+        <div className={cn(
+          "shoot-group-body max-w-[1400px] mx-auto flex flex-col gap-4",
+          memberListExpanded && "xl:flex-row xl:items-start",
+        )} data-roster-expanded={memberListExpanded}>
+          {/* Keep the roster collapsed by default so the photo review area gets the available width. */}
+          <section className={cn("w-full shrink-0", memberListExpanded && "xl:w-[340px]")}>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <button
+                type="button"
+                aria-expanded={memberListExpanded}
+                aria-controls="group-member-roster"
+                onClick={() => setMemberListExpanded((expanded) => !expanded)}
+                className="flex w-full items-center justify-between gap-4 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[10px] font-extrabold uppercase tracking-widest text-teal-700">
+                    1. Roster · {memberStudentIds.size} selected
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs font-medium text-slate-500">
+                    {memberListExpanded ? 'Choose which students receive this group photo.' : 'Expand to change group members.'}
+                  </span>
+                </span>
+                <ChevronRight className={cn("size-4 shrink-0 text-slate-500 transition-transform", memberListExpanded && "rotate-90")} />
+              </button>
+              <div
+                id="group-member-roster"
+                hidden={!memberListExpanded}
+                className="max-h-[300px] overflow-y-auto p-3 xl:max-h-[calc(100vh-250px)]"
+              >
+                {memberListExpanded && students.map(student => {
                   const isSelected = memberStudentIds.has(student.id)
                   return (
                     <label key={student.id} className={cn("flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border", isSelected ? "bg-teal-50/50 border-teal-200 shadow-sm" : "border-transparent hover:bg-slate-50")}>
@@ -4090,7 +4240,7 @@ function GroupDetail({
                 })}
               </div>
             </div>
-          </div>
+          </section>
 
           {/* Captures Column */}
           <div
@@ -4158,6 +4308,8 @@ function GroupDetail({
                       key={activeCapture.id}
                       draggable
                       onDragStart={(event) => {
+                        const draggedCaptureIds = captureIdsForDrag(selectedCaptureIds, activeCapture.id)
+                        event.dataTransfer.setData('application/x-volume-capture-group-captures', JSON.stringify(draggedCaptureIds))
                         event.dataTransfer.setData('application/x-volume-capture-group-capture', String(activeCapture.id))
                         event.dataTransfer.effectAllowed = 'move'
                       }}
@@ -4190,6 +4342,7 @@ function GroupDetail({
                             type="button"
                             className="relative aspect-[7/5] max-h-full w-full max-w-full overflow-hidden bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600"
                             onClick={() => void window.api.invoke('photos:openInSystem', { filePath: jpegFile.storedPath })}
+                            onContextMenu={(event) => openMoveMenu(event, activeCapture.id)}
                             title="Open full-size image to inspect focus and zoom"
                           >
                             <GalleryThumbnail
@@ -4246,7 +4399,24 @@ function GroupDetail({
                 <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-3 pb-3 pt-2 sm:px-4">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500">Camera roll</span>
-                    <span className="text-[9px] font-bold text-slate-400">Use ← → to compare · Enter to select</span>
+                    <div className="flex items-center gap-3">
+                      {selectedCaptureIds.length > 0 && (
+                        <>
+                          <span className="text-[9px] font-extrabold text-teal-700">{selectedCaptureIds.length} selected</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedCaptureIds([])
+                              setSelectionAnchorId(null)
+                            }}
+                            className="text-[9px] font-bold text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-800"
+                          >
+                            Clear
+                          </button>
+                        </>
+                      )}
+                      <span className="text-[9px] font-bold text-slate-400">← → compare · Shift-click range · right-click to move</span>
+                    </div>
                   </div>
                   <div
                     ref={filmstripRef}
@@ -4273,27 +4443,37 @@ function GroupDetail({
                     {groupCaptures.map((capture, index) => {
                       const jpegFile = capture.files.find((file) => file.fileRole === 'JPEG')
                       const isActive = capture.id === activeCapture?.id
+                      const isSelected = selectedCaptureIds.includes(capture.id)
                       return (
                         <button
                           key={capture.id}
                           id={`group-filmstrip-${capture.id}`}
                           data-group-capture-id={capture.id}
                           role="option"
-                          aria-selected={isActive}
-                          aria-label={`Frame ${index + 1}, ${capture.baseFilename}${capture.rating ? `, rated ${capture.rating} stars` : ', unrated'}`}
+                          aria-selected={isSelected}
+                          aria-label={`Frame ${index + 1}, ${capture.baseFilename}${capture.rating ? `, rated ${capture.rating} stars` : ', unrated'}${isSelected ? ', selected' : ''}. Shift-click to select a range; right-click to move.`}
                           tabIndex={isActive ? 0 : -1}
+                          draggable
                           type="button"
-                          onClick={() => setActiveCaptureId(capture.id)}
+                          onClick={(event) => selectFilmstripCapture(capture.id, event.shiftKey)}
+                          onContextMenu={(event) => openMoveMenu(event, capture.id)}
+                          onDragStart={(event) => {
+                            const draggedCaptureIds = captureIdsForDrag(selectedCaptureIds, capture.id)
+                            event.dataTransfer.setData('application/x-volume-capture-group-captures', JSON.stringify(draggedCaptureIds))
+                            event.dataTransfer.setData('application/x-volume-capture-group-capture', String(capture.id))
+                            event.dataTransfer.effectAllowed = 'move'
+                          }}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault()
-                              setActiveCaptureId(capture.id)
+                              selectFilmstripCapture(capture.id, event.shiftKey)
                             }
                           }}
                           className={cn(
-                            'group relative w-32 shrink-0 overflow-hidden rounded-lg border-2 bg-white text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-1 sm:w-40',
-                            isActive ? 'border-teal-600 shadow-sm' : 'border-transparent hover:border-slate-300',
+                            'group relative w-32 shrink-0 cursor-grab overflow-hidden rounded-lg border-2 bg-white text-left transition-colors active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-1 sm:w-40',
+                            isActive ? 'border-teal-600 shadow-sm' : isSelected ? 'border-teal-300 ring-2 ring-teal-100' : 'border-transparent hover:border-slate-300',
                           )}
+                          title="Drag to a class target, Shift-click to select a range, or right-click to move"
                         >
                           <div className="relative aspect-[7/5] overflow-hidden bg-slate-200">
                             {jpegFile ? (
@@ -4311,6 +4491,7 @@ function GroupDetail({
                               {index + 1}
                             </span>
                             {capture.rating > 0 && <span className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-slate-900/75 px-1.5 py-0.5 text-[8px] font-extrabold text-amber-300"><Star className="size-2.5" fill="currentColor" /> {capture.rating}</span>}
+                            {isSelected && <span className="absolute bottom-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-teal-700 text-white shadow"><Check className="size-3" /></span>}
                           </div>
                           <div className="flex items-center justify-between gap-1 px-2 py-1.5">
                             <span className="truncate font-mono text-[8px] text-slate-500">
@@ -4329,12 +4510,59 @@ function GroupDetail({
             )}
             {groupCaptures.length > 0 && (
               <p className="text-[11px] text-slate-500">
-                Drag a class photo to another class target before its upload starts. After upload, correct it in the web photo library.
+                Drag a camera-roll photo to another class target, or right-click to move one or a Shift-click range. Moves are allowed only before upload starts.
               </p>
             )}
           </div>
         </div>
       </div>
+      {moveMenu && (
+        <>
+          <button
+            type="button"
+            aria-label="Close class photo move menu"
+            tabIndex={-1}
+            onClick={() => setMoveMenu(null)}
+            className="fixed inset-0 z-[80] cursor-default"
+          />
+          <div
+            role="menu"
+            aria-label="Move selected class photos"
+            style={{ left: moveMenu.x, top: moveMenu.y }}
+            className="fixed z-[81] w-72 max-h-[min(24rem,calc(100vh-1rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-2xl"
+          >
+            <p className="border-b border-slate-100 px-2 pb-2 pt-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+              Move {moveMenu.captureIds.length} selected photo{moveMenu.captureIds.length === 1 ? '' : 's'} to
+            </p>
+            {contextMenuMoveBlocked && (
+              <p className="px-2 py-2 text-[11px] leading-4 text-amber-800" role="note">
+                {projectFinished
+                  ? 'This project is finished; its photos cannot be moved.'
+                  : 'Select only local photos whose upload has not started. This move will not partially move a mixed selection.'}
+              </p>
+            )}
+            {classTargets.filter((targetGroup) => targetGroup.id !== group.id).length > 0 ? (
+              classTargets
+                .filter((targetGroup) => targetGroup.id !== group.id)
+                .map((targetGroup) => (
+                  <button
+                    key={targetGroup.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => void moveFromContextMenu(targetGroup)}
+                    disabled={contextMenuMoveBlocked}
+                    className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    <span className="truncate">{targetGroup.name}</span>
+                    <ArrowRight className="size-3.5 shrink-0" />
+                  </button>
+                ))
+            ) : (
+              <p className="px-3 py-3 text-xs text-slate-500">No other class-photo targets are available.</p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

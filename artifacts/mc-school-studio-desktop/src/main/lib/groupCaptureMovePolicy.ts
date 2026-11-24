@@ -4,6 +4,11 @@ export interface GroupCaptureMoveFileState {
   galleryReady?: boolean
 }
 
+export interface GroupCaptureBatchMoveItem {
+  rating: number
+  files: GroupCaptureMoveFileState[]
+}
+
 export function groupCaptureMoveBlockReason(input: {
   projectFinished: boolean
   sourceGroupId: number
@@ -32,6 +37,36 @@ export function groupCaptureMoveBlockReason(input: {
   ) {
     return 'The destination class already has a five-star photo with an upload in progress, already completed, or waiting for retry. Let it resolve before replacing it.'
   }
+  return null
+}
+
+export function groupCaptureBatchMoveBlockReason(input: {
+  projectFinished: boolean
+  sourceGroupId: number
+  targetGroupId: number
+  sourceIsClassGroup: boolean
+  targetIsClassGroup: boolean
+  sourceCaptures: GroupCaptureBatchMoveItem[]
+  destinationFiveStarFiles: GroupCaptureMoveFileState[][]
+}): string | null {
+  if (input.sourceCaptures.length === 0) {
+    return 'Select at least one class photo to move.'
+  }
+
+  for (const capture of input.sourceCaptures) {
+    const reason = groupCaptureMoveBlockReason({
+      projectFinished: input.projectFinished,
+      sourceGroupId: input.sourceGroupId,
+      targetGroupId: input.targetGroupId,
+      sourceIsClassGroup: input.sourceIsClassGroup,
+      targetIsClassGroup: input.targetIsClassGroup,
+      sourceFiles: capture.files,
+      sourceRating: capture.rating,
+      destinationFiveStarFiles: input.destinationFiveStarFiles,
+    })
+    if (reason) return reason
+  }
+
   return null
 }
 

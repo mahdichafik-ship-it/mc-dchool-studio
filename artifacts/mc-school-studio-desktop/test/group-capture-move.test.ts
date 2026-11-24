@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { groupCaptureMoveBlockReason } from '../src/main/lib/groupCaptureMovePolicy.ts'
+import {
+  groupCaptureBatchMoveBlockReason,
+  groupCaptureMoveBlockReason,
+} from '../src/main/lib/groupCaptureMovePolicy.ts'
 
 const baseMove = {
   projectFinished: false,
@@ -74,4 +77,42 @@ test('allows an unrated move even if the destination already has its five-star i
     sourceRating: 2,
     destinationFiveStarFiles: [[{ uploadStatus: 'done', fileUrl: '/cloud/existing.jpg' }]],
   }), null)
+})
+
+test('allows a batch of local class photos before upload starts', () => {
+  assert.equal(groupCaptureBatchMoveBlockReason({
+    ...baseMove,
+    sourceCaptures: [
+      { rating: 0, files: [{ uploadStatus: null, fileUrl: null, galleryReady: false }] },
+      { rating: 3, files: [{ uploadStatus: null, fileUrl: null, galleryReady: false }] },
+    ],
+  }), null)
+})
+
+test('blocks the entire batch when any selected class photo is already uploading', () => {
+  assert.match(groupCaptureBatchMoveBlockReason({
+    ...baseMove,
+    sourceCaptures: [
+      { rating: 0, files: [{ uploadStatus: null, fileUrl: null, galleryReady: false }] },
+      { rating: 0, files: [{ uploadStatus: 'uploading', fileUrl: null, galleryReady: false }] },
+    ],
+  }) ?? '', /upload|retry/)
+})
+
+test('blocks an unrated batch source when it has no files', () => {
+  assert.match(groupCaptureBatchMoveBlockReason({
+    ...baseMove,
+    sourceCaptures: [{ rating: 0, files: [] }],
+  }) ?? '', /class photo/)
+})
+
+test('blocks a five-star batch move if the destination winner is still locked', () => {
+  assert.match(groupCaptureBatchMoveBlockReason({
+    ...baseMove,
+    sourceCaptures: [
+      { rating: 0, files: [{ uploadStatus: null, fileUrl: null, galleryReady: false }] },
+      { rating: 5, files: [{ uploadStatus: null, fileUrl: null, galleryReady: false }] },
+    ],
+    destinationFiveStarFiles: [[{ uploadStatus: 'done', fileUrl: '/cloud/existing.jpg' }]],
+  }) ?? '', /destination class already has a five-star photo/)
 })

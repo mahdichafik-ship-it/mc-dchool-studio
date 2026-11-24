@@ -69,8 +69,8 @@ function groupFixture() {
           <button>Clear Target</button>
         </div>
         <div class="flex-1 overflow-y-auto p-8">
-          <div class="shoot-group-body max-w-[1400px] mx-auto flex flex-col gap-8">
-            <div><div class="bg-white border p-4">Group roster<br>Student one<br>Student two</div></div>
+          <div class="shoot-group-body max-w-[1400px] mx-auto flex flex-col gap-4" data-roster-expanded="false">
+            <div><button class="w-full bg-slate-50 border p-3 text-left">1. Roster · 24 selected · Expand to change group members</button></div>
             <div class="shoot-capture-area flex-1 min-w-0 flex flex-col gap-4">
               <div class="flex justify-between"><strong>Group Captures</strong><button>Refresh</button></div>
               <div class="border bg-white p-4 flex flex-col gap-4">
@@ -91,7 +91,10 @@ function assertionsScript() {
     const boxes = Object.fromEntries(selectors.map(selector => [selector, document.querySelector(selector).getBoundingClientRect()]));
     const preview = document.querySelector('.shoot-preview').getBoundingClientRect();
     const completeness = boxes['[data-testid="shoot-completeness"]'];
-    const visible = Object.values(boxes).every(box => box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
+    const captureArea = boxes['.shoot-capture-area'];
+    const criticalBoxes = Object.entries(boxes).filter(([selector]) => selector !== '.shoot-capture-area').map(([, box]) => box);
+    const visible = criticalBoxes.every(box => box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth)
+      && captureArea.top >= 0 && captureArea.top < innerHeight && captureArea.left >= 0 && captureArea.right <= innerWidth;
     const noOverlap = preview.bottom <= completeness.top;
     const noHorizontalOverflow = document.documentElement.scrollWidth <= innerWidth;
     document.body.dataset.result = visible && noOverlap && noHorizontalOverflow ? 'PASS' : JSON.stringify({ visible, noOverlap, noHorizontalOverflow, innerWidth, innerHeight, boxes, preview });

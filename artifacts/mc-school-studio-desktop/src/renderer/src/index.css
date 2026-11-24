@@ -88,13 +88,13 @@
 }
 
 @media (min-width: 900px) and (max-width: 1280px) {
-  .shoot-group-body {
+  .shoot-group-body[data-roster-expanded="true"] {
     display: grid;
     grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
     gap: 1rem;
   }
 
-  .shoot-group-body > :first-child {
+  .shoot-group-body[data-roster-expanded="true"] > :first-child {
     width: 100%;
   }
 }

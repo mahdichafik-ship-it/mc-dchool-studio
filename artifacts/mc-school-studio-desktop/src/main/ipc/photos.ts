@@ -2,7 +2,7 @@ import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'fs'
 import { basename, dirname, extname, join } from 'path'
 import { randomUUID } from 'crypto'
-import { and, eq, count, or, isNull, ne } from 'drizzle-orm'
+import { and, eq, count, or, isNull, ne, inArray } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { capturesTable, groupMembersTable, groupsTable, imageFilesTable, photosTable, projectsTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
 import {
@@ -16,7 +16,10 @@ import { buildCaptureReviewStatus } from '../lib/captureReviewStatus'
 import { groupFiveStarReplacementIds, portraitFiveStarReplacementIds } from '../lib/reviewRatingReplacement'
 import { photoReassignmentMoveBlockReason } from '../lib/photoReassignmentMovePolicy'
 import { syncCaptureReview, syncGroupCaptureReview } from './upload'
-import { groupCaptureMoveBlockReason } from '../lib/groupCaptureMovePolicy'
+import {
+  groupCaptureBatchMoveBlockReason,
+  groupCaptureMoveBlockReason,
+} from '../lib/groupCaptureMovePolicy'
 import type {
   CaptureCompletenessSummary,
   CaptureAspectRatio,
@@ -801,6 +804,137 @@ export function registerPhotoHandlers() {
       win?.webContents.send('groupCapture:updated', { projectId, groupId: source.groupId })
       win?.webContents.send('groupCapture:updated', { projectId, groupId })
       return { captureId, fromGroupId: source.groupId, toGroupId: groupId, classId: destination.classId }
+    },
+  )
+
+  ipcMain.handle(
+    'groupCaptures:moveMany',
+    async (
+      _e,
+      { projectId, captureIds, groupId }: { projectId: number; captureIds: number[]; groupId: number },
+    ) => {
+      const db = getDb()
+      const uniqueCaptureIds = Array.isArray(captureIds) ? [...new Set(captureIds)] : []
+      if (
+        !Number.isSafeInteger(projectId)
+        || projectId <= 0
+        || !Number.isSafeInteger(groupId)
+        || groupId <= 0
+        || uniqueCaptureIds.length === 0
+        || uniqueCaptureIds.length > 250
+        || uniqueCaptureIds.some((value) => !Number.isSafeInteger(value) || value <= 0)
+      ) {
+        throw new Error('Choose valid class photos and a destination class.')
+      }
+
+      const moved = db.transaction((tx) => {
+        const project = tx.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+        if (!project) throw new Error('Project not found.')
+
+        const destination = tx.select().from(groupsTable).where(and(
+          eq(groupsTable.id, groupId),
+          eq(groupsTable.projectId, projectId),
+        )).get()
+        if (!destination) throw new Error('Choose a class-photo target from this project.')
+
+        const sources = tx.select().from(groupCapturesTable).where(and(
+          eq(groupCapturesTable.projectId, projectId),
+          inArray(groupCapturesTable.id, uniqueCaptureIds),
+        )).all()
+        if (sources.length !== uniqueCaptureIds.length) {
+          throw new Error('One or more selected class photos are no longer available in this project.')
+        }
+        const sourceGroupId = sources[0].groupId
+        if (sources.some((source) => source.groupId !== sourceGroupId)) {
+          throw new Error('Move class photos from one source class at a time.')
+        }
+
+        const sourceGroup = tx.select().from(groupsTable).where(and(
+          eq(groupsTable.id, sourceGroupId),
+          eq(groupsTable.projectId, projectId),
+        )).get()
+        const sourceFiles = tx.select().from(groupCaptureFilesTable)
+          .where(inArray(groupCaptureFilesTable.captureId, uniqueCaptureIds))
+          .all()
+        const selectedFiveStar = sources.some((source) => source.rating === 5)
+        const destinationWinners = selectedFiveStar
+          ? tx.select().from(groupCapturesTable).where(and(
+              eq(groupCapturesTable.projectId, projectId),
+              eq(groupCapturesTable.groupId, groupId),
+              eq(groupCapturesTable.rating, 5),
+            )).all()
+          : []
+        const destinationWinnerIds = destinationWinners.map((winner) => winner.id)
+        const destinationFileRows = destinationWinnerIds.length > 0
+          ? tx.select().from(groupCaptureFilesTable)
+              .where(inArray(groupCaptureFilesTable.captureId, destinationWinnerIds))
+              .all()
+          : []
+        const destinationWinnerFiles = destinationWinners.map((winner) =>
+          destinationFileRows.filter((file) => file.captureId === winner.id)
+        )
+        const sourceFilesByCaptureId = new Map<number, typeof sourceFiles>()
+        for (const source of sources) {
+          sourceFilesByCaptureId.set(
+            source.id,
+            sourceFiles.filter((file) => file.captureId === source.id),
+          )
+        }
+        const blockReason = groupCaptureBatchMoveBlockReason({
+          projectFinished: Boolean(project.finishedAt),
+          sourceGroupId,
+          targetGroupId: groupId,
+          sourceIsClassGroup: Boolean(sourceGroup?.isDefaultClassGroup && sourceGroup.classId !== null),
+          targetIsClassGroup: Boolean(destination.isDefaultClassGroup && destination.classId !== null),
+          sourceCaptures: sources.map((source) => ({
+            rating: source.rating,
+            files: sourceFilesByCaptureId.get(source.id) ?? [],
+          })),
+          destinationFiveStarFiles: destinationWinnerFiles,
+        })
+        if (blockReason) throw new Error(blockReason)
+
+        const updatedAt = now()
+        for (const winner of destinationWinners) {
+          tx.update(groupCapturesTable).set({
+            rating: 0,
+            reviewSyncPending: true,
+            updatedAt,
+          }).where(eq(groupCapturesTable.id, winner.id)).run()
+        }
+
+        for (const source of sources) {
+          tx.update(capturesTable).set({
+            groupId: String(groupId),
+            classId: destination.classId,
+            updatedAt,
+          }).where(and(
+            eq(capturesTable.projectId, projectId),
+            eq(capturesTable.captureKey, source.captureKey),
+          )).run()
+          tx.update(groupCapturesTable).set({
+            groupId,
+            classId: destination.classId,
+            reviewSyncPending: true,
+            updatedAt,
+          }).where(and(
+            eq(groupCapturesTable.id, source.id),
+            eq(groupCapturesTable.projectId, projectId),
+          )).run()
+        }
+
+        return {
+          captureIds: sources.map((source) => source.id),
+          fromGroupId: sourceGroupId,
+          toGroupId: groupId,
+          classId: destination.classId,
+        }
+      })
+
+      const win = getMainWindow()
+      win?.webContents.send('groupCapture:updated', { projectId, groupId: moved.fromGroupId })
+      win?.webContents.send('groupCapture:updated', { projectId, groupId: moved.toGroupId })
+      return moved
     },
   )
 

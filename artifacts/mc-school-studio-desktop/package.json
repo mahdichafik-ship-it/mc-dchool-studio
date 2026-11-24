@@ -32,6 +32,7 @@
     "benchmark:image-ingestion": "node --experimental-strip-types test/image-ingestion-benchmark.ts",
     "test:retirement": "node --experimental-strip-types --test test/retirement.test.ts",
     "test:retirement-copy": "node --experimental-strip-types --test test/retirement-team-copy.test.ts",
+    "test:group-capture-move": "node --experimental-strip-types --test test/group-capture-move.test.ts test/group-capture-selection.test.ts",
     "test:retirement-release": "node test/retirement-release-smoke.mjs",
     "test:update-release": "node test/update-release-smoke.mjs",
     "test:updater": "node --test test/updater-metadata.test.mjs",

@@ -44,6 +44,7 @@ import {
 import { ratingFromShortcut } from '@/lib/reviewShortcuts'
 import { filterRosterStudents } from '@/lib/rosterFilter'
 import { createGroupMemberStudentIdSet } from '@/lib/groupMembership'
+import { canStartUploadNow } from '@/lib/uploadAvailability'
 import {
   captureIdsForDrag,
   selectCaptureRange,
@@ -1382,15 +1383,16 @@ export function ProjectView({
               <div className="flex gap-3">
                 <AlertCircle className="size-5 shrink-0 text-amber-600" />
                 <div>
-                  <p className="font-bold text-amber-900">Review photos before uploading</p>
+                  <p className="font-bold text-amber-900">Unrated photos stay private</p>
                   <p className="mt-1 text-sm text-amber-800">
                     {reviewSummary.unratedPortraits > 0
-                      ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? '' : 's'} need a rating or “Do not share”.`
+                      ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? '' : 's'} still need a rating.`
                       : ''}
                     {reviewSummary.unratedPortraits > 0 && reviewSummary.unratedGroups > 0 ? ' ' : ''}
                     {reviewSummary.unratedGroups > 0
                       ? `${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'} need a rating.`
                       : ''}
+                    {' Upload can continue; unrated photos stay out of parents’ galleries until rated.'}
                   </p>
                 </div>
               </div>
@@ -1524,12 +1526,11 @@ export function ProjectView({
               </Button>
             )}
             <Button
-              disabled={
-                uploadActionRunning
-                || !liveUpload?.cloudReady
-                || reviewSummary.unratedPortraits > 0
-                || reviewSummary.unratedGroups > 0
-              }
+              disabled={!canStartUploadNow({
+                actionRunning: uploadActionRunning,
+                cloudReady: Boolean(liveUpload?.cloudReady),
+                projectFinished: Boolean(project?.finishedAt),
+              })}
               onClick={() => void handleUploadNow()}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >

@@ -54,6 +54,7 @@ import type {
   ActiveCaptureTargetEvent,
   DroppedCaptureBatchResult,
   DroppedCaptureFileResult,
+  DroppedGroupCaptureBatchResult,
   ImagePipelineRendererStage,
   Photo,
   Student,
@@ -162,7 +163,7 @@ interface EnqueueCaptureOptions {
 const watchers = new Map<number, WatchSession>()
 const pendingManualTargets = new Map<number, number>()
 const pendingGroupTargets = new Map<number, number>()
-const activeDropBatches = new Set<Promise<DroppedCaptureBatchResult>>()
+const activeDropBatches = new Set<Promise<unknown>>()
 const dropCapabilityTokens = new Map<number, string>()
 let dropBatchTail: Promise<void> = Promise.resolve()
 let desktopRetiring = false
@@ -241,6 +242,21 @@ function queueDroppedCaptureBatch(
   // deterministic when a photographer drops files again before the first
   // batch has finished persisting.
   const batch = dropBatchTail.then(() => ingestDroppedFiles(projectId, studentId, filePaths))
+  dropBatchTail = batch.then(
+    () => undefined,
+    () => undefined,
+  )
+  activeDropBatches.add(batch)
+  void batch.finally(() => activeDropBatches.delete(batch)).catch(() => {})
+  return batch
+}
+
+function queueDroppedGroupCaptureBatch(
+  projectId: number,
+  groupId: number,
+  filePaths: string[],
+): Promise<DroppedGroupCaptureBatchResult> {
+  const batch = dropBatchTail.then(() => ingestDroppedGroupFiles(projectId, groupId, filePaths))
   dropBatchTail = batch.then(
     () => undefined,
     () => undefined,
@@ -820,6 +836,35 @@ export function registerWatcherHandlers() {
       return queueDroppedCaptureBatch(input.projectId, input.studentId, input.filePaths)
     },
   )
+
+  ipcMain.handle(
+    'watcher:ingestDroppedGroupFiles',
+    async (
+      event,
+      input: {
+        capabilityToken?: unknown
+        projectId?: unknown
+        groupId?: unknown
+        filePaths?: unknown
+      },
+    ): Promise<DroppedGroupCaptureBatchResult> => {
+      if (
+        typeof input?.capabilityToken !== 'string'
+        || dropCapabilityTokens.get(event.sender.id) !== input.capabilityToken
+      ) {
+        throw new Error('Dropped photo import is only available through the preload capability')
+      }
+      if (
+        !Number.isInteger(input.projectId)
+        || !Number.isInteger(input.groupId)
+        || !Array.isArray(input.filePaths)
+        || input.filePaths.some((filePath) => typeof filePath !== 'string' || !filePath.trim())
+      ) {
+        throw new Error('A valid project, class-photo target, and dropped file paths are required')
+      }
+      return queueDroppedGroupCaptureBatch(input.projectId, input.groupId, input.filePaths)
+    },
+  )
 }
 
 export async function stopProjectWatcher(
@@ -1152,6 +1197,95 @@ async function ingestDroppedFiles(
     errors,
     files: results,
   }
+}
+
+async function ingestDroppedGroupFiles(
+  projectId: number,
+  groupId: number,
+  filePaths: string[],
+): Promise<DroppedGroupCaptureBatchResult> {
+  if (desktopRetiring || getSetting('desktop_retired') === '1') {
+    throw new Error('Cloud sync is disabled because this desktop was retired')
+  }
+  const db = getDb()
+  const project = db.select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
+  if (!project) throw new Error(`Project ${projectId} not found`)
+  if (project.finishedAt) {
+    throw new Error('This project is finished. Reopen it as a new local project before importing photos.')
+  }
+  const group = db.select().from(groupsTable).where(and(
+    eq(groupsTable.id, groupId),
+    eq(groupsTable.projectId, projectId),
+  )).get()
+  if (!group) throw new Error('Class-photo target does not belong to this project')
+  if (!Array.isArray(filePaths)) throw new Error('Dropped files were not provided')
+
+  // Use the same local capture pipeline as a Watch Folder arrival. These files
+  // remain on this Mac until the photographer explicitly starts project upload.
+  const session = createWatchSession(null, createSequenceState(), true)
+  const results: DroppedCaptureFileResult[] = []
+  let imported = 0
+  let duplicates = 0
+  let skipped = 0
+  let errors = 0
+
+  for (const rawPath of filePaths) {
+    const filePath = typeof rawPath === 'string' ? rawPath : ''
+    const fileName = filePath ? basename(filePath) : 'Unknown file'
+    let diagnosticId: string | undefined
+    let result: DroppedCaptureFileResult
+    if (!filePath) {
+      result = { filePath, fileName, status: 'error', reason: 'The dropped file path was empty.' }
+    } else if (!getCaptureFileRole(fileName)) {
+      result = {
+        filePath,
+        fileName,
+        status: 'unsupported',
+        reason: 'Only JPEG (.jpg/.jpeg) and supported RAW files can be imported.',
+      }
+    } else {
+      try {
+        diagnosticId = startImagePipelineTrace(filePath)
+        const fileStat = await statFile(filePath)
+        if (!fileStat.isFile()) throw new Error('The dropped item is not a regular file.')
+        const status = await enqueueCapture(projectId, filePath, diagnosticId, {
+          session,
+          selectedStudentId: null,
+          assignmentSource: 'manual',
+          selectedGroupId: groupId,
+          strictStudentOwnership: true,
+          processImmediately: true,
+        })
+        result = status === 'duplicate'
+          ? { filePath, fileName, status: 'duplicate', reason: 'This source file was already imported.' }
+          : status === 'unsupported'
+            ? { filePath, fileName, status: 'unsupported', reason: 'This file type is not supported.' }
+            : status === 'unmatched'
+              ? { filePath, fileName, status: 'error', reason: 'The photo could not be assigned to this class group.' }
+              : { filePath, fileName, status: 'imported' }
+      } catch (error) {
+        result = {
+          filePath,
+          fileName,
+          status: 'error',
+          reason: error instanceof Error ? error.message : String(error),
+        }
+      } finally {
+        finishImagePipelineTrace(diagnosticId)
+      }
+    }
+    results.push(result)
+    if (result.status === 'imported') imported++
+    else if (result.status === 'duplicate') duplicates++
+    else if (result.status === 'unsupported') skipped++
+    else errors++
+  }
+
+  await session.processing
+  await session.persistence
+  await Promise.allSettled([...session.pendingPersistences])
+  await session.previewScheduler.waitForIdle()
+  return { projectId, groupId, total: filePaths.length, imported, duplicates, skipped, errors, files: results }
 }
 
 async function handleNewPhoto(

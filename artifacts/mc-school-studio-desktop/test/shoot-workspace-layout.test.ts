@@ -64,13 +64,29 @@ test('project classes live in the expandable app rail instead of duplicating the
   assert.doesNotMatch(view, /Class tabs/)
 })
 
+test('class-photo review selects an active capture from the camera roll', async () => {
+  const view = await readFile(projectViewPath, 'utf8')
+
+  assert.match(view, /Camera roll/)
+  assert.match(view, /role="listbox"[\s\S]*aria-label="Class photo captures"/)
+  assert.match(view, /role="option"[\s\S]*aria-selected=\{isActive\}/)
+  assert.match(view, /onClick=\{\(\) => setActiveCaptureId\(capture\.id\)\}/)
+  assert.match(view, /if \(rating === null \|\| !activeCapture\) return/)
+  assert.match(view, /activeCapture\.id,[\s\S]*activeCapture\.rating === rating/)
+  assert.match(view, /moveFilmstripSelection\('previous'\)/)
+  assert.match(view, /moveFilmstripSelection\('next'\)/)
+})
+
 test('JPEG-only and paired captures report truthful aggregate upload state', () => {
   assert.equal(captureUploadLabel([
     { fileRole: 'JPEG', uploadStatus: 'pending', galleryReady: false },
-  ]), 'Queued')
+  ]), 'Retry scheduled')
   assert.equal(captureUploadLabel([
     { fileRole: 'JPEG', uploadStatus: null, galleryReady: false },
-  ]), 'Queued')
+]), 'Ready to upload')
+  assert.equal(captureUploadLabel([
+    { fileRole: 'JPEG', uploadStatus: null, galleryReady: false },
+  ], true), 'Queued')
   assert.equal(captureUploadLabel([
     { fileRole: 'JPEG', uploadStatus: 'done', galleryReady: false },
   ]), 'Preparing gallery')
@@ -81,7 +97,7 @@ test('JPEG-only and paired captures report truthful aggregate upload state', () 
   assert.equal(captureUploadLabel([
     { fileRole: 'JPEG', uploadStatus: 'done', galleryReady: true },
     { fileRole: 'RAW', uploadStatus: 'pending' },
-  ]), 'Queued')
+  ]), 'Retry scheduled')
   assert.equal(captureUploadLabel([
     { fileRole: 'JPEG', uploadStatus: 'done', galleryReady: true },
     { fileRole: 'RAW', uploadStatus: 'done' },

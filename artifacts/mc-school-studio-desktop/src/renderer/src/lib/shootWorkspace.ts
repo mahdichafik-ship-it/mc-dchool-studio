@@ -9,10 +9,12 @@ export type CaptureFileUploadState = {
   galleryReady?: boolean
 }
 
-export function captureUploadLabel(files: CaptureFileUploadState[]) {
+export function captureUploadLabel(files: CaptureFileUploadState[], queueStarted = false) {
   if (files.some((file) => file.uploadStatus === 'error')) return 'Upload failed'
   if (files.some((file) => file.uploadStatus === 'uploading')) return 'Uploading'
-  if (files.some((file) => file.uploadStatus !== 'done')) return 'Queued'
+  if (files.some((file) => file.uploadStatus === 'pending')) return 'Retry scheduled'
+  if (queueStarted && files.some((file) => file.uploadStatus === null)) return 'Queued'
+  if (files.some((file) => file.uploadStatus !== 'done')) return 'Ready to upload'
   if (files.some((file) => file.fileRole === 'JPEG' && !file.galleryReady)) return 'Preparing gallery'
   return 'Uploaded'
 }

@@ -32,6 +32,7 @@ import type {
   StudentGroup,
   GroupCaptureReview,
   DroppedCaptureBatchResult,
+  DroppedGroupCaptureBatchResult,
   DroppedCaptureProgressEvent,
 } from '../shared/types'
 
@@ -136,6 +137,7 @@ interface ElectronAPI {
   invoke(channel: 'groupCaptures:list', args: { projectId: number; groupId: number }): Promise<GroupCaptureReview[]>
   invoke(channel: 'groupCaptures:summary', args: { projectId: number }): Promise<number>
   invoke(channel: 'groupCaptures:updateReview', args: { captureId: number; rating: number }): Promise<GroupCaptureReview | null>
+  invoke(channel: 'groupCaptures:move', args: { projectId: number; captureId: number; groupId: number }): Promise<{ captureId: number; fromGroupId: number; toGroupId: number; classId: number }>
   invoke(channel: 'photos:list', args: { studentId: number }): Promise<Photo[]>
   invoke(channel: 'captures:list', args: { studentId: number }): Promise<StudentCaptureReview>
   invoke(channel: 'captures:summary', args: { projectId: number }): Promise<CaptureCompletenessSummary>
@@ -175,6 +177,11 @@ interface ElectronAPI {
     studentId: number,
     files: File[],
   ): Promise<DroppedCaptureBatchResult>
+  ingestDroppedGroupFiles(
+    projectId: number,
+    groupId: number,
+    files: File[],
+  ): Promise<DroppedGroupCaptureBatchResult>
   invoke(channel: 'dialog:openFile', args?: { filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>
   invoke(channel: 'dialog:openFolder'): Promise<string | null>
   invoke(channel: 'app:openFile', args: { filePath: string }): Promise<void>

@@ -81,6 +81,18 @@ test('class-photo review selects an active capture from the camera roll', async 
   assert.match(view, /activeCapture\.id,[\s\S]*activeCapture\.rating === rating/)
   assert.match(view, /moveFilmstripSelection\('previous'\)/)
   assert.match(view, /moveFilmstripSelection\('next'\)/)
+  assert.match(view, /shouldReturnToLatestOnNewCapture\(previousLatest\.captureId, latestCaptureId\)/)
+  assert.match(view, /maxEdge=\{1440\}/, 'the selected group photo should upgrade to the full local preview')
+  assert.match(view, /const thumbnailEdge = Math\.min\(320, maxEdge\)/, 'filmstrip thumbnails should keep their fast small size')
+})
+
+test('accepted student and class-photo drop targets are visibly highlighted', async () => {
+  const view = await readFile(projectViewPath, 'utf8')
+
+  assert.match(view, /data-drop-target="student"[\s\S]*data-drop-active=\{isDropActive \? 'true' : 'false'\}/)
+  assert.match(view, /data-drop-target="class-photo"[\s\S]*data-drop-active=\{draggedGroupId === group\.id \? 'true' : 'false'\}/)
+  assert.match(view, /draggedGroupId === group\.id[\s\S]*border-teal-500 bg-teal-100/)
+  assert.match(view, /isDropActive && \([\s\S]*Drop here/)
 })
 
 test('JPEG-only and paired captures report truthful aggregate upload state', () => {

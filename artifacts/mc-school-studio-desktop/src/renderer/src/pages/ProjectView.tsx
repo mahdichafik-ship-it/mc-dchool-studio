@@ -44,9 +44,12 @@ import {
 import { ratingFromShortcut } from '@/lib/reviewShortcuts'
 import { filterRosterStudents } from '@/lib/rosterFilter'
 import { createGroupMemberStudentIdSet } from '@/lib/groupMembership'
+import { canStartUploadNow } from '@/lib/uploadAvailability'
+import { canDropOnGroup, canDropOnStudent } from '@/lib/dropTargetFeedback'
 import {
   captureIdsForDrag,
   selectCaptureRange,
+  shouldReturnToLatestOnNewCapture,
 } from '@/lib/groupCaptureSelection'
 import type {
   Student,
@@ -191,6 +194,7 @@ export function ProjectView({
   }>({ unratedPortraits: 0, unratedGroups: 0 })
   const [dropProgress, setDropProgress] = useState<DropProgressState | null>(null)
   const [draggedStudentId, setDraggedStudentId] = useState<number | null>(null)
+  const [draggedGroupId, setDraggedGroupId] = useState<number | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const autoStartAttemptedRef = useRef<number | null>(null)
   const qrRepairInFlightRef = useRef(new Set<number>())
@@ -581,6 +585,7 @@ export function ProjectView({
   async function handleDropOnGroup(group: StudentGroup, event: React.DragEvent<HTMLElement>) {
     event.preventDefault()
     event.stopPropagation()
+    setDraggedGroupId(null)
     const groupCaptureIdsData = event.dataTransfer.getData('application/x-volume-capture-group-captures')
     let groupCaptureIds: number[] = []
     if (groupCaptureIdsData) {
@@ -626,6 +631,22 @@ export function ProjectView({
     } catch (error) {
       addToast({ type: 'error', title: 'Could not move item', description: String(error) })
     }
+  }
+
+  function handleGroupDragOver(group: StudentGroup, event: React.DragEvent<HTMLElement>) {
+    const transferTypes = Array.from(event.dataTransfer.types)
+    if (!canDropOnGroup(transferTypes, group.isDefaultClassGroup)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = transferTypes.some((type) => type.startsWith('application/x-volume-capture-group-capture'))
+      ? 'move'
+      : 'copy'
+    setDraggedGroupId(group.id)
+  }
+
+  function handleGroupDragLeave(group: StudentGroup, event: React.DragEvent<HTMLElement>) {
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+    setDraggedGroupId((current) => current === group.id ? null : current)
   }
 
   async function ingestDroppedGroupFiles(group: StudentGroup, files: File[]) {
@@ -1524,12 +1545,11 @@ export function ProjectView({
               </Button>
             )}
             <Button
-              disabled={
-                uploadActionRunning
-                || !liveUpload?.cloudReady
-                || reviewSummary.unratedPortraits > 0
-                || reviewSummary.unratedGroups > 0
-              }
+              disabled={!canStartUploadNow({
+                actionRunning: uploadActionRunning,
+                cloudReady: Boolean(liveUpload?.cloudReady),
+                projectFinished: Boolean(project?.finishedAt),
+              })}
               onClick={() => void handleUploadNow()}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
@@ -1875,27 +1895,37 @@ export function ProjectView({
                   <button
                     key={group.id}
                     type="button"
+                    data-drop-target="class-photo"
+                    data-drop-active={draggedGroupId === group.id ? 'true' : 'false'}
                     onClick={() => void handleSelectGroup(group)}
-                    onDragOver={(event) => {
-                      event.preventDefault()
-                      event.dataTransfer.dropEffect = 'move'
-                    }}
+                    onDragEnter={(event) => handleGroupDragOver(group, event)}
+                    onDragOver={(event) => handleGroupDragOver(group, event)}
+                    onDragLeave={(event) => handleGroupDragLeave(group, event)}
                     onDrop={(event) => void handleDropOnGroup(group, event)}
                     className={cn(
                       "flex w-full min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
-                      isActive
+                      draggedGroupId === group.id
+                        ? "border-2 border-teal-500 bg-teal-100 text-teal-950 ring-2 ring-inset ring-teal-300 shadow-sm"
+                        : isActive
                         ? "border-teal-200 bg-teal-50 text-teal-950"
                         : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
                     )}
+                    title={draggedGroupId === group.id ? `Drop here: ${label}` : label}
                   >
                     <Camera className={cn(
                       "size-3.5 shrink-0",
                       isActive ? "text-teal-600" : "text-slate-400",
                     )} />
                     <span className="min-w-0 flex-1 truncate text-xs font-bold">{label}</span>
-                    <Badge className="shrink-0 bg-slate-100 px-1.5 py-0 text-[10px] font-bold text-slate-600 shadow-none hover:bg-slate-100">
-                      {group.memberStudentIds.length}
-                    </Badge>
+                    {draggedGroupId === group.id ? (
+                      <Badge className="shrink-0 bg-teal-700 px-1.5 py-0 text-[9px] font-extrabold uppercase tracking-wider text-white shadow-none hover:bg-teal-700">
+                        Drop here
+                      </Badge>
+                    ) : (
+                      <Badge className="shrink-0 bg-slate-100 px-1.5 py-0 text-[10px] font-bold text-slate-600 shadow-none hover:bg-slate-100">
+                        {group.memberStudentIds.length}
+                      </Badge>
+                    )}
                   </button>
                 )
               })}
@@ -1917,13 +1947,19 @@ export function ProjectView({
                         <div
                           key={`move-target-${group.id}`}
                           role="listitem"
+                          data-drop-target="class-photo"
+                          data-drop-active={draggedGroupId === group.id ? 'true' : 'false'}
                           aria-label={`Drop class photo to ${className}`}
-                          onDragOver={(event) => {
-                            event.preventDefault()
-                            event.dataTransfer.dropEffect = 'move'
-                          }}
+                          onDragEnter={(event) => handleGroupDragOver(group, event)}
+                          onDragOver={(event) => handleGroupDragOver(group, event)}
+                          onDragLeave={(event) => handleGroupDragLeave(group, event)}
                           onDrop={(event) => void handleDropOnGroup(group, event)}
-                          className="flex min-w-0 items-center gap-2 rounded-md border border-dashed border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:border-teal-400 hover:bg-teal-50"
+                          className={cn(
+                            "flex min-w-0 items-center gap-2 rounded-md border border-dashed px-2.5 py-2 text-xs font-semibold transition-colors",
+                            draggedGroupId === group.id
+                              ? "border-2 border-teal-500 bg-teal-100 text-teal-950 ring-2 ring-inset ring-teal-300 shadow-sm"
+                              : "border-slate-300 bg-white text-slate-700 hover:border-teal-400 hover:bg-teal-50",
+                          )}
                         >
                           <Camera className="size-3.5 shrink-0 text-teal-600" />
                           <span className="truncate">{className}</span>
@@ -1965,10 +2001,21 @@ export function ProjectView({
                   }}
                    isDropActive={draggedStudentId === s.id}
                    onDragEnter={(event) => {
+                      if (!canDropOnStudent(Array.from(event.dataTransfer.types))) return
                      event.preventDefault()
                      setDraggedStudentId(s.id)
                    }}
-                   onDragLeave={() => setDraggedStudentId((current) => current === s.id ? null : current)}
+                    onDragOver={(event) => {
+                      if (!canDropOnStudent(Array.from(event.dataTransfer.types))) return
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'copy'
+                      setDraggedStudentId(s.id)
+                    }}
+                    onDragLeave={(event) => {
+                      const nextTarget = event.relatedTarget
+                      if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+                      setDraggedStudentId((current) => current === s.id ? null : current)
+                    }}
                    onDrop={(event) => void handleDropForStudent(s.id, event)}
                   uploadSummary={uploadStatusMap.get(s.id)}
                   hasRatedPortrait={captureReviewStatus.ratedPortraitStudentIds.includes(s.id)}
@@ -2643,6 +2690,7 @@ function StudentRow({
   onDragStart,
   isDropActive,
   onDragEnter,
+  onDragOver,
   onDragLeave,
   onDrop,
   uploadSummary,
@@ -2657,7 +2705,8 @@ function StudentRow({
   onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void
   isDropActive: boolean
   onDragEnter: (event: React.DragEvent<HTMLButtonElement>) => void
-  onDragLeave: () => void
+  onDragOver: (event: React.DragEvent<HTMLButtonElement>) => void
+  onDragLeave: (event: React.DragEvent<HTMLButtonElement>) => void
   onDrop: (event: React.DragEvent<HTMLButtonElement>) => void
   uploadSummary?: StudentUploadSummary
   hasRatedPortrait: boolean
@@ -2672,16 +2721,15 @@ function StudentRow({
   return (
     <button
       data-student-row={s.id}
+      data-drop-target="student"
+      data-drop-active={isDropActive ? 'true' : 'false'}
       aria-keyshortcuts="ArrowUp ArrowDown N"
       onClick={onClick}
       onContextMenu={onContextMenu}
       draggable
       onDragStart={onDragStart}
       onDragEnter={onDragEnter}
-      onDragOver={(event) => {
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'copy'
-      }}
+      onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
@@ -2717,7 +2765,12 @@ function StudentRow({
                 </span>
               )}
             </span>
-           <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              {isDropActive && (
+                <Badge className="bg-teal-700 hover:bg-teal-700 text-white text-[9px] font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded-sm shadow-sm">
+                  Drop here
+                </Badge>
+              )}
              {isActive && (
                <Badge className="bg-teal-600 hover:bg-teal-600 text-white text-[9px] font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded-sm shadow-sm">
                  <Camera className="size-2.5 mr-1" />
@@ -3989,7 +4042,14 @@ function GroupDetail({
   const [memberListExpanded, setMemberListExpanded] = useState(false)
   const [moveMenu, setMoveMenu] = useState<{ x: number; y: number; captureIds: number[] } | null>(null)
   const filmstripRef = useRef<HTMLDivElement>(null)
-  const activeCapture = groupCaptures.find((capture) => capture.id === activeCaptureId)
+  const previousLatestCaptureRef = useRef<{ groupId: number; captureId: number | null }>({
+    groupId: group.id,
+    captureId: null,
+  })
+  const activeCapture = activeCaptureId === null
+    ? groupCaptures[groupCaptures.length - 1]
+    : groupCaptures.find((capture) => capture.id === activeCaptureId)
+      ?? groupCaptures[groupCaptures.length - 1]
   const activeCaptureIndex = activeCapture
     ? groupCaptures.findIndex((capture) => capture.id === activeCapture.id)
     : -1
@@ -4010,6 +4070,13 @@ function GroupDetail({
     )
 
   useEffect(() => {
+    const latestCaptureId = groupCaptures[groupCaptures.length - 1]?.id ?? null
+    const previousLatest = previousLatestCaptureRef.current
+    const groupChanged = previousLatest.groupId !== group.id
+    const newCaptureArrived = !groupChanged
+      && shouldReturnToLatestOnNewCapture(previousLatest.captureId, latestCaptureId)
+    previousLatestCaptureRef.current = { groupId: group.id, captureId: latestCaptureId }
+
     if (groupCaptures.length === 0) {
       setActiveCaptureId(null)
       setSelectedCaptureIds([])
@@ -4018,20 +4085,24 @@ function GroupDetail({
       return
     }
     const availableIds = new Set(groupCaptures.map((capture) => capture.id))
-    const nextActiveId = availableIds.has(activeCaptureId ?? -1)
-      ? activeCaptureId!
-      : groupCaptures[groupCaptures.length - 1].id
-    if (nextActiveId !== activeCaptureId) {
-      setActiveCaptureId(nextActiveId)
+    const latestId = groupCaptures[groupCaptures.length - 1].id
+    const followLatest = groupChanged || newCaptureArrived
+    const nextActiveId = followLatest || activeCaptureId === null || !availableIds.has(activeCaptureId)
+      ? latestId
+      : activeCaptureId
+
+    if (followLatest) {
+      setActiveCaptureId(null)
     }
     setSelectedCaptureIds((current) => {
+      if (followLatest) return [latestId]
       const next = current.filter((captureId) => availableIds.has(captureId))
       if (next.length === 0) return [nextActiveId]
       if (next.length === current.length && next.every((captureId, index) => captureId === current[index])) return current
       return next
     })
-    setSelectionAnchorId((current) => current !== null && availableIds.has(current) ? current : nextActiveId)
-  }, [groupCaptures, activeCaptureId])
+    setSelectionAnchorId((current) => followLatest || current === null || !availableIds.has(current) ? nextActiveId : current)
+  }, [group.id, groupCaptures, activeCaptureId])
 
   function captureUploadState(capture: GroupCaptureReview) {
     const label = captureUploadLabel(capture.files, uploadRequested)
@@ -4351,6 +4422,7 @@ function GroupDetail({
                               previewKey={`group-capture-${activeCapture.id}`}
                               alt={activeCapture.baseFilename}
                               framing={defaultGroupCaptureFraming}
+                              maxEdge={1440}
                             />
                           </button>
                         ) : (
@@ -4767,6 +4839,7 @@ function GalleryThumbnail({
   previewKey,
   alt,
   framing,
+  maxEdge = 320,
 }: {
   source?: string
   fallback?: string | null
@@ -4774,6 +4847,7 @@ function GalleryThumbnail({
   previewKey?: string
   alt: string
   framing?: Omit<CaptureFraming, 'pending'>
+  maxEdge?: number
 }) {
   const [generatedSource, setGeneratedSource] = useState<string | null>(null)
 
@@ -4781,7 +4855,7 @@ function GalleryThumbnail({
     setGeneratedSource(null)
     if (fallback || (!source && !filePath)) return
     let mounted = true
-    let objectUrl: string | null = null
+    const objectUrls: string[] = []
     const cancel = previewScheduler.enqueue({
       id: `gallery-${previewKey ?? source ?? filePath}`,
       priority: 'gallery',
@@ -4791,7 +4865,8 @@ function GalleryThumbnail({
           previewKey: previewKey ?? `gallery-${filePath}`,
         })
         if (!resolvedSource || signal.aborted || !mounted) return
-        const bitmap = await decodeResizedPreview(resolvedSource, 320, signal)
+        const thumbnailEdge = Math.min(320, maxEdge)
+        const bitmap = await decodeResizedPreview(resolvedSource, thumbnailEdge, signal)
         if (!bitmap || signal.aborted || !mounted) {
           bitmap?.close()
           return
@@ -4805,17 +4880,41 @@ function GalleryThumbnail({
           canvas.toBlob(resolve, 'image/jpeg', 0.82)
         })
         if (!blob || !mounted || signal.aborted) return
-        objectUrl = URL.createObjectURL(blob)
-        setGeneratedSource(objectUrl)
+        const thumbnailUrl = URL.createObjectURL(blob)
+        objectUrls.push(thumbnailUrl)
+        setGeneratedSource(thumbnailUrl)
+
+        // Keep the first paint fast, then sharpen only the large, active
+        // preview. Filmstrip thumbnails retain the smaller default size.
+        if (maxEdge <= thumbnailEdge) return
+        await waitForPaintFrames()
+        if (!mounted || signal.aborted) return
+        const detailedBitmap = await decodeResizedPreview(resolvedSource, maxEdge, signal)
+        if (!detailedBitmap || signal.aborted || !mounted) {
+          detailedBitmap?.close()
+          return
+        }
+        const detailedCanvas = document.createElement('canvas')
+        detailedCanvas.width = detailedBitmap.width
+        detailedCanvas.height = detailedBitmap.height
+        detailedCanvas.getContext('2d')?.drawImage(detailedBitmap, 0, 0)
+        detailedBitmap.close()
+        const detailedBlob = await new Promise<Blob | null>((resolve) => {
+          detailedCanvas.toBlob(resolve, 'image/jpeg', 0.92)
+        })
+        if (!detailedBlob || !mounted || signal.aborted) return
+        const detailedUrl = URL.createObjectURL(detailedBlob)
+        objectUrls.push(detailedUrl)
+        setGeneratedSource(detailedUrl)
       },
     })
 
     return () => {
       mounted = false
       cancel()
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      for (const objectUrl of objectUrls) URL.revokeObjectURL(objectUrl)
     }
-  }, [fallback, filePath, previewKey, source])
+  }, [fallback, filePath, maxEdge, previewKey, source])
 
   const imageSource = fallback ?? generatedSource
   if (!imageSource) {

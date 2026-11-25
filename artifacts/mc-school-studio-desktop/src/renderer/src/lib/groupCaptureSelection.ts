@@ -24,3 +24,12 @@ export function captureIdsForDrag(
     ? selectedCaptureIds
     : [draggedCaptureId]
 }
+
+export function shouldReturnToLatestOnNewCapture(
+  previousLatestCaptureId: number | null,
+  latestCaptureId: number | null,
+): boolean {
+  return previousLatestCaptureId !== null
+    && latestCaptureId !== null
+    && latestCaptureId !== previousLatestCaptureId
+}

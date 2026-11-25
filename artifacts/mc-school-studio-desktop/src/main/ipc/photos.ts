@@ -2,7 +2,7 @@ import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'fs'
 import { basename, dirname, extname, join } from 'path'
 import { randomUUID } from 'crypto'
-import { and, eq, count, or, isNull, ne, inArray } from 'drizzle-orm'
+import { and, eq, count, or, isNull, ne, inArray, asc } from 'drizzle-orm'
 import { getDb, getPhotosDir } from '../db'
 import { capturesTable, groupMembersTable, groupsTable, imageFilesTable, photosTable, projectsTable, qrMarkersTable, studentsTable, groupCapturesTable, groupCaptureFilesTable } from '../db/schema'
 import {
@@ -171,6 +171,7 @@ export function registerPhotoHandlers() {
   ipcMain.handle('groupCaptures:list', async (_e, { projectId, groupId }: { projectId: number; groupId: number }) => {
     const rows = db.select().from(groupCapturesTable)
       .where(and(eq(groupCapturesTable.projectId, projectId), eq(groupCapturesTable.groupId, groupId)))
+      .orderBy(asc(groupCapturesTable.id))
       .all()
     return Promise.all(rows.map(async (row) => ({
       id: row.id,

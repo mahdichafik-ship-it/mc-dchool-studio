@@ -32,6 +32,7 @@ import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
 import { AsyncTaskLimiter, runWithConcurrency } from '../lib/uploadConcurrency'
 import { startActiveUploadRun } from '../lib/activeUploadRun'
 import { classifyProjectUploadFile } from '../lib/projectUploadClassification'
+import { requiresCloudIdentityRepair } from '../lib/cloudIdentityRepairPolicy'
 import {
   assertR2VerifierResponse,
   parseR2UploadSession,
@@ -624,6 +625,14 @@ export async function syncGroupCloudIdentities(projectId: number): Promise<void>
   for (const group of groups) {
     const members = db.select().from(groupMembersTable).where(eq(groupMembersTable.groupId, group.id)).all()
     for (const member of members) {
+      const studentIdentity = db.select({
+        cloudId: studentsTable.cloudId,
+        classSyncPending: studentsTable.classSyncPending,
+      }).from(studentsTable).where(and(
+        eq(studentsTable.id, member.studentId),
+        eq(studentsTable.projectId, projectId),
+      )).get()
+      if (!requiresCloudIdentityRepair(studentIdentity ?? null)) continue
       const result = await syncStudentCloudIdentity(projectId, member.studentId)
       if (!result.synced) throw new Error(result.error ?? 'Could not synchronize a group member.')
     }

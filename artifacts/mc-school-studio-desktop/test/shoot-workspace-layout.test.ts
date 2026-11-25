@@ -67,6 +67,8 @@ test('project classes live in the expandable app rail instead of duplicating the
 test('class-photo review selects an active capture from the camera roll', async () => {
   const view = await readFile(projectViewPath, 'utf8')
 
+  assert.match(view, /Unrated photos stay private/)
+  assert.match(view, /Upload now is available; unrated photos stay private/)
   assert.match(view, /Camera roll/)
   assert.match(view, /role="listbox"[\s\S]*aria-label="Class photo captures"/)
   assert.match(view, /role="option"[\s\S]*aria-selected=\{isSelected\}/)

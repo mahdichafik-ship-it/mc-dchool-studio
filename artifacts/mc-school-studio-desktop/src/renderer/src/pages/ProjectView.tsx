@@ -1403,15 +1403,16 @@ export function ProjectView({
               <div className="flex gap-3">
                 <AlertCircle className="size-5 shrink-0 text-amber-600" />
                 <div>
-                  <p className="font-bold text-amber-900">Review photos before uploading</p>
+                  <p className="font-bold text-amber-900">Unrated photos stay private</p>
                   <p className="mt-1 text-sm text-amber-800">
                     {reviewSummary.unratedPortraits > 0
-                      ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? '' : 's'} need a rating or “Do not share”.`
+                      ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? '' : 's'} still need a rating.`
                       : ''}
                     {reviewSummary.unratedPortraits > 0 && reviewSummary.unratedGroups > 0 ? ' ' : ''}
                     {reviewSummary.unratedGroups > 0
                       ? `${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'} need a rating.`
                       : ''}
+                    {' Upload now is available; unrated photos stay private, and parent sharing still follows the existing rating rules.'}
                   </p>
                 </div>
               </div>

@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   captureIdsForDrag,
   selectCaptureRange,
+  shouldReturnToLatestOnNewCapture,
 } from '../src/renderer/src/lib/groupCaptureSelection.ts'
 
 test('shift selection returns the inclusive range from the anchor to the clicked frame', () => {
@@ -20,4 +21,11 @@ test('a missing anchor starts a new single-frame selection', () => {
 test('dragging a selected frame includes the selected set, otherwise only that frame', () => {
   assert.deepEqual(captureIdsForDrag([11, 12, 13], 12), [11, 12, 13])
   assert.deepEqual(captureIdsForDrag([11, 12, 13], 14), [14])
+})
+
+test('a new group capture returns review to the latest frame after manual browsing', () => {
+  assert.equal(shouldReturnToLatestOnNewCapture(14, 15), true)
+  assert.equal(shouldReturnToLatestOnNewCapture(14, 14), false)
+  assert.equal(shouldReturnToLatestOnNewCapture(null, 14), false)
+  assert.equal(shouldReturnToLatestOnNewCapture(14, null), false)
 })

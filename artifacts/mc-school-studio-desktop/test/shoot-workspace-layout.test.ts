@@ -11,6 +11,8 @@ import {
 const projectViewPath = new URL('../src/renderer/src/pages/ProjectView.tsx', import.meta.url)
 const appLayoutPath = new URL('../src/renderer/src/components/layout/AppLayout.tsx', import.meta.url)
 const stylesheetPath = new URL('../src/renderer/src/index.css', import.meta.url)
+const uploadPath = new URL('../src/main/ipc/upload.ts', import.meta.url)
+const projectSyncPath = new URL('../src/main/ipc/projectSync.ts', import.meta.url)
 
 test('active student and group keep critical shoot regions in the compact renderer contract', async () => {
   assert.deepEqual(shootWorkspaceViewports, [
@@ -68,7 +70,8 @@ test('class-photo review selects an active capture from the camera roll', async 
   const view = await readFile(projectViewPath, 'utf8')
 
   assert.match(view, /Unrated photos stay private/)
-  assert.match(view, /Upload now is available; unrated photos stay private/)
+  assert.match(view, /Unrated photos stay private and are not shared with families/)
+  assert.match(view, /Choose a five-star portrait for each person/)
   assert.match(view, /Camera roll/)
   assert.match(view, /role="listbox"[\s\S]*aria-label="Class photo captures"/)
   assert.match(view, /role="option"[\s\S]*aria-selected=\{isSelected\}/)
@@ -95,6 +98,29 @@ test('accepted student and class-photo drop targets are visibly highlighted', as
   assert.match(view, /data-drop-target="class-photo"[\s\S]*data-drop-active=\{draggedGroupId === group\.id \? 'true' : 'false'\}/)
   assert.match(view, /draggedGroupId === group\.id[\s\S]*border-teal-500 bg-teal-100/)
   assert.match(view, /isDropActive && \([\s\S]*Drop here/)
+})
+
+test('five-star review lists the exact people and blocks every cloud-upload entry point', async () => {
+  const [view, upload, projectSync] = await Promise.all([
+    readFile(projectViewPath, 'utf8'),
+    readFile(uploadPath, 'utf8'),
+    readFile(projectSyncPath, 'utf8'),
+  ])
+
+  assert.match(view, /studentsMissingFiveStarPortraitIds/)
+  assert.match(view, /data-testid="missing-favorite-portrait-list"/)
+  assert.match(view, /aria-label=\{`Review portrait for \$\{entry\.fullName\}, \$\{entry\.className\}`\}/)
+  assert.match(view, /startMissingFavoriteReview\(studentId, 'upload'\)/)
+  assert.match(view, /startMissingFavoriteReview\(studentId, 'finish'\)/)
+  assert.match(view, /focusMissingFavoritePortrait\(nextEntry\.studentId, favoriteReviewReturnTo\)/)
+  assert.match(view, /Return to validation/)
+  assert.match(view, /missingFavoritePortraitCount > 0/)
+  assert.match(view, /captureReviewStatus\.fiveStarPortraitStudentIds\.includes\(s\.id\)/)
+  assert.match(view, /capture\.rating === 5[\s\S]*5-star favorite/)
+  assert.match(upload, /if \(getMissingFavoritePortraitStudentIds\(projectId\)\.length > 0\) return/)
+  assert.match(upload, /enabled && getMissingFavoritePortraitStudentIds\(projectId\)\.length > 0/)
+  assert.match(projectSync, /missingFavoriteStudentIds\.length > 0 && deps\.isCloudSessionVerified\(\)/)
+  assert.match(view, /You are offline\. You can finish this shoot locally/)
 })
 
 test('JPEG-only and paired captures report truthful aggregate upload state', () => {

@@ -173,6 +173,7 @@ type HarnessOptions = {
   progress?: ProjectSyncProgress
   reviewPending?: { portrait: number; group: number }
   blockers?: number
+  missingFavoritePortraitStudentIds?: number[]
   finishError?: Error
 }
 
@@ -213,6 +214,7 @@ function createHarness(options: HarnessOptions = {}) {
     isCloudSessionVerified: () => options.cloudReady !== false,
     getProjectCaptureBatchExpectedCount: () => options.expectedFiles ?? progress.total,
     getProjectUploadBlockerCount: () => options.blockers ?? 0,
+    getMissingFavoritePortraitStudentIds: () => options.missingFavoritePortraitStudentIds ?? [],
     syncGroupCloudIdentities: async () => { calls.push('sync-groups') },
     beginProjectCaptureBatch: async (_projectId, expected) => {
       calls.push('begin')
@@ -254,6 +256,34 @@ test('offline finish drains and closes the local shoot before any cloud upload',
     total: 3,
     failed: 0,
   })
+})
+
+test('missing five-star portraits stop online upload and finishing before local state changes', async () => {
+  const harness = createHarness({ missingFavoritePortraitStudentIds: [101, 102] })
+
+  const result = await runProjectSync(1, {}, harness.deps)
+
+  assert.equal(result.ok, false)
+  assert.equal(result.syncStatus, 'active')
+  assert.equal(result.finishedAt, undefined)
+  assert.match(result.error ?? '', /2 individuals with portraits have a five-star favorite/)
+  assert.deepEqual(harness.calls, [])
+  assert.equal(harness.state.finishedAt, null)
+})
+
+test('offline local completion remains available while cloud upload waits for favorite review', async () => {
+  const harness = createHarness({
+    cloudReady: false,
+    expectedFiles: 2,
+    missingFavoritePortraitStudentIds: [101],
+  })
+
+  const result = await runProjectSync(1, {}, harness.deps)
+
+  assert.equal(result.syncStatus, 'finished_local')
+  assert.equal(result.localFinished, true)
+  assert.deepEqual(harness.calls, ['pause', 'stop:drain:clear'])
+  assert.equal(harness.batches.length, 0)
 })
 
 test('reopening a locally finished or failed project preserves its durable progress independently', async () => {
@@ -622,6 +652,7 @@ test('late offline student keeps paired captures across a real restart and produ
       isCloudSessionVerified: () => cloudReady,
       getProjectCaptureBatchExpectedCount: () => store.getFiles().length,
       getProjectUploadBlockerCount: () => 0,
+      getMissingFavoritePortraitStudentIds: () => [],
       syncGroupCloudIdentities: async () => {},
       beginProjectCaptureBatch: (_projectId, expected) => beginProjectCaptureBatchWithDependencies(
         1,

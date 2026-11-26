@@ -28,6 +28,8 @@ import { normalizeProjectType } from '../../shared/types'
 import { eq, and, or, asc, isNull } from 'drizzle-orm'
 import type { LiveUploadQueueItem, LiveUploadState, UploadStatus } from '../../shared/types'
 import { assertCaptureBatchComplete } from '../lib/captureBatch'
+import { buildCaptureReviewStatus } from '../lib/captureReviewStatus'
+import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
 import { AsyncTaskLimiter, runWithConcurrency } from '../lib/uploadConcurrency'
 import { startActiveUploadRun } from '../lib/activeUploadRun'
@@ -63,6 +65,38 @@ export {
   RetryableUploadError,
 } from '../lib/uploadResponseValidation'
 export type { R2UploadSession } from '../lib/uploadResponseValidation'
+
+export function getMissingFavoritePortraitStudentIds(projectId: number): number[] {
+  const db = getDb()
+  const legacyPhotos = db.select()
+    .from(photosTable)
+    .where(eq(photosTable.projectId, projectId))
+    .all()
+  reconcileLegacyPhotosAsCaptures(db, legacyPhotos)
+  const portraitCaptures = db.select({
+    captureId: capturesTable.id,
+    studentId: capturesTable.studentId,
+    rating: capturesTable.rating,
+    rejected: capturesTable.rejected,
+  })
+    .from(capturesTable)
+    .where(and(eq(capturesTable.projectId, projectId), isNull(capturesTable.groupId)))
+    .all()
+  const portraitJpegCaptureIds = new Set(
+    db.select({ captureId: imageFilesTable.captureId })
+      .from(imageFilesTable)
+      .where(eq(imageFilesTable.fileRole, 'JPEG'))
+      .all()
+      .map((file) => file.captureId),
+  )
+  return buildCaptureReviewStatus({
+    portraitCaptures,
+    portraitJpegCaptureIds,
+    groupCaptures: [],
+    groupJpegCaptureIds: new Set(),
+    groupMembers: [],
+  }).studentsMissingFiveStarPortraitIds
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
@@ -2001,6 +2035,7 @@ async function runLiveUpload(projectId: number, includeErrors = false): Promise<
     try {
       const jobs = getProjectLiveUploadJobs(projectId, includeErrors)
       if (jobs.length === 0) return
+      if (getMissingFavoritePortraitStudentIds(projectId).length > 0) return
       // The server keeps the greatest expected count for this retry-stable key.
       // As a shoot grows, every live upload therefore belongs to the same batch
       // that Finish My Shoot will eventually close.
@@ -2339,6 +2374,9 @@ export function registerUploadHandlers() {
   ) => {
     const project = getDb().select().from(projectsTable).where(eq(projectsTable.id, projectId)).get()
     if (!project || project.finishedAt) return getLiveUploadState(projectId)
+    if (enabled && getMissingFavoritePortraitStudentIds(projectId).length > 0) {
+      return getLiveUploadState(projectId)
+    }
     setSetting(liveUploadSettingKey(projectId), enabled ? '1' : '0')
     if (enabled) ensureLiveUploadTimer(projectId)
     else stopLiveUploadTimer(projectId)

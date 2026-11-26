@@ -566,6 +566,9 @@ export function useCaptureReviewStatus(projectId: number | null) {
     ratedPortraitStudentIds: [],
     ratedGroupStudentIds: [],
     ratedGroupIds: [],
+    fiveStarPortraitStudentIds: [],
+    studentsMissingFiveStarPortraitIds: [],
+    fiveStarGroupIds: [],
   })
 
   const load = useCallback(async () => {

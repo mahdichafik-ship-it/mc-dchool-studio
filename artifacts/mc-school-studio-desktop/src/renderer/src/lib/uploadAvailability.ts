@@ -2,12 +2,16 @@ export interface UploadAvailabilityInput {
   actionRunning: boolean
   cloudReady: boolean
   projectFinished: boolean
+  missingFavoritePortraitCount: number
 }
 
 /**
- * Photo review controls gallery visibility, not whether matched files can be
- * backed up. Keep manual upload gated only by operational prerequisites.
+ * Upload requires operational readiness and one selected five-star portrait
+ * for every photographed individual.
  */
 export function canStartUploadNow(input: UploadAvailabilityInput): boolean {
-  return !input.actionRunning && input.cloudReady && !input.projectFinished
+  return !input.actionRunning
+    && input.cloudReady
+    && !input.projectFinished
+    && input.missingFavoritePortraitCount === 0
 }

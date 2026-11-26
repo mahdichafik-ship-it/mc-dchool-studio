@@ -142,6 +142,9 @@ export interface CaptureReviewStatus {
   ratedPortraitStudentIds: number[]
   ratedGroupStudentIds: number[]
   ratedGroupIds: number[]
+  fiveStarPortraitStudentIds: number[]
+  studentsMissingFiveStarPortraitIds: number[]
+  fiveStarGroupIds: number[]
 }
 
 export interface GroupCaptureFileReview {

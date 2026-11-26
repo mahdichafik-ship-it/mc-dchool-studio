@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   ArrowLeft, Folder, Play, Square, Search, Image, User,
   ChevronRight, ArrowRight, Camera, AlertCircle, ExternalLink, Download,
@@ -103,6 +103,13 @@ interface DropProgressState {
   results: DroppedCaptureFileResult[]
 }
 
+interface MissingFavoritePortraitEntry {
+  studentId: number
+  student: Student | null
+  fullName: string
+  className: string
+}
+
 export function ProjectView({
   projectId,
   onBack,
@@ -119,7 +126,10 @@ export function ProjectView({
   const employeeLabel = isCorporate ? 'Employee' : 'Student'
   const employeePlural = `${employeeLabel}s`
   const { data: captureSummary } = useCaptureSummary(projectId)
-  const { data: captureReviewStatus } = useCaptureReviewStatus(projectId)
+  const {
+    data: captureReviewStatus,
+    reload: reloadCaptureReviewStatus,
+  } = useCaptureReviewStatus(projectId)
   const [groupCaptureCount, setGroupCaptureCount] = useState(0)
   const { data: students, reload: reloadStudents } = useStudents(projectId, selectedClassId ?? undefined)
   const { data: allProjectStudents, reload: reloadAllProjectStudents } = useStudents(projectId)
@@ -133,6 +143,8 @@ export function ProjectView({
     reload: reloadUnmatchedPhotos,
   } = useUnmatchedPhotos(projectId)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
+  const [favoriteReviewStudentId, setFavoriteReviewStudentId] = useState<number | null>(null)
+  const [favoriteReviewReturnTo, setFavoriteReviewReturnTo] = useState<'upload' | 'finish'>('upload')
   const { isRunning, start: startWatcher, stop: stopWatcher } = useWatcherStatus(projectId)
   const {
     studentId: activeStudentId,
@@ -152,6 +164,26 @@ export function ProjectView({
   const [search, setSearch] = useState('')
   const filteredStudents = filterRosterStudents(students, search)
   const selectedClass = classes.find((projectClass) => projectClass.id === selectedClassId)
+  const missingFavoritePortraitEntries = useMemo<MissingFavoritePortraitEntry[]>(
+    () => captureReviewStatus.studentsMissingFiveStarPortraitIds
+      .map((studentId) => {
+        const student = allProjectStudents.find((candidate) => candidate.id === studentId) ?? null
+        return {
+          studentId,
+          student,
+          fullName: student
+            ? `${student.firstName} ${student.lastName}`
+            : `Roster record ${studentId}`,
+          className: student?.className?.trim() || 'Class unavailable',
+        }
+      })
+      .sort((a, b) =>
+        a.className.localeCompare(b.className)
+        || a.fullName.localeCompare(b.fullName),
+      ),
+    [allProjectStudents, captureReviewStatus.studentsMissingFiveStarPortraitIds],
+  )
+  const missingFavoritePortraitCount = captureReviewStatus.studentsMissingFiveStarPortraitIds.length
   const defaultClassGroup = selectedClassId === null
     ? null
     : groups.find((group) => group.isDefaultClassGroup) ?? null
@@ -405,6 +437,7 @@ export function ProjectView({
 
   useEffect(() => {
     if (selectedStudent) {
+      if (favoriteReviewStudentId !== null) return
       const refreshed = students.find((s) => s.id === selectedStudent.id)
       if (refreshed) {
         setSelectedStudent(refreshed)
@@ -412,7 +445,7 @@ export function ProjectView({
         setSelectedStudent(null)
       }
     }
-  }, [students])
+  }, [favoriteReviewStudentId, students])
 
   useEffect(() => {
     if (!selectedStudent || selectedStudent.simpleQr || qrRepairInFlightRef.current.has(selectedStudent.id)) return
@@ -434,10 +467,31 @@ export function ProjectView({
   }, [projectId, selectedStudent?.id, selectedStudent?.simpleQr, reloadStudents])
 
   useEffect(() => {
+    if (favoriteReviewStudentId !== null) return
     if (activeStudentId === null) return
     const activeStudent = students.find((student) => student.id === activeStudentId)
     if (activeStudent) setSelectedStudent(activeStudent)
-  }, [activeStudentId, students])
+  }, [activeStudentId, favoriteReviewStudentId, students])
+
+  useEffect(() => {
+    if (favoriteReviewStudentId === null) return
+    if (captureReviewStatus.studentsMissingFiveStarPortraitIds.includes(favoriteReviewStudentId)) return
+
+    const nextEntry = missingFavoritePortraitEntries.find((entry) => entry.student !== null)
+    if (nextEntry?.student) {
+      focusMissingFavoritePortrait(nextEntry.studentId, favoriteReviewReturnTo)
+      return
+    }
+
+    setFavoriteReviewStudentId(null)
+    if (favoriteReviewReturnTo === 'finish') setFinishDialogOpen(true)
+    else setUploadDialogOpen(true)
+  }, [
+    favoriteReviewStudentId,
+    favoriteReviewReturnTo,
+    captureReviewStatus.studentsMissingFiveStarPortraitIds,
+    missingFavoritePortraitEntries,
+  ])
 
   useEffect(() => {
     if (selectedGroup && !groups.some((group) => group.id === selectedGroup.id)) {
@@ -1029,6 +1083,15 @@ export function ProjectView({
 
   async function handleUploadAndFinish() {
     if (!project || projectSynced || finishing) return
+    if (missingFavoritePortraitCount > 0 && liveUpload?.cloudReady) {
+      setFinishDialogOpen(true)
+      addToast({
+        type: 'error',
+        title: 'Choose five-star portraits before uploading',
+        description: `${missingFavoritePortraitCount} photographed individual${missingFavoritePortraitCount === 1 ? '' : 's'} still need a five-star portrait favorite.`,
+      })
+      return
+    }
     setFinishing(true)
     setSyncProgress({
       projectId,
@@ -1078,7 +1141,11 @@ export function ProjectView({
 
   async function openUploadDialog() {
     try {
-      await loadReviewSummary()
+      await Promise.all([
+        loadReviewSummary(),
+        reloadCaptureReviewStatus(),
+        reloadAllProjectStudents(),
+      ])
       setUploadDialogOpen(true)
     } catch (error) {
       addToast({ type: 'error', title: 'Could not check photo ratings', description: String(error) })
@@ -1087,15 +1154,61 @@ export function ProjectView({
 
   async function openFinishDialog() {
     try {
-      await loadReviewSummary()
+      await Promise.all([
+        loadReviewSummary(),
+        reloadCaptureReviewStatus(),
+        reloadAllProjectStudents(),
+      ])
       setFinishDialogOpen(true)
     } catch (error) {
       addToast({ type: 'error', title: 'Could not check photo ratings', description: String(error) })
     }
   }
 
+  function focusMissingFavoritePortrait(studentId: number, returnTo: 'upload' | 'finish') {
+    const entry = missingFavoritePortraitEntries.find((candidate) => candidate.studentId === studentId)
+    if (!entry?.student) return
+    setFavoriteReviewReturnTo(returnTo)
+    setFavoriteReviewStudentId(studentId)
+    setUploadDialogOpen(false)
+    setFinishDialogOpen(false)
+    onSelectedClassIdChange(entry.student.classId)
+    setSelectedGroup(null)
+    setSelectedStudent(entry.student)
+  }
+
+  function startMissingFavoriteReview(studentId: number, returnTo: 'upload' | 'finish') {
+    focusMissingFavoritePortrait(studentId, returnTo)
+  }
+
+  function goToNextMissingFavoritePortrait() {
+    const reviewableEntries = missingFavoritePortraitEntries.filter((entry) => entry.student !== null)
+    if (reviewableEntries.length < 2) return
+    const currentIndex = reviewableEntries.findIndex((entry) => entry.studentId === favoriteReviewStudentId)
+    const nextEntry = reviewableEntries[
+      currentIndex < 0 ? 0 : (currentIndex + 1) % reviewableEntries.length
+    ]
+    if (nextEntry && nextEntry.studentId !== favoriteReviewStudentId) {
+      focusMissingFavoritePortrait(nextEntry.studentId, favoriteReviewReturnTo)
+    }
+  }
+
+  function returnToFavoriteValidation() {
+    setFavoriteReviewStudentId(null)
+    if (favoriteReviewReturnTo === 'finish') setFinishDialogOpen(true)
+    else setUploadDialogOpen(true)
+  }
+
   async function handleToggleLiveUpload() {
     if (!liveUpload || project?.finishedAt) return
+    if (!liveUpload.enabled && missingFavoritePortraitCount > 0) {
+      addToast({
+        type: 'error',
+        title: 'Choose five-star portraits first',
+        description: `${missingFavoritePortraitCount} photographed individual${missingFavoritePortraitCount === 1 ? '' : 's'} still need a five-star portrait favorite.`,
+      })
+      return
+    }
     setUploadActionRunning(true)
     try {
       await setLiveUploadEnabled(!liveUpload.enabled)
@@ -1114,6 +1227,14 @@ export function ProjectView({
   }
 
   async function handleUploadNow(retryFailed = false) {
+    if (missingFavoritePortraitCount > 0) {
+      addToast({
+        type: 'error',
+        title: 'Choose five-star portraits first',
+        description: `${missingFavoritePortraitCount} photographed individual${missingFavoritePortraitCount === 1 ? '' : 's'} still need a five-star portrait favorite.`,
+      })
+      return
+    }
     setUploadActionRunning(true)
     try {
       if (retryFailed) await retryProjectFailed()
@@ -1368,6 +1489,46 @@ export function ProjectView({
         </div>
       )}
 
+      {favoriteReviewStudentId !== null && (
+        <div
+          data-testid="favorite-portrait-review-guide"
+          className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-indigo-200 bg-indigo-50 px-5 py-2.5 text-indigo-950"
+        >
+          <div className="min-w-0">
+            <div className="text-xs font-extrabold uppercase tracking-wider">
+              Favorite portrait review · {missingFavoritePortraitCount} remaining
+            </div>
+            <div className="mt-0.5 truncate text-sm font-semibold">
+              {selectedStudent?.id === favoriteReviewStudentId
+                ? `${selectedStudent.firstName} ${selectedStudent.lastName} · ${selectedStudent.className}`
+                : 'Reviewing the next student'}
+            </div>
+            <div className="text-xs text-indigo-800">
+              Rate one portrait five stars. The next student opens automatically when this choice is saved.
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={missingFavoritePortraitEntries.filter((entry) => entry.student !== null).length < 2}
+              onClick={goToNextMissingFavoritePortrait}
+              className="h-8 border-indigo-300 bg-white px-3 text-[10px] font-extrabold uppercase tracking-wider text-indigo-800 hover:bg-indigo-100"
+            >
+              Next Student <ArrowRight className="ml-1.5 size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={returnToFavoriteValidation}
+              className="h-8 border-indigo-300 bg-white px-3 text-[10px] font-extrabold uppercase tracking-wider text-indigo-800 hover:bg-indigo-100"
+            >
+              Return to validation
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Dialog
         open={uploadDialogOpen}
         onClose={() => setUploadDialogOpen(false)}
@@ -1398,25 +1559,35 @@ export function ProjectView({
               {retryWaitingCount} photo{retryWaitingCount === 1 ? '' : 's'} waiting to retry after a previous upload attempt. These are kept separate from photos that have not been sent.
             </p>
           )}
-          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+          {missingFavoritePortraitCount > 0 ? (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
               <div className="flex gap-3">
                 <AlertCircle className="size-5 shrink-0 text-amber-600" />
-                <div>
-                  <p className="font-bold text-amber-900">Unrated photos stay private</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-amber-900">Choose a five-star portrait for each person</p>
                   <p className="mt-1 text-sm text-amber-800">
-                    {reviewSummary.unratedPortraits > 0
-                      ? `${reviewSummary.unratedPortraits} portrait${reviewSummary.unratedPortraits === 1 ? '' : 's'} still need a rating.`
-                      : ''}
-                    {reviewSummary.unratedPortraits > 0 && reviewSummary.unratedGroups > 0 ? ' ' : ''}
-                    {reviewSummary.unratedGroups > 0
-                      ? `${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'} need a rating.`
-                      : ''}
-                    {' Upload now is available; unrated photos stay private, and parent sharing still follows the existing rating rules.'}
+                    {missingFavoritePortraitCount} individual{missingFavoritePortraitCount === 1 ? '' : 's'} with JPEG portraits still need a five-star favorite. Other frames can keep their existing ratings.
                   </p>
+                  <MissingFavoritePortraitList
+                    entries={missingFavoritePortraitEntries}
+                    onSelect={(studentId) => startMissingFavoriteReview(studentId, 'upload')}
+                  />
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-900">
+              <CheckCircle className="size-5 shrink-0" />
+              <div>
+                <p className="font-bold">All photographed individuals have a five-star portrait selected.</p>
+                <p className="mt-0.5 text-sm">Upload is ready. Group photos are checked separately.</p>
+              </div>
+            </div>
+          )}
+          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Unrated photos stay private and are not shared with families. This does not add extra five-star requirements beyond one favorite portrait per photographed person.
+            </p>
           )}
           <div>
             <div className="mb-2 flex items-center justify-between">
@@ -1531,7 +1702,11 @@ export function ProjectView({
           <div className="flex flex-wrap gap-2 justify-end">
             <Button
               variant="outline"
-              disabled={uploadActionRunning || Boolean(project?.finishedAt)}
+              disabled={
+                uploadActionRunning
+                || Boolean(project?.finishedAt)
+                || (!liveUpload?.enabled && missingFavoritePortraitCount > 0)
+              }
               onClick={() => void handleToggleLiveUpload()}
             >
               {liveUpload?.enabled ? 'Pause Live Upload' : 'Resume Live Upload'}
@@ -1539,7 +1714,7 @@ export function ProjectView({
             {(liveUpload?.error ?? 0) > 0 && (
               <Button
                 variant="outline"
-                disabled={uploadActionRunning || !liveUpload?.cloudReady}
+                disabled={uploadActionRunning || !liveUpload?.cloudReady || missingFavoritePortraitCount > 0}
                 onClick={() => void handleUploadNow(true)}
               >
                 Retry Failed
@@ -1550,12 +1725,13 @@ export function ProjectView({
                 actionRunning: uploadActionRunning,
                 cloudReady: Boolean(liveUpload?.cloudReady),
                 projectFinished: Boolean(project?.finishedAt),
-              })}
+                missingFavoritePortraitCount,
+              }) || missingFavoritePortraitCount > 0}
               onClick={() => void handleUploadNow()}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {uploadActionRunning && <Loader className="size-4 mr-2 animate-spin" />}
-              Upload Now
+              {missingFavoritePortraitCount > 0 ? 'Review Favorites First' : 'Upload Now'}
             </Button>
           </div>
         </div>
@@ -1575,7 +1751,8 @@ export function ProjectView({
                 <p className="font-bold text-amber-900">This stops capture intake on this computer.</p>
                 <p className="text-sm text-amber-800 mt-1">
                   Volume Capture will drain the watch folder and save local completion first.
-                  When connected, it will then upload every remaining file and finish this photographer’s batch.
+                  When connected, it will upload remaining files after each photographed person has a five-star portrait favorite.
+                  Then it will finish this photographer’s batch.
                   It does not close the studio’s entire project.
                 </p>
               </div>
@@ -1595,27 +1772,38 @@ export function ProjectView({
               <div className="text-[10px] font-bold uppercase text-red-700">Need retry</div>
             </div>
           </div>
-          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+          {missingFavoritePortraitCount > 0 ? (
             <div className="rounded-xl border border-red-300 bg-red-50 p-4">
               <div className="flex gap-3">
                 <AlertCircle className="size-5 shrink-0 text-red-600" />
-                <div>
-                  <p className="font-bold text-red-900">Photo review is not complete</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-red-900">Choose a five-star portrait for each person</p>
                   <p className="mt-1 text-sm text-red-800">
-                    Review {reviewSummary.unratedPortraits} portrait{reviewSummary.unratedPortraits === 1 ? '' : 's'}
-                    {reviewSummary.unratedGroups > 0
-                      ? ` and ${reviewSummary.unratedGroups} group photo${reviewSummary.unratedGroups === 1 ? '' : 's'}`
-                      : ''}.
-                    Rate photos to share, or choose “Do not share” for portraits that must stay private.
+                    {missingFavoritePortraitCount} individual{missingFavoritePortraitCount === 1 ? '' : 's'} with JPEG portraits still need a five-star favorite. Lower ratings on their other frames are fine.
                   </p>
+                  <MissingFavoritePortraitList
+                    entries={missingFavoritePortraitEntries}
+                    onSelect={(studentId) => startMissingFavoriteReview(studentId, 'finish')}
+                  />
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-900">
+              <CheckCircle className="size-5 shrink-0" />
+              <p className="font-bold">All photographed individuals have a five-star portrait selected.</p>
+            </div>
+          )}
+          {(reviewSummary.unratedPortraits > 0 || reviewSummary.unratedGroups > 0) && (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Unrated photos stay private and are not shared with families. This does not add extra five-star requirements beyond one favorite portrait per photographed person.
+            </p>
           )}
           {!liveUpload?.cloudReady && (
             <p className="text-sm font-medium text-amber-700">
-              You are offline. Finish locally now; reconnect later and use Retry Upload &amp; Finish.
-              Your local captures remain safe.
+              {missingFavoritePortraitCount > 0
+                ? 'You are offline. You can finish this shoot locally; choose a five-star favorite for each photographed person before reconnecting to upload. Your local captures remain safe.'
+                : 'You are offline. Finish locally now; reconnect later and use Retry Upload &amp; Finish. Your local captures remain safe.'}
             </p>
           )}
           <div>
@@ -1641,8 +1829,7 @@ export function ProjectView({
             <Button
               disabled={
                 finishing
-                || reviewSummary.unratedPortraits > 0
-                || reviewSummary.unratedGroups > 0
+                || (Boolean(liveUpload?.cloudReady) && missingFavoritePortraitCount > 0)
               }
               onClick={() => void handleUploadAndFinish()}
               className="bg-blue-600 hover:bg-blue-700 text-white"
@@ -2019,8 +2206,7 @@ export function ProjectView({
                     }}
                    onDrop={(event) => void handleDropForStudent(s.id, event)}
                   uploadSummary={uploadStatusMap.get(s.id)}
-                  hasRatedPortrait={captureReviewStatus.ratedPortraitStudentIds.includes(s.id)}
-                  hasRatedGroupCapture={captureReviewStatus.ratedGroupStudentIds.includes(s.id)}
+                  hasFiveStarPortrait={captureReviewStatus.fiveStarPortraitStudentIds.includes(s.id)}
                 />
               ))}
               {filteredStudents.length === 0 && (
@@ -2065,6 +2251,7 @@ export function ProjectView({
               projectId={projectId}
               photoStatusMap={photoStatusMap}
               onReassign={() => reloadStudents()}
+              onReviewChanged={reloadCaptureReviewStatus}
               onPhotoContextMenu={(photo, event) => setContextMenu({ x: event.clientX, y: event.clientY, photo })}
               isActiveCaptureTarget={activeStudentId === selectedStudent.id}
               activeStudentSource={activeStudentSource}
@@ -2682,6 +2869,46 @@ function UploadBadge({ summary }: { summary: StudentUploadSummary }) {
   return null
 }
 
+function MissingFavoritePortraitList({
+  entries,
+  onSelect,
+}: {
+  entries: MissingFavoritePortraitEntry[]
+  onSelect: (studentId: number) => void
+}) {
+  return (
+    <div
+      data-testid="missing-favorite-portrait-list"
+      className="mt-2 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-amber-200 bg-white p-1.5"
+    >
+      {entries.map((entry) => (
+        entry.student ? (
+          <button
+            key={entry.studentId}
+            type="button"
+            onClick={() => onSelect(entry.studentId)}
+            aria-label={`Review portrait for ${entry.fullName}, ${entry.className}`}
+            className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-bold text-slate-900">{entry.fullName}</span>
+              <span className="block truncate text-xs font-medium text-slate-600">{entry.className}</span>
+            </span>
+            <ArrowRight className="size-4 shrink-0 text-amber-700" />
+          </button>
+        ) : (
+          <div key={entry.studentId} role="status" className="rounded-md px-2.5 py-2">
+            <span className="block text-sm font-bold text-slate-900">{entry.fullName}</span>
+            <span className="block text-xs text-red-700">
+              {entry.className}. This roster record must be repaired before review.
+            </span>
+          </div>
+        )
+      ))}
+    </div>
+  )
+}
+
 function StudentRow({
   student: s,
   isSelected,
@@ -2695,8 +2922,7 @@ function StudentRow({
   onDragLeave,
   onDrop,
   uploadSummary,
-  hasRatedPortrait,
-  hasRatedGroupCapture,
+  hasFiveStarPortrait,
 }: {
   student: Student
   isSelected: boolean
@@ -2710,15 +2936,8 @@ function StudentRow({
   onDragLeave: (event: React.DragEvent<HTMLButtonElement>) => void
   onDrop: (event: React.DragEvent<HTMLButtonElement>) => void
   uploadSummary?: StudentUploadSummary
-  hasRatedPortrait: boolean
-  hasRatedGroupCapture: boolean
+  hasFiveStarPortrait: boolean
 }) {
-  const ratedCaptureLabel = hasRatedPortrait && hasRatedGroupCapture
-    ? 'Rated portrait and group capture'
-    : hasRatedPortrait
-      ? 'Rated portrait'
-      : 'Rated class/group capture'
-
   return (
     <button
       data-student-row={s.id}
@@ -2756,13 +2975,13 @@ function StudentRow({
               <span className={cn("font-bold text-sm truncate", isActive ? "text-teal-950" : "text-slate-900")}>
                 {s.lastName}, {s.firstName}
               </span>
-              {(hasRatedPortrait || hasRatedGroupCapture) && (
+              {hasFiveStarPortrait && (
                 <span
                   className="shrink-0 text-emerald-600"
-                  aria-label={ratedCaptureLabel}
-                  title={`${ratedCaptureLabel} — rated capture`}
+                  aria-label="Five-star portrait favorite"
+                  title="Five-star portrait favorite"
                 >
-                  <CheckCircle className="size-3.5" />
+                  <Check className="size-3.5" strokeWidth={3.5} />
                 </span>
               )}
             </span>
@@ -2803,6 +3022,7 @@ function StudentDetail({
   isCorporate,
   projectId,
   photoStatusMap,
+  onReviewChanged,
   onReassign,
   onPhotoContextMenu,
   isActiveCaptureTarget,
@@ -2819,6 +3039,7 @@ function StudentDetail({
   isCorporate: boolean
   projectId: number
   photoStatusMap: Map<number, ProjectUploadStatusRow>
+  onReviewChanged: () => Promise<void>
   onReassign: () => void
   onPhotoContextMenu: (photo: Photo, event: React.MouseEvent<HTMLDivElement>) => void
   isActiveCaptureTarget: boolean
@@ -2997,6 +3218,7 @@ function StudentDetail({
     try {
       await window.api.invoke('captures:updateReview', { captureId, ...values })
       await reloadCaptures()
+      await onReviewChanged()
     } catch (error) {
       addToast({ type: 'error', title: 'Could not update capture review', description: String(error) })
     }
@@ -3991,6 +4213,11 @@ function CaptureFilmstrip({
                   {isNewest ? 'Newest' : `Frame ${capture.sequence ?? ''}`}
                 </span>
                 {capture.favorite && <Star className="absolute right-2 top-2 size-3.5 text-amber-300" fill="currentColor" />}
+                {capture.rating === 5 && (
+                  <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md border border-emerald-200/80 bg-emerald-700/95 px-1.5 py-1 text-[8px] font-extrabold uppercase tracking-wide text-white shadow-md">
+                    <Check className="size-3" strokeWidth={3.5} /> 5-star favorite
+                  </span>
+                )}
               </div>
               <div className="flex items-center justify-between gap-2 bg-white px-2 py-2">
                 <span className="font-mono text-[9px] text-slate-500">
@@ -4425,6 +4652,11 @@ function GroupDetail({
                               framing={defaultGroupCaptureFraming}
                               maxEdge={1440}
                             />
+                            {activeCapture.rating === 5 && (
+                              <span className="pointer-events-none absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-md border border-emerald-200/80 bg-emerald-700/95 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-white shadow-md">
+                                <Check className="size-3.5" strokeWidth={3.5} /> 5-star favorite
+                              </span>
+                            )}
                           </button>
                         ) : (
                           <div className="flex aspect-[7/5] w-full max-w-3xl flex-col items-center justify-center gap-3 border-2 border-dashed border-slate-300 bg-slate-50 text-slate-500">
@@ -4564,6 +4796,11 @@ function GroupDetail({
                               {index + 1}
                             </span>
                             {capture.rating > 0 && <span className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-slate-900/75 px-1.5 py-0.5 text-[8px] font-extrabold text-amber-300"><Star className="size-2.5" fill="currentColor" /> {capture.rating}</span>}
+                            {capture.rating === 5 && (
+                              <span className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-0.5 rounded border border-emerald-200/80 bg-emerald-700/95 px-1 py-0.5 text-[7px] font-extrabold uppercase tracking-wide text-white shadow">
+                                <Check className="size-2.5" strokeWidth={3.5} /> Favorite
+                              </span>
+                            )}
                             {isSelected && <span className="absolute bottom-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-teal-700 text-white shadow"><Check className="size-3" /></span>}
                           </div>
                           <div className="flex items-center justify-between gap-1 px-2 py-1.5">

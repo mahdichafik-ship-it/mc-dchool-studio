@@ -23,12 +23,19 @@ test('continues blocking group photos without a class match', () => {
   }), 'blocked')
 })
 
-test('allows matched photos to upload before they are rated', () => {
+test('allows upload only after the required portrait favorites are complete', () => {
   assert.equal(canStartUploadNow({
     actionRunning: false,
     cloudReady: true,
     projectFinished: false,
+    missingFavoritePortraitCount: 0,
   }), true)
+  assert.equal(canStartUploadNow({
+    actionRunning: false,
+    cloudReady: true,
+    projectFinished: false,
+    missingFavoritePortraitCount: 1,
+  }), false)
 })
 
 test('blocks manual upload while an action is running, offline, or finished', () => {
@@ -37,6 +44,9 @@ test('blocks manual upload while an action is running, offline, or finished', ()
     { actionRunning: false, cloudReady: false, projectFinished: false },
     { actionRunning: false, cloudReady: true, projectFinished: true },
   ]) {
-    assert.equal(canStartUploadNow(input), false)
+    assert.equal(canStartUploadNow({
+      ...input,
+      missingFavoritePortraitCount: 0,
+    }), false)
   }
 })

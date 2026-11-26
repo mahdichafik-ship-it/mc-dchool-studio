@@ -222,6 +222,11 @@ export function registerPhotoHandlers() {
     }
   })
   ipcMain.handle('captures:reviewStatus', (_e, { projectId }: { projectId: number }) => {
+    const legacyPhotos = db.select()
+      .from(photosTable)
+      .where(eq(photosTable.projectId, projectId))
+      .all()
+    reconcileLegacyPhotosAsCaptures(db, legacyPhotos)
     const portraitJpegCaptureIds = new Set(
       db.select({ captureId: imageFilesTable.captureId })
         .from(imageFilesTable)

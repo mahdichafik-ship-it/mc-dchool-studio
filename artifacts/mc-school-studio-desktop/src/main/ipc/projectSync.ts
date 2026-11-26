@@ -14,6 +14,7 @@ import {
   syncGroupCloudIdentities,
   flushPendingCaptureReviews,
   pauseLiveUploadForFinish,
+  getMissingFavoritePortraitStudentIds,
 } from './upload'
 import type { ProjectSyncProgress } from './upload'
 import type { ProjectFinishOptions, ProjectSyncProgressEvent, ProjectSyncResult, ProjectSyncStatus } from '../../shared/types'
@@ -58,6 +59,7 @@ export interface ProjectSyncDependencies {
   isCloudSessionVerified: typeof isCloudSessionVerified
   getProjectCaptureBatchExpectedCount: typeof getProjectCaptureBatchExpectedCount
   getProjectUploadBlockerCount: typeof getProjectUploadBlockerCount
+  getMissingFavoritePortraitStudentIds: typeof getMissingFavoritePortraitStudentIds
   syncGroupCloudIdentities: typeof syncGroupCloudIdentities
   beginProjectCaptureBatch: typeof beginProjectCaptureBatch
   syncProjectUploads: typeof syncProjectUploads
@@ -76,6 +78,7 @@ function createProductionDependencies(): ProjectSyncDependencies {
     isCloudSessionVerified,
     getProjectCaptureBatchExpectedCount,
     getProjectUploadBlockerCount,
+    getMissingFavoritePortraitStudentIds,
     syncGroupCloudIdentities,
     beginProjectCaptureBatch,
     syncProjectUploads,
@@ -104,6 +107,20 @@ export async function runProjectSync(
         failed: project.syncFailedFiles,
         finishedAt: project.finishedAt,
         syncStatus: 'synced',
+      }
+    }
+
+    const missingFavoriteStudentIds = deps.getMissingFavoritePortraitStudentIds(projectId)
+    if (missingFavoriteStudentIds.length > 0 && deps.isCloudSessionVerified()) {
+      return {
+        ok: false,
+        completed: boundedCompleted(project.syncCompletedFiles, project.syncTotalFiles),
+        total: Math.max(0, project.syncTotalFiles),
+        failed: project.syncFailedFiles,
+        localFinished: Boolean(project.finishedAt),
+        syncStatus: project.syncStatus,
+        finishedAt: project.finishedAt ?? undefined,
+        error: `Upload is paused until ${missingFavoriteStudentIds.length} individual${missingFavoriteStudentIds.length === 1 ? '' : 's'} with portraits have a five-star favorite.`,
       }
     }
 

@@ -414,7 +414,7 @@ test('a blocked unmatched file stops cloud completion while preserving local cap
 
   assert.equal(result.syncStatus, 'sync_failed')
   assert.equal(result.failed, 1)
-  assert.match(result.error ?? '', /student match/)
+  assert.match(result.error ?? '', /student or group target/)
   assert.equal(harness.calls.includes('uploads'), false)
 })
 

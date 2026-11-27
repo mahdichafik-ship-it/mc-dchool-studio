@@ -147,8 +147,13 @@ test('upload status uses joined file reads instead of querying once per capture'
     uploadSource.indexOf('function getUploadStatusCounts'),
     uploadSource.indexOf('export function getLiveUploadState'),
   )
+  const accountingHandler = uploadSource.slice(
+    uploadSource.indexOf('function getProjectUploadAccountingKeys'),
+    uploadSource.indexOf('function getProjectSyncJobs(projectId'),
+  )
 
   assert.match(blockerHandler, /loadProjectUploadSnapshot\(projectId\)/)
+  assert.match(blockerHandler, /isGroupCaptureCompatibilityMirror/)
   assert.equal(
     (blockerHandler.match(/\.select\(/g) ?? []).length,
     0,
@@ -156,7 +161,9 @@ test('upload status uses joined file reads instead of querying once per capture'
   )
   assert.match(statusHandler, /loadProjectUploadSnapshot\(projectId\)/)
   assert.match(statusHandler, /classifyProjectUploadFile/)
+  assert.match(statusHandler, /isGroupCaptureCompatibilityMirror/)
   assert.doesNotMatch(statusHandler, /db\.select/)
+  assert.match(accountingHandler, /isGroupCaptureCompatibilityMirror/)
 })
 
 test('upload job and queue reads stay bulk-loaded for large personal and group batches', () => {
@@ -187,6 +194,10 @@ test('upload job and queue reads stay bulk-loaded for large personal and group b
     'personal, group, and legacy inputs should use three bounded joined queries',
   )
   assert.match(jobsHandler, /getMirroredLegacyPhotoIds/)
+  assert.match(jobsHandler, /isGroupCaptureCompatibilityMirror/)
+  assert.match(queueHandler, /isGroupCaptureCompatibilityMirror/)
+  assert.match(queueHandler, /kind: 'unassigned'/)
+  assert.match(queueHandler, /No valid student or group target/)
   assert.doesNotMatch(jobsHandler, /db\.select/)
   assert.doesNotMatch(queueHandler, /db\.select/)
   assert.doesNotMatch(liveJobsHandler, /db\.select/)

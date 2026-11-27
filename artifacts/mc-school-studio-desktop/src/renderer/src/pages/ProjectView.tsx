@@ -2206,6 +2206,7 @@ export function ProjectView({
                     }}
                    onDrop={(event) => void handleDropForStudent(s.id, event)}
                   uploadSummary={uploadStatusMap.get(s.id)}
+                  hasRatedGroupCapture={captureReviewStatus.ratedGroupStudentIds.includes(s.id)}
                   hasFiveStarPortrait={captureReviewStatus.fiveStarPortraitStudentIds.includes(s.id)}
                 />
               ))}
@@ -2922,6 +2923,7 @@ function StudentRow({
   onDragLeave,
   onDrop,
   uploadSummary,
+  hasRatedGroupCapture,
   hasFiveStarPortrait,
 }: {
   student: Student
@@ -2936,6 +2938,7 @@ function StudentRow({
   onDragLeave: (event: React.DragEvent<HTMLButtonElement>) => void
   onDrop: (event: React.DragEvent<HTMLButtonElement>) => void
   uploadSummary?: StudentUploadSummary
+  hasRatedGroupCapture: boolean
   hasFiveStarPortrait: boolean
 }) {
   return (
@@ -2975,6 +2978,15 @@ function StudentRow({
               <span className={cn("font-bold text-sm truncate", isActive ? "text-teal-950" : "text-slate-900")}>
                 {s.lastName}, {s.firstName}
               </span>
+              {hasRatedGroupCapture && (
+                <span
+                  className="shrink-0 text-sky-700"
+                  aria-label="Rated class/group photo"
+                  title="Rated class/group photo"
+                >
+                  <CheckCircle className="size-3.5" strokeWidth={2.8} />
+                </span>
+              )}
               {hasFiveStarPortrait && (
                 <span
                   className="shrink-0 text-emerald-600"

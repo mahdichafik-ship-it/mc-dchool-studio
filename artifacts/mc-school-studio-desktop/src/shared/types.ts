@@ -451,7 +451,7 @@ export interface LiveUploadState {
 
 export interface LiveUploadQueueItem {
   key: string
-  kind: 'portrait' | 'group' | 'legacy'
+  kind: 'portrait' | 'group' | 'legacy' | 'unassigned'
   fileName: string
   fileRole: 'JPEG' | 'RAW'
   subject: string

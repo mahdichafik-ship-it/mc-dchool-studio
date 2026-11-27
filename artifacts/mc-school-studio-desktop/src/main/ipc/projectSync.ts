@@ -185,7 +185,7 @@ export async function runProjectSync(
     })
     const blockedFileCount = deps.getProjectUploadBlockerCount(projectId)
     if (blockedFileCount > 0) {
-      const message = `${blockedFileCount} local capture file${blockedFileCount === 1 ? '' : 's'} still need a student match before cloud sync can complete.`
+      const message = `${blockedFileCount} local capture file${blockedFileCount === 1 ? ' still needs' : 's still need'} a student or group target before cloud sync can complete.`
       deps.updateProject(projectId, {
         syncStatus: 'sync_failed',
         syncCompletedFiles: boundedCompleted(locallyFinished.syncCompletedFiles, locallyFinished.syncTotalFiles),

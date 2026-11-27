@@ -33,7 +33,11 @@ import { reconcileLegacyPhotosAsCaptures } from '../lib/captureRepository'
 import { getEligibleUploadJobs } from '../lib/uploadRetrySchedule'
 import { AsyncTaskLimiter, runWithConcurrency } from '../lib/uploadConcurrency'
 import { startActiveUploadRun } from '../lib/activeUploadRun'
-import { classifyProjectUploadFile } from '../lib/projectUploadClassification'
+import {
+  classifyProjectUploadFile,
+  groupCaptureCompatibilityKey,
+  isGroupCaptureCompatibilityMirror,
+} from '../lib/projectUploadClassification'
 import { requiresCloudIdentityRepair } from '../lib/cloudIdentityRepairPolicy'
 import {
   assertR2VerifierResponse,
@@ -1549,6 +1553,10 @@ function getProjectSyncJobsFromSnapshot(
   includeDone = false,
 ): ProjectSyncJob[] {
   const jobs: ProjectSyncJob[] = []
+  const groupCaptureKeys = new Set(
+    [...snapshot.groupCaptures.values()].map(({ capture }) =>
+      groupCaptureCompatibilityKey(capture.groupId, capture.captureKey)),
+  )
   for (const { capture, group } of snapshot.groupCaptures.values()) {
     for (const file of snapshot.groupCaptureFilesByCapture.get(capture.id) ?? []) {
       const classification = classifyProjectUploadFile({
@@ -1564,6 +1572,7 @@ function getProjectSyncJobsFromSnapshot(
   }
 
   for (const { capture, student } of snapshot.captures.values()) {
+    if (isGroupCaptureCompatibilityMirror(capture, groupCaptureKeys)) continue
     for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
       const classification = classifyProjectUploadFile({
         kind: 'personal',
@@ -1613,7 +1622,12 @@ function getMirroredLegacyPhotoIds(snapshot: ProjectUploadSnapshot): Set<number>
 function getProjectUploadAccountingKeys(snapshot: ProjectUploadSnapshot): Set<string> {
   const keys = new Set<string>()
   const mirroredPhotoIds = getMirroredLegacyPhotoIds(snapshot)
+  const groupCaptureKeys = new Set(
+    [...snapshot.groupCaptures.values()].map(({ capture }) =>
+      groupCaptureCompatibilityKey(capture.groupId, capture.captureKey)),
+  )
   for (const { capture, student } of snapshot.captures.values()) {
+    if (isGroupCaptureCompatibilityMirror(capture, groupCaptureKeys)) continue
     for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
       const classification = classifyProjectUploadFile({
         kind: 'personal',
@@ -1738,12 +1752,17 @@ export function getProjectCaptureBatchExpectedCount(projectId: number): number {
   )
 }
 
-/** Files that are durable locally but cannot be sent until a student match exists. */
+/** Files that are durable locally but cannot be sent until a valid destination exists. */
 export function getProjectUploadBlockerCount(projectId: number): number {
   const snapshot = loadProjectUploadSnapshot(projectId)
   const mirroredPhotoIds = getMirroredLegacyPhotoIds(snapshot)
+  const groupCaptureKeys = new Set(
+    [...snapshot.groupCaptures.values()].map(({ capture }) =>
+      groupCaptureCompatibilityKey(capture.groupId, capture.captureKey)),
+  )
   let blocked = 0
   for (const { capture, student } of snapshot.captures.values()) {
+    if (isGroupCaptureCompatibilityMirror(capture, groupCaptureKeys)) continue
     for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
       if (classifyProjectUploadFile({
         kind: 'personal',
@@ -1782,7 +1801,12 @@ function getUploadStatusCounts(projectId: number) {
   const snapshot = loadProjectUploadSnapshot(projectId)
   const statuses: UploadStatus[] = []
   let blocked = 0
+  const groupCaptureKeys = new Set(
+    [...snapshot.groupCaptures.values()].map(({ capture }) =>
+      groupCaptureCompatibilityKey(capture.groupId, capture.captureKey)),
+  )
   for (const { capture, student } of snapshot.captures.values()) {
+    if (isGroupCaptureCompatibilityMirror(capture, groupCaptureKeys)) continue
     const associationResolved = capture.studentId !== null && student !== undefined
     for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
       const classification = classifyProjectUploadFile({
@@ -1851,6 +1875,10 @@ export function getLiveUploadState(projectId: number): LiveUploadState {
 
 function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
   const snapshot = loadProjectUploadSnapshot(projectId)
+  const groupCaptureKeys = new Set(
+    [...snapshot.groupCaptures.values()].map(({ capture }) =>
+      groupCaptureCompatibilityKey(capture.groupId, capture.captureKey)),
+  )
   const uploadableItems = getProjectSyncJobsFromSnapshot(projectId, snapshot).map((job) => {
     const key = projectSyncJobKey(job)
     const retryAt = failedUploadRetryAfter.get(key)
@@ -1918,6 +1946,7 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
   })
   const blockedItems: LiveUploadQueueItem[] = []
   for (const { capture, student } of snapshot.captures.values()) {
+    if (isGroupCaptureCompatibilityMirror(capture, groupCaptureKeys)) continue
     const associationResolved = capture.studentId !== null && student !== undefined
     for (const file of snapshot.captureFilesByCapture.get(capture.id) ?? []) {
       if (classifyProjectUploadFile({
@@ -1927,13 +1956,13 @@ function getLiveUploadQueue(projectId: number): LiveUploadQueueItem[] {
       }) !== 'blocked') continue
       blockedItems.push({
         key: `capture:${file.id}`,
-        kind: 'portrait',
+        kind: 'unassigned',
         fileName: file.originalFilename,
         fileRole: file.fileRole,
-        subject: 'Waiting for student match',
+        subject: 'Unassigned capture',
         capturedAt: capture.capturedAt,
         status: 'blocked',
-        blockedReason: 'This capture has no student match yet.',
+        blockedReason: 'No valid student or group target is linked to this file on this computer.',
         attempts: 0,
       })
     }

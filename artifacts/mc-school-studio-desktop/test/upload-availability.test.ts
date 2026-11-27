@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classifyProjectUploadFile } from '../src/main/lib/projectUploadClassification.ts'
+import {
+  classifyProjectUploadFile,
+  groupCaptureCompatibilityKey,
+  isGroupCaptureCompatibilityMirror,
+} from '../src/main/lib/projectUploadClassification.ts'
 import { canStartUploadNow } from '../src/renderer/src/lib/uploadAvailability.ts'
 
 test('keeps matched unrated group photos eligible while they remain private', () => {
@@ -21,6 +25,29 @@ test('continues blocking group photos without a class match', () => {
     fileRole: 'JPEG',
     galleryReady: false,
   }), 'blocked')
+})
+
+test('recognizes only the compatibility capture for its matching group photo', () => {
+  const groupCaptureKeys = new Set([
+    groupCaptureCompatibilityKey(12, 'group:12:photo-1'),
+  ])
+
+  assert.equal(isGroupCaptureCompatibilityMirror({
+    groupId: '12',
+    captureKey: 'group:12:photo-1',
+  }, groupCaptureKeys), true)
+  assert.equal(isGroupCaptureCompatibilityMirror({
+    groupId: '13',
+    captureKey: 'group:12:photo-1',
+  }, groupCaptureKeys), false)
+  assert.equal(isGroupCaptureCompatibilityMirror({
+    groupId: null,
+    captureKey: 'group:12:photo-1',
+  }, groupCaptureKeys), false)
+  assert.equal(isGroupCaptureCompatibilityMirror({
+    groupId: '12',
+    captureKey: 'unmatched:photo-1',
+  }, groupCaptureKeys), false)
 })
 
 test('allows upload only after the required portrait favorites are complete', () => {

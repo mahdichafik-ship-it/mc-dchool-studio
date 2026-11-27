@@ -11,6 +11,18 @@ export interface ProjectUploadFileClassificationInput {
   galleryReady?: boolean
 }
 
+export function groupCaptureCompatibilityKey(groupId: number | string, captureKey: string): string {
+  return `${String(groupId)}\u0000${captureKey}`
+}
+
+export function isGroupCaptureCompatibilityMirror(
+  capture: { groupId: string | null; captureKey: string },
+  groupCaptureKeys: ReadonlySet<string>,
+): boolean {
+  return capture.groupId !== null
+    && groupCaptureKeys.has(groupCaptureCompatibilityKey(capture.groupId, capture.captureKey))
+}
+
 /**
  * Classify a durable local file before building upload jobs and progress
  * accounting. An association that points at another project is unresolved,

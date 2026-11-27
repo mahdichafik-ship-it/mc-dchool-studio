@@ -1610,7 +1610,7 @@ export function ProjectView({
                 const statusLabel = item.status === 'preparing_gallery'
                   ? 'Preparing gallery'
                   : item.status === 'blocked'
-                    ? 'Waiting for match'
+                    ? 'Needs destination'
                     : item.status === 'uploading'
                       ? 'Uploading'
                       : item.status === 'failed'
@@ -1622,7 +1622,7 @@ export function ProjectView({
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-slate-800">{item.fileName}</p>
                         <p className="truncate text-xs text-slate-500">
-                          {item.subject} · {item.kind === 'group' ? 'Group' : 'Portrait'} · {item.fileRole}
+                          {item.subject} · {item.kind === 'group' ? 'Group' : item.kind === 'unassigned' ? 'Unassigned' : 'Portrait'} · {item.fileRole}
                         </p>
                       </div>
                       <Badge className={cn(
